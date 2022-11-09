@@ -2,10 +2,12 @@
   "name": "reactorerp",
   "version": "1.0.0",
   "description": "Reactor is a web-browser enterprise resource planning system built with react and mysql(mongoose).",
+  "proxy": "http://localhost:8080",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js",
+    "start": "concurrently \"nodemon server.js\" \"npm run client\"",
+    "client": "cd frontend && npm run start",
     "dev": "nodemon server.js"
   },
   "repository": {
@@ -20,7 +22,9 @@
   },
   "homepage": "https://github.com/sandond77/reactorERP#readme",
   "dependencies": {
+    "concurrently": "^7.5.0",
     "express": "^4.18.2",
+    "node": "^19.0.1",
     "nodemon": "^2.0.20"
   }
 }
