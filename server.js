@@ -1,19 +1,31 @@
-const assert = require("assert");
 const express = require("express");
-const mongoose = require("mongoose");
+const { Sequelize } = require('sequelize');
 
 const app = express();
 
 const PORT = process.env.PORT || 8080;
 
-const dbName = "reactorERP";
-const url = "mongodb://localhost:27017/"+ dbName;
+//mySQL Connection
+// const sequelize = new Sequelize(process.env.DB_CONNECTION_URL);
+const sequelize = new Sequelize('reactorerp', 'root', 'password', {
+    dialect: 'mysql'
+  });
 
-main().catch(err => console.log(err));
+async function assertDatabaseConnectionOk() {
+	console.log(`Checking database connection...`);
+	try {
+		await sequelize.authenticate();
+		console.log('Database connection OK!');
+	} catch (error) {
+		console.log('Unable to connect to the database:');
+		console.log(error.message);
+		process.exit(1);
+	}
+}
 
-async function main() {
-    await mongoose.connect(url);
-    console.log(`Connection made on ${url}`);
-};
+assertDatabaseConnectionOk()
+//Schema #1 - Main Inventory Database
+//Schema #2 - Transaction Database that communicates to main inventory
+
 
 app.listen(PORT, console.log(`App is listening on port ${PORT}`));
