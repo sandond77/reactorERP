@@ -1,5 +1,5 @@
 # reactorERP
-Reactor is a web-browser enterprise resource planning system built with react and mysql(mongoose). 
+Reactor is a web-browser enterprise resource planning system built with react and mysql(through Sequelize ORM). 
 
 ### What is an enterprise resource planning(ERP)?
 Enterprise resource planning (ERP) refers to a type of software that organizations use to manage day-to-day business activities such as accounting, procurement, project management, risk management and compliance, and supply chain operations.
