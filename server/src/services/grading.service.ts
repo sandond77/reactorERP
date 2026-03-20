@@ -1,0 +1,364 @@
+import { sql } from 'kysely';
+import { db } from '../config/database';
+import { AppError } from '../middleware/errorHandler';
+import type { GradingCompany } from '../types/db';
+import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
+import type { PaginationParams } from '../utils/pagination';
+
+// Whitelist of sortable columns → SQL expression
+const SLAB_SORT_COLS: Record<string, string> = {
+  cert_number:       'sd.cert_number',
+  card_name:         'COALESCE(cc.card_name, ci.card_name_override)',
+  grade:             'sd.grade',
+  is_listed:         '(l.id IS NOT NULL)',
+  listed_price:      'l.list_price',
+  raw_cost:          'ci.purchase_cost',
+  grading_cost:      'COALESCE(gs.grading_fee, 0)',
+  strike_price:      's.sale_price',
+  after_ebay:        '(s.sale_price - s.platform_fees - s.shipping_cost)',
+  net:               '(s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost - COALESCE(gs.grading_fee, 0))',
+  raw_purchase_date: 'ci.purchased_at',
+  date_listed:       'l.listed_at',
+  date_sold:         's.sold_at',
+  roi_pct:           'ROUND((s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost - COALESCE(gs.grading_fee, 0))::numeric / NULLIF(ci.purchase_cost + COALESCE(gs.grading_fee, 0), 0) * 100, 2)',
+};
+
+export async function getSlabFilterOptions(userId: string) {
+  const [companies, grades, purchaseYears, listedYears, soldYears] = await Promise.all([
+    sql<{ value: string }>`
+      SELECT DISTINCT sd.company AS value
+      FROM slab_details sd
+      INNER JOIN card_instances ci ON ci.id = sd.card_instance_id
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      ORDER BY value
+    `.execute(db),
+
+    sql<{ value: string }>`
+      SELECT DISTINCT sd.grade_label AS value
+      FROM slab_details sd
+      INNER JOIN card_instances ci ON ci.id = sd.card_instance_id
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND sd.grade_label IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+
+    sql<{ value: string }>`
+      SELECT DISTINCT EXTRACT(YEAR FROM ci.purchased_at)::text AS value
+      FROM card_instances ci
+      INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND ci.purchased_at IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+
+    sql<{ value: string }>`
+      SELECT DISTINCT EXTRACT(YEAR FROM l.listed_at)::text AS value
+      FROM listings l
+      INNER JOIN card_instances ci ON ci.id = l.card_instance_id
+      INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND l.listed_at IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+
+    sql<{ value: string }>`
+      SELECT DISTINCT EXTRACT(YEAR FROM s.sold_at)::text AS value
+      FROM sales s
+      INNER JOIN card_instances ci ON ci.id = s.card_instance_id
+      INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      ORDER BY value
+    `.execute(db),
+  ]);
+
+  return {
+    companies: companies.rows.map((r) => r.value),
+    grades: grades.rows.map((r) => r.value),
+    listed: ['Yes', 'No'],
+    card_show: ['Yes', 'No'],
+    purchase_years: purchaseYears.rows.map((r) => r.value),
+    listed_years: listedYears.rows.map((r) => r.value),
+    sold_years: soldYears.rows.map((r) => r.value),
+  };
+}
+
+export async function listSlabs(
+  userId: string,
+  pagination: PaginationParams,
+  search?: string,
+  statusFilter?: 'graded' | 'sold' | 'all',
+  sortBy?: string,
+  sortDir?: 'asc' | 'desc',
+  filterCompanies?: string[],
+  filterGrades?: string[],
+  isListed?: string,
+  isCardShow?: string,
+  purchaseYears?: string[],
+  listedYears?: string[],
+  soldYears?: string[]
+) {
+  const offset = getPaginationOffset(pagination.page, pagination.limit);
+  const status = statusFilter === 'all' || !statusFilter ? null : statusFilter;
+  const sortExpr = SLAB_SORT_COLS[sortBy ?? ''] ?? 'ci.created_at';
+  const dir = sortDir === 'asc' ? sql`ASC` : sql`DESC`;
+
+  const companyIn    = filterCompanies?.length   ? sql`AND sd.company     IN (${sql.join(filterCompanies.map((v) => sql.val(v)))})` : sql``;
+  const gradeIn      = filterGrades?.length       ? sql`AND sd.grade_label IN (${sql.join(filterGrades.map((v) => sql.val(v)))})` : sql``;
+  const listedCond   = isListed === 'yes' ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id)`
+                     : isListed === 'no'  ? sql`AND NOT EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id)`
+                     : sql``;
+  const cardShowCond = isCardShow === 'yes' ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.platform = 'card_show')`
+                     : isCardShow === 'no'  ? sql`AND NOT EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.platform = 'card_show')`
+                     : sql``;
+  const purchaseYearIn = purchaseYears?.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql``;
+  const listedYearIn   = listedYears?.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql``;
+  const soldYearIn     = soldYears?.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql``;
+
+  const countResult = await sql<{ count: string }>`
+    SELECT COUNT(*) AS count
+    FROM card_instances ci
+    INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+    WHERE ci.user_id = ${userId}
+    AND ci.deleted_at IS NULL
+    ${status ? sql`AND ci.status = ${status}` : sql``}
+    ${search ? sql`AND (ci.card_name_override ILIKE ${'%' + search + '%'} OR sd.cert_number::text ILIKE ${'%' + search + '%'})` : sql``}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
+  `.execute(db);
+
+  const total = Number(countResult.rows[0]?.count ?? 0);
+
+  const rows = await sql<{
+    id: string;
+    card_name: string | null;
+    set_name: string | null;
+    cert_number: string | null;
+    grade_label: string | null;
+    numeric_grade: number | null;
+    company: string;
+    is_listed: boolean;
+    listed_price: number | null;
+    listing_url: string | null;
+    listing_platform: string | null;
+    raw_cost: number;
+    grading_cost: number;
+    strike_price: number | null;
+    after_ebay: number | null;
+    raw_purchase_date: string | null;
+    date_listed: string | null;
+    date_sold: string | null;
+    roi_pct: number | null;
+    notes: string | null;
+    is_card_show: boolean;
+  }>`
+    SELECT
+      ci.id,
+      COALESCE(cc.card_name, ci.card_name_override)  AS card_name,
+      COALESCE(cc.set_name,  ci.set_name_override)   AS set_name,
+      sd.cert_number,
+      sd.grade_label,
+      sd.grade                                        AS numeric_grade,
+      sd.company,
+      (l.id IS NOT NULL)                              AS is_listed,
+      l.list_price                                    AS listed_price,
+      l.ebay_listing_url                              AS listing_url,
+      l.platform                                      AS listing_platform,
+      ci.purchase_cost                                AS raw_cost,
+      COALESCE(gs.grading_fee, 0)                     AS grading_cost,
+      s.sale_price                                    AS strike_price,
+      CASE WHEN s.sale_price IS NOT NULL
+        THEN s.sale_price - s.platform_fees - s.shipping_cost
+        ELSE NULL
+      END                                             AS after_ebay,
+      ci.purchased_at                                 AS raw_purchase_date,
+      l.listed_at                                     AS date_listed,
+      s.sold_at                                       AS date_sold,
+      CASE
+        WHEN (ci.purchase_cost + COALESCE(gs.grading_fee, 0)) > 0 AND s.sale_price IS NOT NULL
+        THEN ROUND(
+          (s.sale_price - s.platform_fees - s.shipping_cost
+           - ci.purchase_cost - COALESCE(gs.grading_fee, 0))::numeric
+          / (ci.purchase_cost + COALESCE(gs.grading_fee, 0)) * 100, 2
+        )
+        ELSE NULL
+      END                                             AS roi_pct,
+      ci.notes,
+      (l.platform = 'card_show')                      AS is_card_show
+    FROM card_instances ci
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+    LEFT JOIN LATERAL (
+      SELECT grading_fee FROM grading_submissions
+      WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
+    ) gs ON true
+    LEFT JOIN LATERAL (
+      SELECT id, list_price, platform, ebay_listing_url, listed_at
+      FROM listings
+      WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
+    ) l ON true
+    LEFT JOIN LATERAL (
+      SELECT sale_price, platform_fees, shipping_cost, sold_at
+      FROM sales
+      WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
+    ) s ON true
+    WHERE ci.user_id = ${userId}
+    AND ci.deleted_at IS NULL
+    ${status ? sql`AND ci.status = ${status}` : sql``}
+    ${search ? sql`AND (ci.card_name_override ILIKE ${'%' + search + '%'} OR sd.cert_number::text ILIKE ${'%' + search + '%'})` : sql``}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
+    ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
+    LIMIT ${pagination.limit} OFFSET ${offset}
+  `.execute(db);
+
+  return buildPaginatedResult(rows.rows, total, pagination.page, pagination.limit);
+}
+
+export async function listSubmissions(userId: string, pagination: PaginationParams) {
+  const total = Number(
+    (await db
+      .selectFrom('grading_submissions as gs')
+      .select((eb) => eb.fn.count<number>('gs.id').as('count'))
+      .where('gs.user_id', '=', userId)
+      .executeTakeFirst())?.count ?? 0
+  );
+
+  const data = await db
+    .selectFrom('grading_submissions as gs')
+    .innerJoin('card_instances as ci', 'ci.id', 'gs.card_instance_id')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .select([
+      'gs.id',
+      'gs.company',
+      'gs.submission_number',
+      'gs.service_level',
+      'gs.status',
+      'gs.grading_fee',
+      'gs.shipping_cost',
+      'gs.currency',
+      'gs.submitted_at',
+      'gs.estimated_return',
+      'gs.returned_at',
+      'gs.created_at',
+      'ci.id as card_instance_id',
+      sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
+      sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
+      'ci.image_front_url',
+      'cc.image_url as catalog_image_url',
+    ])
+    .where('gs.user_id', '=', userId)
+    .orderBy('gs.created_at', 'desc')
+    .limit(pagination.limit)
+    .offset(getPaginationOffset(pagination.page, pagination.limit))
+    .execute();
+
+  return buildPaginatedResult(data, total, pagination.page, pagination.limit);
+}
+
+export interface SubmitToGradingInput {
+  card_instance_id: string;
+  company: GradingCompany;
+  submission_number?: string;
+  service_level?: string;
+  grading_fee?: number;
+  shipping_cost?: number;
+  currency?: string;
+  submitted_at?: Date;
+  estimated_return?: Date;
+}
+
+export async function submitForGrading(userId: string, input: SubmitToGradingInput) {
+  const card = await db
+    .selectFrom('card_instances')
+    .select(['id', 'status'])
+    .where('id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .where('deleted_at', 'is', null)
+    .executeTakeFirst();
+
+  if (!card) throw new AppError(404, 'Card not found');
+  if (!['inspected', 'raw_for_sale', 'purchased_raw'].includes(card.status)) {
+    throw new AppError(422, `Card status '${card.status}' cannot be submitted for grading`);
+  }
+
+  const submission = await db
+    .insertInto('grading_submissions')
+    .values({
+      user_id: userId,
+      card_instance_id: input.card_instance_id,
+      company: input.company,
+      status: 'submitted',
+      submission_number: input.submission_number ?? null,
+      service_level: input.service_level ?? null,
+      grading_fee: input.grading_fee ?? 0,
+      shipping_cost: input.shipping_cost ?? 0,
+      currency: input.currency ?? 'USD',
+      submitted_at: input.submitted_at ?? null,
+      estimated_return: input.estimated_return ?? null,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  await db
+    .updateTable('card_instances')
+    .set({ status: 'grading_submitted' })
+    .where('id', '=', input.card_instance_id)
+    .execute();
+
+  return submission;
+}
+
+export interface RecordGradeReturnInput {
+  submission_id: string;
+  grade: number;
+  grade_label?: string;
+  cert_number?: string;
+  subgrades?: Record<string, number>;
+  returned_at?: Date;
+}
+
+export async function recordGradeReturn(userId: string, input: RecordGradeReturnInput) {
+  const submission = await db
+    .selectFrom('grading_submissions')
+    .selectAll()
+    .where('id', '=', input.submission_id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+
+  if (!submission) throw new AppError(404, 'Submission not found');
+  if (submission.status === 'returned') throw new AppError(409, 'Already marked as returned');
+
+  await db
+    .updateTable('grading_submissions')
+    .set({ status: 'returned', returned_at: input.returned_at ?? new Date() })
+    .where('id', '=', input.submission_id)
+    .execute();
+
+  const slab = await db
+    .insertInto('slab_details')
+    .values({
+      card_instance_id: submission.card_instance_id,
+      user_id: userId,
+      source_raw_instance_id: submission.card_instance_id,
+      grading_submission_id: submission.id,
+      company: submission.company,
+      cert_number: input.cert_number ? Number(input.cert_number) : null,
+      grade: input.grade,
+      grade_label: input.grade_label ?? null,
+      subgrades: input.subgrades ? (input.subgrades as any) : null,
+      additional_cost: 0,
+      currency: submission.currency,
+    })
+    .onConflict((oc) =>
+      oc.column('card_instance_id').doUpdateSet({
+        grade: input.grade,
+        grade_label: input.grade_label ?? null,
+        cert_number: input.cert_number ? Number(input.cert_number) : null,
+      })
+    )
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  await db
+    .updateTable('card_instances')
+    .set({ status: 'graded' })
+    .where('id', '=', submission.card_instance_id)
+    .execute();
+
+  return slab;
+}

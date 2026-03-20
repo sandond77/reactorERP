@@ -1,0 +1,19 @@
+{
+  "name": "reactor",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,green \"npm run dev -w server\" \"npm run dev -w client\"",
+    "build": "npm run build -w server && npm run build -w client",
+    "migrate": "npm run migrate -w server",
+    "migrate:up": "npm run migrate -w server -- up",
+    "migrate:down": "npm run migrate -w server -- down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
