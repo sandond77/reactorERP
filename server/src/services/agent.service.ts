@@ -97,7 +97,7 @@ Return a JSON object with this exact structure:
 Only return the JSON object, no other text.`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-6',
+    model: 'claude-sonnet-4-6',
     max_tokens: 2048,
     system: systemPrompt,
     messages: [
@@ -230,7 +230,7 @@ export async function lookupCardInfo(
 
 async function lookupCardInfoWithAI(query: string, game: string): Promise<CardInfoResult[]> {
   const response = await client.messages.create({
-    model: 'claude-opus-4-6',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     thinking: THINKING,
     messages: [
@@ -318,7 +318,7 @@ async function extractCardInfoFromImage(
   game: string
 ): Promise<Omit<CardInfoResult, 'source'> | null> {
   const response = await client.messages.create({
-    model: 'claude-opus-4-6',
+    model: 'claude-sonnet-4-6',
     max_tokens: 512,
     messages: [
       {
@@ -401,7 +401,7 @@ Formatting rules — follow these strictly:
 - When discussing money, format as USD or JPY as appropriate`;
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-6',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     thinking: THINKING,
     system: systemPrompt,

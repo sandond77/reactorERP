@@ -91,7 +91,7 @@ export async function getSaleFilterOptions(userId: string) {
 
 export async function listSales(
   userId: string,
-  filters: { platform?: ListingPlatform; from?: Date; to?: Date },
+  filters: { platforms?: string[]; search?: string; from?: Date; to?: Date },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
@@ -99,9 +99,18 @@ export async function listSales(
   const total = Number(
     (await db
       .selectFrom('sales as s')
+      .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
+      .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
       .select((eb) => eb.fn.count<number>('s.id').as('count'))
       .where('s.user_id', '=', userId)
-      .$if(!!filters.platform, (qb) => qb.where('s.platform', '=', filters.platform!))
+      .$if(filters.platforms !== undefined, (qb) =>
+        filters.platforms!.length === 0
+          ? qb.where(sql`1=0`)
+          : qb.where('s.platform', 'in', filters.platforms! as any)
+      )
+      .$if(!!filters.search, (qb) => qb.where(
+        sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
+      ))
       .$if(!!filters.from, (qb) => qb.where('s.sold_at', '>=', filters.from!))
       .$if(!!filters.to, (qb) => qb.where('s.sold_at', '<=', filters.to!))
       .executeTakeFirst())?.count ?? 0
@@ -137,7 +146,14 @@ export async function listSales(
       sql<number>`(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`.as('profit'),
     ])
     .where('s.user_id', '=', userId)
-    .$if(!!filters.platform, (qb) => qb.where('s.platform', '=', filters.platform!))
+    .$if(filters.platforms !== undefined, (qb) =>
+      filters.platforms!.length === 0
+        ? qb.where(sql`1=0`)
+        : qb.where('s.platform', 'in', filters.platforms! as any)
+    )
+    .$if(!!filters.search, (qb) => qb.where(
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
+    ))
     .$if(!!filters.from, (qb) => qb.where('s.sold_at', '>=', filters.from!))
     .$if(!!filters.to, (qb) => qb.where('s.sold_at', '<=', filters.to!))
     .orderBy(sql.raw(SALES_SORT_COLS[sortBy ?? ''] ?? 's.sold_at'), sortDir ?? 'desc')

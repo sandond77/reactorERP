@@ -15,7 +15,7 @@ export type CardStatus =
 
 export type PurchaseType = 'raw' | 'pre_graded';
 
-export type GradingCompany = 'PSA' | 'BGS' | 'CGC' | 'SGC' | 'HGA' | 'ACE' | 'OTHER';
+export type GradingCompany = 'PSA' | 'BGS' | 'CGC' | 'SGC' | 'HGA' | 'ACE' | 'ARS' | 'OTHER';
 
 export type GradingStatus = 'submitted' | 'in_review' | 'graded' | 'returned' | 'cancelled';
 

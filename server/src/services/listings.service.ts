@@ -36,7 +36,7 @@ export async function getListingFilterOptions(userId: string) {
 
 export async function listListings(
   userId: string,
-  filters: { platform?: ListingPlatform; status?: string },
+  filters: { platforms?: string[]; search?: string; status?: string },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
@@ -44,10 +44,19 @@ export async function listListings(
   const total = Number(
     (await db
       .selectFrom('listings as l')
+      .innerJoin('card_instances as ci', 'ci.id', 'l.card_instance_id')
+      .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
       .select((eb) => eb.fn.count<number>('l.id').as('count'))
       .where('l.user_id', '=', userId)
-      .$if(!!filters.platform, (qb) => qb.where('l.platform', '=', filters.platform!))
+      .$if(filters.platforms !== undefined, (qb) =>
+        filters.platforms!.length === 0
+          ? qb.where(sql`1=0`)
+          : qb.where('l.platform', 'in', filters.platforms! as any)
+      )
       .$if(!!filters.status, (qb) => qb.where('l.listing_status', '=', filters.status as any))
+      .$if(!!filters.search, (qb) => qb.where(
+        sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
+      ))
       .executeTakeFirst())?.count ?? 0
   );
 
@@ -82,8 +91,15 @@ export async function listListings(
       'cc.image_url as catalog_image_url',
     ])
     .where('l.user_id', '=', userId)
-    .$if(!!filters.platform, (qb) => qb.where('l.platform', '=', filters.platform!))
+    .$if(filters.platforms !== undefined, (qb) =>
+      filters.platforms!.length === 0
+        ? qb.where(sql`1=0`)
+        : qb.where('l.platform', 'in', filters.platforms! as any)
+    )
     .$if(!!filters.status, (qb) => qb.where('l.listing_status', '=', filters.status as any))
+    .$if(!!filters.search, (qb) => qb.where(
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
+    ))
     .orderBy(sql.raw(LISTINGS_SORT_COLS[sortBy ?? ''] ?? 'l.created_at'), sortDir ?? 'desc')
     .limit(pagination.limit)
     .offset(getPaginationOffset(pagination.page, pagination.limit))

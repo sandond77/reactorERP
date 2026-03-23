@@ -6,6 +6,7 @@ import { AppLayout } from './components/layout/AppLayout';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Inventory } from './pages/Inventory';
+import { RawInventory } from './pages/RawInventory';
 import { Grading } from './pages/Grading';
 import { Listings } from './pages/Listings';
 import { Sales } from './pages/Sales';
@@ -34,6 +35,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/overall" element={<Overall />} />
               <Route path="/inventory" element={<Inventory />} />
+              <Route path="/raw-inventory" element={<RawInventory />} />
               <Route path="/grading" element={<Grading />} />
               <Route path="/listings" element={<Listings />} />
               <Route path="/sales" element={<Sales />} />

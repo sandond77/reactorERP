@@ -6,26 +6,29 @@ import { toCents } from '../utils/cents';
 const paginationSchema = z.object({
   page: z.coerce.number().default(1),
   limit: z.coerce.number().min(1).max(100).default(25),
+  search: z.string().optional(),
   sort_by: z.string().optional(),
   sort_dir: z.enum(['asc', 'desc']).default('desc'),
   companies: z.string().optional(),
   statuses: z.string().optional(),
 });
 
-function splitCSVLocal(val?: string): string[] {
-  return val ? val.split(',').map((s) => s.trim()).filter(Boolean) : [];
+function splitCSVLocal(val?: string): string[] | undefined {
+  if (val === undefined) return undefined;
+  return val.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 export async function listSubmissions(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit, sort_by, sort_dir, companies, statuses } = paginationSchema.parse(req.query);
+    const { page, limit, search, sort_by, sort_dir, companies, statuses } = paginationSchema.parse(req.query);
     const result = await gradingService.listSubmissions(
       req.user!.id,
       { page, limit },
       sort_by,
       sort_dir,
       splitCSVLocal(companies),
-      splitCSVLocal(statuses)
+      splitCSVLocal(statuses),
+      search
     );
     res.json(result);
   } catch (err) { next(err); }
@@ -42,7 +45,7 @@ const slabsQuerySchema = z.object({
   page: z.coerce.number().default(1),
   limit: z.coerce.number().min(1).max(200).default(50),
   search: z.string().optional(),
-  status: z.enum(['graded', 'sold', 'all']).default('all'),
+  status: z.enum(['graded', 'sold', 'unsold', 'all']).default('all'),
   sort_by: z.string().optional(),
   sort_dir: z.enum(['asc', 'desc']).default('desc'),
   companies: z.string().optional(),
@@ -54,8 +57,10 @@ const slabsQuerySchema = z.object({
   sold_years: z.string().optional(),
 });
 
-function splitCSV(val?: string): string[] {
-  return val ? val.split(',').map((s) => s.trim()).filter(Boolean) : [];
+// Returns undefined when param not sent (no filter), [] when sent as empty (filter to nothing)
+function splitCSV(val?: string): string[] | undefined {
+  if (val === undefined) return undefined;
+  return val.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
 export async function listSlabs(req: Request, res: Response, next: NextFunction) {

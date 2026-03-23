@@ -6,19 +6,25 @@ import { toCents } from '../utils/cents';
 const paginationSchema = z.object({
   page: z.coerce.number().default(1),
   limit: z.coerce.number().min(1).max(100).default(25),
-  platform: z.string().optional(),
+  platforms: z.string().optional(),
+  search: z.string().optional(),
   from: z.string().optional().transform((v) => v ? new Date(v) : undefined),
   to: z.string().optional().transform((v) => v ? new Date(v) : undefined),
   sort_by: z.string().optional(),
   sort_dir: z.enum(['asc', 'desc']).default('desc'),
 });
 
+function splitCSV(val?: string): string[] | undefined {
+  if (val === undefined) return undefined;
+  return val.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
 export async function listSales(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit, platform, from, to, sort_by, sort_dir } = paginationSchema.parse(req.query);
+    const { page, limit, platforms, search, from, to, sort_by, sort_dir } = paginationSchema.parse(req.query);
     const result = await salesService.listSales(
       req.user!.id,
-      { platform: platform as any, from, to },
+      { platforms: splitCSV(platforms), search, from, to },
       { page, limit },
       sort_by,
       sort_dir

@@ -40,7 +40,7 @@ interface FilterOptions {
 }
 
 type SortDir = 'asc' | 'desc';
-type StatusFilter = 'all' | 'graded' | 'sold';
+type StatusFilter = 'all' | 'unsold' | 'sold' | 'graded';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -49,6 +49,7 @@ function certLink(company: string, cert: string): string | null {
     case 'PSA': return `https://www.psacard.com/cert/${cert}`;
     case 'CGC': return `https://www.cgccards.com/certlookup/${cert}`;
     case 'SGC': return `https://sgccard.com/cert/${cert}`;
+    case 'ARS': return `https://ars-grading.com/grading/searchNumber?id=${cert}`;
     default:    return null;
   }
 }
@@ -82,21 +83,21 @@ export function Overall() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('unsold');
   const [sortCol, setSortCol] = useState<string | null>('cert_number');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const { rz, totalWidth } = useColWidths({ cert_number: 120, card_name: 720, grade: 130, company: 90, is_listed: 80, listed_price: 110, listing: 65, raw_cost: 85, grading_cost: 110, strike_price: 105, after_ebay: 100, net: 85, raw_purchase_date: 150, date_listed: 110, date_sold: 105, roi_pct: 75, notes: 180, card_show: 100 });
+  const { rz, totalWidth } = useColWidths({ cert_number: 120, card_name: 720, grade: 130, company: 115, is_listed: 105, listed_price: 110, listing: 65, raw_cost: 85, grading_cost: 110, strike_price: 105, after_ebay: 100, net: 85, raw_purchase_date: 180, date_listed: 130, date_sold: 125, roi_pct: 75, notes: 180, card_show: 125 });
 
   // Per-column filters
   const [selectedSlab, setSelectedSlab] = useState<SlabRow | null>(null);
 
-  const [fCompany, setFCompany]       = useState<string[]>([]);
-  const [fGrade, setFGrade]           = useState<string[]>([]);
-  const [fListed, setFListed]         = useState<string[]>([]);
-  const [fCardShow, setFCardShow]     = useState<string[]>([]);
-  const [fPurchYear, setFPurchYear]   = useState<string[]>([]);
-  const [fListYear, setFListYear]     = useState<string[]>([]);
-  const [fSoldYear, setFSoldYear]     = useState<string[]>([]);
+  const [fCompany, setFCompany]       = useState<string[] | null>(null);
+  const [fGrade, setFGrade]           = useState<string[] | null>(null);
+  const [fListed, setFListed]         = useState<string[] | null>(null);
+  const [fCardShow, setFCardShow]     = useState<string[] | null>(null);
+  const [fPurchYear, setFPurchYear]   = useState<string[] | null>(null);
+  const [fListYear, setFListYear]     = useState<string[] | null>(null);
+  const [fSoldYear, setFSoldYear]     = useState<string[] | null>(null);
 
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
@@ -119,8 +120,13 @@ export function Overall() {
     staleTime: 5 * 60 * 1000,
   });
 
-  function activeFilter(sel: string[], opts?: string[]) {
-    return sel.length > 0 && sel.length < (opts?.length ?? 0) ? sel : [];
+  // null → no filter (undefined param, show all)
+  // []  → filter active but empty (send '' param, show nothing)
+  // [...] → filter to these values
+  function activeFilter(sel: string[] | null, opts?: string[]): string[] | undefined {
+    if (sel === null) return undefined;
+    if (sel.length >= (opts?.length ?? Infinity)) return undefined;
+    return sel;
   }
 
   const params = {
@@ -129,13 +135,13 @@ export function Overall() {
     status: statusFilter,
     sort_by: sortCol ?? undefined,
     sort_dir: sortDir,
-    companies:      activeFilter(fCompany,   filterOptions?.companies).join(',')     || undefined,
-    grades:         activeFilter(fGrade,     filterOptions?.grades).join(',')        || undefined,
-    is_listed:      activeFilter(fListed,    filterOptions?.listed)[0]?.toLowerCase() || undefined,
-    is_card_show:   activeFilter(fCardShow,  filterOptions?.card_show)[0]?.toLowerCase() || undefined,
-    purchase_years: activeFilter(fPurchYear, filterOptions?.purchase_years).join(',') || undefined,
-    listed_years:   activeFilter(fListYear,  filterOptions?.listed_years).join(',')   || undefined,
-    sold_years:     activeFilter(fSoldYear,  filterOptions?.sold_years).join(',')     || undefined,
+    companies:      activeFilter(fCompany,   filterOptions?.companies)?.join(','),
+    grades:         activeFilter(fGrade,     filterOptions?.grades)?.join(','),
+    is_listed:      activeFilter(fListed,    filterOptions?.listed)?.[0]?.toLowerCase(),
+    is_card_show:   activeFilter(fCardShow,  filterOptions?.card_show)?.[0]?.toLowerCase(),
+    purchase_years: activeFilter(fPurchYear, filterOptions?.purchase_years)?.join(','),
+    listed_years:   activeFilter(fListYear,  filterOptions?.listed_years)?.join(','),
+    sold_years:     activeFilter(fSoldYear,  filterOptions?.sold_years)?.join(','),
   };
 
   const { data, isLoading } = useQuery<PaginatedResult<SlabRow>>({
@@ -144,11 +150,11 @@ export function Overall() {
   });
 
   const hasActiveFilters = [fCompany, fGrade, fListed, fCardShow, fPurchYear, fListYear, fSoldYear]
-    .some((f) => f.length > 0);
+    .some((f) => f !== null && f.length > 0);
 
   function clearAllFilters() {
-    setFCompany([]); setFGrade([]); setFListed([]); setFCardShow([]);
-    setFPurchYear([]); setFListYear([]); setFSoldYear([]);
+    setFCompany(null); setFGrade(null); setFListed(null); setFCardShow(null);
+    setFPurchYear(null); setFListYear(null); setFSoldYear(null);
     setPage(1);
   }
 
@@ -165,10 +171,15 @@ export function Overall() {
             </button>
           )}
           <div className="flex gap-1">
-            {(['all', 'graded', 'sold'] as StatusFilter[]).map((s) => (
-              <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
-                className={`px-3 py-1 text-xs rounded font-medium capitalize transition-colors ${statusFilter === s ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
-                {s}
+            {([
+              { value: 'all',    label: 'All' },
+              { value: 'unsold', label: 'Unsold' },
+              { value: 'sold',   label: 'Sold' },
+              { value: 'graded', label: 'Graded' },
+            ] as { value: StatusFilter; label: string }[]).map(({ value, label }) => (
+              <button key={value} onClick={() => { setStatusFilter(value); setPage(1); }}
+                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${statusFilter === value ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                {label}
               </button>
             ))}
           </div>
@@ -185,8 +196,6 @@ export function Overall() {
       <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
-        ) : !data?.data.length ? (
-          <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">No records found.</div>
         ) : (
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
@@ -219,7 +228,9 @@ export function Overall() {
               </tr>
             </thead>
             <tbody>
-              {data.data.map((row) => {
+              {!data?.data.length ? (
+                <tr><td colSpan={18} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
+              ) : data.data.map((row) => {
                 const link = row.cert_number ? certLink(row.company, row.cert_number) : null;
                 return (
                   <tr key={row.id} onClick={() => setSelectedSlab(row)} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">

@@ -58,7 +58,14 @@ export async function listCards(
     .where('ci.user_id', '=', userId)
     .where('ci.deleted_at', 'is', null);
 
-  if (filters.status) query = query.where('ci.status', '=', filters.status);
+  if (filters.status) {
+    const statuses = filters.status.split(',').map((s: string) => s.trim()).filter(Boolean);
+    if (statuses.length === 1) {
+      query = query.where('ci.status', '=', statuses[0]);
+    } else if (statuses.length > 1) {
+      query = query.where('ci.status', 'in', statuses as any);
+    }
+  }
   if (filters.card_game) query = query.where('ci.card_game', '=', filters.card_game);
   if (filters.purchase_type) query = query.where('ci.purchase_type', '=', filters.purchase_type as any);
   if (filters.search) {
@@ -81,7 +88,10 @@ export async function listCards(
     .select((eb) => eb.fn.count<number>('ci.id').as('count'))
     .where('ci.user_id', '=', userId)
     .where('ci.deleted_at', 'is', null)
-    .$if(!!filters.status, (qb) => qb.where('ci.status', '=', filters.status!))
+    .$if(!!filters.status, (qb) => {
+      const ss = filters.status!.split(',').map((s: string) => s.trim()).filter(Boolean);
+      return ss.length === 1 ? qb.where('ci.status', '=', ss[0]) : qb.where('ci.status', 'in', ss as any);
+    })
     .$if(!!filters.card_game, (qb) => qb.where('ci.card_game', '=', filters.card_game!))
     .executeTakeFirst();
   const total = Number(countResult?.count ?? 0);

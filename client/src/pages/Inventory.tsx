@@ -45,6 +45,16 @@ interface FilterOptions {
 type StatusFilter = 'all' | 'graded';
 type SortDir = 'asc' | 'desc';
 
+function certLink(company: string, cert: string): string | null {
+  switch (company) {
+    case 'PSA': return `https://www.psacard.com/cert/${cert}`;
+    case 'CGC': return `https://www.cgccards.com/certlookup/${cert}`;
+    case 'SGC': return `https://sgccard.com/cert/${cert}`;
+    case 'ARS': return `https://ars-grading.com/grading/searchNumber?id=${cert}`;
+    default:    return null;
+  }
+}
+
 function fmt(cents: number | null): string {
   if (cents == null) return '—';
   return formatCurrency(cents);
@@ -89,15 +99,15 @@ export function Inventory() {
 
   const [sortCol, setSortCol] = useState<string | null>('cert_number');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const { rz, totalWidth } = useColWidths({ cert: 110, card: 680, grade: 130, listed: 80, listed_price: 100, listing: 60, raw: 80, grading_cost: 105, strike: 95, after_ebay: 90, net: 80, purch_date: 140, date_listed: 100, date_sold: 100, roi: 70, notes: 170, card_show: 95 });
+  const { rz, totalWidth } = useColWidths({ cert: 120, card: 680, grade: 130, company: 90, listed: 80, listed_price: 100, listing: 60, raw: 80, grading_cost: 105, strike: 95, after_ebay: 90, net: 80, purch_date: 140, date_listed: 100, date_sold: 100, roi: 70, notes: 170, card_show: 95 });
 
-  const [fCompany, setFCompany] = useState<string[]>([]);
-  const [fGrade, setFGrade] = useState<string[]>([]);
-  const [fListed, setFListed] = useState<string[]>([]);
-  const [fCardShow, setFCardShow] = useState<string[]>([]);
-  const [fPurchYear, setFPurchYear] = useState<string[]>([]);
-  const [fListYear, setFListYear] = useState<string[]>([]);
-  const [fSoldYear, setFSoldYear] = useState<string[]>([]);
+  const [fCompany, setFCompany] = useState<string[] | null>(null);
+  const [fGrade, setFGrade] = useState<string[] | null>(null);
+  const [fListed, setFListed] = useState<string[] | null>(null);
+  const [fCardShow, setFCardShow] = useState<string[] | null>(null);
+  const [fPurchYear, setFPurchYear] = useState<string[] | null>(null);
+  const [fListYear, setFListYear] = useState<string[] | null>(null);
+  const [fSoldYear, setFSoldYear] = useState<string[] | null>(null);
 
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
@@ -123,8 +133,10 @@ export function Inventory() {
     staleTime: 5 * 60 * 1000,
   });
 
-  function activeFilter(sel: string[], opts?: string[]) {
-    return sel.length > 0 && sel.length < (opts?.length ?? 0) ? sel : [];
+  function activeFilter(sel: string[] | null, opts?: string[]): string[] | undefined {
+    if (sel === null) return undefined;
+    if (sel.length >= (opts?.length ?? Infinity)) return undefined;
+    return sel;
   }
 
   const params = {
@@ -133,27 +145,26 @@ export function Inventory() {
     status: statusFilter,
     sort_by: sortCol ?? undefined,
     sort_dir: sortDir,
-    companies:      activeFilter(fCompany,   filterOptions?.companies).join(',')     || undefined,
-    grades:         activeFilter(fGrade,     filterOptions?.grades).join(',')        || undefined,
-    is_listed:      activeFilter(fListed,    filterOptions?.listed)[0]?.toLowerCase() || undefined,
-    is_card_show:   activeFilter(fCardShow,  filterOptions?.card_show)[0]?.toLowerCase() || undefined,
-    purchase_years: activeFilter(fPurchYear, filterOptions?.purchase_years).join(',') || undefined,
-    listed_years:   activeFilter(fListYear,  filterOptions?.listed_years).join(',')   || undefined,
-    sold_years:     activeFilter(fSoldYear,  filterOptions?.sold_years).join(',')     || undefined,
+    companies:      activeFilter(fCompany,   filterOptions?.companies)?.join(','),
+    grades:         activeFilter(fGrade,     filterOptions?.grades)?.join(','),
+    is_listed:      activeFilter(fListed,    filterOptions?.listed)?.[0]?.toLowerCase(),
+    is_card_show:   activeFilter(fCardShow,  filterOptions?.card_show)?.[0]?.toLowerCase(),
+    purchase_years: activeFilter(fPurchYear, filterOptions?.purchase_years)?.join(','),
+    listed_years:   activeFilter(fListYear,  filterOptions?.listed_years)?.join(','),
+    sold_years:     activeFilter(fSoldYear,  filterOptions?.sold_years)?.join(','),
   };
 
   const { data, isLoading } = useQuery<PaginatedResult<SlabRow>>({
     queryKey: ['inventory-slabs', params],
-    queryFn: () =>
-      api.get('/grading/slabs', { params }).then((r) => r.data),
+    queryFn: () => api.get('/grading/slabs', { params }).then((r) => r.data),
   });
 
   const hasActiveFilters = [fCompany, fGrade, fListed, fCardShow, fPurchYear, fListYear, fSoldYear]
-    .some((f) => f.length > 0);
+    .some((f) => f !== null && f.length > 0);
 
   function clearAllFilters() {
-    setFCompany([]); setFGrade([]); setFListed([]); setFCardShow([]);
-    setFPurchYear([]); setFListYear([]); setFSoldYear([]);
+    setFCompany(null); setFGrade(null); setFListed(null); setFCardShow(null);
+    setFPurchYear(null); setFListYear(null); setFSoldYear(null);
     setPage(1);
   }
 
@@ -195,11 +206,6 @@ export function Inventory() {
       <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
-        ) : !data?.data.length ? (
-          <div className="flex flex-col items-center justify-center h-40 gap-2">
-            <p className="text-zinc-500 text-sm">No cards found.</p>
-            <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}>Add your first card</Button>
-          </div>
         ) : (
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
@@ -208,6 +214,8 @@ export function Inventory() {
                 <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card')} />
                 <ColHeader label="Grade"             col="grade"             {...sh} {...rz('grade')}
                   filterOptions={filterOptions?.grades}    filterSelected={fGrade}    onFilterChange={(v) => { setFGrade(v); setPage(1); }} />
+                <ColHeader label="Company"                                   {...sh} {...rz('company')}
+                  filterOptions={filterOptions?.companies} filterSelected={fCompany}  onFilterChange={(v) => { setFCompany(v); setPage(1); }} align="center" />
                 <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('listed')} align="center"
                   filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
                 <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" />
@@ -230,20 +238,27 @@ export function Inventory() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {data.data.map((row) => (
+              {!data?.data.length ? (
+                <tr><td colSpan={18} className="px-3 py-10 text-center text-zinc-500">No cards found.</td></tr>
+              ) : data.data.map((row) => (
                 <tr
                   key={row.id}
                   onClick={() => setSelectedId(row.id)}
                   className="hover:bg-zinc-800/25 cursor-pointer transition-colors"
                 >
-                  <td className="px-3 py-1.5 font-mono text-zinc-400">{row.cert_number ?? '—'}</td>
+                  <td className="px-3 py-1.5 font-mono text-[11px]">
+                    {(() => {
+                      const link = row.cert_number ? certLink(row.company, row.cert_number) : null;
+                      return link
+                        ? <a href={link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-400 hover:underline">{row.cert_number}</a>
+                        : <span className="text-zinc-400">{row.cert_number ?? ''}</span>;
+                    })()}
+                  </td>
                   <td className="px-3 py-1.5 text-zinc-200 truncate" title={row.card_name ?? ''}>
                     {row.card_name ?? '—'}
                   </td>
-                  <td className="px-3 py-1.5 text-zinc-300 font-medium">
-                    <span className="text-zinc-500 text-[10px] mr-1">{row.company}</span>
-                    {row.grade_label ?? '—'}
-                  </td>
+                  <td className="px-3 py-1.5 text-zinc-300">{row.grade_label ?? ''}</td>
+                  <td className="px-3 py-1.5 text-center text-zinc-400 text-[11px]">{row.company}</td>
                   <td className="px-3 py-1.5 text-center">
                     {row.is_listed ? (
                       <span className="text-green-400 font-medium">Yes</span>
@@ -321,7 +336,7 @@ export function Inventory() {
         <CardDetailModal
           cardId={selectedId}
           onClose={() => setSelectedId(null)}
-          onDelete={(_id) => { qc.invalidateQueries({ queryKey: ['inventory-slabs'] }); setSelectedId(null); }}
+          onDelete={() => setSelectedId(null)}
         />
       )}
     </div>

@@ -2,34 +2,47 @@ import { useState, useRef, useEffect } from 'react';
 import { ChevronUp, ChevronDown, ChevronsUpDown, ListFilter, X } from 'lucide-react';
 
 // ─── ColumnFilter ─────────────────────────────────────────────────────────────
+// null  = Select All active (default, no filter)
+// []    = explicitly cleared (nothing checked)
+// [...] = specific items selected (filter active)
 
 interface ColumnFilterProps {
   options: string[];
-  selected: string[];
-  onChange: (vals: string[]) => void;
+  selected: string[] | null;
+  onChange: (vals: string[] | null) => void;
 }
 
 export function ColumnFilter({ options, selected, onChange }: ColumnFilterProps) {
   const [open, setOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
-  const active = selected.length > 0 && selected.length < options.length;
+
+  // Active = some (not null/all, not empty) items are selected
+  const active = selected !== null && selected.length > 0 && selected.length < options.length;
+  // Select All is checked when null (default) or all explicitly selected
+  const allChecked = selected === null || selected.length === options.length;
 
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !e.composedPath().includes(ref.current as EventTarget)) setOpen(false);
     }
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
   const visible = options.filter((o) => o.toLowerCase().includes(filterSearch.toLowerCase()));
-  const allChecked = selected.length === 0 || selected.length === options.length;
 
-  function toggleAll() { onChange(allChecked ? [] : [...options]); }
+  function toggleAll() {
+    // null → [] (deselect all);  [] or [...all] → null (select all)
+    onChange(selected === null ? [] : null);
+  }
+
   function toggle(val: string) {
-    const next = selected.includes(val) ? selected.filter((v) => v !== val) : [...selected, val];
-    onChange(next.length === options.length ? [] : next);
+    // null means all are implicitly selected — expand to full list first
+    const base = selected === null ? [...options] : selected;
+    const next = base.includes(val) ? base.filter((v) => v !== val) : [...base, val];
+    // If all options are checked, collapse back to null (Select All state)
+    onChange(next.length === options.length ? null : next);
   }
 
   return (
@@ -62,14 +75,19 @@ export function ColumnFilter({ options, selected, onChange }: ColumnFilterProps)
             </label>
             {visible.map((opt) => (
               <label key={opt} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-300">
-                <input type="checkbox" checked={allChecked || selected.includes(opt)} onChange={() => toggle(opt)} className="accent-indigo-500" />
+                <input
+                  type="checkbox"
+                  checked={selected === null || selected.includes(opt)}
+                  onChange={() => toggle(opt)}
+                  className="accent-indigo-500"
+                />
                 {opt}
               </label>
             ))}
           </div>
           {active && (
             <div className="border-t border-zinc-800 px-2 py-1">
-              <button onClick={() => onChange([])} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
+              <button onClick={() => onChange(null)} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
                 <X size={10} /> Clear
               </button>
             </div>
@@ -89,8 +107,8 @@ export interface ColHeaderProps {
   sortDir: 'asc' | 'desc';
   onSort: (col: string) => void;
   filterOptions?: string[];
-  filterSelected?: string[];
-  onFilterChange?: (vals: string[]) => void;
+  filterSelected?: string[] | null;
+  onFilterChange?: (vals: string[] | null) => void;
   align?: 'left' | 'right' | 'center';
   className?: string;
   width?: number;
@@ -112,10 +130,11 @@ export function ColHeader({
   ) : null;
 
   const FilterBtn = filterOptions?.length && onFilterChange
-    ? <ColumnFilter options={filterOptions} selected={filterSelected ?? []} onChange={onFilterChange} />
+    ? <ColumnFilter options={filterOptions} selected={filterSelected ?? null} onChange={onFilterChange} />
     : null;
 
-  const labelActive = (filterSelected ?? []).length > 0 && (filterSelected ?? []).length < (filterOptions?.length ?? 0);
+  const sel = filterSelected ?? null;
+  const labelActive = sel !== null && sel.length > 0 && sel.length < (filterOptions?.length ?? 0);
 
   function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();

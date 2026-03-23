@@ -405,9 +405,9 @@ export function InventorySummary() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const [fLanguage, setFLanguage] = useState<string[]>([]);
-  const [fRarity, setFRarity] = useState<string[]>([]);
-  const [fCompany, setFCompany] = useState<string[]>([]);
+  const [fLanguage, setFLanguage] = useState<string[] | null>(null);
+  const [fRarity, setFRarity] = useState<string[] | null>(null);
+  const [fCompany, setFCompany] = useState<string[] | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEmpty, setShowEmpty] = useState(false);
   const [editPart, setEditPart] = useState<SummaryRow | null>(null);
@@ -451,9 +451,9 @@ export function InventorySummary() {
       r.card_name?.toLowerCase().includes(search.toLowerCase()) ||
       r.set_name?.toLowerCase().includes(search.toLowerCase());
 
-    const matchLang = fLanguage.length === 0 || fLanguage.length === languageOptions.length || fLanguage.includes(r.language);
-    const matchRarity = fRarity.length === 0 || fRarity.length === rarityOptions.length || fRarity.includes(r.rarity ?? '');
-    const matchCompany = fCompany.length === 0 || fCompany.length === companyOptions.length || fCompany.includes(r.company);
+    const matchLang = fLanguage === null || fLanguage.length === 0 || fLanguage.includes(r.language);
+    const matchRarity = fRarity === null || fRarity.length === 0 || fRarity.includes(r.rarity ?? '');
+    const matchCompany = fCompany === null || fCompany.length === 0 || fCompany.includes(r.company);
 
     return matchSearch && matchLang && matchRarity && matchCompany;
   });
@@ -513,6 +513,14 @@ export function InventorySummary() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {(fLanguage !== null || fRarity !== null || fCompany !== null || search) && (
+            <button
+              onClick={() => { setFLanguage(null); setFRarity(null); setFCompany(null); setSearch(''); }}
+              className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"
+            >
+              <X size={12} /> Clear filters
+            </button>
+          )}
           <Button size="sm" variant={showEmpty ? 'primary' : 'secondary'} onClick={() => setShowEmpty(v => !v)}>
             {showEmpty ? 'In Inventory' : 'Show Empty'}
           </Button>

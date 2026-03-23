@@ -83,11 +83,11 @@ export async function listSlabs(
   userId: string,
   pagination: PaginationParams,
   search?: string,
-  statusFilter?: 'graded' | 'sold' | 'all',
+  statusFilter?: 'graded' | 'sold' | 'unsold' | 'all',
   sortBy?: string,
   sortDir?: 'asc' | 'desc',
-  filterCompanies?: string[],
-  filterGrades?: string[],
+  filterCompanies?: string[] | undefined,
+  filterGrades?: string[] | undefined,
   isListed?: string,
   isCardShow?: string,
   purchaseYears?: string[],
@@ -96,20 +96,21 @@ export async function listSlabs(
 ) {
   const offset = getPaginationOffset(pagination.page, pagination.limit);
   const status = statusFilter === 'all' || !statusFilter ? null : statusFilter;
+  const unsold = statusFilter === 'unsold';
   const sortExpr = SLAB_SORT_COLS[sortBy ?? ''] ?? 'ci.created_at';
   const dir = sortDir === 'asc' ? sql`ASC` : sql`DESC`;
 
-  const companyIn    = filterCompanies?.length   ? sql`AND sd.company     IN (${sql.join(filterCompanies.map((v) => sql.val(v)))})` : sql``;
-  const gradeIn      = filterGrades?.length       ? sql`AND sd.grade_label IN (${sql.join(filterGrades.map((v) => sql.val(v)))})` : sql``;
+  const companyIn    = filterCompanies === undefined ? sql`` : filterCompanies.length ? sql`AND sd.company     IN (${sql.join(filterCompanies.map((v) => sql.val(v)))})` : sql`AND 1=0`;
+  const gradeIn      = filterGrades    === undefined ? sql`` : filterGrades.length    ? sql`AND sd.grade_label IN (${sql.join(filterGrades.map((v) => sql.val(v)))})` : sql`AND 1=0`;
   const listedCond   = isListed === 'yes' ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id)`
                      : isListed === 'no'  ? sql`AND NOT EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id)`
                      : sql``;
   const cardShowCond = isCardShow === 'yes' ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.platform = 'card_show')`
                      : isCardShow === 'no'  ? sql`AND NOT EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.platform = 'card_show')`
                      : sql``;
-  const purchaseYearIn = purchaseYears?.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql``;
-  const listedYearIn   = listedYears?.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql``;
-  const soldYearIn     = soldYears?.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql``;
+  const purchaseYearIn = purchaseYears === undefined ? sql`` : purchaseYears.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql`AND 1=0`;
+  const listedYearIn   = listedYears   === undefined ? sql`` : listedYears.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
+  const soldYearIn     = soldYears     === undefined ? sql`` : soldYears.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
 
   const countResult = await sql<{ count: string }>`
     SELECT COUNT(*) AS count
@@ -117,7 +118,7 @@ export async function listSlabs(
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
     WHERE ci.user_id = ${userId}
     AND ci.deleted_at IS NULL
-    ${status ? sql`AND ci.status = ${status}` : sql``}
+    ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${search ? sql`AND (ci.card_name_override ILIKE ${'%' + search + '%'} OR sd.cert_number::text ILIKE ${'%' + search + '%'})` : sql``}
     ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
   `.execute(db);
@@ -195,7 +196,7 @@ export async function listSlabs(
     ) s ON true
     WHERE ci.user_id = ${userId}
     AND ci.deleted_at IS NULL
-    ${status ? sql`AND ci.status = ${status}` : sql``}
+    ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${search ? sql`AND (ci.card_name_override ILIKE ${'%' + search + '%'} OR sd.cert_number::text ILIKE ${'%' + search + '%'})` : sql``}
     ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
     ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
@@ -241,19 +242,23 @@ export async function listSubmissions(
   sortBy?: string,
   sortDir?: 'asc' | 'desc',
   filterCompanies?: string[],
-  filterStatuses?: string[]
+  filterStatuses?: string[],
+  search?: string
 ) {
   const sortExpr = SUBMISSION_SORT_COLS[sortBy ?? ''] ?? 'gs.created_at';
   const dir = sortDir === 'asc' ? sql`ASC` : sql`DESC`;
 
-  const companyIn  = filterCompanies?.length ? sql`AND gs.company IN (${sql.join(filterCompanies.map((v) => sql.val(v)))})` : sql``;
-  const statusIn   = filterStatuses?.length  ? sql`AND gs.status  IN (${sql.join(filterStatuses.map((v) => sql.val(v)))})` : sql``;
+  const companyIn    = filterCompanies === undefined ? sql`` : filterCompanies.length ? sql`AND gs.company IN (${sql.join(filterCompanies.map((v) => sql.val(v)))})` : sql`AND 1=0`;
+  const statusIn     = filterStatuses  === undefined ? sql`` : filterStatuses.length  ? sql`AND gs.status  IN (${sql.join(filterStatuses.map((v) => sql.val(v)))})` : sql`AND 1=0`;
+  const searchClause = search ? sql`AND COALESCE(ci.card_name_override, cc.card_name) ILIKE ${'%' + search + '%'}` : sql``;
 
   const countResult = await sql<{ count: string }>`
     SELECT COUNT(*) AS count
     FROM grading_submissions gs
+    INNER JOIN card_instances ci ON ci.id = gs.card_instance_id
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     WHERE gs.user_id = ${userId}
-    ${companyIn} ${statusIn}
+    ${companyIn} ${statusIn} ${searchClause}
   `.execute(db);
 
   const total = Number(countResult.rows[0]?.count ?? 0);
@@ -299,7 +304,7 @@ export async function listSubmissions(
     INNER JOIN card_instances ci ON ci.id = gs.card_instance_id
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     WHERE gs.user_id = ${userId}
-    ${companyIn} ${statusIn}
+    ${companyIn} ${statusIn} ${searchClause}
     ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
     LIMIT ${pagination.limit} OFFSET ${getPaginationOffset(pagination.page, pagination.limit)}
   `.execute(db);
