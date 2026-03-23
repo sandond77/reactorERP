@@ -222,9 +222,20 @@ async function enrichWithSku(suggestions: CardInfoResult[]): Promise<CardInfoRes
     const rawCode = s.set_code ?? s.set_name;
     if (!rawCode) return { ...s, catalog_exists: false };
     const setCode = lookupSetCode(lang, rawCode) ?? lookupSetCode(lang, s.set_name ?? '') ?? rawCode;
-    const sku = generatePartNumber(lang, setCode, s.card_number);
+    const sku = generatePartNumber(lang, setCode, s.card_number, s.rarity ?? undefined);
     const row = await db.selectFrom('card_catalog').select(['id', 'card_name']).where('sku', '=', sku).executeTakeFirst();
-    return { ...s, sku, catalog_id: row?.id, catalog_exists: !!row, catalog_card_name: row?.card_name ?? undefined };
+    if (!row) return { ...s, sku, catalog_exists: false };
+    // Use the established card name from an existing inventory entry for this SKU
+    const established = await db
+      .selectFrom('card_instances')
+      .select('card_name_override')
+      .where('catalog_id', '=', row.id)
+      .where('card_name_override', 'is not', null)
+      .orderBy('created_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    const catalog_card_name = established?.card_name_override ?? row.card_name ?? undefined;
+    return { ...s, sku, catalog_id: row.id, catalog_exists: true, catalog_card_name };
   }));
 }
 
@@ -251,9 +262,8 @@ export async function autoFillCardData(input: {
     const vision = await extractCardInfoFromImage(input.image_base64, input.image_media_type, game);
     if (vision) {
       const { grading_company, grade, grade_label, cert_number, psa_label, ...cardInfo } = vision;
-      const base = await lookupCardInfo(cardInfo.card_name, game);
-      const raw = base.length > 0 ? base : [{ ...cardInfo, source: 'ai_generated' as const }];
-      results.suggestions = await enrichWithSku(raw);
+      // Use vision data directly — do NOT search catalog by name as it may match wrong entries
+      results.suggestions = await enrichWithSku([{ ...cardInfo, source: 'ai_generated' as const }]);
       if (grading_company && grade != null) {
         results.parsed_grade = { company: grading_company, grade, grade_label: normalizeGradeLabel(grading_company, grade, grade_label) };
       }
@@ -275,9 +285,8 @@ export async function autoFillCardData(input: {
         const vision = await extractCardInfoFromImage(buffer.toString('base64'), mimeType, game);
         if (vision) {
           const { grading_company, grade, grade_label, cert_number, psa_label, ...cardInfo } = vision;
-          const base = await lookupCardInfo(cardInfo.card_name, game);
-          const raw = base.length > 0 ? base : [{ ...cardInfo, source: 'ai_generated' as const }];
-          results.suggestions = await enrichWithSku(raw);
+          // Use vision data directly — do NOT search catalog by name as it may match wrong entries
+          results.suggestions = await enrichWithSku([{ ...cardInfo, source: 'ai_generated' as const }]);
           if (grading_company && grade != null) {
             results.parsed_grade = { company: grading_company, grade, grade_label: normalizeGradeLabel(grading_company, grade, grade_label) };
           }

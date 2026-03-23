@@ -15,6 +15,7 @@ const schema = z.object({
   card_name_override: z.string().min(1, 'Card name required'),
   set_name_override: z.string().min(1, 'Set name required'),
   card_number_override: z.string().min(1, 'Card number required'),
+  rarity: z.string().optional(),
   card_game: z.string().default('pokemon'),
   language: z.string().default('EN'),
   purchase_cost: z.coerce.number().min(0, 'Purchase cost required'),
@@ -42,7 +43,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, string> } | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { register, handleSubmit, setValue, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { register, handleSubmit, setValue, getValues, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: { card_game: 'pokemon', language: 'EN', currency: 'USD', slab_company: 'PSA' },
   });
@@ -80,12 +81,14 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       const parsedCert: string | undefined = data.data?.parsed_cert;
       const parsedLabel: string | undefined = data.data?.parsed_label;
       if (s) {
-        // Card name: use catalog name if part exists, otherwise leave blank for manual entry
+        // Card name: only fill if the part exists and we have an established name from inventory
+        // If part is new, leave blank — user pastes from grading company cert page
         if (s.catalog_exists && s.catalog_card_name) {
           setValue('card_name_override', s.catalog_card_name);
         }
         if (s.set_name) setValue('set_name_override', s.set_name);
         if (s.card_number) setValue('card_number_override', s.card_number);
+        if (s.rarity) setValue('rarity', s.rarity);
         if (s.language) setValue('language', s.language === 'JP' ? 'JP' : 'EN');
         setPartNumber({ sku: s.sku ?? null, exists: !!s.catalog_exists, catalogData: s });
       }
@@ -122,7 +125,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
         set_code: s.set_code ?? null,
         card_number: s.card_number ?? null,
         language: s.language ?? 'EN',
-        rarity: s.rarity ?? null,
+        rarity: getValues('rarity') || s.rarity || null,
       });
       setPartNumber((p) => p ? { ...p, exists: true } : p);
       toast.success('Part number created');
@@ -216,20 +219,21 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       <div className="flex flex-col gap-1">
         <Input
           label="Card Name"
-          placeholder="e.g. 1996 POKEMON JAPANESE BASIC #6 CHARIZARD-HOLO"
+          placeholder="e.g. 1996 Pokemon Japanese Basic 6 Charizard-Holo"
           {...register('card_name_override')}
           error={errors.card_name_override?.message}
         />
         {partNumber && !partNumber.exists && (
           <p className="text-xs text-yellow-500/80 leading-snug">
-            Look up the cert on the grading company's website — use the name shown in the blue box (e.g. <span className="font-mono">1996 POKEMON JAPANESE BASIC #6 CHARIZARD-HOLO</span>)
+            New part — enter the card name from the grading company cert page (the text in the blue box)
           </p>
         )}
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <Input label="Set Name" placeholder="e.g. Base Set" {...register('set_name_override')} error={errors.set_name_override?.message} />
         <Input label="Card Number" placeholder="e.g. 4/102" {...register('card_number_override')} error={errors.card_number_override?.message} />
+        <Input label="Rarity" placeholder="e.g. Holo, Art Rare" {...register('rarity')} />
       </div>
 
       {partNumber && (
