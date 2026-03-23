@@ -25,6 +25,8 @@ interface Sale {
   grade: number | null;
   grade_label: string | null;
   grading_company: string | null;
+  cert_number: string | null;
+  unique_id: string | null;
 }
 
 interface SaleFilterOptions {
@@ -37,7 +39,8 @@ interface SlabResult {
   set_name: string | null;
   company: string | null;
   grade_label: string | null;
-  grade: number | null;
+  numeric_grade: number | null;
+  cert_number: string | null;
   currency: string;
 }
 
@@ -60,6 +63,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [shippingCost, setShippingCost] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [soldAt, setSoldAt] = useState('');
+  const [orderNumber, setOrderNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -69,7 +73,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   const { data: cardResults } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['card-picker-sale', debouncedSearch],
-    queryFn: () => api.get('/grading/slabs', { params: { search: debouncedSearch, limit: 8, status: 'all' } }).then(r => r.data),
+    queryFn: () => api.get('/grading/slabs', { params: { search: debouncedSearch, limit: 8, status: 'graded' } }).then(r => r.data),
     enabled: debouncedSearch.length >= 2,
   });
 
@@ -92,11 +96,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       await api.post('/sales', {
         card_instance_id: selectedCard.card_instance_id,
         platform,
-        sale_price: parseFloat(salePrice),
-        platform_fees: platformFees ? parseFloat(platformFees) : undefined,
-        shipping_cost: shippingCost ? parseFloat(shippingCost) : undefined,
+        sale_price: salePrice,
+        platform_fees: platformFees || undefined,
+        shipping_cost: shippingCost || undefined,
         currency,
         sold_at: soldAt || undefined,
+        unique_id: orderNumber || undefined,
       });
       toast.success('Sale recorded!');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -115,7 +120,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         <Input
           label="Card"
           placeholder="Search by name…"
-          value={selectedCard ? `${selectedCard.card_name ?? ''}${selectedCard.grade_label ? ` · ${selectedCard.company} ${selectedCard.grade_label}` : ''}` : cardSearch}
+          value={selectedCard ? `${selectedCard.card_name ?? ''}${selectedCard.grade_label ? ` · ${selectedCard.company} ${selectedCard.grade_label}` : ''}${selectedCard.cert_number ? ` #${selectedCard.cert_number}` : ''}` : cardSearch}
           onChange={(e) => { setCardSearch(e.target.value); setSelectedCard(null); setShowDropdown(true); }}
           onFocus={() => setShowDropdown(true)}
           autoComplete="off"
@@ -133,7 +138,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 className="w-full text-left px-3 py-2 text-sm text-zinc-200 hover:bg-zinc-700 border-b border-zinc-700/50 last:border-0"
                 onMouseDown={() => { setSelectedCard(card); setShowDropdown(false); }}>
                 <div className="font-medium">{card.card_name ?? 'Unknown'}</div>
-                <div className="text-xs text-zinc-500">{card.set_name}{card.grade_label ? ` · ${card.company} ${card.grade_label}` : ''}</div>
+                <div className="text-xs text-zinc-500">
+                  {card.set_name}{card.grade_label ? ` · ${card.company} ${card.grade_label}` : ''}
+                  {card.cert_number ? <span className="ml-1 font-mono">#{card.cert_number}</span> : ''}
+                </div>
               </button>
             ))}
           </div>
@@ -160,7 +168,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           value={shippingCost} onChange={(e) => setShippingCost(e.target.value)} />
       </div>
 
-      <Input label="Sold Date" type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)} />
+      <div className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
+          <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
+            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
+        </div>
+        <Input label="Order #" placeholder="e.g. eBay order number" value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
+      </div>
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
@@ -278,10 +293,11 @@ export function Sales() {
                     <p className="font-medium text-zinc-200 truncate" title={sale.card_name ?? ''}>{sale.card_name ?? 'Unknown'}</p>
                     <p className="text-[10px] text-zinc-500">
                       {sale.set_name}{sale.grade ? ` · ${sale.grading_company} ${sale.grade_label ?? sale.grade}` : ''}
+                      {sale.cert_number ? <span className="ml-1 font-mono">#{String(sale.cert_number).padStart(8, '0')}</span> : ''}
                     </p>
                   </td>
                   <td className="px-3 py-2">
-                    <Badge className="bg-zinc-700/50 text-zinc-300">{sale.platform}</Badge>
+                    <Badge className="bg-zinc-700/50 text-zinc-300">{sale.platform.replace('_', ' ')}</Badge>
                   </td>
                   <td className="px-3 py-2 text-right text-zinc-300">{formatCurrency(sale.sale_price, sale.currency)}</td>
                   <td className="px-3 py-2 text-right text-zinc-300">{formatCurrency(sale.net_proceeds, sale.currency)}</td>
