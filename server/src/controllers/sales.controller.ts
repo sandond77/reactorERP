@@ -68,3 +68,20 @@ export async function recordSale(req: Request, res: Response, next: NextFunction
     res.status(201).json({ data: sale });
   } catch (err) { next(err); }
 }
+
+const updateSaleSchema = recordSaleSchema.omit({ card_instance_id: true }).partial();
+
+export async function updateSale(req: Request, res: Response, next: NextFunction) {
+  try {
+    const data = updateSaleSchema.parse(req.body);
+    const sale = await salesService.updateSale(req.user!.id, req.params['id'] as string, data as any);
+    res.json({ data: sale });
+  } catch (err) { next(err); }
+}
+
+export async function deleteSale(req: Request, res: Response, next: NextFunction) {
+  try {
+    await salesService.deleteSale(req.user!.id, req.params['id'] as string);
+    res.status(204).send();
+  } catch (err) { next(err); }
+}

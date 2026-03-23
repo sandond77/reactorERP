@@ -121,6 +121,7 @@ export async function listSales(
     .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .leftJoin('listings as l', 'l.id', 's.listing_id')
     .select([
       's.id',
       's.platform',
@@ -136,6 +137,7 @@ export async function listSales(
       's.sold_at',
       's.created_at',
       'ci.id as card_instance_id',
+      'ci.purchase_cost as raw_cost',
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       'ci.card_game',
@@ -143,6 +145,8 @@ export async function listSales(
       'sd.grade_label',
       'sd.company as grading_company',
       'sd.cert_number',
+      'sd.grading_cost',
+      'l.list_price as listed_price',
       sql<number>`(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`.as('profit'),
     ])
     .where('s.user_id', '=', userId)
@@ -162,6 +166,38 @@ export async function listSales(
     .execute();
 
   return buildPaginatedResult(data, total, pagination.page, pagination.limit);
+}
+
+export async function updateSale(userId: string, saleId: string, input: Partial<RecordSaleInput>) {
+  const existing = await db.selectFrom('sales').select(['id']).where('id', '=', saleId).where('user_id', '=', userId).executeTakeFirst();
+  if (!existing) throw new AppError(404, 'Sale not found');
+
+  await db.updateTable('sales').set({
+    ...(input.platform !== undefined && { platform: input.platform }),
+    ...(input.sale_price !== undefined && { sale_price: input.sale_price }),
+    ...(input.platform_fees !== undefined && { platform_fees: input.platform_fees }),
+    ...(input.shipping_cost !== undefined && { shipping_cost: input.shipping_cost }),
+    ...(input.currency !== undefined && { currency: input.currency }),
+    ...(input.sold_at !== undefined && { sold_at: input.sold_at }),
+    ...(input.unique_id !== undefined && { unique_id: input.unique_id }),
+  }).where('id', '=', saleId).where('user_id', '=', userId).execute();
+
+  return getSaleById(userId, saleId);
+}
+
+export async function deleteSale(userId: string, saleId: string) {
+  const sale = await db.selectFrom('sales').select(['id', 'card_instance_id', 'listing_id']).where('id', '=', saleId).where('user_id', '=', userId).executeTakeFirst();
+  if (!sale) throw new AppError(404, 'Sale not found');
+
+  await db.deleteFrom('sales').where('id', '=', saleId).where('user_id', '=', userId).execute();
+
+  // Revert card status back to graded
+  await db.updateTable('card_instances').set({ status: 'graded' }).where('id', '=', sale.card_instance_id).execute();
+
+  // Revert listing status if linked
+  if (sale.listing_id) {
+    await db.updateTable('listings').set({ listing_status: 'active', sold_at: null }).where('id', '=', sale.listing_id).execute();
+  }
 }
 
 export async function getSaleById(userId: string, saleId: string) {
