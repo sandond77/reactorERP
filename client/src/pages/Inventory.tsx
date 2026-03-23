@@ -4,7 +4,7 @@ import { Plus, ExternalLink, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { AddCardForm } from '../components/inventory/AddCardForm';
+import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { ColHeader, useColWidths } from '../components/ui/TableHeader';
@@ -174,7 +174,7 @@ export function Inventory() {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h1 className="text-xl font-bold text-zinc-100">Inventory</h1>
+        <h1 className="text-xl font-bold text-zinc-100">Graded/Slabs</h1>
         <div className="flex items-center gap-3">
           {hasActiveFilters && (
             <button onClick={clearAllFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
@@ -197,7 +197,7 @@ export function Inventory() {
             className="w-64 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           />
           <Button size="sm" onClick={() => setAddOpen(true)}>
-            <Plus size={14} /> Add Card
+            <Plus size={14} /> Add Slab
           </Button>
         </div>
       </div>
@@ -249,9 +249,10 @@ export function Inventory() {
                   <td className="px-3 py-1.5 font-mono text-[11px]">
                     {(() => {
                       const link = row.cert_number ? certLink(row.company, row.cert_number) : null;
+                      const display = row.cert_number ? row.cert_number.padStart(8, '0') : '';
                       return link
-                        ? <a href={link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-400 hover:underline">{row.cert_number}</a>
-                        : <span className="text-zinc-400">{row.cert_number ?? ''}</span>;
+                        ? <a href={link} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="text-blue-400 hover:underline">{display}</a>
+                        : <span className="text-zinc-400">{display}</span>;
                     })()}
                   </td>
                   <td className="px-3 py-1.5 text-zinc-200 truncate" title={row.card_name ?? ''}>
@@ -328,8 +329,8 @@ export function Inventory() {
       )}
 
       {/* Modals */}
-      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Card">
-        <AddCardForm onSuccess={() => { setAddOpen(false); qc.invalidateQueries({ queryKey: ['inventory-slabs'] }); }} />
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Slab">
+        <AddSlabForm onSuccess={() => { setAddOpen(false); qc.invalidateQueries({ queryKey: ['inventory-slabs'] }); }} />
       </Modal>
 
       {selectedId && (

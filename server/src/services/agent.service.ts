@@ -3,6 +3,8 @@ import axios from 'axios';
 import { sql } from 'kysely';
 import { env } from '../config/env';
 import { db } from '../config/database';
+import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
+import { normalizeGradeLabel } from '../utils/grade-labels';
 
 const THINKING: Anthropic.ThinkingConfigParam = { type: 'adaptive' };
 
@@ -10,28 +12,6 @@ const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
 // ── TCGdex API ───────────────────────────────────────────────
 
-interface TCGdexCard {
-  id: string;
-  localId: string;
-  name: string;
-  image?: string;
-  rarity?: string;
-  category?: string;
-  set: { id: string; name: string };
-}
-
-async function searchTCGdexCards(query: string, lang: string = 'en'): Promise<TCGdexCard[]> {
-  try {
-    const response = await axios.get(`https://api.tcgdex.net/v2/${lang}/cards`, {
-      params: { name: query },
-      timeout: 5000,
-    });
-    const data = response.data;
-    return Array.isArray(data) ? data.slice(0, 10) : [];
-  } catch {
-    return [];
-  }
-}
 
 // ── Receipt parsing ──────────────────────────────────────────
 
@@ -145,6 +125,11 @@ export interface CardInfoResult {
   game: string;
   variants?: string[];
   source: 'database' | 'tcgdex' | 'ai_generated';
+  sku?: string;
+  catalog_id?: string;
+  catalog_exists?: boolean;
+  catalog_card_name?: string;
+  normalized_label?: string;
 }
 
 export async function lookupCardInfo(
@@ -182,83 +167,45 @@ export async function lookupCardInfo(
     }));
   }
 
-  // 2. For Pokemon, hit TCGdex
-  if (game === 'pokemon') {
-    const apiResults = await searchTCGdexCards(query);
-    if (apiResults.length > 0) {
-      // Cache results in our catalog
-      for (const card of apiResults.slice(0, 5)) {
-        await db
-          .insertInto('card_catalog')
-          .values({
-            game: 'pokemon',
-            set_name: card.set.name,
-            set_code: card.set.id,
-            card_name: card.name,
-            card_number: card.localId,
-            variant: null,
-            rarity: card.rarity ?? null,
-            language: 'EN',
-            image_url: card.image ? `${card.image}/low.png` : null,
-            image_url_hi: card.image ? `${card.image}/high.png` : null,
-            external_id: card.id,
-          })
-          .onConflict((oc) => oc.doNothing())
-          .execute()
-          .catch(() => {}); // silently fail — catalog is optional
-      }
-
-      return apiResults.map((card: TCGdexCard) => ({
-        card_name: card.name,
-        set_name: card.set.name,
-        set_code: card.set.id,
-        card_number: card.localId,
-        rarity: card.rarity,
-        language: 'EN',
-        image_url: card.image ? `${card.image}/low.png` : undefined,
-        image_url_hi: card.image ? `${card.image}/high.png` : undefined,
-        external_id: card.id,
-        game: 'pokemon',
-        source: 'tcgdex' as const,
-      }));
-    }
-  }
-
-  // 3. Fall back to Claude for fuzzy lookup / other games
+  // 2. Fall back to Claude for fuzzy lookup
   return lookupCardInfoWithAI(query, game);
 }
 
 async function lookupCardInfoWithAI(query: string, game: string): Promise<CardInfoResult[]> {
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    thinking: THINKING,
+    max_tokens: 512,
     messages: [
       {
         role: 'user',
-        content: `You are a trading card expert. Look up card info for: "${query}" (game: ${game}).
+        content: `You are a trading card expert. The input may be a PSA/grading label, card name, or partial description. Parse it and return normalized card info.
 
-Return a JSON array of up to 5 matching cards:
+Input: "${query}"
+Game: ${game}
+
+Return ONLY a JSON array (no markdown):
 [{
-  "card_name": "exact official name",
-  "set_name": "set name",
-  "set_code": "set code or null",
-  "card_number": "card number in set or null",
-  "rarity": "rarity or null",
-  "language": "EN",
+  "card_name": "just the card name, e.g. 'Charizard'",
+  "set_name": "set name, e.g. 'Basic'",
+  "set_code": "internal set code or null, e.g. 'BS1', 'SV11W', 'XY-20TH'",
+  "card_number": "card number zero-padded to 3 digits, e.g. '006'",
+  "rarity": "rarity or null, e.g. 'Holo'",
+  "language": "EN or JP",
   "game": "${game}",
-  "variants": ["list of known variants or empty array"]
+  "normalized_label": "full normalized identifier in format: '{YEAR} POKEMON {LANGUAGE} {SET_CODE}-{SET_NAME} {NUMBER} {CARD NAME} {RARITY}' e.g. '2024 POKEMON JAPANESE SV11W-WHITE FLARE 136 SCRAGGY ART RARE'. Use POKEMON not P.M., zero-pad card numbers, exclude grade and cert."
 }]
 
-Only return the JSON array. If unknown, return [].`,
+If you cannot identify the card, return [].`,
       },
     ],
   });
 
   const text = response.content.find((b) => b.type === 'text')?.text ?? '[]';
   try {
-    const cleaned = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-    const results = JSON.parse(cleaned) as CardInfoResult[];
+    const start = text.indexOf('[');
+    const end = text.lastIndexOf(']');
+    const json = start !== -1 && end !== -1 ? text.slice(start, end + 1) : '[]';
+    const results = JSON.parse(json) as CardInfoResult[];
     return results.map((r) => ({ ...r, source: 'ai_generated' as const }));
   } catch {
     return [];
@@ -267,10 +214,26 @@ Only return the JSON array. If unknown, return [].`,
 
 // ── Automation: suggest card data from intake form partial input ──
 
+async function enrichWithSku(suggestions: CardInfoResult[]): Promise<CardInfoResult[]> {
+  return Promise.all(suggestions.map(async (s) => {
+    if (!s.card_number) return { ...s, catalog_exists: false };
+    const lang = (s.language === 'JP' ? 'JP' : 'EN') as 'EN' | 'JP';
+    // Try set_code first, then fall back to looking up set_name
+    const rawCode = s.set_code ?? s.set_name;
+    if (!rawCode) return { ...s, catalog_exists: false };
+    const setCode = lookupSetCode(lang, rawCode) ?? lookupSetCode(lang, s.set_name ?? '') ?? rawCode;
+    const sku = generatePartNumber(lang, setCode, s.card_number);
+    const row = await db.selectFrom('card_catalog').select(['id', 'card_name']).where('sku', '=', sku).executeTakeFirst();
+    return { ...s, sku, catalog_id: row?.id, catalog_exists: !!row, catalog_card_name: row?.card_name ?? undefined };
+  }));
+}
+
 export interface AutoFillResult {
   suggestions: CardInfoResult[];
-  parsed_grade?: { company: string; grade: number } | null;
+  parsed_grade?: { company: string; grade: number; grade_label?: string } | null;
   parsed_condition?: string | null;
+  parsed_cert?: string | null;
+  parsed_label?: string | null;
 }
 
 export async function autoFillCardData(input: {
@@ -285,23 +248,48 @@ export async function autoFillCardData(input: {
 
   // If we have a card image, use vision to extract card info
   if (input.image_base64 && input.image_media_type) {
-    const visionResult = await extractCardInfoFromImage(
-      input.image_base64,
-      input.image_media_type,
-      game
-    );
-    if (visionResult) {
-      const apiResults = await lookupCardInfo(visionResult.card_name, game);
-      results.suggestions = apiResults.length > 0
-        ? apiResults
-        : [{ ...visionResult, source: 'ai_generated' }];
+    const vision = await extractCardInfoFromImage(input.image_base64, input.image_media_type, game);
+    if (vision) {
+      const { grading_company, grade, grade_label, cert_number, psa_label, ...cardInfo } = vision;
+      const base = await lookupCardInfo(cardInfo.card_name, game);
+      const raw = base.length > 0 ? base : [{ ...cardInfo, source: 'ai_generated' as const }];
+      results.suggestions = await enrichWithSku(raw);
+      if (grading_company && grade != null) {
+        results.parsed_grade = { company: grading_company, grade, grade_label: normalizeGradeLabel(grading_company, grade, grade_label) };
+      }
+      if (cert_number) results.parsed_cert = cert_number;
+      if (psa_label) results.parsed_label = stripGradeFromLabel(psa_label, grade_label, grade, cert_number);
       return results;
     }
   }
 
-  // Text-based lookup
+  // Text-based lookup (or image URL → vision)
   if (input.partial_name) {
-    results.suggestions = await lookupCardInfo(input.partial_name, game);
+    const isUrl = /^https?:\/\//i.test(input.partial_name.trim());
+    if (isUrl) {
+      try {
+        const resp = await axios.get(input.partial_name.trim(), { responseType: 'arraybuffer', timeout: 10000 });
+        const contentType = (resp.headers['content-type'] as string) ?? 'image/jpeg';
+        const mimeType = contentType.split(';')[0].trim() as 'image/jpeg' | 'image/png' | 'image/webp';
+        const buffer = Buffer.from(resp.data);
+        const vision = await extractCardInfoFromImage(buffer.toString('base64'), mimeType, game);
+        if (vision) {
+          const { grading_company, grade, grade_label, cert_number, psa_label, ...cardInfo } = vision;
+          const base = await lookupCardInfo(cardInfo.card_name, game);
+          const raw = base.length > 0 ? base : [{ ...cardInfo, source: 'ai_generated' as const }];
+          results.suggestions = await enrichWithSku(raw);
+          if (grading_company && grade != null) {
+            results.parsed_grade = { company: grading_company, grade, grade_label: normalizeGradeLabel(grading_company, grade, grade_label) };
+          }
+          if (cert_number) results.parsed_cert = cert_number;
+          if (psa_label) results.parsed_label = stripGradeFromLabel(psa_label, grade_label, grade, cert_number);
+          return results;
+        }
+      } catch { /* fall through to text lookup */ }
+    }
+    const suggestions = await lookupCardInfo(input.partial_name, game);
+    results.suggestions = await enrichWithSku(suggestions);
+    results.parsed_grade = parseLabelGrade(input.partial_name);
   }
 
   // Parse cert number for grade info (PSA certs are numeric)
@@ -312,14 +300,22 @@ export async function autoFillCardData(input: {
   return results;
 }
 
+interface ImageExtractionResult extends Omit<CardInfoResult, 'source'> {
+  grading_company?: string;
+  grade?: number;
+  grade_label?: string;
+  cert_number?: string;
+  psa_label?: string;
+}
+
 async function extractCardInfoFromImage(
   imageBase64: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
   game: string
-): Promise<Omit<CardInfoResult, 'source'> | null> {
+): Promise<ImageExtractionResult | null> {
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 512,
+    max_tokens: 768,
     messages: [
       {
         role: 'user',
@@ -330,19 +326,25 @@ async function extractCardInfoFromImage(
           },
           {
             type: 'text',
-            text: `This is a ${game} trading card image. Extract the card information.
+            text: `This image may be a graded trading card slab (PSA, BGS, CGC, etc.) or a raw card.
 
-Return JSON:
+Extract all visible information. Return ONLY this JSON (no markdown):
 {
-  "card_name": "exact name on card",
-  "set_name": "set name if visible",
-  "card_number": "card number if visible (e.g. 025/165)",
-  "rarity": "rarity if visible",
-  "language": "EN | JP | KR | etc",
-  "game": "${game}"
+  "psa_label": "normalized card identifier in format: '{YEAR} POKEMON {LANGUAGE} {SET_CODE}-{SET_NAME} {NUMBER} {CARD NAME} {RARITY}' — e.g. '2024 POKEMON JAPANESE SV8a-TERASTAL FEST ex 093 UMBREON EX' or '1996 POKEMON JAPANESE BS1-BASIC 006 CHARIZARD HOLO'. Use POKEMON (not P.M.), spell out JAPANESE/ENGLISH, zero-pad card numbers to 3 digits. Exclude grade and cert.",
+  "card_name": "card name only, e.g. 'Charizard'",
+  "set_name": "set name, e.g. 'Basic'",
+  "set_code": "internal set code if known, e.g. 'BS1' or 'XY-20TH' or null",
+  "card_number": "card number only, e.g. '006' or '034/087'",
+  "rarity": "rarity if visible, e.g. 'Holo' or '1st Edition'",
+  "language": "EN | JP | KR",
+  "game": "${game}",
+  "grading_company": "PSA | BGS | CGC | SGC | HGA | ACE | ARS | null",
+  "grade": 10,
+  "grade_label": "grade label text, e.g. 'GEM MT' or 'EXCELLENT-MINT'",
+  "cert_number": "cert number if visible, e.g. '26354848'"
 }
 
-Only return JSON, no other text. If not a card image, return null.`,
+If not a card image, return null.`,
           },
         ],
       },
@@ -351,12 +353,36 @@ Only return JSON, no other text. If not a card image, return null.`,
 
   const text = response.content.find((b) => b.type === 'text')?.text ?? 'null';
   try {
-    const cleaned = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-    if (cleaned === 'null') return null;
-    return JSON.parse(cleaned);
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    const json = start !== -1 && end !== -1 ? text.slice(start, end + 1) : text.trim();
+    if (json === 'null') return null;
+    return JSON.parse(json);
   } catch {
     return null;
   }
+}
+
+function stripGradeFromLabel(label: string, gradeLabel?: string, grade?: number, cert?: string): string {
+  let s = label.trim();
+  if (cert) s = s.replace(new RegExp(`\\s*${cert}\\s*$`), '').trim();
+  if (grade != null) s = s.replace(new RegExp(`\\s+${grade}\\s*$`), '').trim();
+  if (gradeLabel) s = s.replace(new RegExp(`\\s+${gradeLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'i'), '').trim();
+  return s;
+}
+
+
+function parseLabelGrade(label: string): { company: string; grade: number; grade_label?: string } | null {
+  const COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS'];
+  const upper = label.toUpperCase();
+  for (const co of COMPANIES) {
+    const match = new RegExp(`${co}\\s*(\\d+(?:\\.\\d+)?)`).exec(upper);
+    if (match) {
+      const grade = Number(match[1]);
+      return { company: co, grade, grade_label: normalizeGradeLabel(co, grade, label) };
+    }
+  }
+  return null;
 }
 
 function parseCertNumber(cert: string): { company: string; grade: number } | null {

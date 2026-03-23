@@ -48,12 +48,22 @@ const createCardSchema = z.object({
   order_number: z.string().optional(),
   notes: z.string().optional(),
   purchased_at: z.string().optional().transform((v) => v ? new Date(v) : null),
+  // Optional slab fields — when provided, a slab_details record is created and status set to 'graded'
+  slab_company: z.enum(['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER']).optional(),
+  slab_grade: z.coerce.number().min(1).max(10).optional(),
+  slab_grade_label: z.string().optional(),
+  slab_cert_number: z.string().optional(),
+  slab_additional_cost: z.union([z.string(), z.number()]).transform((v) => toCents(v)).optional(),
 });
 
 export async function createCard(req: Request, res: Response, next: NextFunction) {
   try {
     const data = createCardSchema.parse(req.body);
-    const card = await cardsService.createCard(req.user!.id, data as any);
+    const { slab_company, slab_grade, slab_grade_label, slab_cert_number, slab_additional_cost, ...cardData } = data;
+    const slabInfo = slab_company && slab_grade != null
+      ? { company: slab_company, grade: slab_grade, grade_label: slab_grade_label, cert_number: slab_cert_number, additional_cost: slab_additional_cost ?? 0 }
+      : undefined;
+    const card = await cardsService.createCard(req.user!.id, cardData as any, slabInfo);
     res.status(201).json({ data: card });
   } catch (err) { next(err); }
 }

@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import * as agentService from '../services/agent.service';
 import { z } from 'zod';
 import { AppError } from '../middleware/errorHandler';
+import sharp from 'sharp';
 
 // Receipt image parsing
 export async function parseReceipt(req: Request, res: Response, next: NextFunction) {
@@ -34,8 +35,15 @@ export async function lookupCard(req: Request, res: Response, next: NextFunction
 // Auto-fill from partial input or card image
 export async function autoFill(req: Request, res: Response, next: NextFunction) {
   try {
-    const imageBase64 = req.file?.buffer.toString('base64');
-    const mediaType = req.file?.mimetype as 'image/jpeg' | 'image/png' | 'image/webp' | undefined;
+    let imageBuffer = req.file?.buffer;
+    if (imageBuffer && imageBuffer.byteLength > 4 * 1024 * 1024) {
+      imageBuffer = await sharp(imageBuffer)
+        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+    }
+    const imageBase64 = imageBuffer?.toString('base64');
+    const mediaType = imageBuffer ? 'image/jpeg' as const : undefined;
 
     const result = await agentService.autoFillCardData({
       partial_name: req.body.partial_name,

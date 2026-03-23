@@ -135,12 +135,33 @@ export async function getCardById(userId: string, cardId: string) {
   return card;
 }
 
-export async function createCard(userId: string, data: Omit<NewCardInstance, 'user_id'>) {
+export async function createCard(
+  userId: string,
+  data: Omit<NewCardInstance, 'user_id'>,
+  slab?: { company: string; grade: number; grade_label?: string; cert_number?: string; additional_cost?: number }
+) {
+  const status = slab ? 'graded' : data.status ?? 'purchased_raw';
   const card = await db
     .insertInto('card_instances')
-    .values({ ...data, user_id: userId })
+    .values({ ...data, user_id: userId, status, purchase_type: slab ? 'pre_graded' : (data.purchase_type ?? 'raw') })
     .returningAll()
     .executeTakeFirstOrThrow();
+
+  if (slab) {
+    await db.insertInto('slab_details').values({
+      card_instance_id: card.id,
+      user_id: userId,
+      company: slab.company as any,
+      grade: slab.grade,
+      grade_label: slab.grade_label ?? null,
+      cert_number: slab.cert_number ? Number(slab.cert_number) : null,
+      source_raw_instance_id: null,
+      grading_submission_id: null,
+      additional_cost: slab.additional_cost ?? 0,
+      grading_cost: slab.additional_cost ?? 0,
+      currency: data.currency ?? 'USD',
+    }).execute();
+  }
 
   await logAudit(userId, 'card_instances', card.id, 'created', null, card);
   return card;

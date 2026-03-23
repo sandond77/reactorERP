@@ -6,7 +6,7 @@ import { useAuth } from '../../contexts/AuthContext';
 const NAV = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/overall', icon: LayoutGrid, label: 'Overall' },
-  { to: '/inventory', icon: Package, label: 'Inventory' },
+  { to: '/inventory', icon: Package, label: 'Graded/Slabs' },
   { to: '/raw-inventory', icon: PackageOpen, label: 'Raw Cards' },
   { to: '/parts', icon: Layers, label: 'Parts' },
   { to: '/grading', icon: Star, label: 'Grading' },
