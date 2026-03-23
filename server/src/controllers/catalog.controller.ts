@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard } from '../services/catalog.service';
+import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries } from '../services/catalog.service';
 
 export async function inventorySummary(req: Request, res: Response, next: NextFunction) {
   try {
@@ -29,6 +29,44 @@ export async function syncSet(req: Request, res: Response, next: NextFunction) {
       count++;
     }
     res.json({ synced: count });
+  } catch (err) { next(err); }
+}
+
+export async function createCard(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { game, sku, card_name, set_name, set_code, card_number, language, rarity, variant } = req.body;
+    if (!card_name || !set_name || !language) {
+      return res.status(400).json({ error: 'card_name, set_name, and language are required' });
+    }
+    const id = await createCatalogCard({ game: game ?? 'pokemon', sku, card_name, set_name, set_code, card_number, language, rarity, variant });
+    res.status(201).json({ id });
+  } catch (err: any) {
+    if (err?.code === '23505') return res.status(409).json({ error: 'A catalog entry with this SKU already exists.' });
+    next(err);
+  }
+}
+
+export async function emptyCatalog(req: Request, res: Response, next: NextFunction) {
+  try {
+    const rows = await getEmptyCatalogEntries(req.user!.id);
+    res.json({ data: rows });
+  } catch (err) { next(err); }
+}
+
+export async function updateCard(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    const { sku, card_name, set_name, set_code, card_number, rarity, variant, language } = req.body;
+    await updateCatalogCard(id, { sku, card_name, set_name, set_code, card_number, rarity, variant, language });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+export async function deleteCard(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { id } = req.params;
+    await deleteCatalogCard(id);
+    res.json({ ok: true });
   } catch (err) { next(err); }
 }
 

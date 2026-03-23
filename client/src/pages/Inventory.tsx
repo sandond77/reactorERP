@@ -164,39 +164,30 @@ export function Inventory() {
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Inventory</h1>
-        <Button onClick={() => setAddOpen(true)}>
-          <Plus size={16} /> Add Card
-        </Button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-800 bg-zinc-950/50">
-        <input
-          type="text"
-          placeholder="Search card or cert…"
-          value={search}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          className="flex-1 max-w-72 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
-        />
-        {hasActiveFilters && (
-          <button onClick={clearAllFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
-            <X size={12} /> Clear all filters
-          </button>
-        )}
-        <div className="flex gap-1 ml-auto">
-          {(['all', 'graded'] as StatusFilter[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => { setStatusFilter(s); setPage(1); }}
-              className={`px-3 py-1 text-xs rounded font-medium capitalize transition-colors ${
-                statusFilter === s
-                  ? 'bg-zinc-600 text-zinc-100'
-                  : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              {s}
+        <div className="flex items-center gap-3">
+          {hasActiveFilters && (
+            <button onClick={clearAllFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+              <X size={12} /> Clear filters
             </button>
-          ))}
+          )}
+          <div className="flex gap-1">
+            {(['all', 'graded'] as StatusFilter[]).map((s) => (
+              <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
+                className={`px-3 py-1 text-xs rounded font-medium capitalize transition-colors ${statusFilter === s ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                {s}
+              </button>
+            ))}
+          </div>
+          <input
+            type="text"
+            placeholder="Search card or cert…"
+            value={search}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            className="w-64 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+          />
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <Plus size={14} /> Add Card
+          </Button>
         </div>
       </div>
 

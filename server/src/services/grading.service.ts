@@ -8,7 +8,7 @@ import type { PaginationParams } from '../utils/pagination';
 // Whitelist of sortable columns → SQL expression
 const SLAB_SORT_COLS: Record<string, string> = {
   cert_number:       'sd.cert_number',
-  card_name:         'COALESCE(cc.card_name, ci.card_name_override)',
+  card_name:         'COALESCE(ci.card_name_override, cc.card_name)',
   grade:             'sd.grade',
   is_listed:         '(l.id IS NOT NULL)',
   listed_price:      'l.list_price',
@@ -149,7 +149,7 @@ export async function listSlabs(
   }>`
     SELECT
       ci.id,
-      COALESCE(cc.card_name, ci.card_name_override)  AS card_name,
+      COALESCE(ci.card_name_override, cc.card_name)  AS card_name,
       COALESCE(cc.set_name,  ci.set_name_override)   AS set_name,
       sd.cert_number,
       sd.grade_label,
@@ -206,7 +206,7 @@ export async function listSlabs(
 }
 
 const SUBMISSION_SORT_COLS: Record<string, string> = {
-  card_name: `COALESCE(cc.card_name, ci.card_name_override)`,
+  card_name: `COALESCE(ci.card_name_override, cc.card_name)`,
   company: 'gs.company',
   status: 'gs.status',
   grading_fee: 'gs.grading_fee',
@@ -291,7 +291,7 @@ export async function listSubmissions(
       gs.returned_at,
       gs.created_at,
       ci.id AS card_instance_id,
-      COALESCE(cc.card_name, ci.card_name_override) AS card_name,
+      COALESCE(ci.card_name_override, cc.card_name) AS card_name,
       COALESCE(cc.set_name, ci.set_name_override) AS set_name,
       ci.image_front_url,
       cc.image_url AS catalog_image_url

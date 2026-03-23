@@ -72,7 +72,7 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
 }
 
 const SALES_SORT_COLS: Record<string, string> = {
-  card_name: `COALESCE(cc.card_name, ci.card_name_override)`,
+  card_name: `COALESCE(ci.card_name_override, cc.card_name)`,
   platform: 's.platform',
   sale_price: 's.sale_price',
   net_proceeds: 's.net_proceeds',
@@ -127,7 +127,7 @@ export async function listSales(
       's.sold_at',
       's.created_at',
       'ci.id as card_instance_id',
-      sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       'ci.card_game',
       'sd.grade',
@@ -156,7 +156,7 @@ export async function getSaleById(userId: string, saleId: string) {
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .selectAll('s')
     .select([
-      sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       'ci.card_game',
       'ci.purchase_cost',

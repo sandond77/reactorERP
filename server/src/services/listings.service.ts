@@ -6,7 +6,7 @@ import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 
 const LISTINGS_SORT_COLS: Record<string, string> = {
-  card_name: `COALESCE(cc.card_name, ci.card_name_override)`,
+  card_name: `COALESCE(ci.card_name_override, cc.card_name)`,
   platform: 'l.platform',
   listing_status: 'l.listing_status',
   list_price: 'l.list_price',
@@ -72,7 +72,7 @@ export async function listListings(
       'l.created_at',
       'ci.id as card_instance_id',
       'ci.status as card_status',
-      sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       'sd.grade',
       'sd.grade_label',

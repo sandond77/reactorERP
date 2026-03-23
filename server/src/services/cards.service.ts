@@ -46,7 +46,7 @@ export async function listCards(
       'ci.created_at',
       'ci.image_front_url',
       'ci.image_back_url',
-      sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
       'cc.image_url as catalog_image_url',
@@ -103,7 +103,7 @@ export async function getCardById(userId: string, cardId: string) {
     .leftJoin('grading_submissions as gs', 'gs.id', 'sd.grading_submission_id')
     .selectAll('ci')
     .select([
-      sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
       'cc.image_url as catalog_image_url',

@@ -65,6 +65,7 @@ export interface CardCatalogTable {
   image_url_back: string | null;
   tcgplayer_id: string | null;
   external_id: string | null;
+  sku: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

@@ -396,33 +396,37 @@ export async function getInventorySummary(userId: string) {
     set_code: string | null;
     card_number: string | null;
     rarity: string | null;
+    variant: string | null;
     language: string;
     company: string;
     grade: number | null;
     grade_label: string | null;
-    qty: number;
+    qty_total: number;
+    qty_unsold: number;
+    qty_sold: number;
     total_cost: number;
     avg_cost: number;
     qty_listed: number;
-    qty_sold: number;
     catalog_id: string | null;
   }>`
     SELECT
       cc.sku,
-      COALESCE(cc.card_name, ci.card_name_override)   AS card_name,
+      COALESCE(ci.card_name_override, cc.card_name)   AS card_name,
       COALESCE(cc.set_name,  ci.set_name_override)    AS set_name,
       cc.set_code,
       COALESCE(cc.card_number, ci.card_number_override) AS card_number,
       cc.rarity,
+      cc.variant,
       COALESCE(cc.language, ci.language)              AS language,
       sd.company,
       sd.grade,
       sd.grade_label,
-      COUNT(*)::int                                   AS qty,
+      COUNT(*)::int                                                  AS qty_total,
+      COUNT(*) FILTER (WHERE ci.status != 'sold')::int               AS qty_unsold,
+      COUNT(*) FILTER (WHERE ci.status = 'sold')::int                AS qty_sold,
       SUM(ci.purchase_cost + sd.grading_cost)::int AS total_cost,
       AVG(ci.purchase_cost + sd.grading_cost)::int AS avg_cost,
       COUNT(*) FILTER (WHERE l.id IS NOT NULL)::int   AS qty_listed,
-      COUNT(*) FILTER (WHERE ci.status = 'sold')::int AS qty_sold,
       ci.catalog_id
     FROM card_instances ci
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
@@ -435,12 +439,11 @@ export async function getInventorySummary(userId: string) {
     ) l ON true
     WHERE ci.user_id = ${userId}
       AND ci.deleted_at IS NULL
-      AND ci.status != 'sold'
     GROUP BY
       cc.sku, cc.card_name, ci.card_name_override,
       cc.set_name, ci.set_name_override,
       cc.set_code, cc.card_number, ci.card_number_override,
-      cc.rarity, cc.language, ci.language,
+      cc.rarity, cc.variant, cc.language, ci.language,
       sd.company, sd.grade, sd.grade_label,
       ci.catalog_id
     ORDER BY
@@ -451,4 +454,96 @@ export async function getInventorySummary(userId: string) {
   `.execute(db);
 
   return rows.rows;
+}
+
+export async function createCatalogCard(params: {
+  game: string;
+  sku?: string | null;
+  card_name: string;
+  set_name: string;
+  set_code?: string | null;
+  card_number?: string | null;
+  language: string;
+  rarity?: string | null;
+  variant?: string | null;
+}): Promise<string> {
+  const result = await db
+    .insertInto('card_catalog')
+    .values({
+      game: params.game,
+      sku: params.sku ?? null,
+      card_name: params.card_name,
+      set_name: params.set_name,
+      set_code: params.set_code ?? null,
+      card_number: params.card_number ?? null,
+      language: params.language,
+      rarity: params.rarity ?? null,
+      variant: params.variant ?? null,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  return result.id;
+}
+
+export async function getEmptyCatalogEntries(userId: string) {
+  const result = await sql<{
+    id: string;
+    game: string;
+    sku: string | null;
+    card_name: string;
+    set_name: string;
+    set_code: string | null;
+    card_number: string | null;
+    language: string;
+    rarity: string | null;
+    variant: string | null;
+    created_at: string;
+  }>`
+    SELECT
+      cc.id,
+      cc.game,
+      cc.sku,
+      cc.card_name,
+      cc.set_name,
+      cc.set_code,
+      cc.card_number,
+      cc.language,
+      cc.rarity,
+      cc.variant,
+      cc.created_at
+    FROM card_catalog cc
+    WHERE NOT EXISTS (
+      SELECT 1 FROM card_instances ci
+      WHERE ci.catalog_id = cc.id
+        AND ci.user_id = ${userId}
+        AND ci.deleted_at IS NULL
+    )
+    ORDER BY cc.sku NULLS LAST, cc.card_name
+  `.execute(db);
+  return result.rows;
+}
+
+export async function deleteCatalogCard(id: string) {
+  // Unlink any card instances pointing to this catalog entry
+  await sql`
+    UPDATE card_instances SET catalog_id = NULL WHERE catalog_id = ${id}
+  `.execute(db);
+  await db.deleteFrom('card_catalog').where('id', '=', id).execute();
+}
+
+export async function updateCatalogCard(id: string, fields: {
+  sku?: string;
+  card_name?: string;
+  set_name?: string;
+  set_code?: string;
+  card_number?: string;
+  rarity?: string | null;
+  variant?: string | null;
+  language?: string;
+}) {
+  await db
+    .updateTable('card_catalog')
+    .set({ ...fields, updated_at: new Date() })
+    .where('id', '=', id)
+    .execute();
 }

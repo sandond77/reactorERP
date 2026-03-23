@@ -155,7 +155,7 @@ export async function getGradingRoi(userId: string) {
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .select([
       's.id as sale_id',
-      sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       'sd.grade',
       'sd.company as grading_company',
       'ci.purchase_cost as raw_cost',
