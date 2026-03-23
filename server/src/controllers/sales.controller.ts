@@ -9,17 +9,28 @@ const paginationSchema = z.object({
   platform: z.string().optional(),
   from: z.string().optional().transform((v) => v ? new Date(v) : undefined),
   to: z.string().optional().transform((v) => v ? new Date(v) : undefined),
+  sort_by: z.string().optional(),
+  sort_dir: z.enum(['asc', 'desc']).default('desc'),
 });
 
 export async function listSales(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit, platform, from, to } = paginationSchema.parse(req.query);
+    const { page, limit, platform, from, to, sort_by, sort_dir } = paginationSchema.parse(req.query);
     const result = await salesService.listSales(
       req.user!.id,
       { platform: platform as any, from, to },
-      { page, limit }
+      { page, limit },
+      sort_by,
+      sort_dir
     );
     res.json(result);
+  } catch (err) { next(err); }
+}
+
+export async function getSaleFilters(req: Request, res: Response, next: NextFunction) {
+  try {
+    const options = await salesService.getSaleFilterOptions(req.user!.id);
+    res.json(options);
   } catch (err) { next(err); }
 }
 

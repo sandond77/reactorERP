@@ -19,8 +19,9 @@ dotenv.config({ path: path.join(__dirname, '../../../.env') });
 
 import Anthropic from '@anthropic-ai/sdk';
 import pg from 'pg';
+import { buildLookupWithDbAliases } from '../../utils/set-codes';
 // Dynamic import after dotenv — catalog.service triggers Kysely env validation at load time
-let findOrFetchCard: (typeof import('../../services/catalog.service'))['findOrFetchCard'];
+let findOrCreateCatalogCard: (typeof import('../../services/catalog.service'))['findOrCreateCatalogCard'];
 
 const args = process.argv.slice(2);
 const limitArg = args[args.indexOf('--limit') + 1];
@@ -36,12 +37,12 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
 interface ParsedCard {
   original: string;
   language: 'EN' | 'JP' | null;
-  setCode: string | null;       // TCGdex set ID (e.g. 'base1', 'SV1a')
-  setName: string | null;       // human-readable set name
-  cardNumber: string | null;    // e.g. '4', '080', '025'
+  setName: string | null;       // human-readable set name (e.g. 'Brilliant Stars', 'VMAX Climax')
+  cardNumber: string | null;
   cardName: string | null;
-  rarity: string | null;        // as stated in label (e.g. 'Art Rare', 'Common')
-  variant: string | null;       // e.g. 'First Edition', 'Shadowless'
+  rarity: string | null;
+  variant: string | null;
+  isPromo: boolean;
   confidence: 'high' | 'medium' | 'low';
 }
 
@@ -51,27 +52,29 @@ const SYSTEM_PROMPT = `You are a Pokemon TCG card expert specializing in PSA/CGC
 
 You will receive a list of grading-company label strings (card names as they appear on slabs).
 For each label, extract:
-- language: "EN" (English) or "JP" (Japanese)
-- setCode: the TCGdex API set ID (e.g. "base1", "sv1a", "SV1a", "swsh1", "xy1", "dp1")
-  IMPORTANT: TCGdex uses lowercase for EN sets (e.g. "sv01", "swsh1", "base1") and preserves case for JP sets (e.g. "SV1a", "S8a")
-- setName: human-readable set name (e.g. "Base Set", "Scarlet & Violet", "Triplet Beat")
+- language: "EN" (English) or "JP" (Japanese) — always use exactly "JP" or "EN", never "JPN"
+- If the card is not a Pokemon TCG card (e.g. One Piece, Old Maid, non-TCG products), set confidence to "low" and all fields to null
+- setName: the human-readable Pokemon TCG set name only (e.g. "Brilliant Stars", "VMAX Climax", "Base Set", "Jungle")
+  Do NOT include "Sword and Shield" or "Scarlet & Violet" prefix — just the specific set name.
+  For vintage JP sets use: "Basic" (base), "Fossil", "Jungle", "Neo Genesis", "Neo Discovery", "Neo Revelation", "Neo Destiny"
+  For Carddass products use the EXACT product name: "Bandai Carddass Vending" (1996 Bandai non-TCG cards) vs "Pocket Monsters Carddass" (1997 series) vs "Vending" (1998-2000 TCG vending machine series)
+  For promos: use the promo series name e.g. "SM Promo", "SWSH Black Star Promo", "SV Promo", "Promo Card Pack 25th Anniversary"
 - cardNumber: numeric card number only (e.g. "4", "080", "025") — strip any "/total" suffix
 - cardName: the Pokemon or Trainer card name only (no set, no year, no rarity)
-- rarity: exactly as stated in label (e.g. "Art Rare", "Common", "Holo Rare", "Two Star")
-  For PSA Japanese labels, common rarity terms: Art Rare, Special Art Rare, Two Star, Three Star, Hyper Rare
-  For PSA English labels: Common, Uncommon, Rare, Holo Rare, Ultra Rare, Illustration Rare, etc.
+- rarity: exactly as stated in label (e.g. "Art Rare", "Common", "Holo Rare", "Two Star") — null if not mentioned
 - variant: if stated (e.g. "First Edition", "Shadowless", "Reverse Holo") — null if not present
-- confidence: "high" if you're certain, "medium" if reasonable guess, "low" if unsure
+- isPromo: true if this is a promotional card (Black Star Promo, SM-P, SV-P, SWSH promo, etc.), false otherwise
+- confidence: "high" if certain, "medium" if reasonable guess, "low" if unsure
 
 Return a JSON array with one object per input label in the same order.
-If you cannot parse a label, set all fields to null except original and confidence="low".`;
+If you cannot parse a label, set all fields to null except original, isPromo: false, and confidence: "low".`;
 
 async function parseBatch(labels: string[]): Promise<ParsedCard[]> {
   const userContent = labels.map((l, i) => `${i + 1}. ${l}`).join('\n');
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4096,
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 8192,
     system: SYSTEM_PROMPT,
     messages: [
       {
@@ -105,10 +108,12 @@ async function parseBatch(labels: string[]): Promise<ParsedCard[]> {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  ({ findOrFetchCard } = await import('../../services/catalog.service'));
+  ({ findOrCreateCatalogCard } = await import('../../services/catalog.service'));
 
   const pgClient = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await pgClient.connect();
+
+  const lookupWithDb = await buildLookupWithDbAliases(pgClient);
 
   // Fetch unmatched card_instances (with card_name_override, no catalog_id)
   const whereClause = REPARSE
@@ -159,22 +164,45 @@ async function main() {
       const p = parsed[j];
       const card = batch[j];
 
-      if (p.confidence === 'low') {
+      // Claude sometimes returns numeric confidence (0-1) instead of string
+      const confStr = typeof p.confidence === 'number'
+        ? (p.confidence < 0.6 ? 'low' : p.confidence < 0.8 ? 'medium' : 'high')
+        : p.confidence;
+      if (confStr === 'low') {
         lowConfidence.push(card.card_name_override);
       }
 
-      if (!p.setCode || !p.cardNumber || !p.language) {
+      if (!p.setName || !p.cardNumber || !p.language) {
+        unmatched++;
+        continue;
+      }
+
+      // Look up our internal set code from the set name
+      const lang = p.language as 'EN' | 'JP';
+      let setCodePart: string | null = null;
+
+      if (p.isPromo) {
+        // For promos, look up promo-specific code or fall back to generic 'P'
+        setCodePart = lookupWithDb(lang, p.setName) ?? 'P';
+      } else {
+        setCodePart = lookupWithDb(lang, p.setName);
+      }
+
+      if (!setCodePart) {
+        console.warn(`  NO SET CODE  lang=${lang} setName="${p.setName}"  "${card.card_name_override}"`);
         unmatched++;
         continue;
       }
 
       try {
-        const catalogId = await findOrFetchCard({
-          setCode: p.setCode,
+        const catalogId = await findOrCreateCatalogCard({
+          setCodePart,
           cardNumber: p.cardNumber,
           cardName: p.cardName ?? card.card_name_override,
-          language: p.language,
+          setName: p.setName,
+          language: lang,
           rarity: p.rarity ?? null,
+          variant: p.variant ?? null,
         });
 
         if (!catalogId) {
@@ -185,10 +213,8 @@ async function main() {
         if (!DRY_RUN) {
           await pgClient.query(
             `UPDATE card_instances SET catalog_id = $1, language = $2 WHERE id = $3`,
-            [catalogId, p.language, card.id]
+            [catalogId, lang, card.id]
           );
-
-          // Also update variant on card_instance if parsed
           if (p.variant) {
             await pgClient.query(
               `UPDATE card_instances SET variant = $1 WHERE id = $2`,

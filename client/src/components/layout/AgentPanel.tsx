@@ -106,7 +106,7 @@ export function AgentPanel() {
     <>
       {/* Floating chat popup */}
       {open && (
-        <div className="fixed bottom-20 right-4 z-50 w-96 flex flex-col bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
+        <div className="fixed bottom-16 right-5 z-50 w-96 flex flex-col bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
           style={{ height: '520px' }}>
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 bg-zinc-800 border-b border-zinc-700">
@@ -208,21 +208,19 @@ export function AgentPanel() {
         </div>
       )}
 
-      {/* Right sidebar toggle button */}
-      <div className="w-56 shrink-0 flex flex-col-reverse items-center pb-5 px-2">
-        <button
-          onClick={() => setOpen(o => !o)}
-          className={cn(
-            'flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors w-full',
-            open
-              ? 'bg-indigo-600/20 text-indigo-400'
-              : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60'
-          )}
-        >
-          <Bot size={16} />
-          <span>AI Agent</span>
-        </button>
-      </div>
+      {/* Floating toggle button */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={cn(
+          'fixed bottom-5 right-5 z-40 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-colors',
+          open
+            ? 'bg-indigo-600 text-white'
+            : 'bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700'
+        )}
+      >
+        <Bot size={15} />
+        <span>AI Agent</span>
+      </button>
     </>
   );
 }

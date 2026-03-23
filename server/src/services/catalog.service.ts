@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { sql } from 'kysely';
 import { db } from '../config/database';
+import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
 
 // ── Rarity code map ──────────────────────────────────────────────────────────
 // Maps TCGdex rarity strings AND PSA label rarity terms → SKU abbreviation
@@ -86,28 +87,14 @@ export const VARIANT_CODE: Record<string, string> = {
 // ── SKU generation ───────────────────────────────────────────────────────────
 
 export function generateSku(params: {
-  language: string;    // 'EN' or 'JP'
-  setCode: string;     // TCGdex set ID, preserved casing (e.g. 'base1', 'SV1a')
-  cardNumber: string;  // TCGdex localId (e.g. '4', '080', '234')
+  language: string;
+  setCode: string;
+  cardNumber: string;
   rarity?: string | null;
   variant?: string | null;
 }): string {
-  // Normalize language
-  const lang = params.language.toUpperCase() === 'JPN' ? 'JP' : params.language.toUpperCase();
-
-  // Pad card number to 3 digits (strip any /total suffix like "025/165" → "025")
-  const rawNum = params.cardNumber.split('/')[0].trim();
-  const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
-
-  const parts: string[] = ['PKMN', lang, params.setCode, paddedNum];
-
-  const rarityCode = params.rarity ? RARITY_CODE[params.rarity] ?? null : null;
-  if (rarityCode) parts.push(rarityCode);
-
-  const variantCode = params.variant ? VARIANT_CODE[params.variant] ?? null : null;
-  if (variantCode) parts.push(variantCode);
-
-  return parts.join('-');
+  const lang = params.language.toUpperCase() === 'JPN' ? 'JP' : params.language.toUpperCase() as 'EN' | 'JP';
+  return generatePartNumber(lang, params.setCode, params.cardNumber);
 }
 
 // ── TCGdex API types ─────────────────────────────────────────────────────────
@@ -237,18 +224,23 @@ export async function findCatalogByKey(
   return rows.rows[0] ?? null;
 }
 
-// Find or fetch from TCGdex — used during matching when catalog entry may not exist yet
+// Find or fetch from TCGdex — used during matching when catalog entry may not exist yet.
+// Falls back to creating a catalog entry from parsed data if TCGdex doesn't have the card.
 export async function findOrFetchCard(params: {
   setCode: string;
   cardNumber: string;
   cardName: string;
+  setName?: string | null;
   language: 'EN' | 'JP';
   rarity?: string | null;
 }): Promise<string | null> {
-  // 1. Check catalog first
+  const rawNum = params.cardNumber.split('/')[0].trim();
+  const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
+  const lang = params.language === 'JP' ? 'ja' : 'en';
+
+  // 1. Check catalog first (handles multiple set code casings)
   const existing = await findCatalogByKey(params.setCode, params.cardNumber, params.language);
   if (existing) {
-    // Update rarity if we now know it and catalog didn't have it
     if (params.rarity && !existing.rarity) {
       const newSku = generateSku({
         language: params.language,
@@ -265,29 +257,133 @@ export async function findOrFetchCard(params: {
     return existing.id;
   }
 
-  // 2. Fetch from TCGdex
-  const lang = params.language === 'JP' ? 'ja' : 'en';
-  const rawNum = params.cardNumber.split('/')[0].trim();
-  const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
+  // 2. Try TCGdex with a few set code variations
+  const setCodeVariants = [
+    params.setCode,
+    params.setCode.toLowerCase(),
+    params.setCode.toUpperCase(),
+    params.setCode.replace(/-/g, ''),
+    params.setCode.replace(/-/g, '').toLowerCase(),
+  ].filter((v, i, a) => a.indexOf(v) === i);
 
-  // Try to fetch full card detail
-  const cardId = `${params.setCode}-${paddedNum}`;
-  const detail = await fetchCardDetail(cardId, lang);
-  if (!detail?.id) return null;
+  let detail: Awaited<ReturnType<typeof fetchCardDetail>> = null;
+  let matchedSetCode = params.setCode;
 
-  const rarity = params.rarity ?? detail.rarity ?? null;
-  const catalogId = await upsertCatalogCard({
-    externalId: detail.id,
-    setCode: params.setCode,
-    setName: detail.set?.name ?? params.setCode,
-    cardNumber: detail.localId ?? paddedNum,
-    cardName: detail.name ?? params.cardName,
+  for (const sc of setCodeVariants) {
+    const cardId = `${sc}-${paddedNum}`;
+    detail = await fetchCardDetail(cardId, lang);
+    if (detail?.id) {
+      matchedSetCode = sc;
+      break;
+    }
+  }
+
+  const rarity = params.rarity ?? detail?.rarity ?? null;
+  const setName = params.setName ?? detail?.set?.name ?? params.setCode;
+  const cardName = detail?.name ?? params.cardName;
+  const externalId = detail?.id ?? null;
+
+  // 3. Upsert catalog entry — even without a TCGdex match we create from parsed data
+  const sku = generateSku({
     language: params.language,
+    setCode: matchedSetCode,
+    cardNumber: detail?.localId ?? paddedNum,
     rarity,
-    imageUrl: detail.image ?? null,
   });
 
-  return catalogId;
+  const result = await sql<{ id: string }>`
+    INSERT INTO card_catalog (
+      game, set_name, set_code, card_name, card_number,
+      language, rarity, image_url, external_id, sku
+    ) VALUES (
+      'pokemon',
+      ${setName},
+      ${matchedSetCode},
+      ${cardName},
+      ${detail?.localId ?? paddedNum},
+      ${params.language},
+      ${rarity},
+      ${detail?.image ?? null},
+      ${externalId},
+      ${sku}
+    )
+    ON CONFLICT (external_id) WHERE external_id IS NOT NULL
+    DO UPDATE SET
+      card_name  = EXCLUDED.card_name,
+      set_name   = EXCLUDED.set_name,
+      rarity     = COALESCE(EXCLUDED.rarity, card_catalog.rarity),
+      image_url  = COALESCE(EXCLUDED.image_url, card_catalog.image_url),
+      sku        = CASE WHEN EXCLUDED.rarity IS NOT NULL THEN EXCLUDED.sku ELSE card_catalog.sku END,
+      updated_at = NOW()
+    RETURNING id
+  `.execute(db);
+
+  return result.rows[0]?.id ?? null;
+}
+
+/**
+ * Find or create a card_catalog entry using our internal set code map.
+ * No external API — purely from parsed data.
+ */
+export async function findOrCreateCatalogCard(params: {
+  setCodePart: string;   // e.g. 'SWSH9', 'SPEC-S8a', 'P', 'PROMO-SV'
+  cardNumber: string;
+  cardName: string;
+  setName: string;
+  language: 'EN' | 'JP';
+  rarity?: string | null;
+  variant?: string | null;
+}): Promise<string | null> {
+  const rawNum = params.cardNumber.split('/')[0].trim();
+  const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
+  const sku = generatePartNumber(params.language, params.setCodePart, paddedNum);
+
+  // 1. Try to find by SKU (most precise match)
+  const bySkuRows = await sql<{ id: string }>`
+    SELECT id FROM card_catalog WHERE sku = ${sku} LIMIT 1
+  `.execute(db);
+  if (bySkuRows.rows.length) return bySkuRows.rows[0].id;
+
+  // 2. Try to find by (setCode, cardNumber, language)
+  const byKeyRows = await sql<{ id: string }>`
+    SELECT id FROM card_catalog
+    WHERE game = 'pokemon'
+      AND language = ${params.language}
+      AND LOWER(set_code) = LOWER(${params.setCodePart})
+      AND (card_number = ${paddedNum} OR card_number = ${rawNum})
+    LIMIT 1
+  `.execute(db);
+  if (byKeyRows.rows.length) return byKeyRows.rows[0].id;
+
+  // 3. Create new entry
+  try {
+    const inserted = await sql<{ id: string }>`
+      INSERT INTO card_catalog (
+        game, set_name, set_code, card_name, card_number,
+        language, rarity, variant, sku
+      ) VALUES (
+        'pokemon',
+        ${params.setName},
+        ${params.setCodePart},
+        ${params.cardName},
+        ${paddedNum},
+        ${params.language},
+        ${params.rarity ?? null},
+        ${params.variant ?? null},
+        ${sku}
+      )
+      ON CONFLICT (sku) WHERE sku IS NOT NULL
+      DO UPDATE SET
+        card_name  = EXCLUDED.card_name,
+        set_name   = EXCLUDED.set_name,
+        rarity     = COALESCE(EXCLUDED.rarity, card_catalog.rarity),
+        updated_at = NOW()
+      RETURNING id
+    `.execute(db);
+    return inserted.rows[0].id;
+  } catch {
+    return null;
+  }
 }
 
 // ── Inventory summary ────────────────────────────────────────────────────────
@@ -323,8 +419,8 @@ export async function getInventorySummary(userId: string) {
       sd.grade,
       sd.grade_label,
       COUNT(*)::int                                   AS qty,
-      SUM(ci.purchase_cost + COALESCE(gs.grading_fee, 0))::int AS total_cost,
-      AVG(ci.purchase_cost + COALESCE(gs.grading_fee, 0))::int AS avg_cost,
+      SUM(ci.purchase_cost + sd.grading_cost)::int AS total_cost,
+      AVG(ci.purchase_cost + sd.grading_cost)::int AS avg_cost,
       COUNT(*) FILTER (WHERE l.id IS NOT NULL)::int   AS qty_listed,
       COUNT(*) FILTER (WHERE ci.status = 'sold')::int AS qty_sold,
       ci.catalog_id
@@ -337,11 +433,6 @@ export async function getInventorySummary(userId: string) {
         AND listing_status = 'active'
       ORDER BY created_at DESC LIMIT 1
     ) l ON true
-    LEFT JOIN LATERAL (
-      SELECT grading_fee FROM grading_submissions
-      WHERE card_instance_id = ci.id
-      ORDER BY created_at DESC LIMIT 1
-    ) gs ON true
     WHERE ci.user_id = ${userId}
       AND ci.deleted_at IS NULL
       AND ci.status != 'sold'

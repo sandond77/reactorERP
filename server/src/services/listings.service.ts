@@ -5,10 +5,41 @@ import type { ListingPlatform, NewListing } from '../types/db';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 
+const LISTINGS_SORT_COLS: Record<string, string> = {
+  card_name: `COALESCE(cc.card_name, ci.card_name_override)`,
+  platform: 'l.platform',
+  listing_status: 'l.listing_status',
+  list_price: 'l.list_price',
+  listed_at: 'l.listed_at',
+};
+
+export async function getListingFilterOptions(userId: string) {
+  const [platforms, statuses] = await Promise.all([
+    sql<{ value: string }>`
+      SELECT DISTINCT l.platform AS value
+      FROM listings l
+      WHERE l.user_id = ${userId}
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT l.listing_status AS value
+      FROM listings l
+      WHERE l.user_id = ${userId}
+      ORDER BY value
+    `.execute(db),
+  ]);
+  return {
+    platforms: platforms.rows.map((r) => r.value),
+    statuses: statuses.rows.map((r) => r.value),
+  };
+}
+
 export async function listListings(
   userId: string,
   filters: { platform?: ListingPlatform; status?: string },
-  pagination: PaginationParams
+  pagination: PaginationParams,
+  sortBy?: string,
+  sortDir?: 'asc' | 'desc'
 ) {
   const total = Number(
     (await db
@@ -53,7 +84,7 @@ export async function listListings(
     .where('l.user_id', '=', userId)
     .$if(!!filters.platform, (qb) => qb.where('l.platform', '=', filters.platform!))
     .$if(!!filters.status, (qb) => qb.where('l.listing_status', '=', filters.status as any))
-    .orderBy('l.created_at', 'desc')
+    .orderBy(sql.raw(LISTINGS_SORT_COLS[sortBy ?? ''] ?? 'l.created_at'), sortDir ?? 'desc')
     .limit(pagination.limit)
     .offset(getPaginationOffset(pagination.page, pagination.limit))
     .execute();

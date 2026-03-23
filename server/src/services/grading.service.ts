@@ -13,14 +13,14 @@ const SLAB_SORT_COLS: Record<string, string> = {
   is_listed:         '(l.id IS NOT NULL)',
   listed_price:      'l.list_price',
   raw_cost:          'ci.purchase_cost',
-  grading_cost:      'COALESCE(gs.grading_fee, 0)',
+  grading_cost:      'sd.grading_cost',
   strike_price:      's.sale_price',
   after_ebay:        '(s.sale_price - s.platform_fees - s.shipping_cost)',
-  net:               '(s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost - COALESCE(gs.grading_fee, 0))',
+  net:               '(s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost - sd.grading_cost)',
   raw_purchase_date: 'ci.purchased_at',
   date_listed:       'l.listed_at',
   date_sold:         's.sold_at',
-  roi_pct:           'ROUND((s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost - COALESCE(gs.grading_fee, 0))::numeric / NULLIF(ci.purchase_cost + COALESCE(gs.grading_fee, 0), 0) * 100, 2)',
+  roi_pct:           'ROUND((s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost - sd.grading_cost)::numeric / NULLIF(ci.purchase_cost + sd.grading_cost, 0) * 100, 2)',
 };
 
 export async function getSlabFilterOptions(userId: string) {
@@ -160,7 +160,7 @@ export async function listSlabs(
       l.ebay_listing_url                              AS listing_url,
       l.platform                                      AS listing_platform,
       ci.purchase_cost                                AS raw_cost,
-      COALESCE(gs.grading_fee, 0)                     AS grading_cost,
+      sd.grading_cost,
       s.sale_price                                    AS strike_price,
       CASE WHEN s.sale_price IS NOT NULL
         THEN s.sale_price - s.platform_fees - s.shipping_cost
@@ -170,11 +170,11 @@ export async function listSlabs(
       l.listed_at                                     AS date_listed,
       s.sold_at                                       AS date_sold,
       CASE
-        WHEN (ci.purchase_cost + COALESCE(gs.grading_fee, 0)) > 0 AND s.sale_price IS NOT NULL
+        WHEN (ci.purchase_cost + sd.grading_cost) > 0 AND s.sale_price IS NOT NULL
         THEN ROUND(
           (s.sale_price - s.platform_fees - s.shipping_cost
-           - ci.purchase_cost - COALESCE(gs.grading_fee, 0))::numeric
-          / (ci.purchase_cost + COALESCE(gs.grading_fee, 0)) * 100, 2
+           - ci.purchase_cost - sd.grading_cost)::numeric
+          / (ci.purchase_cost + sd.grading_cost) * 100, 2
         )
         ELSE NULL
       END                                             AS roi_pct,
@@ -183,10 +183,6 @@ export async function listSlabs(
     FROM card_instances ci
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
-    LEFT JOIN LATERAL (
-      SELECT grading_fee FROM grading_submissions
-      WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
-    ) gs ON true
     LEFT JOIN LATERAL (
       SELECT id, list_price, platform, ebay_listing_url, listed_at
       FROM listings
@@ -209,45 +205,106 @@ export async function listSlabs(
   return buildPaginatedResult(rows.rows, total, pagination.page, pagination.limit);
 }
 
-export async function listSubmissions(userId: string, pagination: PaginationParams) {
-  const total = Number(
-    (await db
-      .selectFrom('grading_submissions as gs')
-      .select((eb) => eb.fn.count<number>('gs.id').as('count'))
-      .where('gs.user_id', '=', userId)
-      .executeTakeFirst())?.count ?? 0
-  );
+const SUBMISSION_SORT_COLS: Record<string, string> = {
+  card_name: `COALESCE(cc.card_name, ci.card_name_override)`,
+  company: 'gs.company',
+  status: 'gs.status',
+  grading_fee: 'gs.grading_fee',
+  submitted_at: 'gs.submitted_at',
+  estimated_return: 'gs.estimated_return',
+};
 
-  const data = await db
-    .selectFrom('grading_submissions as gs')
-    .innerJoin('card_instances as ci', 'ci.id', 'gs.card_instance_id')
-    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
-    .select([
-      'gs.id',
-      'gs.company',
-      'gs.submission_number',
-      'gs.service_level',
-      'gs.status',
-      'gs.grading_fee',
-      'gs.shipping_cost',
-      'gs.currency',
-      'gs.submitted_at',
-      'gs.estimated_return',
-      'gs.returned_at',
-      'gs.created_at',
-      'ci.id as card_instance_id',
-      sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
-      sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
-      'ci.image_front_url',
-      'cc.image_url as catalog_image_url',
-    ])
-    .where('gs.user_id', '=', userId)
-    .orderBy('gs.created_at', 'desc')
-    .limit(pagination.limit)
-    .offset(getPaginationOffset(pagination.page, pagination.limit))
-    .execute();
+export async function getSubmissionFilterOptions(userId: string) {
+  const [companies, statuses] = await Promise.all([
+    sql<{ value: string }>`
+      SELECT DISTINCT gs.company AS value
+      FROM grading_submissions gs
+      WHERE gs.user_id = ${userId}
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT gs.status AS value
+      FROM grading_submissions gs
+      WHERE gs.user_id = ${userId}
+      ORDER BY value
+    `.execute(db),
+  ]);
+  return {
+    companies: companies.rows.map((r) => r.value),
+    statuses: statuses.rows.map((r) => r.value),
+  };
+}
 
-  return buildPaginatedResult(data, total, pagination.page, pagination.limit);
+export async function listSubmissions(
+  userId: string,
+  pagination: PaginationParams,
+  sortBy?: string,
+  sortDir?: 'asc' | 'desc',
+  filterCompanies?: string[],
+  filterStatuses?: string[]
+) {
+  const sortExpr = SUBMISSION_SORT_COLS[sortBy ?? ''] ?? 'gs.created_at';
+  const dir = sortDir === 'asc' ? sql`ASC` : sql`DESC`;
+
+  const companyIn  = filterCompanies?.length ? sql`AND gs.company IN (${sql.join(filterCompanies.map((v) => sql.val(v)))})` : sql``;
+  const statusIn   = filterStatuses?.length  ? sql`AND gs.status  IN (${sql.join(filterStatuses.map((v) => sql.val(v)))})` : sql``;
+
+  const countResult = await sql<{ count: string }>`
+    SELECT COUNT(*) AS count
+    FROM grading_submissions gs
+    WHERE gs.user_id = ${userId}
+    ${companyIn} ${statusIn}
+  `.execute(db);
+
+  const total = Number(countResult.rows[0]?.count ?? 0);
+
+  const dataResult = await sql<{
+    id: string;
+    company: string;
+    submission_number: string | null;
+    service_level: string | null;
+    status: string;
+    grading_fee: number;
+    shipping_cost: number;
+    currency: string;
+    submitted_at: string | null;
+    estimated_return: string | null;
+    returned_at: string | null;
+    created_at: string;
+    card_instance_id: string;
+    card_name: string | null;
+    set_name: string | null;
+    image_front_url: string | null;
+    catalog_image_url: string | null;
+  }>`
+    SELECT
+      gs.id,
+      gs.company,
+      gs.submission_number,
+      gs.service_level,
+      gs.status,
+      gs.grading_fee,
+      gs.shipping_cost,
+      gs.currency,
+      gs.submitted_at,
+      gs.estimated_return,
+      gs.returned_at,
+      gs.created_at,
+      ci.id AS card_instance_id,
+      COALESCE(cc.card_name, ci.card_name_override) AS card_name,
+      COALESCE(cc.set_name, ci.set_name_override) AS set_name,
+      ci.image_front_url,
+      cc.image_url AS catalog_image_url
+    FROM grading_submissions gs
+    INNER JOIN card_instances ci ON ci.id = gs.card_instance_id
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    WHERE gs.user_id = ${userId}
+    ${companyIn} ${statusIn}
+    ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
+    LIMIT ${pagination.limit} OFFSET ${getPaginationOffset(pagination.page, pagination.limit)}
+  `.execute(db);
+
+  return buildPaginatedResult(dataResult.rows, total, pagination.page, pagination.limit);
 }
 
 export interface SubmitToGradingInput {

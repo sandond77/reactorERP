@@ -71,10 +71,30 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
   return sale;
 }
 
+const SALES_SORT_COLS: Record<string, string> = {
+  card_name: `COALESCE(cc.card_name, ci.card_name_override)`,
+  platform: 's.platform',
+  sale_price: 's.sale_price',
+  net_proceeds: 's.net_proceeds',
+  profit: `(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`,
+  sold_at: 's.sold_at',
+};
+
+export async function getSaleFilterOptions(userId: string) {
+  const platforms = await db
+    .selectFrom('sales as s')
+    .select(sql<string>`DISTINCT s.platform`.as('platform'))
+    .where('s.user_id', '=', userId)
+    .execute();
+  return { platforms: platforms.map((r) => r.platform) };
+}
+
 export async function listSales(
   userId: string,
   filters: { platform?: ListingPlatform; from?: Date; to?: Date },
-  pagination: PaginationParams
+  pagination: PaginationParams,
+  sortBy?: string,
+  sortDir?: 'asc' | 'desc'
 ) {
   const total = Number(
     (await db
@@ -120,7 +140,7 @@ export async function listSales(
     .$if(!!filters.platform, (qb) => qb.where('s.platform', '=', filters.platform!))
     .$if(!!filters.from, (qb) => qb.where('s.sold_at', '>=', filters.from!))
     .$if(!!filters.to, (qb) => qb.where('s.sold_at', '<=', filters.to!))
-    .orderBy('s.sold_at', 'desc')
+    .orderBy(sql.raw(SALES_SORT_COLS[sortBy ?? ''] ?? 's.sold_at'), sortDir ?? 'desc')
     .limit(pagination.limit)
     .offset(getPaginationOffset(pagination.page, pagination.limit))
     .execute();

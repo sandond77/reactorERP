@@ -127,6 +127,7 @@ export interface SlabDetailsTable {
   grade: number | null;
   grade_label: string | null;
   subgrades: unknown | null;  // JSONB
+  grading_cost: Generated<number>;
   additional_cost: number;
   currency: string;
   created_at: Generated<Date>;
@@ -201,6 +202,15 @@ export interface AuditLogTable {
   created_at: Generated<Date>;
 }
 
+export interface PokemonSetAliasesTable {
+  id: Generated<string>;
+  language: string;
+  alias: string;
+  set_code: string;
+  set_name: string | null;
+  created_at: Generated<Date>;
+}
+
 // ============================================================
 // Database interface (used by Kysely)
 // ============================================================
@@ -215,6 +225,7 @@ export interface Database {
   sales: SalesTable;
   csv_imports: CsvImportsTable;
   audit_log: AuditLogTable;
+  pokemon_set_aliases: PokemonSetAliasesTable;
 }
 
 // ============================================================

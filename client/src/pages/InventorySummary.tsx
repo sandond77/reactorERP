@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ChevronDown, ChevronRight, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatCurrency } from '../lib/utils';
+import { ColHeader, useColWidths } from '../components/ui/TableHeader';
 
 interface SummaryRow {
   sku: string | null;
@@ -41,9 +42,183 @@ function totalCost(rows: SummaryRow[]) {
   return rows.reduce((s, r) => s + r.total_cost, 0);
 }
 
+type SortDir = 'asc' | 'desc';
+
+type SortKey = 'sku' | 'card_name' | 'set_name' | 'language' | 'rarity' | 'company' | 'grade' | 'qty' | 'total_cost' | 'avg_cost' | 'qty_listed';
+
+function getSortValue(row: SummaryRow, col: SortKey): string | number | null {
+  switch (col) {
+    case 'sku': return row.sku ?? '';
+    case 'card_name': return row.card_name ?? '';
+    case 'set_name': return row.set_name ?? '';
+    case 'language': return row.language;
+    case 'rarity': return row.rarity ?? '';
+    case 'company': return row.company;
+    case 'grade': return row.grade ?? 0;
+    case 'qty': return row.qty;
+    case 'total_cost': return row.total_cost;
+    case 'avg_cost': return row.avg_cost;
+    case 'qty_listed': return row.qty_listed;
+    default: return '';
+  }
+}
+
+// ── Add Set Alias Modal ───────────────────────────────────────────────────────
+
+interface AddSetAliasModalProps {
+  onClose: () => void;
+}
+
+function AddSetAliasModal({ onClose }: AddSetAliasModalProps) {
+  const queryClient = useQueryClient();
+  const [language, setLanguage] = useState<'EN' | 'JP'>('EN');
+  const [alias, setAlias] = useState('');
+  const [setCode, setSetCode] = useState('');
+  const [setName, setSetName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      await api.post('/sets/aliases', {
+        language,
+        alias,
+        set_code: setCode,
+        set_name: setName || undefined,
+      });
+      queryClient.invalidateQueries({ queryKey: ['inventory-summary'] });
+      onClose();
+    } catch (err: unknown) {
+      const msg =
+        err && typeof err === 'object' && 'response' in err
+          ? (err as { response?: { data?: { error?: string; message?: string } } }).response?.data?.error ??
+            (err as { response?: { data?: { error?: string; message?: string } } }).response?.data?.message ??
+            'Failed to save alias.'
+          : 'Failed to save alias.';
+      setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div
+        className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Title bar */}
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-semibold text-zinc-100">Add Set Alias</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          {/* Language */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">Language</label>
+            <div className="flex gap-4">
+              {(['EN', 'JP'] as const).map((l) => (
+                <label key={l} className="flex items-center gap-1.5 cursor-pointer text-sm text-zinc-300">
+                  <input
+                    type="radio"
+                    name="language"
+                    value={l}
+                    checked={language === l}
+                    onChange={() => setLanguage(l)}
+                    className="accent-indigo-500"
+                  />
+                  {l}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Alias */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">
+              PSA Set Name Fragment <span className="text-zinc-600">(alias)</span>
+            </label>
+            <input
+              type="text"
+              value={alias}
+              onChange={(e) => setAlias(e.target.value)}
+              placeholder="e.g. vmax climax"
+              required
+              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          {/* Set Code */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">Internal Set Code</label>
+            <input
+              type="text"
+              value={setCode}
+              onChange={(e) => setSetCode(e.target.value)}
+              placeholder="e.g. SWSH9"
+              required
+              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          {/* Optional canonical name */}
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">
+              Canonical Name <span className="text-zinc-600">(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={setName}
+              onChange={(e) => setSetName(e.target.value)}
+              placeholder="e.g. Brilliant Stars"
+              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          {error && (
+            <p className="text-xs text-red-400">{error}</p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="px-4 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+            >
+              {submitting ? 'Saving…' : 'Save Alias'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+
 export function InventorySummary() {
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [fLanguage, setFLanguage] = useState<string[]>([]);
+  const [fRarity, setFRarity] = useState<string[]>([]);
+  const [fCompany, setFCompany] = useState<string[]>([]);
+  const [showAliasModal, setShowAliasModal] = useState(false);
+  const { rz, totalWidth } = useColWidths({ sku: 180, card: 480, set: 180, lang: 60, rarity: 110, grader: 80, grade: 130, qty: 60, total_cost: 110, avg_cost: 110, listed: 80 });
 
   const { data, isLoading } = useQuery<{ data: SummaryRow[] }>({
     queryKey: ['inventory-summary'],
@@ -52,18 +227,43 @@ export function InventorySummary() {
 
   const rows = data?.data ?? [];
 
-  // Filter by search
-  const filtered = search
-    ? rows.filter(
-        (r) =>
-          r.sku?.toLowerCase().includes(search.toLowerCase()) ||
-          r.card_name?.toLowerCase().includes(search.toLowerCase()) ||
-          r.set_name?.toLowerCase().includes(search.toLowerCase())
-      )
-    : rows;
+  // Derive filter options from data
+  const languageOptions = [...new Set(rows.map((r) => r.language))].sort();
+  const rarityOptions = [...new Set(rows.map((r) => r.rarity).filter(Boolean) as string[])].sort();
+  const companyOptions = [...new Set(rows.map((r) => r.company))].sort();
 
-  const groups = groupRows(filtered);
-  const sortedKeys = [...groups.keys()].sort();
+  // Filter by search + column filters
+  const filtered = rows.filter((r) => {
+    const matchSearch = !search ||
+      r.sku?.toLowerCase().includes(search.toLowerCase()) ||
+      r.card_name?.toLowerCase().includes(search.toLowerCase()) ||
+      r.set_name?.toLowerCase().includes(search.toLowerCase());
+
+    const matchLang = fLanguage.length === 0 || fLanguage.length === languageOptions.length || fLanguage.includes(r.language);
+    const matchRarity = fRarity.length === 0 || fRarity.length === rarityOptions.length || fRarity.includes(r.rarity ?? '');
+    const matchCompany = fCompany.length === 0 || fCompany.length === companyOptions.length || fCompany.includes(r.company);
+
+    return matchSearch && matchLang && matchRarity && matchCompany;
+  });
+
+  // Client-side sort at SummaryRow level before grouping
+  const sortedFiltered = sortCol
+    ? [...filtered].sort((a, b) => {
+        const av = getSortValue(a, sortCol as SortKey);
+        const bv = getSortValue(b, sortCol as SortKey);
+        if (av === bv) return 0;
+        if (av == null || av === '') return 1;
+        if (bv == null || bv === '') return -1;
+        const cmp = av < bv ? -1 : 1;
+        return sortDir === 'asc' ? cmp : -cmp;
+      })
+    : filtered;
+
+  const groups = groupRows(sortedFiltered);
+  // Preserve sort order from sortedFiltered by using insertion order
+  const sortedKeys = sortCol
+    ? [...groups.keys()]
+    : [...groups.keys()].sort();
 
   const toggleGroup = (key: string) => {
     setExpanded((prev) => {
@@ -76,6 +276,16 @@ export function InventorySummary() {
 
   const totalCards = rows.reduce((s, r) => s + r.qty, 0);
   const matchedCards = rows.filter((r) => r.catalog_id).reduce((s, r) => s + r.qty, 0);
+
+  const handleSort = (col: string) => {
+    setSortCol((prev) => {
+      if (prev === col) return prev;
+      return col;
+    });
+    setSortDir((prev) => sortCol === col ? (prev === 'asc' ? 'desc' : 'asc') : 'asc');
+  };
+
+  const sh = { sortCol, sortDir, onSort: handleSort };
 
   return (
     <div className="flex flex-col h-full">
@@ -94,13 +304,21 @@ export function InventorySummary() {
             </p>
           )}
         </div>
-        <input
-          type="text"
-          placeholder="Search SKU, card, set…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-64"
-        />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowAliasModal(true)}
+            className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:border-zinc-500 rounded-lg transition-colors"
+          >
+            + Add Set
+          </button>
+          <input
+            type="text"
+            placeholder="Search SKU, card, set…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-64"
+          />
+        </div>
       </div>
 
       {/* Table */}
@@ -110,20 +328,23 @@ export function InventorySummary() {
         ) : !sortedKeys.length ? (
           <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">No inventory found.</div>
         ) : (
-          <table className="w-full text-xs whitespace-nowrap">
+          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
-              <tr className="border-b border-zinc-800 text-left text-zinc-500 uppercase tracking-wide">
-                <th className="px-3 py-2 font-medium min-w-[180px]">Part #</th>
-                <th className="px-3 py-2 font-medium min-w-[220px]">Card</th>
-                <th className="px-3 py-2 font-medium">Set</th>
-                <th className="px-3 py-2 font-medium">Lang</th>
-                <th className="px-3 py-2 font-medium">Rarity</th>
-                <th className="px-3 py-2 font-medium">Grader</th>
-                <th className="px-3 py-2 font-medium">Grade</th>
-                <th className="px-3 py-2 font-medium text-right">Qty</th>
-                <th className="px-3 py-2 font-medium text-right">Total Cost</th>
-                <th className="px-3 py-2 font-medium text-right">Avg Cost</th>
-                <th className="px-3 py-2 font-medium text-right">Listed</th>
+              <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
+                <ColHeader label="Part #"     col="sku"        {...sh} {...rz('sku')} />
+                <ColHeader label="Card"       col="card_name"  {...sh} {...rz('card')} />
+                <ColHeader label="Set"        col="set_name"   {...sh} {...rz('set')} />
+                <ColHeader label="Lang"       col="language"   {...sh} {...rz('lang')}
+                  filterOptions={languageOptions} filterSelected={fLanguage} onFilterChange={setFLanguage} />
+                <ColHeader label="Rarity"     col="rarity"     {...sh} {...rz('rarity')}
+                  filterOptions={rarityOptions} filterSelected={fRarity} onFilterChange={setFRarity} />
+                <ColHeader label="Grader"     col="company"    {...sh} {...rz('grader')}
+                  filterOptions={companyOptions} filterSelected={fCompany} onFilterChange={setFCompany} />
+                <ColHeader label="Grade"      col="grade"      {...sh} {...rz('grade')} />
+                <ColHeader label="Qty"        col="qty"        {...sh} {...rz('qty')} align="right" />
+                <ColHeader label="Total Cost" col="total_cost" {...sh} {...rz('total_cost')} align="right" />
+                <ColHeader label="Avg Cost"   col="avg_cost"   {...sh} {...rz('avg_cost')} align="right" />
+                <ColHeader label="Listed"     col="qty_listed" {...sh} {...rz('listed')} align="right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
@@ -147,10 +368,10 @@ export function InventorySummary() {
                       <td className="px-3 py-1.5 font-mono text-indigo-400 text-[11px]">
                         {sku ?? <span className="text-zinc-600 italic">unlinked</span>}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-200 max-w-[260px] truncate" title={displayName}>
+                      <td className="px-3 py-1.5 text-zinc-200 truncate" title={displayName}>
                         {displayName}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-400 max-w-[160px] truncate">{setName}</td>
+                      <td className="px-3 py-1.5 text-zinc-400 truncate">{setName}</td>
                       <td className="px-3 py-1.5 text-zinc-500">{lang}</td>
                       <td className="px-3 py-1.5 text-zinc-500">{rarity}</td>
                       <td className="px-3 py-1.5 text-zinc-400">{r.company}</td>
@@ -177,10 +398,10 @@ export function InventorySummary() {
                         {sku ?? <span className="text-zinc-600 italic">unlinked</span>}
                       </span>
                     </td>
-                    <td className="px-3 py-1.5 text-zinc-200 font-medium max-w-[260px] truncate" title={displayName}>
+                    <td className="px-3 py-1.5 text-zinc-200 font-medium truncate" title={displayName}>
                       {displayName}
                     </td>
-                    <td className="px-3 py-1.5 text-zinc-400 max-w-[160px] truncate">{setName}</td>
+                    <td className="px-3 py-1.5 text-zinc-400 truncate">{setName}</td>
                     <td className="px-3 py-1.5 text-zinc-500">{lang}</td>
                     <td className="px-3 py-1.5 text-zinc-500">{rarity}</td>
                     <td className="px-3 py-1.5 text-zinc-600">{groupRows.map((r) => r.company).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</td>
@@ -218,6 +439,9 @@ export function InventorySummary() {
           </table>
         )}
       </div>
+
+      {/* Add Set Alias Modal */}
+      {showAliasModal && <AddSetAliasModal onClose={() => setShowAliasModal(false)} />}
     </div>
   );
 }

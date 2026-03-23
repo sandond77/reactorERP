@@ -6,13 +6,35 @@ import { toCents } from '../utils/cents';
 const paginationSchema = z.object({
   page: z.coerce.number().default(1),
   limit: z.coerce.number().min(1).max(100).default(25),
+  sort_by: z.string().optional(),
+  sort_dir: z.enum(['asc', 'desc']).default('desc'),
+  companies: z.string().optional(),
+  statuses: z.string().optional(),
 });
+
+function splitCSVLocal(val?: string): string[] {
+  return val ? val.split(',').map((s) => s.trim()).filter(Boolean) : [];
+}
 
 export async function listSubmissions(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit } = paginationSchema.parse(req.query);
-    const result = await gradingService.listSubmissions(req.user!.id, { page, limit });
+    const { page, limit, sort_by, sort_dir, companies, statuses } = paginationSchema.parse(req.query);
+    const result = await gradingService.listSubmissions(
+      req.user!.id,
+      { page, limit },
+      sort_by,
+      sort_dir,
+      splitCSVLocal(companies),
+      splitCSVLocal(statuses)
+    );
     res.json(result);
+  } catch (err) { next(err); }
+}
+
+export async function getSubmissionFilters(req: Request, res: Response, next: NextFunction) {
+  try {
+    const options = await gradingService.getSubmissionFilterOptions(req.user!.id);
+    res.json(options);
   } catch (err) { next(err); }
 }
 

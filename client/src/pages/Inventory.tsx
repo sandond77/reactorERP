@@ -1,12 +1,13 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, ExternalLink } from 'lucide-react';
+import { Plus, ExternalLink, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { AddCardForm } from '../components/inventory/AddCardForm';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { formatCurrency, formatDate } from '../lib/utils';
+import { ColHeader, useColWidths } from '../components/ui/TableHeader';
 
 interface SlabRow {
   id: string;
@@ -31,7 +32,18 @@ interface SlabRow {
   is_card_show: boolean;
 }
 
+interface FilterOptions {
+  companies: string[];
+  grades: string[];
+  listed: string[];
+  card_show: string[];
+  purchase_years: string[];
+  listed_years: string[];
+  sold_years: string[];
+}
+
 type StatusFilter = 'all' | 'graded';
+type SortDir = 'asc' | 'desc';
 
 function fmt(cents: number | null): string {
   if (cents == null) return '—';
@@ -75,6 +87,18 @@ export function Inventory() {
   const [addOpen, setAddOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  const [sortCol, setSortCol] = useState<string | null>('cert_number');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const { rz, totalWidth } = useColWidths({ cert: 110, card: 680, grade: 130, listed: 80, listed_price: 100, listing: 60, raw: 80, grading_cost: 105, strike: 95, after_ebay: 90, net: 80, purch_date: 140, date_listed: 100, date_sold: 100, roi: 70, notes: 170, card_show: 95 });
+
+  const [fCompany, setFCompany] = useState<string[]>([]);
+  const [fGrade, setFGrade] = useState<string[]>([]);
+  const [fListed, setFListed] = useState<string[]>([]);
+  const [fCardShow, setFCardShow] = useState<string[]>([]);
+  const [fPurchYear, setFPurchYear] = useState<string[]>([]);
+  const [fListYear, setFListYear] = useState<string[]>([]);
+  const [fSoldYear, setFSoldYear] = useState<string[]>([]);
+
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
     clearTimeout((handleSearchChange as any)._t);
@@ -84,15 +108,56 @@ export function Inventory() {
     }, 300);
   }, []);
 
-  const { data, isLoading } = useQuery<PaginatedResult<SlabRow>>({
-    queryKey: ['inventory-slabs', page, debouncedSearch, statusFilter],
-    queryFn: () =>
-      api
-        .get('/grading/slabs', {
-          params: { page, limit: 50, search: debouncedSearch || undefined, status: statusFilter },
-        })
-        .then((r) => r.data),
+  const handleSort = useCallback((col: string) => {
+    setSortCol((prev) => {
+      if (prev === col) return prev;
+      return col;
+    });
+    setSortDir((prev) => sortCol === col ? (prev === 'asc' ? 'desc' : 'asc') : 'desc');
+    setPage(1);
+  }, [sortCol]);
+
+  const { data: filterOptions } = useQuery<FilterOptions>({
+    queryKey: ['slab-filter-options'],
+    queryFn: () => api.get('/grading/slabs/filters').then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
   });
+
+  function activeFilter(sel: string[], opts?: string[]) {
+    return sel.length > 0 && sel.length < (opts?.length ?? 0) ? sel : [];
+  }
+
+  const params = {
+    page, limit: 50,
+    search: debouncedSearch || undefined,
+    status: statusFilter,
+    sort_by: sortCol ?? undefined,
+    sort_dir: sortDir,
+    companies:      activeFilter(fCompany,   filterOptions?.companies).join(',')     || undefined,
+    grades:         activeFilter(fGrade,     filterOptions?.grades).join(',')        || undefined,
+    is_listed:      activeFilter(fListed,    filterOptions?.listed)[0]?.toLowerCase() || undefined,
+    is_card_show:   activeFilter(fCardShow,  filterOptions?.card_show)[0]?.toLowerCase() || undefined,
+    purchase_years: activeFilter(fPurchYear, filterOptions?.purchase_years).join(',') || undefined,
+    listed_years:   activeFilter(fListYear,  filterOptions?.listed_years).join(',')   || undefined,
+    sold_years:     activeFilter(fSoldYear,  filterOptions?.sold_years).join(',')     || undefined,
+  };
+
+  const { data, isLoading } = useQuery<PaginatedResult<SlabRow>>({
+    queryKey: ['inventory-slabs', params],
+    queryFn: () =>
+      api.get('/grading/slabs', { params }).then((r) => r.data),
+  });
+
+  const hasActiveFilters = [fCompany, fGrade, fListed, fCardShow, fPurchYear, fListYear, fSoldYear]
+    .some((f) => f.length > 0);
+
+  function clearAllFilters() {
+    setFCompany([]); setFGrade([]); setFListed([]); setFCardShow([]);
+    setFPurchYear([]); setFListYear([]); setFSoldYear([]);
+    setPage(1);
+  }
+
+  const sh = { sortCol, sortDir, onSort: handleSort };
 
   return (
     <div className="flex flex-col h-full">
@@ -113,6 +178,11 @@ export function Inventory() {
           onChange={(e) => handleSearchChange(e.target.value)}
           className="flex-1 max-w-72 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
         />
+        {hasActiveFilters && (
+          <button onClick={clearAllFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+            <X size={12} /> Clear all filters
+          </button>
+        )}
         <div className="flex gap-1 ml-auto">
           {(['all', 'graded'] as StatusFilter[]).map((s) => (
             <button
@@ -140,26 +210,32 @@ export function Inventory() {
             <Button variant="secondary" size="sm" onClick={() => setAddOpen(true)}>Add your first card</Button>
           </div>
         ) : (
-          <table className="w-full text-xs whitespace-nowrap">
+          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
-              <tr className="border-b border-zinc-800 text-left text-zinc-500 uppercase tracking-wide">
-                <th className="px-3 py-2 font-medium">Cert</th>
-                <th className="px-3 py-2 font-medium min-w-[260px]">Card</th>
-                <th className="px-3 py-2 font-medium">Grade</th>
-                <th className="px-3 py-2 font-medium text-center">Listed?</th>
-                <th className="px-3 py-2 font-medium text-right">Listed Price</th>
-                <th className="px-3 py-2 font-medium text-center">Listing</th>
-                <th className="px-3 py-2 font-medium text-right">Raw</th>
-                <th className="px-3 py-2 font-medium text-right">Grading Cost</th>
-                <th className="px-3 py-2 font-medium text-right">Strike Price</th>
-                <th className="px-3 py-2 font-medium text-right">After Ebay</th>
-                <th className="px-3 py-2 font-medium text-right">Net</th>
-                <th className="px-3 py-2 font-medium">Raw Purchase Date</th>
-                <th className="px-3 py-2 font-medium">Date Listed</th>
-                <th className="px-3 py-2 font-medium">Date Sold</th>
-                <th className="px-3 py-2 font-medium text-right">% ROI</th>
-                <th className="px-3 py-2 font-medium min-w-[160px]">Notes</th>
-                <th className="px-3 py-2 font-medium text-center">Card Show?</th>
+              <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
+                <ColHeader label="Cert"              col="cert_number"       {...sh} {...rz('cert')} />
+                <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card')} />
+                <ColHeader label="Grade"             col="grade"             {...sh} {...rz('grade')}
+                  filterOptions={filterOptions?.grades}    filterSelected={fGrade}    onFilterChange={(v) => { setFGrade(v); setPage(1); }} />
+                <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('listed')} align="center"
+                  filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
+                <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" />
+                <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" />
+                <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw')} align="right" />
+                <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" />
+                <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike')} align="right" />
+                <ColHeader label="After Ebay"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" />
+                <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" />
+                <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('purch_date')}
+                  filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }} />
+                <ColHeader label="Date Listed"       col="date_listed"       {...sh} {...rz('date_listed')}
+                  filterOptions={filterOptions?.listed_years}   filterSelected={fListYear}  onFilterChange={(v) => { setFListYear(v); setPage(1); }} />
+                <ColHeader label="Date Sold"         col="date_sold"         {...sh} {...rz('date_sold')}
+                  filterOptions={filterOptions?.sold_years}     filterSelected={fSoldYear}  onFilterChange={(v) => { setFSoldYear(v); setPage(1); }} />
+                <ColHeader label="% ROI"             col="roi_pct"           {...sh} {...rz('roi')} align="right" />
+                <ColHeader label="Notes"                                     {...sh} {...rz('notes')} />
+                <ColHeader label="Card Show?"                                {...sh} {...rz('card_show')} align="center"
+                  filterOptions={filterOptions?.card_show} filterSelected={fCardShow} onFilterChange={(v) => { setFCardShow(v); setPage(1); }} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
@@ -170,7 +246,7 @@ export function Inventory() {
                   className="hover:bg-zinc-800/25 cursor-pointer transition-colors"
                 >
                   <td className="px-3 py-1.5 font-mono text-zinc-400">{row.cert_number ?? '—'}</td>
-                  <td className="px-3 py-1.5 text-zinc-200 max-w-[320px] truncate" title={row.card_name ?? ''}>
+                  <td className="px-3 py-1.5 text-zinc-200 truncate" title={row.card_name ?? ''}>
                     {row.card_name ?? '—'}
                   </td>
                   <td className="px-3 py-1.5 text-zinc-300 font-medium">
@@ -214,7 +290,7 @@ export function Inventory() {
                   <td className="px-3 py-1.5 text-right">
                     <RoiCell roi={row.roi_pct} afterEbay={row.after_ebay} raw={row.raw_cost} grading={row.grading_cost} />
                   </td>
-                  <td className="px-3 py-1.5 text-zinc-500 max-w-[200px] truncate" title={row.notes ?? ''}>
+                  <td className="px-3 py-1.5 text-zinc-500 truncate" title={row.notes ?? ''}>
                     {row.notes ?? '—'}
                   </td>
                   <td className="px-3 py-1.5 text-center">
@@ -233,7 +309,7 @@ export function Inventory() {
 
       {/* Pagination */}
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{(data.total ?? 0).toLocaleString()} cards</span>
           {data.total_pages > 1 && (
             <div className="flex items-center gap-2">
@@ -254,7 +330,7 @@ export function Inventory() {
         <CardDetailModal
           cardId={selectedId}
           onClose={() => setSelectedId(null)}
-          onDelete={(id) => { qc.invalidateQueries({ queryKey: ['inventory-slabs'] }); setSelectedId(null); }}
+          onDelete={(_id) => { qc.invalidateQueries({ queryKey: ['inventory-slabs'] }); setSelectedId(null); }}
         />
       )}
     </div>

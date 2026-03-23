@@ -152,7 +152,6 @@ export async function getGradingRoi(userId: string) {
     .selectFrom('sales as s')
     .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
     .innerJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
-    .leftJoin('grading_submissions as gs', 'gs.id', 'sd.grading_submission_id')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .select([
       's.id as sale_id',
@@ -160,7 +159,7 @@ export async function getGradingRoi(userId: string) {
       'sd.grade',
       'sd.company as grading_company',
       'ci.purchase_cost as raw_cost',
-      sql<number>`COALESCE(gs.grading_fee + gs.shipping_cost, 0)`.as('grading_cost'),
+      sql<number>`sd.grading_cost`.as('grading_cost'),
       's.sale_price',
       's.net_proceeds',
       's.total_cost_basis',

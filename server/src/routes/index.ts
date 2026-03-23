@@ -8,6 +8,8 @@ import { reportsRouter } from './reports.routes';
 import { agentRouter } from './agent.routes';
 import { importRouter } from './import.routes';
 import { catalogRouter } from './catalog.routes';
+import { listingsRouter } from './listings.routes';
+import { setsRouter } from './sets.routes';
 
 export const apiRouter = Router();
 
@@ -37,3 +39,5 @@ apiRouter.use('/reports', reportsRouter);
 apiRouter.use('/agent', agentLimiter, agentRouter);
 apiRouter.use('/import', importRouter);
 apiRouter.use('/catalog', catalogRouter);
+apiRouter.use('/listings', listingsRouter);
+apiRouter.use('/sets', setsRouter);

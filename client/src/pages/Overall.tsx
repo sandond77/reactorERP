@@ -1,10 +1,11 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, ChevronUp, ChevronDown, ChevronsUpDown, ListFilter, X } from 'lucide-react';
+import { ExternalLink, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { formatCurrency } from '../lib/utils';
 import { SlabDetailModal } from '../components/inventory/SlabDetailModal';
+import { ColHeader, useColWidths } from '../components/ui/TableHeader';
 
 interface SlabRow {
   id: string;
@@ -75,131 +76,6 @@ function RoiCell({ roi, afterEbay, raw, grading }: { roi: number | null; afterEb
   return <span className={pct >= 0 ? 'text-green-400' : 'text-red-400'}>{pct.toFixed(2)}%</span>;
 }
 
-// ─── Column filter dropdown ───────────────────────────────────────────────────
-
-interface ColumnFilterProps {
-  options: string[];
-  selected: string[];
-  onChange: (vals: string[]) => void;
-}
-
-function ColumnFilter({ options, selected, onChange }: ColumnFilterProps) {
-  const [open, setOpen] = useState(false);
-  const [filterSearch, setFilterSearch] = useState('');
-  const ref = useRef<HTMLDivElement>(null);
-  const active = selected.length > 0 && selected.length < options.length;
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const visible = options.filter((o) => o.toLowerCase().includes(filterSearch.toLowerCase()));
-  const allChecked = selected.length === 0 || selected.length === options.length;
-
-  function toggleAll() { onChange(allChecked ? [] : [...options]); }
-  function toggle(val: string) {
-    const next = selected.includes(val) ? selected.filter((v) => v !== val) : [...selected, val];
-    onChange(next.length === options.length ? [] : next);
-  }
-
-  return (
-    <div ref={ref} className="relative inline-flex">
-      <button
-        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        className={`p-0.5 rounded transition-colors ${active ? 'text-indigo-400' : 'text-zinc-600 hover:text-zinc-400'}`}
-        title="Filter"
-      >
-        <ListFilter size={11} />
-      </button>
-
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl">
-          {options.length > 8 && (
-            <div className="px-2 pt-2">
-              <input
-                autoFocus
-                value={filterSearch}
-                onChange={(e) => setFilterSearch(e.target.value)}
-                placeholder="Search…"
-                className="w-full px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 placeholder:text-zinc-500 focus:outline-none"
-              />
-            </div>
-          )}
-          <label className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 cursor-pointer hover:bg-zinc-800/50">
-            <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-indigo-500" />
-            <span className="text-xs text-zinc-300 font-medium">(Select All)</span>
-          </label>
-          <div className="max-h-56 overflow-y-auto">
-            {visible.map((opt) => (
-              <label key={opt} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-zinc-800/50">
-                <input
-                  type="checkbox"
-                  checked={allChecked || selected.includes(opt)}
-                  onChange={() => toggle(opt)}
-                  className="accent-indigo-500"
-                />
-                <span className="text-xs text-zinc-300 truncate">{opt}</span>
-              </label>
-            ))}
-          </div>
-          {active && (
-            <div className="px-3 py-2 border-t border-zinc-800">
-              <button onClick={() => onChange([])} className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-200">
-                <X size={10} /> Clear filter
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── Column header ────────────────────────────────────────────────────────────
-
-interface ColHeaderProps {
-  label: string;
-  col?: string;
-  sortCol: string | null;
-  sortDir: SortDir;
-  onSort: (col: string) => void;
-  filterOptions?: string[];
-  filterSelected?: string[];
-  onFilterChange?: (vals: string[]) => void;
-  align?: 'left' | 'right' | 'center';
-  className?: string;
-}
-
-function ColHeader({ label, col, sortCol, sortDir, onSort, filterOptions, filterSelected, onFilterChange, align = 'left', className = '' }: ColHeaderProps) {
-  const isActive = col && sortCol === col;
-  const SortBtn = col ? (
-    <button onClick={() => onSort(col)} className="hover:text-zinc-300 transition-colors shrink-0">
-      {isActive ? (sortDir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />) : <ChevronsUpDown size={11} className="opacity-30" />}
-    </button>
-  ) : null;
-
-  const FilterBtn = filterOptions?.length && onFilterChange ? (
-    <ColumnFilter options={filterOptions} selected={filterSelected ?? []} onChange={onFilterChange} />
-  ) : null;
-
-  const labelActive = (filterSelected ?? []).length > 0 && (filterSelected ?? []).length < (filterOptions?.length ?? 0);
-
-  return (
-    <th className={`px-3 py-2 font-medium ${className}`}>
-      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
-        {align === 'right' && SortBtn}
-        <span className={labelActive ? 'text-indigo-400' : ''}>{label}</span>
-        {align !== 'right' && SortBtn}
-        {FilterBtn}
-      </div>
-    </th>
-  );
-}
-
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export function Overall() {
@@ -209,6 +85,7 @@ export function Overall() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sortCol, setSortCol] = useState<string | null>('cert_number');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const { rz, totalWidth } = useColWidths({ cert_number: 120, card_name: 720, grade: 130, company: 90, is_listed: 80, listed_price: 110, listing: 65, raw_cost: 85, grading_cost: 110, strike_price: 105, after_ebay: 100, net: 85, raw_purchase_date: 150, date_listed: 110, date_sold: 105, roi_pct: 75, notes: 180, card_show: 100 });
 
   // Per-column filters
   const [selectedSlab, setSelectedSlab] = useState<SlabRow | null>(null);
@@ -309,33 +186,33 @@ export function Overall() {
         ) : !data?.data.length ? (
           <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">No records found.</div>
         ) : (
-          <table className="w-full text-xs whitespace-nowrap border-collapse">
+          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
-              <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wide">
-                <ColHeader label="Cert"              col="cert_number"       {...sh} />
-                <ColHeader label="Card"              col="card_name"         {...sh} className="min-w-[280px]" />
-                <ColHeader label="Grade"             col="grade"             {...sh}
+              <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
+                <ColHeader label="Cert"              col="cert_number"       {...sh} {...rz('cert_number')} />
+                <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card_name')} />
+                <ColHeader label="Grade"             col="grade"             {...sh} {...rz('grade')}
                   filterOptions={filterOptions?.grades}    filterSelected={fGrade}    onFilterChange={(v) => { setFGrade(v); setPage(1); }} />
-                <ColHeader label="Company"                                   {...sh}
+                <ColHeader label="Company"                                   {...sh} {...rz('company')}
                   filterOptions={filterOptions?.companies} filterSelected={fCompany}  onFilterChange={(v) => { setFCompany(v); setPage(1); }} align="center" />
-                <ColHeader label="Listed?"           col="is_listed"         {...sh} align="center"
+                <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('is_listed')} align="center"
                   filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
-                <ColHeader label="Listed Price"      col="listed_price"      {...sh} align="right" />
-                <ColHeader label="Listing"                                   {...sh} align="center" />
-                <ColHeader label="Raw"               col="raw_cost"          {...sh} align="right" />
-                <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} align="right" />
-                <ColHeader label="Strike Price"      col="strike_price"      {...sh} align="right" />
-                <ColHeader label="After Ebay"        col="after_ebay"        {...sh} align="right" />
-                <ColHeader label="Net"               col="net"               {...sh} align="right" />
-                <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh}
+                <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" />
+                <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" />
+                <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw_cost')} align="right" />
+                <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" />
+                <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike_price')} align="right" />
+                <ColHeader label="After Ebay"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" />
+                <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" />
+                <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('raw_purchase_date')}
                   filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }} />
-                <ColHeader label="Date Listed"       col="date_listed"       {...sh}
+                <ColHeader label="Date Listed"       col="date_listed"       {...sh} {...rz('date_listed')}
                   filterOptions={filterOptions?.listed_years}   filterSelected={fListYear}  onFilterChange={(v) => { setFListYear(v); setPage(1); }} />
-                <ColHeader label="Date Sold"         col="date_sold"         {...sh}
+                <ColHeader label="Date Sold"         col="date_sold"         {...sh} {...rz('date_sold')}
                   filterOptions={filterOptions?.sold_years}     filterSelected={fSoldYear}  onFilterChange={(v) => { setFSoldYear(v); setPage(1); }} />
-                <ColHeader label="% ROI"             col="roi_pct"           {...sh} align="right" />
-                <ColHeader label="Notes"                                     {...sh} className="min-w-[180px]" />
-                <ColHeader label="Card Show?"                                {...sh} align="center"
+                <ColHeader label="% ROI"             col="roi_pct"           {...sh} {...rz('roi_pct')} align="right" />
+                <ColHeader label="Notes"                                     {...sh} {...rz('notes')} />
+                <ColHeader label="Card Show?"                                {...sh} {...rz('card_show')} align="center"
                   filterOptions={filterOptions?.card_show} filterSelected={fCardShow} onFilterChange={(v) => { setFCardShow(v); setPage(1); }} />
               </tr>
             </thead>
@@ -389,7 +266,7 @@ export function Overall() {
       )}
 
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{(data.total ?? 0).toLocaleString()} total records</span>
           {data.total_pages > 1 && (
             <div className="flex items-center gap-2">
