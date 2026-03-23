@@ -452,9 +452,8 @@ export async function buildLookupWithDbAliases(
  *                  Use 'P' for generic promos if you only have era info.
  * @param cardNumber  Raw card number string — will be zero-padded to 3 digits
  */
-export function generatePartNumber(language: 'EN' | 'JP', setCode: string, cardNumber: string, rarity?: string): string {
+export function generatePartNumber(language: 'EN' | 'JP', setCode: string, cardNumber: string): string {
   const rawNum = cardNumber.split('/')[0].trim();
   const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
-  const rarityPart = rarity ? `-${rarity.toUpperCase().replace(/\s+/g, '-')}` : '';
-  return `PKMN-${language}-${setCode}-${paddedNum}${rarityPart}`;
+  return `PKMN-${language}-${setCode}-${paddedNum}`;
 }

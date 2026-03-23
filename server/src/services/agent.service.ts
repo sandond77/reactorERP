@@ -222,7 +222,7 @@ async function enrichWithSku(suggestions: CardInfoResult[]): Promise<CardInfoRes
     const rawCode = s.set_code ?? s.set_name;
     if (!rawCode) return { ...s, catalog_exists: false };
     const setCode = lookupSetCode(lang, rawCode) ?? lookupSetCode(lang, s.set_name ?? '') ?? rawCode;
-    const sku = generatePartNumber(lang, setCode, s.card_number, s.rarity ?? undefined);
+    const sku = generatePartNumber(lang, setCode, s.card_number);
     const row = await db.selectFrom('card_catalog').select(['id', 'card_name']).where('sku', '=', sku).executeTakeFirst();
     if (!row) return { ...s, sku, catalog_exists: false };
     // Use the established card name from an existing inventory entry for this SKU
