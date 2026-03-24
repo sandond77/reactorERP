@@ -23,6 +23,7 @@ export interface CardFilters {
   language?: string;
   condition?: string;
   purchase_type?: string;
+  decision?: string;
 }
 
 export async function listCards(
@@ -56,6 +57,8 @@ export async function listCards(
       'sd.grade_label',
       'sd.company as grading_company',
       'sd.cert_number',
+      'ci.decision',
+      'ci.notes',
     ])
     .where('ci.user_id', '=', userId)
     .where('ci.deleted_at', 'is', null);
@@ -81,6 +84,7 @@ export async function listCards(
     query = vals.length === 1 ? query.where('ci.condition', '=', vals[0]) : query.where('ci.condition', 'in', vals as any);
   }
   if (filters.purchase_type) query = query.where('ci.purchase_type', '=', filters.purchase_type as any);
+  if (filters.decision) query = query.where('ci.decision', '=', filters.decision as any);
   if (filters.search) {
     const term = `%${filters.search}%`;
     query = query.where((eb) =>

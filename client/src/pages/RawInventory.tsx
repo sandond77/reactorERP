@@ -23,6 +23,7 @@ interface RawCardRow {
   purchased_at: string | null;
   notes: string | null;
   status: string;
+  decision: string | null;
 }
 
 interface RawFilterOptions {
@@ -35,8 +36,11 @@ type SortDir = 'asc' | 'desc';
 
 const STATUS_LABELS: Record<string, string> = {
   purchased_raw: 'Purchased',
-  inspected: 'Inspected',
+  inspected:     'Inspected',
+  raw_for_sale:  'For Sale',
 };
+
+type DecisionTab = 'all' | 'sell_raw' | 'grade';
 
 const RAW_FILTER_DEFAULTS = {
   sortCol: null as string | null,
@@ -44,6 +48,7 @@ const RAW_FILTER_DEFAULTS = {
   fGame: null as string[] | null,
   fLanguage: null as string[] | null,
   fCondition: null as string[] | null,
+  decisionTab: 'all' as DecisionTab,
   search: '',
 };
 
@@ -58,6 +63,7 @@ export function RawInventory() {
   const [fGame, setFGame] = useState<string[] | null>(saved.fGame);
   const [fLanguage, setFLanguage] = useState<string[] | null>(saved.fLanguage);
   const [fCondition, setFCondition] = useState<string[] | null>(saved.fCondition);
+  const [decisionTab, setDecisionTab] = useState<DecisionTab>(saved.decisionTab);
   const [addOpen, setAddOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const MINS = {
@@ -78,8 +84,8 @@ export function RawInventory() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('raw-inventory', { sortCol, sortDir, fGame, fLanguage, fCondition, search });
-  }, [sortCol, sortDir, fGame, fLanguage, fCondition, search]);
+    saveFilters('raw-inventory', { sortCol, sortDir, fGame, fLanguage, fCondition, decisionTab, search });
+  }, [sortCol, sortDir, fGame, fLanguage, fCondition, decisionTab, search]);
 
   const handleSort = useCallback((col: string) => {
     setSortCol((prev) => {
@@ -102,10 +108,20 @@ export function RawInventory() {
     return sel;
   }
 
+  // Decision tab drives status param:
+  // all      → purchased_raw + inspected + raw_for_sale
+  // sell_raw → raw_for_sale only
+  // grade    → inspected (decision=grade) only — backend filters by decision
+  const statusParam =
+    decisionTab === 'sell_raw' ? 'raw_for_sale' :
+    decisionTab === 'grade'    ? 'inspected' :
+    'purchased_raw,inspected,raw_for_sale';
+
   const params = {
     page,
     limit: 50,
-    status: 'purchased_raw,inspected',
+    status: statusParam,
+    decision: decisionTab === 'grade' ? 'grade' : undefined,
     search: debouncedSearch || undefined,
     card_game: activeFilter(fGame, filterOptions?.games)?.join(','),
     language: activeFilter(fLanguage, filterOptions?.languages)?.join(','),
@@ -124,6 +140,12 @@ export function RawInventory() {
     setPage(1);
   }
 
+  const DECISION_TABS: { key: DecisionTab; label: string }[] = [
+    { key: 'all',      label: 'All' },
+    { key: 'sell_raw', label: 'For Sale' },
+    { key: 'grade',    label: 'To Grade' },
+  ];
+
   const sh = { sortCol, sortDir, onSort: handleSort };
 
   return (
@@ -137,6 +159,15 @@ export function RawInventory() {
               <X size={12} /> Clear filters
             </button>
           )}
+          <div className="flex gap-1">
+            {DECISION_TABS.map((t) => (
+              <button key={t.key}
+                onClick={() => { setDecisionTab(t.key); setPage(1); }}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${decisionTab === t.key ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {t.label}
+              </button>
+            ))}
+          </div>
           <input
             type="text"
             placeholder="Search card…"

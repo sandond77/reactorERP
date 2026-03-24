@@ -32,6 +32,9 @@ export type ListingStatus = 'active' | 'sold' | 'expired' | 'cancelled';
 
 export type ImportStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
+export type RawPurchaseType = 'raw' | 'bulk';
+export type RawPurchaseStatus = 'ordered' | 'received' | 'cancelled';
+
 export type UserPlan = 'free' | 'pro' | 'enterprise';
 
 // ============================================================
@@ -94,6 +97,8 @@ export interface CardInstancesTable {
   image_front_url: string | null;
   image_back_url: string | null;
   purchased_at: Date | null;
+  raw_purchase_id: string | null;
+  decision: string | null;
   is_card_show: Generated<boolean>;
   is_personal_collection: Generated<boolean>;
   created_at: Generated<Date>;
@@ -205,6 +210,38 @@ export interface AuditLogTable {
   created_at: Generated<Date>;
 }
 
+export interface RawPurchasesTable {
+  id: Generated<string>;
+  user_id: string;
+  purchase_id: string;
+  type: RawPurchaseType;
+  source: string | null;
+  order_number: string | null;
+  language: string;
+  catalog_id: string | null;
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  total_cost_yen: number | null;
+  fx_rate: number | null;
+  total_cost_usd: number | null;
+  card_count: number;
+  status: RawPurchaseStatus;
+  purchased_at: Date | null;
+  received_at: Date | null;
+  reserved: Generated<boolean>;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface RawPurchaseSequencesTable {
+  user_id: string;
+  year: number;
+  type: RawPurchaseType;
+  next_seq: number;
+}
+
 export interface PokemonSetAliasesTable {
   id: Generated<string>;
   language: string;
@@ -229,6 +266,8 @@ export interface Database {
   csv_imports: CsvImportsTable;
   audit_log: AuditLogTable;
   pokemon_set_aliases: PokemonSetAliasesTable;
+  raw_purchases: RawPurchasesTable;
+  raw_purchase_sequences: RawPurchaseSequencesTable;
 }
 
 // ============================================================
