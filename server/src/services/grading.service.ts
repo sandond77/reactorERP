@@ -137,6 +137,7 @@ export async function listSlabs(
     listed_price: number | null;
     listing_url: string | null;
     listing_platform: string | null;
+    listing_id: string | null;
     raw_cost: number;
     grading_cost: number;
     strike_price: number | null;
@@ -147,6 +148,7 @@ export async function listSlabs(
     roi_pct: number | null;
     notes: string | null;
     is_card_show: boolean;
+    order_details_link: string | null;
   }>`
     SELECT
       ci.id,
@@ -160,6 +162,7 @@ export async function listSlabs(
       l.list_price                                    AS listed_price,
       l.ebay_listing_url                              AS listing_url,
       l.platform                                      AS listing_platform,
+      l.id                                            AS listing_id,
       ci.purchase_cost                                AS raw_cost,
       sd.grading_cost,
       s.sale_price                                    AS strike_price,
@@ -180,7 +183,8 @@ export async function listSlabs(
         ELSE NULL
       END                                             AS roi_pct,
       ci.notes,
-      (l.platform = 'card_show')                      AS is_card_show
+      (l.platform = 'card_show')                      AS is_card_show,
+      s.order_details_link
     FROM card_instances ci
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
@@ -190,7 +194,7 @@ export async function listSlabs(
       WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
     ) l ON true
     LEFT JOIN LATERAL (
-      SELECT sale_price, platform_fees, shipping_cost, sold_at
+      SELECT sale_price, platform_fees, shipping_cost, sold_at, order_details_link
       FROM sales
       WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
     ) s ON true

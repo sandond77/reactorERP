@@ -20,6 +20,7 @@ interface SlabRow {
   listed_price: number | null;
   listing_url: string | null;
   listing_platform: string | null;
+  listing_id: string | null;
   raw_cost: number;
   grading_cost: number;
   strike_price: number | null;
@@ -30,6 +31,7 @@ interface SlabRow {
   roi_pct: number | null;
   notes: string | null;
   is_card_show: boolean;
+  order_details_link: string | null;
 }
 
 interface FilterOptions {
@@ -269,13 +271,14 @@ export function Inventory() {
                   </td>
                   <td className="px-3 py-1.5 text-right text-zinc-300">{fmt(row.listed_price)}</td>
                   <td className="px-3 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
-                    {row.listing_url ? (
-                      <a
-                        href={row.listing_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex text-blue-400 hover:text-blue-300"
-                      >
+                    {row.order_details_link ? (
+                      <a href={row.order_details_link} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex text-amber-400 hover:text-amber-300" title="Order details">
+                        <ExternalLink size={12} />
+                      </a>
+                    ) : row.listing_url ? (
+                      <a href={row.listing_url} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex text-blue-400 hover:text-blue-300" title="eBay listing">
                         <ExternalLink size={12} />
                       </a>
                     ) : (

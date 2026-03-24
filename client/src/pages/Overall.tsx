@@ -17,6 +17,8 @@ interface SlabRow {
   is_listed: boolean;
   listed_price: number | null;
   listing_url: string | null;
+  listing_id: string | null;
+  order_details_link: string | null;
   raw_cost: number;
   grading_cost: number;
   strike_price: number | null;
@@ -246,9 +248,15 @@ export function Overall() {
                       {row.is_listed ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}
                     </td>
                     <td className="px-3 py-1 text-right text-zinc-300">{fmt(row.listed_price)}</td>
-                    <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()} >
-                      {row.listing_url ? (
-                        <a href={row.listing_url} target="_blank" rel="noopener noreferrer" className="inline-flex text-blue-400 hover:text-blue-300">
+                    <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
+                      {row.order_details_link ? (
+                        <a href={row.order_details_link} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex text-amber-400 hover:text-amber-300" title="Order details">
+                          <ExternalLink size={11} />
+                        </a>
+                      ) : row.listing_url ? (
+                        <a href={row.listing_url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex text-blue-400 hover:text-blue-300" title="eBay listing">
                           <ExternalLink size={11} />
                         </a>
                       ) : ''}

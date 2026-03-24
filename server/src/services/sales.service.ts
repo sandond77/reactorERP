@@ -180,6 +180,8 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
     ...(input.currency !== undefined && { currency: input.currency }),
     ...(input.sold_at !== undefined && { sold_at: input.sold_at }),
     ...(input.unique_id !== undefined && { unique_id: input.unique_id }),
+    ...(input.unique_id_2 !== undefined && { unique_id_2: input.unique_id_2 }),
+    ...(input.order_details_link !== undefined && { order_details_link: input.order_details_link }),
   }).where('id', '=', saleId).where('user_id', '=', userId).execute();
 
   return getSaleById(userId, saleId);
