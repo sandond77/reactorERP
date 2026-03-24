@@ -8,7 +8,8 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency, formatDate } from '../lib/utils';
-import { ColHeader, useColWidths } from '../components/ui/TableHeader';
+import { loadFilters, saveFilters } from '../lib/filter-store';
+import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import toast from 'react-hot-toast';
 
 interface Submission {
@@ -187,21 +188,42 @@ function SubmitGradingModal({ onClose }: { onClose: () => void }) {
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+const GRADING_FILTER_DEFAULTS = {
+  sortCol: 'submitted_at' as string | null,
+  sortDir: 'desc' as SortDir,
+  fCompany: null as string[] | null,
+  fStatus: null as string[] | null,
+  search: '',
+};
+
 export function Grading() {
+  const saved = loadFilters('grading', GRADING_FILTER_DEFAULTS);
   const [page, setPage] = useState(1);
-  const [sortCol, setSortCol] = useState<string | null>('submitted_at');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [fCompany, setFCompany] = useState<string[] | null>(null);
-  const [fStatus, setFStatus] = useState<string[] | null>(null);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [sortCol, setSortCol] = useState<string | null>(saved.sortCol);
+  const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
+  const [fCompany, setFCompany] = useState<string[] | null>(saved.fCompany);
+  const [fStatus, setFStatus] = useState<string[] | null>(saved.fStatus);
+  const [search, setSearch] = useState(saved.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [showAddModal, setShowAddModal] = useState(false);
-  const { rz, totalWidth } = useColWidths({ card: 600, company: 100, status: 110, cost: 110, submitted: 120, est_return: 120 });
+  const MINS = {
+    card:       colMinWidth('Card',        true,  false),
+    company:    colMinWidth('Company',     true,  true),
+    status:     colMinWidth('Status',      true,  true),
+    cost:       colMinWidth('Cost',        true,  false),
+    submitted:  colMinWidth('Submitted',   true,  false),
+    est_return: colMinWidth('Est. Return', true,  false),
+  };
+  const { rz, totalWidth } = useColWidths({ card: Math.max(MINS.card, 600), company: Math.max(MINS.company, 100), status: Math.max(MINS.status, 110), cost: Math.max(MINS.cost, 110), submitted: Math.max(MINS.submitted, 120), est_return: Math.max(MINS.est_return, 120) });
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    saveFilters('grading', { sortCol, sortDir, fCompany, fStatus, search });
+  }, [sortCol, sortDir, fCompany, fStatus, search]);
 
   const handleSort = useCallback((col: string) => {
     setSortCol((prev) => {
@@ -274,14 +296,14 @@ export function Grading() {
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
-                <ColHeader label="Card"        col="card_name"        {...sh} {...rz('card')} />
-                <ColHeader label="Company"     col="company"          {...sh} {...rz('company')}
+                <ColHeader label="Card"        col="card_name"        {...sh} {...rz('card')} minWidth={MINS.card} />
+                <ColHeader label="Company"     col="company"          {...sh} {...rz('company')} minWidth={MINS.company}
                   filterOptions={filterOptions?.companies} filterSelected={fCompany} onFilterChange={(v) => { setFCompany(v); setPage(1); }} />
-                <ColHeader label="Status"      col="status"           {...sh} {...rz('status')}
+                <ColHeader label="Status"      col="status"           {...sh} {...rz('status')} minWidth={MINS.status}
                   filterOptions={filterOptions?.statuses} filterSelected={fStatus} onFilterChange={(v) => { setFStatus(v); setPage(1); }} />
-                <ColHeader label="Cost"        col="grading_fee"      {...sh} {...rz('cost')} align="right" />
-                <ColHeader label="Submitted"   col="submitted_at"     {...sh} {...rz('submitted')} />
-                <ColHeader label="Est. Return" col="estimated_return" {...sh} {...rz('est_return')} />
+                <ColHeader label="Cost"        col="grading_fee"      {...sh} {...rz('cost')} align="right" minWidth={MINS.cost} />
+                <ColHeader label="Submitted"   col="submitted_at"     {...sh} {...rz('submitted')} minWidth={MINS.submitted} />
+                <ColHeader label="Est. Return" col="estimated_return" {...sh} {...rz('est_return')} minWidth={MINS.est_return} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">

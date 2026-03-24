@@ -7,7 +7,8 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency, formatDate } from '../lib/utils';
-import { ColHeader, useColWidths } from '../components/ui/TableHeader';
+import { loadFilters, saveFilters } from '../lib/filter-store';
+import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import toast from 'react-hot-toast';
 
 interface Sale {
@@ -52,6 +53,7 @@ interface SlabResult {
   listed_price: number | null;
   listing_id: string | null;
   is_listed: boolean;
+  is_personal_collection: boolean;
 }
 
 type SortDir = 'asc' | 'desc';
@@ -102,16 +104,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const { data: searchResults, isFetching: isSearching } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['card-name-search', debouncedSearch],
     queryFn: () => api.get('/grading/slabs', {
-      params: { search: debouncedSearch, limit: 100, status: 'unsold', sort_by: 'card_name', sort_dir: 'asc' },
+      params: { search: debouncedSearch, limit: 100, status: 'unsold', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
     }).then(r => r.data),
     enabled: debouncedSearch.length >= 2 && step === 'search',
   });
 
-  // Phase 2: fetch all copies of selected card name, sorted FIFO
+  // Phase 2: fetch all copies of selected card name, sorted by cert number (FIFO)
   const { data: copiesResult, isFetching: isLoadingCopies } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['card-copies', selectedCardName],
     queryFn: () => api.get('/grading/slabs', {
-      params: { search: selectedCardName, limit: 200, status: 'unsold', sort_by: 'raw_purchase_date', sort_dir: 'asc' },
+      params: { search: selectedCardName, limit: 200, status: 'unsold', sort_by: 'cert_number', sort_dir: 'asc', personal_collection: 'no' },
     }).then(r => r.data),
     enabled: !!selectedCardName && step === 'copies',
   });
@@ -129,7 +131,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     : [];
 
   // Filter copies to exact name match, then optionally to listed-only
-  const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName) ?? [];
+  const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName && !c.is_personal_collection) ?? [];
   const copies = listedOnly ? allCopies.filter(c => c.is_listed) : allCopies;
   const listedCount = allCopies.filter(c => c.is_listed).length;
 
@@ -514,21 +516,45 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+const SALES_FILTER_DEFAULTS = {
+  sortCol: 'sold_at' as string | null,
+  sortDir: 'desc' as SortDir,
+  fPlatform: null as string[] | null,
+  search: '',
+};
+
 export function Sales() {
+  const saved = loadFilters('sales', SALES_FILTER_DEFAULTS);
   const [page, setPage] = useState(1);
-  const [sortCol, setSortCol] = useState<string | null>('sold_at');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
-  const [fPlatform, setFPlatform] = useState<string[] | null>(null);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [sortCol, setSortCol] = useState<string | null>(saved.sortCol);
+  const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
+  const [fPlatform, setFPlatform] = useState<string[] | null>(saved.fPlatform);
+  const [search, setSearch] = useState(saved.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
-  const { rz, totalWidth } = useColWidths({ date: 115, cert: 130, card: 460, sale_method: 140, raw_cost: 105, grading_cost: 130, listed_price: 130, strike: 130, after_ebay: 130, net: 105 });
+  const MINS = {
+    date:         colMinWidth('Date Sold',     true,  false),
+    cert:         colMinWidth('Cert',          true,  false),
+    card:         colMinWidth('Card',          true,  false),
+    sale_method:  colMinWidth('Sale Method',   true,  true),
+    raw_cost:     colMinWidth('Raw Cost',      true,  false),
+    grading_cost: colMinWidth('Grading Cost',  true,  false),
+    listed_price: colMinWidth('Listing Price', true,  false),
+    strike:       colMinWidth('Strike Price',  true,  false),
+    after_ebay:   colMinWidth('After Fees',    true,  false),
+    net:          colMinWidth('Net',           true,  false),
+  };
+  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 130), card: Math.max(MINS.card, 460), sale_method: Math.max(MINS.sale_method, 140), raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    saveFilters('sales', { sortCol, sortDir, fPlatform, search });
+  }, [sortCol, sortDir, fPlatform, search]);
 
   const handleSort = useCallback((col: string) => {
     setSortCol((prev) => {
@@ -600,17 +626,17 @@ export function Sales() {
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
-                <ColHeader label="Date Sold"      col="sold_at"      {...sh} {...rz('date')} />
-                <ColHeader label="Cert"           col="cert_number"  {...sh} {...rz('cert')} />
-                <ColHeader label="Card"           col="card_name"    {...sh} {...rz('card')} />
-                <ColHeader label="Sale Method"    col="platform"     {...sh} {...rz('sale_method')}
+                <ColHeader label="Date Sold"      col="sold_at"      {...sh} {...rz('date')} minWidth={MINS.date} />
+                <ColHeader label="Cert"           col="cert_number"  {...sh} {...rz('cert')} minWidth={MINS.cert} />
+                <ColHeader label="Card"           col="card_name"    {...sh} {...rz('card')} minWidth={MINS.card} />
+                <ColHeader label="Sale Method"    col="platform"     {...sh} {...rz('sale_method')} minWidth={MINS.sale_method}
                   filterOptions={filterOptions?.platforms} filterSelected={fPlatform} onFilterChange={(v) => { setFPlatform(v); setPage(1); }} />
-                <ColHeader label="Raw Cost"       col="raw_cost"     {...sh} {...rz('raw_cost')} align="right" />
-                <ColHeader label="Grading Cost"   col="grading_cost" {...sh} {...rz('grading_cost')} align="right" />
-                <ColHeader label="Listing Price"  col="listed_price" {...sh} {...rz('listed_price')} align="right" />
-                <ColHeader label="Strike Price"   col="sale_price"   {...sh} {...rz('strike')} align="right" />
-                <ColHeader label="After Fees"     col="net_proceeds" {...sh} {...rz('after_ebay')} align="right" />
-                <ColHeader label="Net"            col="profit"       {...sh} {...rz('net')} align="right" />
+                <ColHeader label="Raw Cost"       col="raw_cost"     {...sh} {...rz('raw_cost')} align="right" minWidth={MINS.raw_cost} />
+                <ColHeader label="Grading Cost"   col="grading_cost" {...sh} {...rz('grading_cost')} align="right" minWidth={MINS.grading_cost} />
+                <ColHeader label="Listing Price"  col="listed_price" {...sh} {...rz('listed_price')} align="right" minWidth={MINS.listed_price} />
+                <ColHeader label="Strike Price"   col="sale_price"   {...sh} {...rz('strike')} align="right" minWidth={MINS.strike} />
+                <ColHeader label="After Fees"     col="net_proceeds" {...sh} {...rz('after_ebay')} align="right" minWidth={MINS.after_ebay} />
+                <ColHeader label="Net"            col="profit"       {...sh} {...rz('net')} align="right" minWidth={MINS.net} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">

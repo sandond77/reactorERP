@@ -50,8 +50,9 @@ const slabsQuerySchema = z.object({
   sort_dir: z.enum(['asc', 'desc']).default('desc'),
   companies: z.string().optional(),
   grades: z.string().optional(),
-  is_listed: z.string().optional(),    // 'yes' | 'no'
-  is_card_show: z.string().optional(), // 'yes' | 'no'
+  is_listed: z.string().optional(),             // 'yes' | 'no'
+  is_card_show: z.string().optional(),          // 'yes' | 'no'
+  personal_collection: z.string().optional(),   // 'yes' | 'no'
   purchase_years: z.string().optional(),
   listed_years: z.string().optional(),
   sold_years: z.string().optional(),
@@ -79,7 +80,8 @@ export async function listSlabs(req: Request, res: Response, next: NextFunction)
       q.is_card_show,
       splitCSV(q.purchase_years),
       splitCSV(q.listed_years),
-      splitCSV(q.sold_years)
+      splitCSV(q.sold_years),
+      q.personal_collection
     );
     res.json(result);
   } catch (err) { next(err); }

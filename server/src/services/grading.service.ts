@@ -73,6 +73,7 @@ export async function getSlabFilterOptions(userId: string) {
     grades: grades.rows.map((r) => r.value),
     listed: ['Yes', 'No'],
     card_show: ['Yes', 'No'],
+    personal_collection: ['Yes', 'No'],
     purchase_years: purchaseYears.rows.map((r) => r.value),
     listed_years: listedYears.rows.map((r) => r.value),
     sold_years: soldYears.rows.map((r) => r.value),
@@ -92,7 +93,8 @@ export async function listSlabs(
   isCardShow?: string,
   purchaseYears?: string[],
   listedYears?: string[],
-  soldYears?: string[]
+  soldYears?: string[],
+  personalCollection?: string
 ) {
   const offset = getPaginationOffset(pagination.page, pagination.limit);
   const status = statusFilter === 'all' || !statusFilter ? null : statusFilter;
@@ -105,9 +107,12 @@ export async function listSlabs(
   const listedCond   = isListed === 'yes' ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id)`
                      : isListed === 'no'  ? sql`AND NOT EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id)`
                      : sql``;
-  const cardShowCond = isCardShow === 'yes' ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.platform = 'card_show')`
-                     : isCardShow === 'no'  ? sql`AND NOT EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.platform = 'card_show')`
+  const cardShowCond = isCardShow === 'yes' ? sql`AND ci.is_card_show = true`
+                     : isCardShow === 'no'  ? sql`AND ci.is_card_show = false`
                      : sql``;
+  const personalCollectionCond = personalCollection === 'yes' ? sql`AND ci.is_personal_collection = true`
+                                : personalCollection === 'no'  ? sql`AND ci.is_personal_collection = false`
+                                : sql``;
   const purchaseYearIn = purchaseYears === undefined ? sql`` : purchaseYears.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql`AND 1=0`;
   const listedYearIn   = listedYears   === undefined ? sql`` : listedYears.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
   const soldYearIn     = soldYears     === undefined ? sql`` : soldYears.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
@@ -120,7 +125,7 @@ export async function listSlabs(
     AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${search ? sql`AND (ci.card_name_override ILIKE ${'%' + search + '%'} OR sd.cert_number::text ILIKE ${'%' + search + '%'})` : sql``}
-    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
   `.execute(db);
 
   const total = Number(countResult.rows[0]?.count ?? 0);
@@ -148,6 +153,7 @@ export async function listSlabs(
     roi_pct: number | null;
     notes: string | null;
     is_card_show: boolean;
+    is_personal_collection: boolean;
     order_details_link: string | null;
   }>`
     SELECT
@@ -183,7 +189,8 @@ export async function listSlabs(
         ELSE NULL
       END                                             AS roi_pct,
       ci.notes,
-      (l.platform = 'card_show')                      AS is_card_show,
+      ci.is_card_show,
+      ci.is_personal_collection,
       s.order_details_link
     FROM card_instances ci
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
@@ -202,7 +209,7 @@ export async function listSlabs(
     AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${search ? sql`AND (ci.card_name_override ILIKE ${'%' + search + '%'} OR sd.cert_number::text ILIKE ${'%' + search + '%'})` : sql``}
-    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
     ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
     LIMIT ${pagination.limit} OFFSET ${offset}
   `.execute(db);

@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Package, PackageOpen, Star, TrendingUp, ListOrdered, BarChart3, Upload, Zap, LayoutGrid, Layers } from 'lucide-react';
+import { LayoutDashboard, Package, PackageOpen, Star, TrendingUp, ListOrdered, BarChart3, Upload, Zap, LayoutGrid, Layers, ShoppingBag } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 
@@ -11,6 +11,7 @@ const NAV = [
   { to: '/parts', icon: Layers, label: 'Parts' },
   { to: '/grading', icon: Star, label: 'Grading' },
   { to: '/listings', icon: ListOrdered, label: 'Listings' },
+  { to: '/card-show', icon: ShoppingBag, label: 'Card Show' },
   { to: '/sales', icon: TrendingUp, label: 'Sales' },
   { to: '/reports', icon: BarChart3, label: 'Reports' },
   { to: '/import', icon: Upload, label: 'Import' },

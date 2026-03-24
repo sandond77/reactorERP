@@ -7,7 +7,8 @@ import { Modal } from '../components/ui/Modal';
 import { AddCardForm } from '../components/inventory/AddCardForm';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { formatCurrency, formatDate } from '../lib/utils';
-import { ColHeader, useColWidths } from '../components/ui/TableHeader';
+import { loadFilters, saveFilters } from '../lib/filter-store';
+import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 
 interface RawCardRow {
   id: string;
@@ -24,29 +25,61 @@ interface RawCardRow {
   status: string;
 }
 
+interface RawFilterOptions {
+  games: string[];
+  languages: string[];
+  conditions: string[];
+}
+
 type SortDir = 'asc' | 'desc';
-type SortKey = 'card_name' | 'card_game' | 'language' | 'condition' | 'purchase_cost' | 'purchased_at';
 
 const STATUS_LABELS: Record<string, string> = {
   purchased_raw: 'Purchased',
   inspected: 'Inspected',
 };
 
+const RAW_FILTER_DEFAULTS = {
+  sortCol: null as string | null,
+  sortDir: 'asc' as SortDir,
+  fGame: null as string[] | null,
+  fLanguage: null as string[] | null,
+  fCondition: null as string[] | null,
+  search: '',
+};
+
 export function RawInventory() {
   const qc = useQueryClient();
+  const saved = loadFilters('raw-inventory', RAW_FILTER_DEFAULTS);
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [sortCol, setSortCol] = useState<string | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [search, setSearch] = useState(saved.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
+  const [sortCol, setSortCol] = useState<string | null>(saved.sortCol);
+  const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
+  const [fGame, setFGame] = useState<string[] | null>(saved.fGame);
+  const [fLanguage, setFLanguage] = useState<string[] | null>(saved.fLanguage);
+  const [fCondition, setFCondition] = useState<string[] | null>(saved.fCondition);
   const [addOpen, setAddOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { rz, totalWidth } = useColWidths({ card: 500, game: 90, lang: 70, condition: 100, cost: 110, purchased: 140, status: 110, notes: 200 });
+  const MINS = {
+    card:      colMinWidth('Card',      true,  false),
+    game:      colMinWidth('Game',      true,  true),
+    lang:      colMinWidth('Lang',      true,  true),
+    condition: colMinWidth('Condition', true,  true),
+    cost:      colMinWidth('Cost',      true,  false),
+    purchased: colMinWidth('Purchased', true,  false),
+    status:    colMinWidth('Status',    true,  false),
+    notes:     colMinWidth('Notes',     false, false),
+  };
+  const { rz, totalWidth } = useColWidths({ card: Math.max(MINS.card, 500), game: Math.max(MINS.game, 90), lang: Math.max(MINS.lang, 70), condition: Math.max(MINS.condition, 100), cost: Math.max(MINS.cost, 110), purchased: Math.max(MINS.purchased, 140), status: Math.max(MINS.status, 110), notes: Math.max(MINS.notes, 200) });
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  useEffect(() => {
+    saveFilters('raw-inventory', { sortCol, sortDir, fGame, fLanguage, fCondition, search });
+  }, [sortCol, sortDir, fGame, fLanguage, fCondition, search]);
 
   const handleSort = useCallback((col: string) => {
     setSortCol((prev) => {
@@ -57,17 +90,39 @@ export function RawInventory() {
     setPage(1);
   }, [sortCol]);
 
+  const { data: filterOptions } = useQuery<RawFilterOptions>({
+    queryKey: ['raw-inventory-filters'],
+    queryFn: () => api.get('/cards/filters').then((r) => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  function activeFilter(sel: string[] | null, opts?: string[]): string[] | undefined {
+    if (sel === null) return undefined;
+    if (sel.length >= (opts?.length ?? Infinity)) return undefined;
+    return sel;
+  }
+
   const params = {
     page,
     limit: 50,
     status: 'purchased_raw,inspected',
     search: debouncedSearch || undefined,
+    card_game: activeFilter(fGame, filterOptions?.games)?.join(','),
+    language: activeFilter(fLanguage, filterOptions?.languages)?.join(','),
+    condition: activeFilter(fCondition, filterOptions?.conditions)?.join(','),
   };
 
   const { data, isLoading } = useQuery<PaginatedResult<RawCardRow>>({
     queryKey: ['raw-inventory', params],
     queryFn: () => api.get('/cards', { params }).then((r) => r.data),
   });
+
+  const hasActiveFilters = [fGame, fLanguage, fCondition].some((f) => f !== null && f.length > 0) || !!debouncedSearch;
+
+  function clearAllFilters() {
+    setFGame(null); setFLanguage(null); setFCondition(null); setSearch('');
+    setPage(1);
+  }
 
   const sh = { sortCol, sortDir, onSort: handleSort };
 
@@ -76,10 +131,10 @@ export function RawInventory() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Raw Inventory</h1>
         <div className="flex items-center gap-3">
-          {!!debouncedSearch && (
-            <button onClick={() => setSearch('')}
+          {hasActiveFilters && (
+            <button onClick={clearAllFilters}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
-              <X size={12} /> Clear
+              <X size={12} /> Clear filters
             </button>
           )}
           <input
@@ -102,14 +157,17 @@ export function RawInventory() {
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
-                <ColHeader label="Card"       col="card_name"     {...sh} {...rz('card')} />
-                <ColHeader label="Game"       col="card_game"     {...sh} {...rz('game')} />
-                <ColHeader label="Lang"       col="language"      {...sh} {...rz('lang')} />
-                <ColHeader label="Condition"  col="condition"     {...sh} {...rz('condition')} />
-                <ColHeader label="Cost"       col="purchase_cost" {...sh} {...rz('cost')} align="right" />
-                <ColHeader label="Purchased"  col="purchased_at"  {...sh} {...rz('purchased')} />
-                <ColHeader label="Status"     col="status"        {...sh} {...rz('status')} />
-                <ColHeader label="Notes"                          {...sh} {...rz('notes')} />
+                <ColHeader label="Card"      col="card_name"     {...sh} {...rz('card')} minWidth={MINS.card} />
+                <ColHeader label="Game"      col="card_game"     {...sh} {...rz('game')} minWidth={MINS.game}
+                  filterOptions={filterOptions?.games} filterSelected={fGame} onFilterChange={(v) => { setFGame(v); setPage(1); }} />
+                <ColHeader label="Lang"      col="language"      {...sh} {...rz('lang')} minWidth={MINS.lang}
+                  filterOptions={filterOptions?.languages} filterSelected={fLanguage} onFilterChange={(v) => { setFLanguage(v); setPage(1); }} />
+                <ColHeader label="Condition" col="condition"     {...sh} {...rz('condition')} minWidth={MINS.condition}
+                  filterOptions={filterOptions?.conditions} filterSelected={fCondition} onFilterChange={(v) => { setFCondition(v); setPage(1); }} />
+                <ColHeader label="Cost"      col="purchase_cost" {...sh} {...rz('cost')} align="right" minWidth={MINS.cost} />
+                <ColHeader label="Purchased" col="purchased_at"  {...sh} {...rz('purchased')} minWidth={MINS.purchased} />
+                <ColHeader label="Status"    col="status"        {...sh} {...rz('status')} minWidth={MINS.status} />
+                <ColHeader label="Notes"                         {...sh} {...rz('notes')} minWidth={MINS.notes} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">

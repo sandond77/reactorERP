@@ -10,9 +10,10 @@ interface ColumnFilterProps {
   options: string[];
   selected: string[] | null;
   onChange: (vals: string[] | null) => void;
+  align?: 'left' | 'right';
 }
 
-export function ColumnFilter({ options, selected, onChange }: ColumnFilterProps) {
+export function ColumnFilter({ options, selected, onChange, align = 'left' }: ColumnFilterProps) {
   const [open, setOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -56,37 +57,37 @@ export function ColumnFilter({ options, selected, onChange }: ColumnFilterProps)
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1 z-50 w-52 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl">
+        <div className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 z-50 w-max min-w-[14rem] max-w-[44rem] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl`}>
           {options.length > 8 && (
-            <div className="px-2 pt-2">
+            <div className="px-3 pt-3 pb-1">
               <input
                 autoFocus
                 value={filterSearch}
                 onChange={(e) => setFilterSearch(e.target.value)}
                 placeholder="Search…"
-                className="w-full px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 placeholder:text-zinc-500 focus:outline-none"
+                className="w-full px-3 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 placeholder:text-zinc-500 focus:outline-none"
               />
             </div>
           )}
-          <div className="p-1 max-h-60 overflow-y-auto">
-            <label className="flex items-center gap-2 px-2 py-1 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-400">
-              <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-indigo-500" />
+          <div className="p-1.5 max-h-60 overflow-y-auto">
+            <label className="flex items-center gap-2.5 px-3 py-1.5 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-400">
+              <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-indigo-500 shrink-0" />
               (Select All)
             </label>
             {visible.map((opt) => (
-              <label key={opt} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-300">
+              <label key={opt} className="flex items-center gap-2.5 px-3 py-1.5 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-300">
                 <input
                   type="checkbox"
                   checked={selected === null || selected.includes(opt)}
                   onChange={() => toggle(opt)}
-                  className="accent-indigo-500"
+                  className="accent-indigo-500 shrink-0"
                 />
                 {opt}
               </label>
             ))}
           </div>
           {active && (
-            <div className="border-t border-zinc-800 px-2 py-1">
+            <div className="border-t border-zinc-800 px-3 py-2">
               <button onClick={() => onChange(null)} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
                 <X size={10} /> Clear
               </button>
@@ -96,6 +97,25 @@ export function ColumnFilter({ options, selected, onChange }: ColumnFilterProps)
       )}
     </div>
   );
+}
+
+// ─── colMinWidth ──────────────────────────────────────────────────────────────
+// Computes minimum column width needed to fit label + sort/filter icons + padding.
+// Uses approximate char widths for uppercase text-xs font-medium with tracking-wide.
+
+export function colMinWidth(label: string, hasSort: boolean, hasFilter: boolean): number {
+  let textW = 0;
+  for (const c of label.toUpperCase()) {
+    if (c === 'M' || c === 'W') textW += 10;
+    else if (c === 'I' || c === 'J' || c === 'L') textW += 6;
+    else if (c === ' ') textW += 4;
+    else textW += 8;
+  }
+  textW += label.length * 0.6; // tracking-wide ≈ 0.05em at 12px
+  const padding = 32;           // px-4 on both sides (16px × 2)
+  const sortW   = hasSort   ? 4 + 11 : 0; // gap-1 + icon
+  const filterW = hasFilter ? 4 + 15 : 0; // gap-1 + p-0.5×2 + icon
+  return Math.ceil(padding + textW + sortW + filterW);
 }
 
 // ─── ColHeader ────────────────────────────────────────────────────────────────
@@ -109,16 +129,18 @@ export interface ColHeaderProps {
   filterOptions?: string[];
   filterSelected?: string[] | null;
   onFilterChange?: (vals: string[] | null) => void;
+  filterAlign?: 'left' | 'right';
   align?: 'left' | 'right' | 'center';
   className?: string;
   width?: number;
+  minWidth?: number;
   onWidthChange?: (newWidth: number) => void;
 }
 
 export function ColHeader({
   label, col, sortCol, sortDir, onSort,
-  filterOptions, filterSelected, onFilterChange,
-  align = 'left', className = '', width, onWidthChange,
+  filterOptions, filterSelected, onFilterChange, filterAlign = 'left',
+  align = 'left', className = '', width, minWidth = 40, onWidthChange,
 }: ColHeaderProps) {
   const isActive = col && sortCol === col;
   const SortBtn = col ? (
@@ -130,7 +152,7 @@ export function ColHeader({
   ) : null;
 
   const FilterBtn = filterOptions?.length && onFilterChange
-    ? <ColumnFilter options={filterOptions} selected={filterSelected ?? null} onChange={onFilterChange} />
+    ? <ColumnFilter options={filterOptions} selected={filterSelected ?? null} onChange={onFilterChange} align={filterAlign} />
     : null;
 
   const sel = filterSelected ?? null;
@@ -143,7 +165,7 @@ export function ColHeader({
     el.setPointerCapture(e.pointerId);
     const startX = e.clientX;
     const startWidth = width ?? 100;
-    function onMove(ev: PointerEvent) { onWidthChange!(Math.max(40, startWidth + (ev.clientX - startX))); }
+    function onMove(ev: PointerEvent) { onWidthChange!(Math.max(minWidth, startWidth + (ev.clientX - startX))); }
     function onUp() { el.removeEventListener('pointermove', onMove); el.removeEventListener('pointerup', onUp); }
     el.addEventListener('pointermove', onMove);
     el.addEventListener('pointerup', onUp);
@@ -151,7 +173,7 @@ export function ColHeader({
 
   return (
     <th
-      className={`px-3 py-2 font-medium relative select-none ${className}`}
+      className={`px-4 py-2 font-medium relative select-none ${className}`}
       style={width ? { width: `${width}px` } : undefined}
     >
       <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
@@ -162,7 +184,7 @@ export function ColHeader({
       {onWidthChange && (
         <div
           onPointerDown={handlePointerDown}
-          className="absolute top-0 h-full w-4 cursor-col-resize group flex items-center justify-end"
+          className="absolute top-0 h-full w-4 cursor-col-resize group flex items-center justify-center"
           style={{ right: '-8px' }}
         >
           <div className="h-full w-0.5 group-hover:bg-indigo-500/70 group-active:bg-indigo-500" />

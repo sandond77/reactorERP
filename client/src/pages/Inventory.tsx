@@ -7,7 +7,7 @@ import { Modal } from '../components/ui/Modal';
 import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { formatCurrency, formatDate } from '../lib/utils';
-import { ColHeader, useColWidths } from '../components/ui/TableHeader';
+import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 
 interface SlabRow {
   id: string;
@@ -101,7 +101,27 @@ export function Inventory() {
 
   const [sortCol, setSortCol] = useState<string | null>('cert_number');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const { rz, totalWidth } = useColWidths({ cert: 120, card: 680, grade: 130, company: 90, listed: 80, listed_price: 100, listing: 60, raw: 80, grading_cost: 105, strike: 95, after_ebay: 90, net: 80, purch_date: 140, date_listed: 100, date_sold: 100, roi: 70, notes: 170, card_show: 95 });
+  const MINS = {
+    cert:        colMinWidth('Cert',              true,  false),
+    card:        colMinWidth('Card',              true,  false),
+    grade:       colMinWidth('Grade',             true,  true),
+    company:     colMinWidth('Company',           false, true),
+    listed:      colMinWidth('Listed?',           true,  true),
+    listed_price: colMinWidth('Listed Price',     true,  false),
+    listing:     colMinWidth('Listing',           false, false),
+    raw:         colMinWidth('Raw',               true,  false),
+    grading_cost: colMinWidth('Grading Cost',     true,  false),
+    strike:      colMinWidth('Strike Price',      true,  false),
+    after_ebay:  colMinWidth('After Ebay',        true,  false),
+    net:         colMinWidth('Net',               true,  false),
+    purch_date:  colMinWidth('Raw Purchase Date', true,  true),
+    date_listed: colMinWidth('Date Listed',       true,  true),
+    date_sold:   colMinWidth('Date Sold',         true,  true),
+    roi:         colMinWidth('% ROI',             true,  false),
+    notes:       colMinWidth('Notes',             false, false),
+    card_show:   colMinWidth('Card Show?',        false, true),
+  };
+  const { rz, totalWidth } = useColWidths({ cert: Math.max(MINS.cert, 120), card: Math.max(MINS.card, 680), grade: Math.max(MINS.grade, 130), company: Math.max(MINS.company, 90), listed: Math.max(MINS.listed, 80), listed_price: Math.max(MINS.listed_price, 100), listing: Math.max(MINS.listing, 60), raw: Math.max(MINS.raw, 80), grading_cost: Math.max(MINS.grading_cost, 105), strike: Math.max(MINS.strike, 95), after_ebay: Math.max(MINS.after_ebay, 90), net: Math.max(MINS.net, 80), purch_date: Math.max(MINS.purch_date, 140), date_listed: Math.max(MINS.date_listed, 100), date_sold: Math.max(MINS.date_sold, 100), roi: Math.max(MINS.roi, 70), notes: Math.max(MINS.notes, 170), card_show: Math.max(MINS.card_show, 95) });
 
   const [fCompany, setFCompany] = useState<string[] | null>(null);
   const [fGrade, setFGrade] = useState<string[] | null>(null);
@@ -212,30 +232,30 @@ export function Inventory() {
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
-                <ColHeader label="Cert"              col="cert_number"       {...sh} {...rz('cert')} />
-                <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card')} />
-                <ColHeader label="Grade"             col="grade"             {...sh} {...rz('grade')}
+                <ColHeader label="Cert"              col="cert_number"       {...sh} {...rz('cert')} minWidth={MINS.cert} />
+                <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card')} minWidth={MINS.card} />
+                <ColHeader label="Grade"             col="grade"             {...sh} {...rz('grade')} minWidth={MINS.grade}
                   filterOptions={filterOptions?.grades}    filterSelected={fGrade}    onFilterChange={(v) => { setFGrade(v); setPage(1); }} />
-                <ColHeader label="Company"                                   {...sh} {...rz('company')}
+                <ColHeader label="Company"                                   {...sh} {...rz('company')} minWidth={MINS.company}
                   filterOptions={filterOptions?.companies} filterSelected={fCompany}  onFilterChange={(v) => { setFCompany(v); setPage(1); }} align="center" />
-                <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('listed')} align="center"
+                <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('listed')} align="center" minWidth={MINS.listed}
                   filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
-                <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" />
-                <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" />
-                <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw')} align="right" />
-                <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" />
-                <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike')} align="right" />
-                <ColHeader label="After Ebay"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" />
-                <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" />
-                <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('purch_date')}
+                <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" minWidth={MINS.listed_price} />
+                <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" minWidth={MINS.listing} />
+                <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw')} align="right" minWidth={MINS.raw} />
+                <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" minWidth={MINS.grading_cost} />
+                <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike')} align="right" minWidth={MINS.strike} />
+                <ColHeader label="After Ebay"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" minWidth={MINS.after_ebay} />
+                <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" minWidth={MINS.net} />
+                <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('purch_date')} minWidth={MINS.purch_date}
                   filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }} />
-                <ColHeader label="Date Listed"       col="date_listed"       {...sh} {...rz('date_listed')}
+                <ColHeader label="Date Listed"       col="date_listed"       {...sh} {...rz('date_listed')} minWidth={MINS.date_listed}
                   filterOptions={filterOptions?.listed_years}   filterSelected={fListYear}  onFilterChange={(v) => { setFListYear(v); setPage(1); }} />
-                <ColHeader label="Date Sold"         col="date_sold"         {...sh} {...rz('date_sold')}
+                <ColHeader label="Date Sold"         col="date_sold"         {...sh} {...rz('date_sold')} minWidth={MINS.date_sold}
                   filterOptions={filterOptions?.sold_years}     filterSelected={fSoldYear}  onFilterChange={(v) => { setFSoldYear(v); setPage(1); }} />
-                <ColHeader label="% ROI"             col="roi_pct"           {...sh} {...rz('roi')} align="right" />
-                <ColHeader label="Notes"                                     {...sh} {...rz('notes')} />
-                <ColHeader label="Card Show?"                                {...sh} {...rz('card_show')} align="center"
+                <ColHeader label="% ROI"             col="roi_pct"           {...sh} {...rz('roi')} align="right" minWidth={MINS.roi} />
+                <ColHeader label="Notes"                                     {...sh} {...rz('notes')} minWidth={MINS.notes} />
+                <ColHeader label="Card Show?"                                {...sh} {...rz('card_show')} align="center" minWidth={MINS.card_show}
                   filterOptions={filterOptions?.card_show} filterSelected={fCardShow} onFilterChange={(v) => { setFCardShow(v); setPage(1); }} />
               </tr>
             </thead>

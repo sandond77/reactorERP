@@ -1,11 +1,12 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { formatCurrency } from '../lib/utils';
+import { loadFilters, saveFilters } from '../lib/filter-store';
 import { SlabDetailModal } from '../components/inventory/SlabDetailModal';
-import { ColHeader, useColWidths } from '../components/ui/TableHeader';
+import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 
 interface SlabRow {
   id: string;
@@ -29,6 +30,7 @@ interface SlabRow {
   roi_pct: number | null;
   notes: string | null;
   is_card_show: boolean;
+  is_personal_collection: boolean;
 }
 
 interface FilterOptions {
@@ -36,6 +38,7 @@ interface FilterOptions {
   grades: string[];
   listed: string[];
   card_show: string[];
+  personal_collection: string[];
   purchase_years: string[];
   listed_years: string[];
   sold_years: string[];
@@ -81,25 +84,68 @@ function RoiCell({ roi, afterEbay, raw, grading }: { roi: number | null; afterEb
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
-export function Overall() {
+const OVERALL_FILTER_DEFAULTS = {
+  sortCol: 'cert_number' as string | null,
+  sortDir: 'asc' as SortDir,
+  statusFilter: 'unsold' as StatusFilter,
+  fCompany: null as string[] | null,
+  fGrade: null as string[] | null,
+  fListed: null as string[] | null,
+  fCardShow: null as string[] | null,
+  fPersonalCollection: null as string[] | null,
+  fPurchYear: null as string[] | null,
+  fListYear: null as string[] | null,
+  fSoldYear: null as string[] | null,
+  search: '',
+};
+
+export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
+  const filterKey = cardShowMode ? 'card-show' : 'overall';
+  const saved = loadFilters(filterKey, OVERALL_FILTER_DEFAULTS);
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('unsold');
-  const [sortCol, setSortCol] = useState<string | null>('cert_number');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
-  const { rz, totalWidth } = useColWidths({ cert_number: 120, card_name: 720, grade: 130, company: 115, is_listed: 105, listed_price: 110, listing: 65, raw_cost: 85, grading_cost: 110, strike_price: 105, after_ebay: 100, net: 85, raw_purchase_date: 180, date_listed: 130, date_sold: 125, roi_pct: 75, notes: 180, card_show: 125 });
+  const [search, setSearch] = useState(saved.search);
+  const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(cardShowMode ? 'unsold' : saved.statusFilter);
+  const [sortCol, setSortCol] = useState<string | null>(saved.sortCol);
+  const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
+  const MINS = {
+    cert_number:        colMinWidth('Cert',              true,  false),
+    card_name:          colMinWidth('Card',              true,  false),
+    grade:              colMinWidth('Grade',             true,  true),
+    company:            colMinWidth('Company',           false, true),
+    is_listed:          colMinWidth('Listed?',           true,  true),
+    listed_price:       colMinWidth('Listed Price',      true,  false),
+    listing:            colMinWidth('Listing',           false, false),
+    raw_cost:           colMinWidth('Raw',               true,  false),
+    grading_cost:       colMinWidth('Grading Cost',      true,  false),
+    strike_price:       colMinWidth('Strike Price',      true,  false),
+    after_ebay:         colMinWidth('After Ebay',        true,  false),
+    net:                colMinWidth('Net',               true,  false),
+    raw_purchase_date:  colMinWidth('Raw Purchase Date', true,  true),
+    date_listed:        colMinWidth('Date Listed',       true,  true),
+    date_sold:          colMinWidth('Date Sold',         true,  true),
+    roi_pct:            colMinWidth('% ROI',             true,  false),
+    notes:              colMinWidth('Notes',             false, false),
+    card_show:          colMinWidth('Card Show?',        false, true),
+    personal_collection: colMinWidth('Personal',        false, true),
+  };
+  const { rz, totalWidth } = useColWidths({ cert_number: Math.max(MINS.cert_number, 120), card_name: Math.max(MINS.card_name, 720), grade: Math.max(MINS.grade, 130), company: Math.max(MINS.company, 115), is_listed: Math.max(MINS.is_listed, 105), listed_price: Math.max(MINS.listed_price, 110), listing: Math.max(MINS.listing, 65), raw_cost: Math.max(MINS.raw_cost, 85), grading_cost: Math.max(MINS.grading_cost, 110), strike_price: Math.max(MINS.strike_price, 105), after_ebay: Math.max(MINS.after_ebay, 100), net: Math.max(MINS.net, 85), raw_purchase_date: Math.max(MINS.raw_purchase_date, 180), date_listed: Math.max(MINS.date_listed, 130), date_sold: Math.max(MINS.date_sold, 125), roi_pct: Math.max(MINS.roi_pct, 75), notes: Math.max(MINS.notes, 180), card_show: Math.max(MINS.card_show, 125), personal_collection: Math.max(MINS.personal_collection, 130) });
 
   // Per-column filters
   const [selectedSlab, setSelectedSlab] = useState<SlabRow | null>(null);
 
-  const [fCompany, setFCompany]       = useState<string[] | null>(null);
-  const [fGrade, setFGrade]           = useState<string[] | null>(null);
-  const [fListed, setFListed]         = useState<string[] | null>(null);
-  const [fCardShow, setFCardShow]     = useState<string[] | null>(null);
-  const [fPurchYear, setFPurchYear]   = useState<string[] | null>(null);
-  const [fListYear, setFListYear]     = useState<string[] | null>(null);
-  const [fSoldYear, setFSoldYear]     = useState<string[] | null>(null);
+  const [fCompany, setFCompany]       = useState<string[] | null>(saved.fCompany);
+  const [fGrade, setFGrade]           = useState<string[] | null>(saved.fGrade);
+  const [fListed, setFListed]         = useState<string[] | null>(saved.fListed);
+  const [fCardShow, setFCardShow]           = useState<string[] | null>(saved.fCardShow);
+  const [fPersonalCollection, setFPersonalCollection] = useState<string[] | null>(saved.fPersonalCollection);
+  const [fPurchYear, setFPurchYear]         = useState<string[] | null>(saved.fPurchYear);
+  const [fListYear, setFListYear]     = useState<string[] | null>(saved.fListYear);
+  const [fSoldYear, setFSoldYear]     = useState<string[] | null>(saved.fSoldYear);
+
+  useEffect(() => {
+    saveFilters(filterKey, { sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonalCollection, fPurchYear, fListYear, fSoldYear, search });
+  }, [sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonalCollection, fPurchYear, fListYear, fSoldYear, search]);
 
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
@@ -134,13 +180,14 @@ export function Overall() {
   const params = {
     page, limit: 100,
     search: debouncedSearch || undefined,
-    status: statusFilter,
+    status: cardShowMode ? 'unsold' : statusFilter,
     sort_by: sortCol ?? undefined,
     sort_dir: sortDir,
     companies:      activeFilter(fCompany,   filterOptions?.companies)?.join(','),
     grades:         activeFilter(fGrade,     filterOptions?.grades)?.join(','),
     is_listed:      activeFilter(fListed,    filterOptions?.listed)?.[0]?.toLowerCase(),
-    is_card_show:   activeFilter(fCardShow,  filterOptions?.card_show)?.[0]?.toLowerCase(),
+    is_card_show:   cardShowMode ? 'yes' : activeFilter(fCardShow, filterOptions?.card_show)?.[0]?.toLowerCase(),
+    personal_collection:   activeFilter(fPersonalCollection, filterOptions?.personal_collection)?.[0]?.toLowerCase(),
     purchase_years: activeFilter(fPurchYear, filterOptions?.purchase_years)?.join(','),
     listed_years:   activeFilter(fListYear,  filterOptions?.listed_years)?.join(','),
     sold_years:     activeFilter(fSoldYear,  filterOptions?.sold_years)?.join(','),
@@ -151,12 +198,12 @@ export function Overall() {
     queryFn: () => api.get('/grading/slabs', { params }).then((r) => r.data),
   });
 
-  const hasActiveFilters = [fCompany, fGrade, fListed, fCardShow, fPurchYear, fListYear, fSoldYear]
+  const hasActiveFilters = [fCompany, fGrade, fListed, fCardShow, fPersonalCollection, fPurchYear, fListYear, fSoldYear]
     .some((f) => f !== null && f.length > 0);
 
   function clearAllFilters() {
     setFCompany(null); setFGrade(null); setFListed(null); setFCardShow(null);
-    setFPurchYear(null); setFListYear(null); setFSoldYear(null);
+    setFPersonalCollection(null); setFPurchYear(null); setFListYear(null); setFSoldYear(null);
     setPage(1);
   }
 
@@ -165,26 +212,28 @@ export function Overall() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h1 className="text-xl font-bold text-zinc-100">Overall</h1>
+        <h1 className="text-xl font-bold text-zinc-100">{cardShowMode ? 'Card Show Inventory' : 'Overall'}</h1>
         <div className="flex items-center gap-3">
           {hasActiveFilters && (
             <button onClick={clearAllFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
               <X size={12} /> Clear filters
             </button>
           )}
-          <div className="flex gap-1">
-            {([
-              { value: 'all',    label: 'All' },
-              { value: 'unsold', label: 'Unsold' },
-              { value: 'sold',   label: 'Sold' },
-              { value: 'graded', label: 'Graded' },
-            ] as { value: StatusFilter; label: string }[]).map(({ value, label }) => (
-              <button key={value} onClick={() => { setStatusFilter(value); setPage(1); }}
-                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${statusFilter === value ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
+          {!cardShowMode && (
+            <div className="flex gap-1">
+              {([
+                { value: 'all',    label: 'All' },
+                { value: 'unsold', label: 'Unsold' },
+                { value: 'sold',   label: 'Sold' },
+                { value: 'graded', label: 'Graded' },
+              ] as { value: StatusFilter; label: string }[]).map(({ value, label }) => (
+                <button key={value} onClick={() => { setStatusFilter(value); setPage(1); }}
+                  className={`px-3 py-1 text-xs rounded font-medium transition-colors ${statusFilter === value ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <input
             type="text"
             placeholder="Search card or cert…"
@@ -202,36 +251,40 @@ export function Overall() {
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
-                <ColHeader label="Cert"              col="cert_number"       {...sh} {...rz('cert_number')} />
-                <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card_name')} />
-                <ColHeader label="Grade"             col="grade"             {...sh} {...rz('grade')}
+                <ColHeader label="Cert"              col="cert_number"       {...sh} {...rz('cert_number')} minWidth={MINS.cert_number} />
+                <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card_name')} minWidth={MINS.card_name} />
+                <ColHeader label="Grade"             col="grade"             {...sh} {...rz('grade')} minWidth={MINS.grade}
                   filterOptions={filterOptions?.grades}    filterSelected={fGrade}    onFilterChange={(v) => { setFGrade(v); setPage(1); }} />
-                <ColHeader label="Company"                                   {...sh} {...rz('company')}
+                <ColHeader label="Company"                                   {...sh} {...rz('company')} minWidth={MINS.company}
                   filterOptions={filterOptions?.companies} filterSelected={fCompany}  onFilterChange={(v) => { setFCompany(v); setPage(1); }} align="center" />
-                <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('is_listed')} align="center"
+                <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('is_listed')} align="center" minWidth={MINS.is_listed}
                   filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
-                <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" />
-                <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" />
-                <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw_cost')} align="right" />
-                <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" />
-                <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike_price')} align="right" />
-                <ColHeader label="After Ebay"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" />
-                <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" />
-                <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('raw_purchase_date')}
+                <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" minWidth={MINS.listed_price} />
+                <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" minWidth={MINS.listing} />
+                <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw_cost')} align="right" minWidth={MINS.raw_cost} />
+                <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" minWidth={MINS.grading_cost} />
+                <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike_price')} align="right" minWidth={MINS.strike_price} />
+                <ColHeader label="After Ebay"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" minWidth={MINS.after_ebay} />
+                <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" minWidth={MINS.net} />
+                <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('raw_purchase_date')} minWidth={MINS.raw_purchase_date}
                   filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }} />
-                <ColHeader label="Date Listed"       col="date_listed"       {...sh} {...rz('date_listed')}
+                <ColHeader label="Date Listed"       col="date_listed"       {...sh} {...rz('date_listed')} minWidth={MINS.date_listed}
                   filterOptions={filterOptions?.listed_years}   filterSelected={fListYear}  onFilterChange={(v) => { setFListYear(v); setPage(1); }} />
-                <ColHeader label="Date Sold"         col="date_sold"         {...sh} {...rz('date_sold')}
+                <ColHeader label="Date Sold"         col="date_sold"         {...sh} {...rz('date_sold')} minWidth={MINS.date_sold}
                   filterOptions={filterOptions?.sold_years}     filterSelected={fSoldYear}  onFilterChange={(v) => { setFSoldYear(v); setPage(1); }} />
-                <ColHeader label="% ROI"             col="roi_pct"           {...sh} {...rz('roi_pct')} align="right" />
-                <ColHeader label="Notes"                                     {...sh} {...rz('notes')} />
-                <ColHeader label="Card Show?"                                {...sh} {...rz('card_show')} align="center"
-                  filterOptions={filterOptions?.card_show} filterSelected={fCardShow} onFilterChange={(v) => { setFCardShow(v); setPage(1); }} />
+                <ColHeader label="% ROI"             col="roi_pct"           {...sh} {...rz('roi_pct')} align="right" minWidth={MINS.roi_pct} />
+                <ColHeader label="Notes"                                     {...sh} {...rz('notes')} minWidth={MINS.notes} />
+                {!cardShowMode && (
+                  <ColHeader label="Card Show?"                              {...sh} {...rz('card_show')} align="center" minWidth={MINS.card_show}
+                    filterOptions={filterOptions?.card_show} filterSelected={fCardShow} onFilterChange={(v) => { setFCardShow(v); setPage(1); }} filterAlign="right" />
+                )}
+                <ColHeader label="Personal"                                  {...sh} {...rz('personal_collection')} align="center" minWidth={MINS.personal_collection}
+                  filterOptions={filterOptions?.personal_collection} filterSelected={fPersonalCollection} onFilterChange={(v) => { setFPersonalCollection(v); setPage(1); }} filterAlign="right" />
               </tr>
             </thead>
             <tbody>
               {!data?.data.length ? (
-                <tr><td colSpan={18} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
+                <tr><td colSpan={19} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
               ) : data.data.map((row) => {
                 const link = row.cert_number ? certLink(row.company, row.cert_number) : null;
                 return (
@@ -271,8 +324,13 @@ export function Overall() {
                     <td className="px-3 py-1 text-zinc-500">{fmtDate(row.date_sold)}</td>
                     <td className="px-3 py-1 text-right"><RoiCell roi={row.roi_pct} afterEbay={row.after_ebay} raw={row.raw_cost} grading={row.grading_cost} /></td>
                     <td className="px-3 py-1 text-zinc-500 max-w-[220px] truncate" title={row.notes ?? ''}>{row.notes ?? ''}</td>
+                    {!cardShowMode && (
+                      <td className="px-3 py-1 text-center">
+                        {row.is_card_show ? <span className="text-yellow-400">Yes</span> : ''}
+                      </td>
+                    )}
                     <td className="px-3 py-1 text-center">
-                      {row.is_card_show ? <span className="text-yellow-400">Yes</span> : ''}
+                      {row.is_personal_collection ? <span className="text-violet-400">Yes</span> : ''}
                     </td>
                   </tr>
                 );

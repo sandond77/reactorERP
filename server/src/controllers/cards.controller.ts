@@ -8,6 +8,8 @@ const cardFiltersSchema = z.object({
   status: z.string().optional(),
   search: z.string().optional(),
   card_game: z.string().optional(),
+  language: z.string().optional(),
+  condition: z.string().optional(),
   purchase_type: z.string().optional(),
   page: z.coerce.number().default(1),
   limit: z.coerce.number().min(1).max(100).default(25),
@@ -19,6 +21,13 @@ export async function listCards(req: Request, res: Response, next: NextFunction)
     const { page, limit, ...filters } = query;
     const result = await cardsService.listCards(req.user!.id, filters as any, { page, limit });
     res.json(result);
+  } catch (err) { next(err); }
+}
+
+export async function getCardFilters(req: Request, res: Response, next: NextFunction) {
+  try {
+    const options = await cardsService.getCardFilterOptions(req.user!.id);
+    res.json(options);
   } catch (err) { next(err); }
 }
 
@@ -47,6 +56,7 @@ const createCardSchema = z.object({
   source_link: z.string().url().optional(),
   order_number: z.string().optional(),
   notes: z.string().optional(),
+  is_personal_collection: z.boolean().default(false),
   purchased_at: z.string().optional().transform((v) => v ? new Date(v) : null),
   // Optional slab fields — when provided, a slab_details record is created and status set to 'graded'
   slab_company: z.enum(['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER']).optional(),

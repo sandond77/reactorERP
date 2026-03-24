@@ -1,111 +1,272 @@
 import { sql } from 'kysely';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
-import type { ListingPlatform, NewListing } from '../types/db';
+import type { NewListing } from '../types/db';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 
+export type ListingAggRow = {
+  card_name: string | null;
+  set_name: string | null;
+  part_number: string | null;
+  grade_label: string | null;
+  grading_company: string | null;
+  platform: string;
+  list_price: number | null;
+  currency: string;
+  ebay_listing_url: string | null;
+  listed_at: string | null;
+  num_listed: number;
+  num_sold: number;
+};
+
 const LISTINGS_SORT_COLS: Record<string, string> = {
-  card_name: `COALESCE(ci.card_name_override, cc.card_name)`,
-  platform: 'l.platform',
-  listing_status: 'l.listing_status',
-  list_price: 'l.list_price',
-  listed_at: 'l.listed_at',
+  card_name: 'card_name',
+  platform: 'platform',
+  list_price: 'list_price',
+  listed_at: 'listed_at',
+  num_listed: 'num_listed',
+  num_sold: 'num_sold',
 };
 
 export async function getListingFilterOptions(userId: string) {
-  const [platforms, statuses] = await Promise.all([
+  const [platforms, grades, companies, partNumbers, numListedOpts, numSoldOpts, cardNames, prices] = await Promise.all([
     sql<{ value: string }>`
       SELECT DISTINCT l.platform AS value
       FROM listings l
       WHERE l.user_id = ${userId}
+      AND l.listing_status = 'active'
       ORDER BY value
     `.execute(db),
     sql<{ value: string }>`
-      SELECT DISTINCT l.listing_status AS value
+      SELECT DISTINCT (sd.company || ' ' || sd.grade_label) AS value
+      FROM listings l
+      JOIN card_instances ci ON ci.id = l.card_instance_id
+      JOIN slab_details sd ON sd.card_instance_id = ci.id
+      WHERE l.user_id = ${userId}
+      AND l.listing_status = 'active'
+      AND sd.grade_label IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT sd.company AS value
+      FROM listings l
+      JOIN card_instances ci ON ci.id = l.card_instance_id
+      JOIN slab_details sd ON sd.card_instance_id = ci.id
+      WHERE l.user_id = ${userId}
+      AND l.listing_status = 'active'
+      AND sd.company IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT cc.sku AS value
+      FROM listings l
+      JOIN card_instances ci ON ci.id = l.card_instance_id
+      LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+      WHERE l.user_id = ${userId}
+      AND l.listing_status = 'active'
+      AND cc.sku IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT COUNT(DISTINCT l.id)::text AS value
+      FROM listings l
+      JOIN card_instances ci ON ci.id = l.card_instance_id
+      LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+      LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+      WHERE l.user_id = ${userId}
+      AND l.listing_status = 'active'
+      GROUP BY
+        COALESCE(ci.card_name_override, cc.card_name),
+        COALESCE(cc.set_name, ci.set_name_override),
+        cc.sku, sd.grade_label, sd.company,
+        l.platform, l.list_price, l.currency, l.ebay_listing_url
+      ORDER BY 1
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT COUNT(*)::text AS value
+      FROM sales s
+      JOIN card_instances ci ON ci.id = s.card_instance_id
+      LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+      LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+      WHERE s.user_id = ${userId}
+      GROUP BY
+        COALESCE(ci.card_name_override, cc.card_name),
+        sd.grade_label, sd.company, s.platform
+      ORDER BY 1
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT COALESCE(ci.card_name_override, cc.card_name) AS value
+      FROM listings l
+      JOIN card_instances ci ON ci.id = l.card_instance_id
+      LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+      WHERE l.user_id = ${userId}
+      AND l.listing_status = 'active'
+      AND COALESCE(ci.card_name_override, cc.card_name) IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT ROUND(l.list_price / 100.0, 2)::text AS value
       FROM listings l
       WHERE l.user_id = ${userId}
-      ORDER BY value
+      AND l.listing_status = 'active'
+      ORDER BY 1
     `.execute(db),
   ]);
   return {
     platforms: platforms.rows.map((r) => r.value),
-    statuses: statuses.rows.map((r) => r.value),
+    grades: grades.rows.map((r) => r.value),
+    companies: companies.rows.map((r) => r.value),
+    part_numbers: partNumbers.rows.map((r) => r.value),
+    num_listed: numListedOpts.rows.map((r) => r.value),
+    num_sold: numSoldOpts.rows.map((r) => r.value),
+    card_names: cardNames.rows.map((r) => r.value),
+    prices: prices.rows.map((r) => r.value),
   };
 }
 
 export async function listListings(
   userId: string,
-  filters: { platforms?: string[]; search?: string; status?: string },
+  filters: { platforms?: string[]; search?: string; grades?: string[]; companies?: string[]; part_numbers?: string[]; num_listed?: string[]; num_sold?: string[]; card_names?: string[]; prices?: string[] },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
 ) {
-  const total = Number(
-    (await db
-      .selectFrom('listings as l')
-      .innerJoin('card_instances as ci', 'ci.id', 'l.card_instance_id')
-      .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
-      .select((eb) => eb.fn.count<number>('l.id').as('count'))
-      .where('l.user_id', '=', userId)
-      .$if(filters.platforms !== undefined, (qb) =>
-        filters.platforms!.length === 0
-          ? qb.where(sql`1=0`)
-          : qb.where('l.platform', 'in', filters.platforms! as any)
-      )
-      .$if(!!filters.status, (qb) => qb.where('l.listing_status', '=', filters.status as any))
-      .$if(!!filters.search, (qb) => qb.where(
-        sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
-      ))
-      .executeTakeFirst())?.count ?? 0
-  );
+  const sortCol = LISTINGS_SORT_COLS[sortBy ?? ''] ?? 'listed_at';
+  const sortDirSafe = sortDir === 'asc' ? sql.raw('ASC') : sql.raw('DESC');
 
-  const data = await db
-    .selectFrom('listings as l')
-    .innerJoin('card_instances as ci', 'ci.id', 'l.card_instance_id')
-    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
-    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
-    .select([
-      'l.id',
-      'l.platform',
-      'l.listing_status',
-      'l.list_price',
-      'l.asking_price',
-      'l.currency',
-      'l.ebay_listing_id',
-      'l.ebay_listing_url',
-      'l.show_name',
-      'l.show_date',
-      'l.listed_at',
-      'l.sold_at',
-      'l.created_at',
-      'ci.id as card_instance_id',
-      'ci.status as card_status',
-      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
-      sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
-      'sd.grade',
-      'sd.grade_label',
-      'sd.company as grading_company',
-      'sd.cert_number',
-      'ci.image_front_url',
-      'cc.image_url as catalog_image_url',
-    ])
-    .where('l.user_id', '=', userId)
-    .$if(filters.platforms !== undefined, (qb) =>
-      filters.platforms!.length === 0
-        ? qb.where(sql`1=0`)
-        : qb.where('l.platform', 'in', filters.platforms! as any)
+  const platformCond =
+    filters.platforms !== undefined
+      ? filters.platforms.length === 0
+        ? sql`AND 1=0`
+        : sql`AND l.platform IN (${sql.join(filters.platforms.map((p) => sql.val(p)))})`
+      : sql``;
+
+  const searchCond = filters.search
+    ? sql`AND COALESCE(ci.card_name_override, cc.card_name) ILIKE ${`%${filters.search}%`}`
+    : sql``;
+
+  const gradeCond =
+    filters.grades !== undefined
+      ? filters.grades.length === 0
+        ? sql`AND 1=0`
+        : sql`AND (sd.company || ' ' || sd.grade_label) IN (${sql.join(filters.grades.map((g) => sql.val(g)))})`
+      : sql``;
+
+  const companyCond =
+    filters.companies !== undefined
+      ? filters.companies.length === 0
+        ? sql`AND 1=0`
+        : sql`AND sd.company IN (${sql.join(filters.companies.map((c) => sql.val(c)))})`
+      : sql``;
+
+  const partNumberCond =
+    filters.part_numbers !== undefined
+      ? filters.part_numbers.length === 0
+        ? sql`AND 1=0`
+        : sql`AND cc.sku IN (${sql.join(filters.part_numbers.map((p) => sql.val(p)))})`
+      : sql``;
+
+  const cardNameCond =
+    filters.card_names !== undefined
+      ? filters.card_names.length === 0
+        ? sql`AND 1=0`
+        : sql`AND COALESCE(ci.card_name_override, cc.card_name) IN (${sql.join(filters.card_names.map((n) => sql.val(n)))})`
+      : sql``;
+
+  const priceCond =
+    filters.prices !== undefined
+      ? filters.prices.length === 0
+        ? sql`AND 1=0`
+        : sql`AND l.list_price IN (${sql.join(filters.prices.map((p) => sql.val(Math.round(parseFloat(p) * 100))))})`
+      : sql``;
+
+  const numListedCond =
+    filters.num_listed !== undefined
+      ? filters.num_listed.length === 0
+        ? sql`AND 1=0`
+        : sql`AND num_listed IN (${sql.join(filters.num_listed.map((n) => sql.val(Number(n))))})`
+      : sql``;
+
+  const numSoldCond =
+    filters.num_sold !== undefined
+      ? filters.num_sold.length === 0
+        ? sql`AND 1=0`
+        : sql`AND num_sold IN (${sql.join(filters.num_sold.map((n) => sql.val(Number(n))))})`
+      : sql``;
+
+  const result = await sql<ListingAggRow & { total_count: number }>`
+    WITH sales_agg AS (
+      SELECT
+        cc2.sku                                                                          AS sku,
+        CASE WHEN cc2.sku IS NULL THEN COALESCE(ci2.card_name_override, cc2.card_name) END AS card_name_key,
+        sd2.grade_label,
+        s.platform,
+        COUNT(*) AS num_sold
+      FROM sales s
+      JOIN card_instances ci2 ON ci2.id = s.card_instance_id
+      LEFT JOIN slab_details sd2 ON sd2.card_instance_id = ci2.id
+      LEFT JOIN card_catalog cc2 ON cc2.id = ci2.catalog_id
+      WHERE s.user_id = ${userId}
+      GROUP BY 1, 2, 3, 4
+    ),
+    grouped AS (
+      SELECT
+        (ARRAY_AGG(COALESCE(ci.card_name_override, cc.card_name) ORDER BY l.listed_at DESC NULLS LAST))[1] AS card_name,
+        (ARRAY_AGG(COALESCE(cc.set_name, ci.set_name_override)   ORDER BY l.listed_at DESC NULLS LAST))[1] AS set_name,
+        cc.sku                                                                                              AS part_number,
+        sd.grade_label,
+        sd.company                                                                                          AS grading_company,
+        l.platform,
+        (ARRAY_AGG(l.list_price       ORDER BY l.listed_at DESC NULLS LAST))[1]                            AS list_price,
+        l.currency,
+        (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST))[1]                            AS ebay_listing_url,
+        MIN(l.listed_at)                                                                                    AS listed_at,
+        COUNT(DISTINCT l.id)::int                                                                           AS num_listed,
+        MAX(COALESCE(sa.num_sold, 0))::int                                                                  AS num_sold
+      FROM listings l
+      JOIN card_instances ci ON ci.id = l.card_instance_id
+      LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+      LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+      LEFT JOIN sales_agg sa ON
+        (
+          cc.sku IS NOT NULL AND sa.sku IS NOT DISTINCT FROM cc.sku
+          OR cc.sku IS NULL AND sa.sku IS NULL
+             AND sa.card_name_key IS NOT DISTINCT FROM COALESCE(ci.card_name_override, cc.card_name)
+        )
+        AND sa.grade_label IS NOT DISTINCT FROM sd.grade_label
+        AND sa.platform = l.platform
+      WHERE l.user_id = ${userId}
+      AND l.listing_status = 'active'
+      ${platformCond}
+      ${searchCond}
+      ${cardNameCond}
+      ${gradeCond}
+      ${companyCond}
+      ${partNumberCond}
+      ${priceCond}
+      GROUP BY
+        cc.sku,
+        CASE WHEN cc.sku IS NULL THEN COALESCE(ci.card_name_override, cc.card_name) END,
+        CASE WHEN cc.sku IS NULL THEN COALESCE(cc.set_name, ci.set_name_override) END,
+        sd.grade_label,
+        sd.company,
+        l.platform,
+        l.currency,
+        CASE WHEN cc.sku IS NULL THEN l.list_price END,
+        CASE WHEN cc.sku IS NULL THEN l.ebay_listing_url END
     )
-    .$if(!!filters.status, (qb) => qb.where('l.listing_status', '=', filters.status as any))
-    .$if(!!filters.search, (qb) => qb.where(
-      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
-    ))
-    .orderBy(sql.raw(LISTINGS_SORT_COLS[sortBy ?? ''] ?? 'l.created_at'), sortDir ?? 'desc')
-    .limit(pagination.limit)
-    .offset(getPaginationOffset(pagination.page, pagination.limit))
-    .execute();
+    SELECT *, COUNT(*) OVER ()::int AS total_count
+    FROM grouped
+    WHERE 1=1 ${numListedCond} ${numSoldCond}
+    ORDER BY ${sql.raw(sortCol)} ${sortDirSafe}
+    LIMIT ${pagination.limit}
+    OFFSET ${getPaginationOffset(pagination.page, pagination.limit)}
+  `.execute(db);
 
-  return buildPaginatedResult(data, total, pagination.page, pagination.limit);
+  const total = Number(result.rows[0]?.total_count ?? 0);
+  const rows = result.rows.map(({ total_count: _, ...rest }) => rest as ListingAggRow);
+  return buildPaginatedResult(rows, total, pagination.page, pagination.limit);
 }
 
 export type CreateListingInput = Omit<NewListing, 'user_id'>;
@@ -127,7 +288,8 @@ export async function createListing(userId: string, input: CreateListingInput) {
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  if (['graded', 'inspected', 'purchased_raw'].includes(card.status)) {
+  // Only transition raw cards to raw_for_sale; graded cards stay graded
+  if (['inspected', 'purchased_raw'].includes(card.status)) {
     await db
       .updateTable('card_instances')
       .set({ status: 'raw_for_sale' })
@@ -158,6 +320,69 @@ export async function updateListing(
     .where('id', '=', listingId)
     .returningAll()
     .executeTakeFirstOrThrow();
+}
+
+// ── Group operations (act on all listings belonging to an aggregated row) ─────
+
+export interface ListingGroupKey {
+  part_number: string | null;
+  card_name: string | null;
+  grade_label: string | null;
+  grading_company: string | null;
+  platform: string;
+  currency: string;
+}
+
+function groupIdSubquery(userId: string, key: ListingGroupKey) {
+  const skuCond = key.part_number !== null
+    ? sql`cc.sku IS NOT NULL AND cc.sku = ${key.part_number}`
+    : sql`cc.sku IS NULL AND COALESCE(ci.card_name_override, cc.card_name) = ${key.card_name}`;
+  const gradeCond = key.grade_label !== null
+    ? sql`sd.grade_label = ${key.grade_label}`
+    : sql`sd.grade_label IS NULL`;
+  const companyCond = key.grading_company !== null
+    ? sql`sd.company = ${key.grading_company}`
+    : sql`sd.company IS NULL`;
+  return sql<{ id: string }>`
+    SELECT l.id
+    FROM listings l
+    JOIN card_instances ci ON ci.id = l.card_instance_id
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+    WHERE l.user_id = ${userId}
+    AND l.listing_status = 'active'
+    AND l.platform = ${key.platform}
+    AND l.currency = ${key.currency}
+    AND (${skuCond})
+    AND (${gradeCond})
+    AND (${companyCond})
+  `;
+}
+
+export async function updateListingsByGroup(
+  userId: string,
+  key: ListingGroupKey,
+  updates: { list_price?: number; platform?: string; currency?: string; ebay_listing_url?: string | null }
+) {
+  const ids = await groupIdSubquery(userId, key).execute(db);
+  if (ids.rows.length === 0) throw new AppError(404, 'No active listings found for this group');
+  await db
+    .updateTable('listings')
+    .set(updates as any)
+    .where('id', 'in', ids.rows.map(r => r.id))
+    .execute();
+  return { updated: ids.rows.length };
+}
+
+export async function cancelListingsByGroup(userId: string, key: ListingGroupKey) {
+  const ids = await groupIdSubquery(userId, key).execute(db);
+  if (ids.rows.length === 0) throw new AppError(404, 'No active listings found for this group');
+  await db
+    .updateTable('listings')
+    .set({ listing_status: 'cancelled' })
+    .where('id', 'in', ids.rows.map(r => r.id))
+    .execute();
+  return { cancelled: ids.rows.length };
 }
 
 export async function cancelListing(userId: string, listingId: string) {

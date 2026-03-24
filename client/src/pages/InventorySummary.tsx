@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
-import { ColHeader, useColWidths } from '../components/ui/TableHeader';
+import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 
 interface SummaryRow {
   sku: string | null;
@@ -411,7 +411,19 @@ export function InventorySummary() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEmpty, setShowEmpty] = useState(false);
   const [editPart, setEditPart] = useState<SummaryRow | null>(null);
-  const { rz, totalWidth } = useColWidths({ sku: 180, set: 200, card: 480, lang: 80, rarity: 130, grader: 110, grade: 130, qty_total: 90, qty_unsold: 90, qty_sold: 80 });
+  const MINS = {
+    sku:       colMinWidth('Part #',  true,  false),
+    set:       colMinWidth('Set',     true,  false),
+    card:      colMinWidth('Card',    true,  false),
+    lang:      colMinWidth('Lang',    true,  true),
+    rarity:    colMinWidth('Rarity',  true,  true),
+    grader:    colMinWidth('Grader',  true,  true),
+    grade:     colMinWidth('Grade',   true,  false),
+    qty_total:  colMinWidth('Total',  true,  false),
+    qty_unsold: colMinWidth('Unsold', true,  false),
+    qty_sold:   colMinWidth('Sold',   true,  false),
+  };
+  const { rz, totalWidth } = useColWidths({ sku: Math.max(MINS.sku, 180), set: Math.max(MINS.set, 200), card: Math.max(MINS.card, 480), lang: Math.max(MINS.lang, 80), rarity: Math.max(MINS.rarity, 130), grader: Math.max(MINS.grader, 110), grade: Math.max(MINS.grade, 130), qty_total: Math.max(MINS.qty_total, 90), qty_unsold: Math.max(MINS.qty_unsold, 90), qty_sold: Math.max(MINS.qty_sold, 80) });
 
   const { data: summaryData, isLoading: summaryLoading } = useQuery<{ data: SummaryRow[] }>({
     queryKey: ['inventory-summary'],
@@ -547,19 +559,19 @@ export function InventorySummary() {
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
-                <ColHeader label="Part #"     col="sku"        {...sh} {...rz('sku')} />
-                <ColHeader label="Set"        col="set_name"   {...sh} {...rz('set')} />
-                <ColHeader label="Card"       col="card_name"  {...sh} {...rz('card')} />
-                <ColHeader label="Lang"       col="language"   {...sh} {...rz('lang')}
+                <ColHeader label="Part #"     col="sku"        {...sh} {...rz('sku')} minWidth={MINS.sku} />
+                <ColHeader label="Set"        col="set_name"   {...sh} {...rz('set')} minWidth={MINS.set} />
+                <ColHeader label="Card"       col="card_name"  {...sh} {...rz('card')} minWidth={MINS.card} />
+                <ColHeader label="Lang"       col="language"   {...sh} {...rz('lang')} minWidth={MINS.lang}
                   filterOptions={languageOptions} filterSelected={fLanguage} onFilterChange={setFLanguage} />
-                <ColHeader label="Rarity"     col="rarity"     {...sh} {...rz('rarity')}
+                <ColHeader label="Rarity"     col="rarity"     {...sh} {...rz('rarity')} minWidth={MINS.rarity}
                   filterOptions={rarityOptions} filterSelected={fRarity} onFilterChange={setFRarity} />
-                <ColHeader label="Grader"     col="company"    {...sh} {...rz('grader')}
+                <ColHeader label="Grader"     col="company"    {...sh} {...rz('grader')} minWidth={MINS.grader}
                   filterOptions={companyOptions} filterSelected={fCompany} onFilterChange={setFCompany} />
-                <ColHeader label="Grade"      col="grade"      {...sh} {...rz('grade')} />
-                <ColHeader label="Total"   col="qty_total"  {...sh} {...rz('qty_total')}  align="right" />
-                <ColHeader label="Unsold"  col="qty_unsold" {...sh} {...rz('qty_unsold')} align="right" />
-                <ColHeader label="Sold"    col="qty_sold"   {...sh} {...rz('qty_sold')}   align="right" />
+                <ColHeader label="Grade"      col="grade"      {...sh} {...rz('grade')} minWidth={MINS.grade} />
+                <ColHeader label="Total"   col="qty_total"  {...sh} {...rz('qty_total')}  align="right" minWidth={MINS.qty_total} />
+                <ColHeader label="Unsold"  col="qty_unsold" {...sh} {...rz('qty_unsold')} align="right" minWidth={MINS.qty_unsold} />
+                <ColHeader label="Sold"    col="qty_sold"   {...sh} {...rz('qty_sold')}   align="right" minWidth={MINS.qty_sold} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">

@@ -18,6 +18,11 @@ export function formatDate(date: string | Date | null | undefined): string {
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(date));
 }
 
+export function formatCertNumber(cert: string | number | null | undefined): string {
+  if (!cert) return 'No cert';
+  return `#${String(cert).padStart(8, '0')}`;
+}
+
 export const STATUS_LABELS: Record<string, string> = {
   purchased_raw: 'Purchased Raw',
   inspected: 'Inspected',

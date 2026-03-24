@@ -23,6 +23,7 @@ const schema = z.object({
   currency: z.enum(['USD', 'JPY']).default('USD'),
   purchased_at: z.string().min(1, 'Purchase date required'),
   notes: z.string().optional(),
+  is_personal_collection: z.boolean().default(false),
   slab_company: z.enum(GRADING_COMPANIES),
   slab_grade: z.coerce.number().min(1, 'Grade required').max(10),
   slab_grade_label: z.string().min(1, 'Grade label required'),
@@ -45,7 +46,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { register, handleSubmit, setValue, getValues, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
-    defaultValues: { card_game: 'pokemon', language: 'EN', currency: 'USD', slab_company: 'PSA' },
+    defaultValues: { card_game: 'pokemon', language: 'EN', currency: 'USD', slab_company: 'PSA', is_personal_collection: false },
   });
 
   const handleImageSelect = (file: File) => {
@@ -147,6 +148,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       purchase_type: 'pre_graded',
       purchase_cost: purchase_cost.toFixed(2),
       slab_additional_cost: grading_cost.toFixed(2),
+      is_personal_collection: rest.is_personal_collection ?? false,
     });
     toast.success('Slab added!');
     onSuccess();
@@ -339,6 +341,18 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       </div>
 
       <Input label="Notes" placeholder="Optional notes" {...register('notes')} />
+
+      <label className="flex items-center gap-3 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          {...register('is_personal_collection')}
+          className="w-4 h-4 rounded border-zinc-600 bg-zinc-800 text-indigo-500 focus:ring-indigo-500 focus:ring-offset-0"
+        />
+        <div>
+          <p className="text-sm text-zinc-200">Personal Collection</p>
+          <p className="text-xs text-zinc-500">Excluded from listing/sale counts</p>
+        </div>
+      </label>
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="submit" disabled={isSubmitting || (!!partNumber && !partNumber.exists)}>

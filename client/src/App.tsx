@@ -13,6 +13,7 @@ import { Sales } from './pages/Sales';
 import { Reports } from './pages/Reports';
 import { Import } from './pages/Import';
 import { Overall } from './pages/Overall';
+import { CardShow } from './pages/CardShow';
 import { InventorySummary } from './pages/InventorySummary';
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
@@ -37,6 +38,7 @@ export default function App() {
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/raw-inventory" element={<RawInventory />} />
               <Route path="/grading" element={<Grading />} />
+              <Route path="/card-show" element={<CardShow />} />
               <Route path="/listings" element={<Listings />} />
               <Route path="/sales" element={<Sales />} />
               <Route path="/reports" element={<Reports />} />

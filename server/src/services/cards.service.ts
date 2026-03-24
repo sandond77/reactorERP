@@ -20,6 +20,8 @@ export interface CardFilters {
   status?: CardStatus;
   search?: string;
   card_game?: string;
+  language?: string;
+  condition?: string;
   purchase_type?: string;
 }
 
@@ -66,7 +68,18 @@ export async function listCards(
       query = query.where('ci.status', 'in', statuses as any);
     }
   }
-  if (filters.card_game) query = query.where('ci.card_game', '=', filters.card_game);
+  if (filters.card_game) {
+    const vals = filters.card_game.split(',').map((s: string) => s.trim()).filter(Boolean);
+    query = vals.length === 1 ? query.where('ci.card_game', '=', vals[0]) : query.where('ci.card_game', 'in', vals as any);
+  }
+  if (filters.language) {
+    const vals = filters.language.split(',').map((s: string) => s.trim()).filter(Boolean);
+    query = vals.length === 1 ? query.where('ci.language', '=', vals[0]) : query.where('ci.language', 'in', vals as any);
+  }
+  if (filters.condition) {
+    const vals = filters.condition.split(',').map((s: string) => s.trim()).filter(Boolean);
+    query = vals.length === 1 ? query.where('ci.condition', '=', vals[0]) : query.where('ci.condition', 'in', vals as any);
+  }
   if (filters.purchase_type) query = query.where('ci.purchase_type', '=', filters.purchase_type as any);
   if (filters.search) {
     const term = `%${filters.search}%`;
@@ -92,7 +105,18 @@ export async function listCards(
       const ss = filters.status!.split(',').map((s: string) => s.trim()).filter(Boolean);
       return ss.length === 1 ? qb.where('ci.status', '=', ss[0]) : qb.where('ci.status', 'in', ss as any);
     })
-    .$if(!!filters.card_game, (qb) => qb.where('ci.card_game', '=', filters.card_game!))
+    .$if(!!filters.card_game, (qb) => {
+      const vals = filters.card_game!.split(',').map((s: string) => s.trim()).filter(Boolean);
+      return vals.length === 1 ? qb.where('ci.card_game', '=', vals[0]) : qb.where('ci.card_game', 'in', vals as any);
+    })
+    .$if(!!filters.language, (qb) => {
+      const vals = filters.language!.split(',').map((s: string) => s.trim()).filter(Boolean);
+      return vals.length === 1 ? qb.where('ci.language', '=', vals[0]) : qb.where('ci.language', 'in', vals as any);
+    })
+    .$if(!!filters.condition, (qb) => {
+      const vals = filters.condition!.split(',').map((s: string) => s.trim()).filter(Boolean);
+      return vals.length === 1 ? qb.where('ci.condition', '=', vals[0]) : qb.where('ci.condition', 'in', vals as any);
+    })
     .executeTakeFirst();
   const total = Number(countResult?.count ?? 0);
 
@@ -103,6 +127,33 @@ export async function listCards(
     .execute();
 
   return buildPaginatedResult(data, total, pagination.page, pagination.limit);
+}
+
+export async function getCardFilterOptions(userId: string) {
+  const statuses = ['purchased_raw', 'inspected'];
+  const [games, languages, conditions] = await Promise.all([
+    sql<{ value: string }>`
+      SELECT DISTINCT card_game AS value FROM card_instances
+      WHERE user_id = ${userId} AND deleted_at IS NULL AND status IN ('purchased_raw', 'inspected')
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT language AS value FROM card_instances
+      WHERE user_id = ${userId} AND deleted_at IS NULL AND status IN ('purchased_raw', 'inspected')
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT condition AS value FROM card_instances
+      WHERE user_id = ${userId} AND deleted_at IS NULL AND status IN ('purchased_raw', 'inspected') AND condition IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+  ]);
+  return {
+    statuses,
+    games: games.rows.map((r) => r.value),
+    languages: languages.rows.map((r) => r.value),
+    conditions: conditions.rows.map((r) => r.value),
+  };
 }
 
 export async function getCardById(userId: string, cardId: string) {

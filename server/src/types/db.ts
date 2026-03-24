@@ -94,6 +94,8 @@ export interface CardInstancesTable {
   image_front_url: string | null;
   image_back_url: string | null;
   purchased_at: Date | null;
+  is_card_show: Generated<boolean>;
+  is_personal_collection: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
   deleted_at: Date | null;
