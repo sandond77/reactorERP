@@ -15,7 +15,12 @@ export function formatCurrency(cents: number, currency = 'USD'): string {
 
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return '—';
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(new Date(date));
+  // Date-only strings (YYYY-MM-DD) must be parsed as local time, not UTC,
+  // otherwise they render as the previous day in negative-offset timezones.
+  const d = typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(date + 'T00:00:00')
+    : new Date(date);
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(d);
 }
 
 export function formatCertNumber(cert: string | number | null | undefined): string {

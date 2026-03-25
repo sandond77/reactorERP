@@ -251,6 +251,38 @@ export interface PokemonSetAliasesTable {
   created_at: Generated<Date>;
 }
 
+export interface GradingBatchesTable {
+  id: Generated<string>;
+  user_id: string;
+  batch_id: string;
+  name: string | null;
+  company: string;
+  tier: string;
+  submitted_at: Date | null;
+  grading_cost: Generated<number>;  // cost per card, in cents
+  status: Generated<string>;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface GradingBatchItemsTable {
+  id: Generated<string>;
+  batch_id: string;
+  card_instance_id: string;
+  line_item_num: number;
+  quantity: Generated<number>;
+  expected_grade: number | null;
+  estimated_value: number | null;
+  created_at: Generated<Date>;
+}
+
+export interface GradingBatchSequencesTable {
+  user_id: string;
+  year: number;
+  next_seq: number;
+}
+
 // ============================================================
 // Database interface (used by Kysely)
 // ============================================================
@@ -268,6 +300,9 @@ export interface Database {
   pokemon_set_aliases: PokemonSetAliasesTable;
   raw_purchases: RawPurchasesTable;
   raw_purchase_sequences: RawPurchaseSequencesTable;
+  grading_batches: GradingBatchesTable;
+  grading_batch_items: GradingBatchItemsTable;
+  grading_batch_sequences: GradingBatchSequencesTable;
 }
 
 // ============================================================

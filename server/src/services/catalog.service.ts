@@ -467,11 +467,16 @@ export async function createCatalogCard(params: {
   rarity?: string | null;
   variant?: string | null;
 }): Promise<string> {
+  const lang = params.language.toUpperCase() === 'JP' || params.language.toUpperCase() === 'JPN' ? 'JP' : 'EN';
+  const autoSku = (!params.sku && params.set_code && params.card_number)
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: params.card_number })
+    : null;
+
   const result = await db
     .insertInto('card_catalog')
     .values({
       game: params.game,
-      sku: params.sku ?? null,
+      sku: params.sku ?? autoSku ?? null,
       card_name: params.card_name,
       set_name: params.set_name,
       set_code: params.set_code ?? null,
@@ -521,6 +526,31 @@ export async function getEmptyCatalogEntries(userId: string) {
     ORDER BY cc.sku NULLS LAST, cc.card_name
   `.execute(db);
   return result.rows;
+}
+
+export async function searchCatalog(params: {
+  card_name?: string;
+  set_name?: string;
+  card_number?: string;
+  language?: string;
+  limit?: number;
+}): Promise<Array<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }>> {
+  const { card_name, set_name, card_number, language, limit = 10 } = params;
+  if (!card_name && !set_name && !card_number) return [];
+
+  const rows = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }>`
+    SELECT id, sku, card_name, set_name, card_number, language
+    FROM card_catalog
+    WHERE game = 'pokemon'
+      ${card_name ? sql`AND card_name ILIKE ${'%' + card_name + '%'}` : sql``}
+      ${set_name  ? sql`AND set_name  ILIKE ${'%' + set_name  + '%'}` : sql``}
+      ${card_number ? sql`AND card_number = ${card_number.split('/')[0].trim().replace(/^0+/, '').padStart(3, '0')}` : sql``}
+      ${language  ? sql`AND language = ${language.toUpperCase()}` : sql``}
+    ORDER BY card_name, set_name
+    LIMIT ${limit}
+  `.execute(db);
+
+  return rows.rows;
 }
 
 export async function deleteCatalogCard(id: string) {

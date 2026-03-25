@@ -36,6 +36,7 @@ export interface CreateRawPurchaseInput {
   source?: string;
   order_number?: string;
   language?: string;
+  catalog_id?: string;
   card_name?: string;
   set_name?: string;
   card_number?: string;
@@ -77,12 +78,13 @@ export async function listRawPurchases(
   filters: {
     type?: RawPurchaseType;
     status?: RawPurchaseStatus;
+    needs_inspection?: boolean;
     search?: string;
     page?: number;
     pageSize?: number;
   } = {}
 ) {
-  const { type, status, search, page = 1, pageSize = 50 } = filters;
+  const { type, status, needs_inspection, search, page = 1, pageSize = 50 } = filters;
   const offset = (page - 1) * pageSize;
 
   let query = db
@@ -110,13 +112,9 @@ export async function listRawPurchases(
       'rp.received_at',
       'rp.reserved',
       'rp.notes',
-      db.fn.count<number>('ci.id' as any).as('inspected_count'),
-      db.fn
-        .count<number>(sql`CASE WHEN ci.decision = 'sell_raw' THEN 1 END`)
-        .as('sell_raw_count'),
-      db.fn
-        .count<number>(sql`CASE WHEN ci.decision = 'grade' THEN 1 END`)
-        .as('grade_count'),
+      sql<number>`COALESCE(SUM(ci.quantity), 0)`.as('inspected_count'),
+      sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'sell_raw' THEN ci.quantity END), 0)`.as('sell_raw_count'),
+      sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'grade' THEN ci.quantity END), 0)`.as('grade_count'),
     ])
     .where('rp.user_id', '=', userId)
     .groupBy('rp.id')
@@ -125,6 +123,11 @@ export async function listRawPurchases(
 
   if (type) query = query.where('rp.type', '=', type);
   if (status) query = query.where('rp.status', '=', status);
+  if (needs_inspection) {
+    query = query
+      .where('rp.status', '=', 'received')
+      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`);
+  }
   if (search) {
     const term = `%${search}%`;
     query = query.where((eb) =>
@@ -140,13 +143,27 @@ export async function listRawPurchases(
 
   const [rows, countResult] = await Promise.all([
     query.limit(pageSize).offset(offset).execute(),
-    db
-      .selectFrom('raw_purchases')
-      .select(db.fn.count<number>('id').as('total'))
-      .where('user_id', '=', userId)
-      .$if(!!type, (q) => q.where('type', '=', type!))
-      .$if(!!status, (q) => q.where('status', '=', status!))
-      .executeTakeFirst(),
+    needs_inspection
+      ? db
+          .selectFrom('raw_purchases as rp')
+          .leftJoin('card_instances as ci', (join) =>
+            join.onRef('ci.raw_purchase_id', '=', 'rp.id').on('ci.deleted_at', 'is', null)
+          )
+          .select('rp.id')
+          .where('rp.user_id', '=', userId)
+          .where('rp.status', '=', 'received')
+          .$if(!!type, (q) => q.where('rp.type', '=', type!))
+          .groupBy('rp.id')
+          .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`)
+          .execute()
+          .then((rows) => ({ total: rows.length }))
+      : db
+          .selectFrom('raw_purchases')
+          .select(db.fn.count<number>('id').as('total'))
+          .where('user_id', '=', userId)
+          .$if(!!type, (q) => q.where('type', '=', type!))
+          .$if(!!status, (q) => q.where('status', '=', status!))
+          .executeTakeFirst(),
   ]);
 
   const total = Number(countResult?.total ?? 0);
@@ -222,6 +239,7 @@ export async function createRawPurchase(userId: string, input: CreateRawPurchase
       source: input.source ?? null,
       order_number: input.order_number ?? null,
       language: input.language ?? 'JP',
+      catalog_id: input.catalog_id ?? null,
       card_name: input.card_name ?? null,
       set_name: input.set_name ?? null,
       card_number: input.card_number ?? null,
@@ -249,6 +267,7 @@ export async function updateRawPurchase(
   if (input.source !== undefined)        update.source = input.source;
   if (input.order_number !== undefined)  update.order_number = input.order_number;
   if (input.language !== undefined)      update.language = input.language;
+  if (input.catalog_id !== undefined)    update.catalog_id = input.catalog_id;
   if (input.card_name !== undefined)     update.card_name = input.card_name;
   if (input.set_name !== undefined)      update.set_name = input.set_name;
   if (input.card_number !== undefined)   update.card_number = input.card_number;

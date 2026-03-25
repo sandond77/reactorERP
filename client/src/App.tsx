@@ -17,6 +17,7 @@ import { CardShow } from './pages/CardShow';
 import { InventorySummary } from './pages/InventorySummary';
 import { Intake } from './pages/Intake';
 import { Inspection } from './pages/Inspection';
+import { UngradedInventory } from './pages/UngradedInventory';
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
 
@@ -42,6 +43,7 @@ export default function App() {
               <Route path="/inspection" element={<Inspection />} />
               <Route path="/raw-inventory" element={<RawInventory />} />
               <Route path="/grading" element={<Grading />} />
+              <Route path="/ungraded" element={<UngradedInventory />} />
               <Route path="/card-show" element={<CardShow />} />
               <Route path="/listings" element={<Listings />} />
               <Route path="/sales" element={<Sales />} />

@@ -3,25 +3,20 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, PackageOpen, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
-  ChevronDown, PackageSearch, ScanSearch, Layers,
+  ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 
-const RAW_ROUTES    = ['/intake', '/inspection', '/raw-inventory', '/grading'];
-const REPORT_ROUTES = ['/reports', '/parts'];
-
+const RAW_ROUTES = ['/intake', '/inspection', '/raw-inventory', '/ungraded', '/grading'];
 const RAW_NAV = [
-  { to: '/raw-inventory', icon: PackageOpen,   label: 'Raw Inventory' },
-  { to: '/intake',        icon: ClipboardList, label: 'Intake' },
-  { to: '/inspection',    icon: ScanSearch,    label: 'Inspection' },
-  { to: '/grading',       icon: Star,          label: 'Grading' },
+  { to: '/raw-inventory', icon: PackageOpen,         label: 'Raw Inventory' },
+  { to: '/intake',        icon: ClipboardList,       label: 'Intake' },
+  { to: '/inspection',    icon: ScanSearch,          label: 'Inspection' },
+  { to: '/ungraded',      icon: GalleryVerticalEnd,  label: 'Ungraded' },
+  { to: '/grading',       icon: Star,                label: 'Grading' },
 ];
 
-const REPORT_NAV = [
-  { to: '/reports', icon: BarChart3, label: 'Reports' },
-  { to: '/parts',   icon: Layers,    label: 'Parts' },
-];
 
 function NavItem({ to, icon: Icon, label, indent = false }: {
   to: string; icon: React.ElementType; label: string; indent?: boolean;
@@ -99,13 +94,9 @@ export function Sidebar() {
         <NavItem to="/card-show" icon={ShoppingBag} label="Card Show" />
         <NavItem to="/sales"     icon={TrendingUp}  label="Sales" />
 
-        <NavFolder icon={BarChart3} label="Reports" routes={REPORT_ROUTES}>
-          {REPORT_NAV.map(({ to, icon, label }) => (
-            <NavItem key={to} to={to} icon={icon} label={label} indent />
-          ))}
-        </NavFolder>
-
-        <NavItem to="/import" icon={Upload} label="Import" />
+        <NavItem to="/reports" icon={BarChart3} label="Reports" />
+        <NavItem to="/parts"   icon={Layers}   label="Parts" />
+        <NavItem to="/import" icon={Upload}  label="Import" />
       </nav>
 
       {/* User */}

@@ -7,6 +7,7 @@ export const cardsRouter = Router();
 cardsRouter.use(requireAuth);
 
 cardsRouter.get('/filters', cardsController.getCardFilters);
+cardsRouter.get('/by-part', cardsController.listCardsGrouped);
 cardsRouter.get('/', cardsController.listCards);
 cardsRouter.post('/', cardsController.createCard);
 cardsRouter.get('/:id', cardsController.getCard);

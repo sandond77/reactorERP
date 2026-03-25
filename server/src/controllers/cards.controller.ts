@@ -24,6 +24,16 @@ export async function listCards(req: Request, res: Response, next: NextFunction)
   } catch (err) { next(err); }
 }
 
+export async function listCardsGrouped(req: Request, res: Response, next: NextFunction) {
+  try {
+    const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+    const pipeline = req.query.pipeline as 'sell' | 'grade' | undefined;
+    const purchase_type = typeof req.query.purchase_type === 'string' ? req.query.purchase_type : undefined;
+    const result = await cardsService.listCardsGroupedByPart(req.user!.id, { search, pipeline, purchase_type });
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
 export async function getCardFilters(req: Request, res: Response, next: NextFunction) {
   try {
     const options = await cardsService.getCardFilterOptions(req.user!.id);

@@ -14,11 +14,13 @@ import { CONDITIONS, DECISION_LABELS } from './types';
 function InspectionLineForm({
   purchase,
   initial,
+  maxQuantity,
   onSave,
   onClose,
 }: {
   purchase: PurchaseRow;
   initial?: Partial<InspectionLine>;
+  maxQuantity: number;
   onSave: (data: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
@@ -37,12 +39,19 @@ function InspectionLineForm({
 
   function set(k: string, v: unknown) { setForm((f) => ({ ...f, [k]: v })); }
 
+  const [qtyError, setQtyError] = useState('');
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const qty = parseInt(form.quantity) || 1;
+    if (qty > maxQuantity) {
+      setQtyError(`Max ${maxQuantity} remaining`);
+      return;
+    }
     onSave({
       condition:     form.condition,
       decision:      form.decision,
-      quantity:      parseInt(form.quantity) || 1,
+      quantity:      qty,
       purchase_cost: Math.round(parseFloat(form.purchase_cost) * 100),
       currency:      form.currency,
       notes:         form.notes || undefined,
@@ -71,8 +80,14 @@ function InspectionLineForm({
       </div>
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <label className={label}>Quantity</label>
-          <input type="number" min="1" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className={inp} />
+          <label className={label}>
+            Quantity
+            {qtyError && <span className="ml-1 text-xs text-red-400">{qtyError}</span>}
+          </label>
+          <input type="number" min="1" max={maxQuantity} value={form.quantity}
+            onChange={(e) => { set('quantity', e.target.value); setQtyError(''); }}
+            className={`${inp} ${qtyError ? 'border-red-500/60' : ''}`} />
+          <p className="text-[10px] text-zinc-600 mt-0.5">{maxQuantity} remaining</p>
         </div>
         <div>
           <label className={label}>Cost / Card (USD)</label>
@@ -166,9 +181,11 @@ export function InspectionPanel({
             {allocated}/{purchase.card_count} allocated
             {remaining > 0 ? ` · ${remaining} remaining` : ''}
           </span>
-          <Button size="sm" onClick={() => setAddLineOpen(true)}>
-            <Plus size={14} /> Add Line
-          </Button>
+          {remaining > 0 && (
+            <Button size="sm" onClick={() => setAddLineOpen(true)}>
+              <Plus size={14} /> Add Line
+            </Button>
+          )}
         </div>
       </div>
 
@@ -253,6 +270,7 @@ export function InspectionPanel({
       <Modal open={addLineOpen} onClose={() => setAddLineOpen(false)} title="Add Inspection Line">
         <InspectionLineForm
           purchase={purchase}
+          maxQuantity={remaining}
           onSave={(body) => addMut.mutate(body)}
           onClose={() => setAddLineOpen(false)}
         />
@@ -263,6 +281,7 @@ export function InspectionPanel({
           <InspectionLineForm
             purchase={purchase}
             initial={editLine}
+            maxQuantity={remaining + editLine.quantity}
             onSave={(body) => updateMut.mutate({ cardId: editLine.id, body })}
             onClose={() => setEditLine(null)}
           />

@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
-import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries } from '../services/catalog.service';
+import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog } from '../services/catalog.service';
 
 export async function inventorySummary(req: Request, res: Response, next: NextFunction) {
   try {
@@ -67,6 +67,14 @@ export async function deleteCard(req: Request, res: Response, next: NextFunction
     const { id } = req.params;
     await deleteCatalogCard(id);
     res.json({ ok: true });
+  } catch (err) { next(err); }
+}
+
+export async function search(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { card_name, set_name, card_number, language } = req.query as Record<string, string | undefined>;
+    const results = await searchCatalog({ card_name, set_name, card_number, language });
+    res.json({ data: results });
   } catch (err) { next(err); }
 }
 

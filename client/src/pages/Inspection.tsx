@@ -6,13 +6,12 @@ import { formatCurrency, formatDate } from '../lib/utils';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { InspectionPanel } from './raw/InspectionPanel';
-import type { PurchaseRow, PurchaseStatus, PurchaseType } from './raw/types';
+import type { PurchaseRow, PurchaseType } from './raw/types';
 import { STATUS_COLORS, TYPE_COLORS } from './raw/types';
 
 const DEFAULTS = {
-  search:  '',
-  fStatus: 'received' as PurchaseStatus | null,
-  fType:   null as PurchaseType | null,
+  search: '',
+  fType:  null as PurchaseType | null,
 };
 
 export function Inspection() {
@@ -20,7 +19,6 @@ export function Inspection() {
   const [page, setPage]               = useState(1);
   const [search, setSearch]           = useState(saved.search);
   const [debouncedSearch, setDebounced] = useState(saved.search);
-  const [fStatus, setFStatus]         = useState<PurchaseStatus | null>(saved.fStatus);
   const [fType, setFType]             = useState<PurchaseType | null>(saved.fType);
   const [drillRow, setDrillRow]       = useState<PurchaseRow | null>(null);
 
@@ -34,19 +32,23 @@ export function Inspection() {
     avg:     colMinWidth('Avg/Card',   true, false),
     status:  colMinWidth('Status',     true, false),
     bought:  colMinWidth('Purchased',  true, false),
-    inspect: colMinWidth('Inspected',  true, false),
+    inspect:   colMinWidth('Inspected', true, false),
+    for_sale:  colMinWidth('For Sale',  true, false),
+    for_grade: colMinWidth('For Grade', true, false),
   };
   const { rz, totalWidth } = useColWidths({
-    pid:     Math.max(MINS.pid,     110),
-    type:    Math.max(MINS.type,     80),
-    card:    Math.max(MINS.card,    280),
-    source:  Math.max(MINS.source,  140),
-    cards:   Math.max(MINS.cards,    70),
-    cost:    Math.max(MINS.cost,    110),
-    avg:     Math.max(MINS.avg,     100),
-    status:  Math.max(MINS.status,  100),
-    bought:  Math.max(MINS.bought,  110),
-    inspect: Math.max(MINS.inspect, 110),
+    pid:       Math.max(MINS.pid,       110),
+    type:      Math.max(MINS.type,       80),
+    card:      Math.max(MINS.card,      280),
+    source:    Math.max(MINS.source,    140),
+    cards:     Math.max(MINS.cards,      70),
+    cost:      Math.max(MINS.cost,      110),
+    avg:       Math.max(MINS.avg,       100),
+    status:    Math.max(MINS.status,    100),
+    bought:    Math.max(MINS.bought,    110),
+    inspect:   Math.max(MINS.inspect,   110),
+    for_sale:  Math.max(MINS.for_sale,   80),
+    for_grade: Math.max(MINS.for_grade,  85),
   });
 
   useEffect(() => {
@@ -55,15 +57,15 @@ export function Inspection() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('inspection', { search, fStatus, fType });
-  }, [search, fStatus, fType]);
+    saveFilters('inspection', { search, fType });
+  }, [search, fType]);
 
   const params = {
     page,
-    pageSize: 50,
-    search:   debouncedSearch || undefined,
-    status:   fStatus ?? undefined,
-    type:     fType ?? undefined,
+    pageSize:         50,
+    search:           debouncedSearch || undefined,
+    needs_inspection: true,
+    type:             fType ?? undefined,
   };
 
   const { data, isLoading } = useQuery<{ data: PurchaseRow[]; total: number; totalPages: number }>({
@@ -71,8 +73,8 @@ export function Inspection() {
     queryFn: () => api.get('/raw-purchases', { params }).then((r) => r.data),
   });
 
-  const hasActiveFilters = !!debouncedSearch || fStatus !== 'received' || fType !== null;
-  function clearFilters() { setSearch(''); setFStatus('received'); setFType(null); setPage(1); }
+  const hasActiveFilters = !!debouncedSearch || fType !== null;
+  function clearFilters() { setSearch(''); setFType(null); setPage(1); }
 
   const sh = { sortCol: null, sortDir: 'asc' as const, onSort: () => {} };
 
@@ -99,17 +101,6 @@ export function Inspection() {
                 onClick={() => { setFType((p) => p === t ? null : t); setPage(1); }}
                 className={`px-2.5 py-1 rounded text-xs font-medium transition-colors capitalize ${fType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 {t}
-              </button>
-            ))}
-          </div>
-
-          {/* Status filter */}
-          <div className="flex gap-1">
-            {(['ordered', 'received', 'cancelled'] as PurchaseStatus[]).map((s) => (
-              <button key={s}
-                onClick={() => { setFStatus((p) => p === s ? null : s); setPage(1); }}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors capitalize ${fStatus === s ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-                {s}
               </button>
             ))}
           </div>
@@ -141,13 +132,15 @@ export function Inspection() {
                 <ColHeader label="Avg/Card"   col="avg_cost_usd"   {...sh} {...rz('avg')}     minWidth={MINS.avg} align="right" />
                 <ColHeader label="Status"     col="status"         {...sh} {...rz('status')}  minWidth={MINS.status} />
                 <ColHeader label="Purchased"  col="purchased_at"   {...sh} {...rz('bought')}  minWidth={MINS.bought} />
-                <ColHeader label="Inspected"  col="inspected_count" {...sh} {...rz('inspect')} minWidth={MINS.inspect} align="right" />
+                <ColHeader label="Inspected" col="inspected_count" {...sh} {...rz('inspect')}   minWidth={MINS.inspect}   align="right" />
+                <ColHeader label="For Sale"  col="sell_raw_count"  {...sh} {...rz('for_sale')}  minWidth={MINS.for_sale}  align="right" />
+                <ColHeader label="For Grade" col="grade_count"     {...sh} {...rz('for_grade')} minWidth={MINS.for_grade} align="right" />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
               {!data?.data.length ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-10 text-center text-zinc-500">
+                  <td colSpan={12} className="px-4 py-10 text-center text-zinc-500">
                     No purchases found.
                   </td>
                 </tr>
@@ -187,12 +180,16 @@ export function Inspection() {
                     <span className={row.inspected_count > 0 ? 'text-emerald-400' : 'text-zinc-600'}>
                       {row.inspected_count}/{row.card_count}
                     </span>
-                    {row.sell_raw_count > 0 && (
-                      <span className="ml-1 text-zinc-500 text-[10px]">{row.sell_raw_count}R</span>
-                    )}
-                    {row.grade_count > 0 && (
-                      <span className="ml-1 text-zinc-500 text-[10px]">{row.grade_count}G</span>
-                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <span className={row.sell_raw_count > 0 ? 'text-zinc-300' : 'text-zinc-700'}>
+                      {row.sell_raw_count > 0 ? row.sell_raw_count : '—'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <span className={row.grade_count > 0 ? 'text-indigo-300' : 'text-zinc-700'}>
+                      {row.grade_count > 0 ? row.grade_count : '—'}
+                    </span>
                   </td>
                 </tr>
               ))}

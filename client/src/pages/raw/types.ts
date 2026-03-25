@@ -20,6 +20,7 @@ export interface PurchaseRow {
   status: PurchaseStatus;
   purchased_at: string | null;
   received_at: string | null;
+  catalog_id: string | null;
   reserved: boolean;
   notes: string | null;
   inspected_count: number;

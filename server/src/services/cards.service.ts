@@ -35,6 +35,7 @@ export async function listCards(
     .selectFrom('card_instances as ci')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
     .select([
       'ci.id',
       'ci.status',
@@ -52,6 +53,7 @@ export async function listCards(
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
+      'cc.rarity',
       'cc.image_url as catalog_image_url',
       'sd.grade',
       'sd.grade_label',
@@ -59,6 +61,7 @@ export async function listCards(
       'sd.cert_number',
       'ci.decision',
       'ci.notes',
+      'rp.purchase_id as raw_purchase_label',
     ])
     .where('ci.user_id', '=', userId)
     .where('ci.deleted_at', 'is', null);
@@ -94,6 +97,7 @@ export async function listCards(
         eb('cc.set_name', 'ilike', term),
         eb('ci.set_name_override', 'ilike', term),
         sql<boolean>`sd.cert_number::text ilike ${term}`,
+        eb('rp.purchase_id', 'ilike', term),
       ])
     );
   }
@@ -158,6 +162,143 @@ export async function getCardFilterOptions(userId: string) {
     languages: languages.rows.map((r) => r.value),
     conditions: conditions.rows.map((r) => r.value),
   };
+}
+
+export async function listCardsGroupedByPart(
+  userId: string,
+  options: { search?: string; pipeline?: 'sell' | 'grade'; purchase_type?: string } = {}
+) {
+  const { search, pipeline, purchase_type } = options;
+
+  let query = db
+    .selectFrom('card_instances as ci')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
+    .leftJoin(
+      db.selectFrom('grading_batch_items')
+        .select(['card_instance_id', db.fn.sum<number>('quantity').as('batch_qty')])
+        .groupBy('card_instance_id')
+        .as('gbi'),
+      'gbi.card_instance_id', 'ci.id'
+    )
+    .select([
+      'ci.id',
+      'ci.catalog_id',
+      'ci.status',
+      'ci.decision',
+      'ci.condition',
+      'ci.quantity',
+      'ci.purchase_cost',
+      'ci.currency',
+      'ci.purchased_at',
+      'ci.notes',
+      'ci.language',
+      'ci.card_game',
+      'cc.sku',
+      'rp.purchase_id as raw_purchase_label',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
+      sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
+      sql<number>`COALESCE(gbi.batch_qty, 0)`.as('batch_qty'),
+    ])
+    .where('ci.user_id', '=', userId)
+    .where('ci.deleted_at', 'is', null)
+    .where('ci.raw_purchase_id', 'is not', null)
+    .orderBy('ci.purchased_at', 'desc');
+
+  if (pipeline === 'sell') {
+    query = query.where((eb) =>
+      eb.or([
+        eb('ci.status', 'in', ['purchased_raw', 'raw_for_sale', 'sold']),
+        eb('ci.status', '=', 'inspected').and('ci.decision', '=', 'sell_raw'),
+      ])
+    );
+  } else if (pipeline === 'grade') {
+    query = query.where((eb) =>
+      eb.or([
+        eb('ci.status', '=', 'inspected').and('ci.decision', '=', 'grade'),
+        eb('ci.status', 'in', ['grading_submitted', 'graded', 'sold']),
+      ])
+    );
+  } else {
+    // default: raw pipeline (excludes graded)
+    query = query.where('ci.status', 'in', ['purchased_raw', 'inspected', 'raw_for_sale', 'grading_submitted', 'sold']);
+  }
+
+  if (purchase_type) {
+    query = query.where('rp.type', '=', purchase_type as any);
+  }
+
+  if (search) {
+    const term = `%${search}%`;
+    query = query.where((eb) =>
+      eb.or([
+        eb('cc.card_name', 'ilike', term),
+        eb('ci.card_name_override', 'ilike', term),
+        eb('cc.set_name', 'ilike', term),
+        eb('ci.set_name_override', 'ilike', term),
+      ])
+    );
+  }
+
+  const rows = await query.execute();
+
+  const groupMap = new Map<string, {
+    catalog_id: string | null;
+    sku: string | null;
+    card_name: string;
+    set_name: string | null;
+    card_number: string | null;
+    language: string;
+    card_game: string;
+    total: number;
+    for_sale_count: number;
+    to_grade_count: number;
+    grading_count: number;
+    returned_count: number;
+    sold_count: number;
+    instances: typeof rows;
+  }>();
+
+  for (const row of rows) {
+    const key = row.catalog_id
+      ?? `${row.card_name}|${row.set_name}|${row.card_number}|${row.language}`;
+
+    if (!groupMap.has(key)) {
+      groupMap.set(key, {
+        catalog_id: row.catalog_id ?? null,
+        sku: row.sku ?? null,
+        card_name: row.card_name,
+        set_name: row.set_name ?? null,
+        card_number: row.card_number ?? null,
+        language: row.language,
+        card_game: row.card_game,
+        total: 0,
+        for_sale_count: 0,
+        to_grade_count: 0,
+        grading_count: 0,
+        returned_count: 0,
+        sold_count: 0,
+        instances: [],
+      });
+    }
+
+    const group = groupMap.get(key)!;
+    const qty = row.quantity ?? 1;
+    const batchQty = Number(row.batch_qty) || 0;
+    group.total += qty;
+    if (row.status === 'sold')                    group.sold_count     += qty;
+    else if (row.status === 'graded')             group.returned_count += qty;
+    else if (row.status === 'grading_submitted') {
+      group.grading_count  += batchQty;
+      group.to_grade_count += Math.max(0, qty - batchQty);
+    }
+    else if (row.status === 'raw_for_sale')       group.for_sale_count += qty;
+    else if (row.decision === 'grade')            group.to_grade_count += qty;
+    group.instances.push(row);
+  }
+
+  return Array.from(groupMap.values());
 }
 
 export async function getCardById(userId: string, cardId: string) {
