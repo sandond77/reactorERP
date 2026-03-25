@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
+import type { GradingCompany } from '../types/db';
 
 // ── ID generation ─────────────────────────────────────────────────────────────
 
@@ -27,6 +28,7 @@ export interface CreateBatchInput {
 
 export interface UpdateBatchInput extends Partial<CreateBatchInput> {
   status?: string;
+  submission_number?: string | null;
 }
 
 export interface AddItemInput {
@@ -55,8 +57,9 @@ export async function listBatches(userId: string) {
       'gb.notes',
       'gb.created_at',
       db.fn.count<number>('gbi.id').as('item_count'),
-      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity), 0)`.as('raw_cost'),
-      sql<number>`COALESCE(SUM(gbi.estimated_value * ci.quantity), 0)`.as('estimated_total'),
+      sql<number>`COALESCE(SUM(gbi.quantity), 0)`.as('total_qty'),
+      sql<number>`COALESCE(SUM(ci.purchase_cost * gbi.quantity), 0)`.as('raw_cost'),
+      sql<number>`COALESCE(SUM(gbi.estimated_value * gbi.quantity), 0)`.as('estimated_total'),
     ])
     .where('gb.user_id', '=', userId)
     .groupBy('gb.id')
@@ -66,6 +69,7 @@ export async function listBatches(userId: string) {
   return rows.map((r) => ({
     ...r,
     item_count:      Number(r.item_count),
+    total_qty:       Number((r as any).total_qty),
     raw_cost:        Number(r.raw_cost),
     estimated_total: Number(r.estimated_total),
   }));
@@ -101,6 +105,8 @@ export async function getBatch(userId: string, id: string) {
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
+      'ci.catalog_id',
+      'cc.sku',
     ])
     .where('gbi.batch_id', '=', id)
     .orderBy('gbi.line_item_num', 'asc')
@@ -159,8 +165,9 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
   if (input.tier !== undefined)         update.tier         = input.tier;
   if (input.submitted_at !== undefined) update.submitted_at = input.submitted_at ? new Date(input.submitted_at) : null;
   if (input.grading_cost !== undefined) update.grading_cost = input.grading_cost;
-  if (input.status !== undefined)       update.status       = input.status;
-  if (input.notes !== undefined)        update.notes        = input.notes;
+  if (input.status !== undefined)            update.status            = input.status;
+  if (input.notes !== undefined)             update.notes             = input.notes;
+  if (input.submission_number !== undefined) update.submission_number = input.submission_number;
 
   return db
     .updateTable('grading_batches')
@@ -262,6 +269,191 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
     )
     .returningAll()
     .executeTakeFirst();
+}
+
+export interface ReturnItemInput {
+  batch_item_id: string;
+  grade: number;
+  grade_label?: string;
+  cert_number?: string;
+  actual_value?: number;
+  card_name_override?: string;
+}
+
+export interface ProcessReturnInput {
+  returned_at?: string;
+  items: ReturnItemInput[];
+}
+
+export async function processReturn(userId: string, batchId: string, input: ProcessReturnInput) {
+  const batch = await db
+    .selectFrom('grading_batches')
+    .selectAll()
+    .where('id', '=', batchId)
+    .where('user_id', '=', userId)
+    .where('status', '=', 'submitted')
+    .executeTakeFirst();
+  if (!batch) return null;
+
+  for (const item of input.items) {
+    const batchItem = await db
+      .selectFrom('grading_batch_items')
+      .selectAll()
+      .where('id', '=', item.batch_item_id)
+      .where('batch_id', '=', batchId)
+      .executeTakeFirst();
+    if (!batchItem) continue;
+
+    const original = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', batchItem.card_instance_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!original) continue;
+
+    const newInstance = await db
+      .insertInto('card_instances')
+      .values({
+        user_id:              userId,
+        catalog_id:           original.catalog_id,
+        card_name_override:   item.card_name_override ?? original.card_name_override,
+        set_name_override:    original.set_name_override,
+        card_number_override: original.card_number_override,
+        card_game:            original.card_game,
+        language:             original.language,
+        variant:              original.variant,
+        rarity:               original.rarity,
+        notes:                original.notes,
+        status:               'graded',
+        purchase_type:        'pre_graded',
+        quantity:             batchItem.quantity,
+        purchase_cost:        original.purchase_cost,
+        currency:             original.currency,
+        raw_purchase_id:      null,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+
+    await db
+      .insertInto('slab_details')
+      .values({
+        card_instance_id:      newInstance.id,
+        user_id:               userId,
+        source_raw_instance_id: original.id,
+        grading_submission_id: null,
+        company:               batch.company as GradingCompany,
+        grade:                 item.grade,
+        grade_label:           item.grade_label ?? null,
+        cert_number:           item.cert_number ? Number(item.cert_number) : null,
+        grading_cost:          batch.grading_cost,
+        additional_cost:       0,
+        currency:              'USD',
+      })
+      .execute();
+
+    const newQty = original.quantity - batchItem.quantity;
+    if (newQty <= 0) {
+      // All copies sent to grading — soft-delete the raw instance
+      await db
+        .updateTable('card_instances')
+        .set({ deleted_at: new Date(), updated_at: new Date() })
+        .where('id', '=', original.id)
+        .where('user_id', '=', userId)
+        .execute();
+    } else {
+      await db
+        .updateTable('card_instances')
+        .set({ quantity: newQty, updated_at: new Date() })
+        .where('id', '=', original.id)
+        .where('user_id', '=', userId)
+        .execute();
+    }
+  }
+
+  await db
+    .updateTable('grading_batches')
+    .set({ status: 'returned', updated_at: new Date() })
+    .where('id', '=', batchId)
+    .where('user_id', '=', userId)
+    .execute();
+
+  return getBatch(userId, batchId);
+}
+
+export async function revertReturn(userId: string, batchId: string) {
+  const batch = await db
+    .selectFrom('grading_batches')
+    .selectAll()
+    .where('id', '=', batchId)
+    .where('user_id', '=', userId)
+    .where('status', '=', 'returned')
+    .executeTakeFirst();
+  if (!batch) return null;
+
+  // Get all batch items to find the original raw instances
+  const batchItems = await db
+    .selectFrom('grading_batch_items')
+    .selectAll()
+    .where('batch_id', '=', batchId)
+    .execute();
+
+  for (const batchItem of batchItems) {
+    // Find the graded instance created for this raw source
+    const slabDetail = await db
+      .selectFrom('slab_details')
+      .select(['card_instance_id'])
+      .where('source_raw_instance_id', '=', batchItem.card_instance_id)
+      .executeTakeFirst();
+
+    if (slabDetail) {
+      // Delete the slab detail and the graded card instance
+      await db
+        .deleteFrom('slab_details')
+        .where('card_instance_id', '=', slabDetail.card_instance_id)
+        .execute();
+      await db
+        .deleteFrom('card_instances')
+        .where('id', '=', slabDetail.card_instance_id)
+        .where('user_id', '=', userId)
+        .execute();
+    }
+
+    // Restore the original raw instance
+    const original = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', batchItem.card_instance_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+
+    if (original) {
+      if (original.deleted_at) {
+        // Was fully consumed — un-soft-delete and restore qty from batch item
+        await db
+          .updateTable('card_instances')
+          .set({ deleted_at: null, quantity: batchItem.quantity, status: 'grading_submitted', updated_at: new Date() })
+          .where('id', '=', original.id)
+          .execute();
+      } else if (slabDetail) {
+        // Graded instance existed → processReturn DID reduce the original qty, add it back
+        await db
+          .updateTable('card_instances')
+          .set({ quantity: original.quantity + batchItem.quantity, updated_at: new Date() })
+          .where('id', '=', original.id)
+          .execute();
+      }
+      // else: processReturn never modified this instance (failed before qty update), leave as-is
+    }
+  }
+
+  await db
+    .updateTable('grading_batches')
+    .set({ status: 'submitted', updated_at: new Date() })
+    .where('id', '=', batchId)
+    .execute();
+
+  return getBatch(userId, batchId);
 }
 
 export async function removeItem(userId: string, itemId: string) {

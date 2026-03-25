@@ -56,3 +56,19 @@ export async function removeItem(req: Request, res: Response, next: NextFunction
     res.status(204).send();
   } catch (err) { next(err); }
 }
+
+export async function processReturn(req: Request, res: Response, next: NextFunction) {
+  try {
+    const batch = await svc.processReturn(req.user!.id, req.params['id'] as string, req.body);
+    if (!batch) return res.status(404).json({ error: 'Not found' });
+    res.json(batch);
+  } catch (err) { next(err); }
+}
+
+export async function revertReturn(req: Request, res: Response, next: NextFunction) {
+  try {
+    const batch = await svc.revertReturn(req.user!.id, req.params['id'] as string);
+    if (!batch) return res.status(404).json({ error: 'Not found or not in returned status' });
+    res.json(batch);
+  } catch (err) { next(err); }
+}

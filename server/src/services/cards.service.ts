@@ -456,11 +456,11 @@ export async function computeCostBasis(cardId: string): Promise<number> {
 
   const slab = await db
     .selectFrom('slab_details')
-    .select('additional_cost')
+    .select('grading_cost')
     .where('card_instance_id', '=', cardId)
     .executeTakeFirst();
 
-  if (slab) basis += slab.additional_cost;
+  if (slab) basis += slab.grading_cost ?? 0;
 
   return basis;
 }

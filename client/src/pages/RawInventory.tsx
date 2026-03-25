@@ -35,10 +35,11 @@ export function RawInventory() {
     to_grade:  colMinWidth('To Grade',  true, false),
     submitted: colMinWidth('Submitted', true, false),
     returned:  colMinWidth('Returned',  true, false),
+    notes:     colMinWidth('Notes',     false, false),
   };
 
   const { rz, totalWidth } = useColWidths({
-    part:      Math.max(MINS.part,      110),
+    part:      Math.max(MINS.part,      190),
     card:      Math.max(MINS.card,      220),
     set:       Math.max(MINS.set,       150),
     cardnum:   Math.max(MINS.cardnum,    70),
@@ -48,6 +49,7 @@ export function RawInventory() {
     to_grade:  Math.max(MINS.to_grade,   70),
     submitted: Math.max(MINS.submitted,  80),
     returned:  Math.max(MINS.returned,   80),
+    notes:     Math.max(MINS.notes,     160),
   });
 
   useEffect(() => {
@@ -162,6 +164,7 @@ export function RawInventory() {
                 <ColHeader label="To Grade"  col="to_grade"    {...sh} {...rz('to_grade')}  minWidth={MINS.to_grade}  align="right" />
                 <ColHeader label="Submitted" col="submitted"   {...sh} {...rz('submitted')} minWidth={MINS.submitted} align="right" />
                 <ColHeader label="Returned"  col="returned"    {...sh} {...rz('returned')}  minWidth={MINS.returned}  align="right" />
+                <ColHeader label="Notes"     col="notes"       {...sh} {...rz('notes')}     minWidth={MINS.notes} />
               </tr>
             </thead>
             <tbody>
@@ -175,7 +178,7 @@ export function RawInventory() {
                       <td className="pl-3 text-zinc-500">
                         <ChevronRight size={12} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
                       </td>
-                      <td className="px-3 py-2 font-mono text-zinc-400 text-[11px] truncate">{group.sku ?? '—'}</td>
+                      <td className="px-3 py-2 font-mono text-zinc-400 text-[11px]">{group.sku ?? '—'}</td>
                       <td className="px-3 py-2 text-zinc-100 font-medium truncate">{group.card_name}</td>
                       <td className="px-3 py-2 text-zinc-400 text-[11px] truncate">{group.set_name ?? '—'}</td>
                       <td className="px-3 py-2 text-zinc-400 text-[11px]">{group.card_number ? `#${group.card_number}` : '—'}</td>
@@ -185,6 +188,7 @@ export function RawInventory() {
                       <td className="px-3 py-2 text-right tabular-nums">{num(group.to_grade_count)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{num(group.grading_count)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{num(group.returned_count)}</td>
+                      <td />
                     </tr>
 
                     {expanded && group.instances.map((inst) => (
@@ -201,7 +205,6 @@ export function RawInventory() {
                         <td className="px-3 py-1.5 pl-5">
                           <span className="text-[10px] text-zinc-600 mr-1">Cond</span>
                           <span className="text-zinc-400 text-[11px]">{inst.condition ?? '—'}</span>
-                          {inst.notes && <span className="ml-2 text-zinc-600 text-[10px] truncate max-w-[120px] inline-block align-bottom">{inst.notes}</span>}
                         </td>
                         <td className="px-3 py-1.5">
                           <span className="text-[10px] text-zinc-600 mr-1">Avg</span>
@@ -214,6 +217,7 @@ export function RawInventory() {
                         <td className="px-3 py-1.5 text-right tabular-nums">{num(instToGrade(inst))}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{num(instGrading(inst))}</td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{num(inst.status === 'graded' ? inst.quantity : 0)}</td>
+                        <td className="px-3 py-1.5 text-zinc-500 text-[10px]">{inst.notes ?? ''}</td>
                       </tr>
                     ))}
                   </React.Fragment>

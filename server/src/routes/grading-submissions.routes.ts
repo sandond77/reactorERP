@@ -13,3 +13,5 @@ gradingSubsRouter.delete('/:id',                  ctrl.remove);
 gradingSubsRouter.post('/:id/items',              ctrl.addItem);
 gradingSubsRouter.patch('/:id/items/:itemId',     ctrl.updateItem);
 gradingSubsRouter.delete('/:id/items/:itemId',    ctrl.removeItem);
+gradingSubsRouter.post('/:id/return',             ctrl.processReturn);
+gradingSubsRouter.post('/:id/revert-return',      ctrl.revertReturn);

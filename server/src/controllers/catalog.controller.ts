@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { db } from '../config/database';
 import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog } from '../services/catalog.service';
 
 export async function inventorySummary(req: Request, res: Response, next: NextFunction) {
@@ -83,5 +84,19 @@ export async function listSets(req: Request, res: Response, next: NextFunction) 
     const lang = (req.query.lang as 'en' | 'ja') ?? 'en';
     const sets = await listTCGdexSets(lang);
     res.json({ data: sets });
+  } catch (err) { next(err); }
+}
+
+export async function namesBySku(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { sku } = req.query as { sku?: string };
+    if (!sku) return res.status(400).json({ error: 'sku required' });
+    const rows = await db
+      .selectFrom('card_catalog')
+      .select(['id', 'card_name'])
+      .where('sku', '=', sku)
+      .orderBy('card_name', 'asc')
+      .execute();
+    res.json(rows);
   } catch (err) { next(err); }
 }

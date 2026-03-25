@@ -12,4 +12,5 @@ catalogRouter.post('/', catalogController.createCard);
 catalogRouter.patch('/:id', catalogController.updateCard);
 catalogRouter.delete('/:id', catalogController.deleteCard);
 catalogRouter.get('/sets', catalogController.listSets);
+catalogRouter.get('/names-by-sku', catalogController.namesBySku);
 catalogRouter.post('/sync-set', catalogController.syncSet);

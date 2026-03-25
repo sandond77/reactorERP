@@ -262,6 +262,7 @@ export interface GradingBatchesTable {
   grading_cost: Generated<number>;  // cost per card, in cents
   status: Generated<string>;
   notes: string | null;
+  submission_number: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

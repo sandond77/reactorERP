@@ -1,6 +1,11 @@
-import { ExternalLink } from 'lucide-react';
+import { useState } from 'react';
+import { ExternalLink, Trash2 } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '../ui/Modal';
+import { Button } from '../ui/Button';
 import { formatCurrency, formatDate } from '../../lib/utils';
+import { api } from '../../lib/api';
+import toast from 'react-hot-toast';
 
 function certLink(company: string, cert: string): string | null {
   switch (company) {
@@ -46,6 +51,7 @@ interface SlabRow {
 interface Props {
   slab: SlabRow;
   onClose: () => void;
+  onDeleted?: () => void;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -70,8 +76,21 @@ function MoneyRow({ label, value, color }: { label: string; value: number | null
   );
 }
 
-export function SlabDetailModal({ slab, onClose }: Props) {
+export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
+  const qc = useQueryClient();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const link = slab.cert_number ? certLink(slab.company, slab.cert_number) : null;
+
+  const deleteMut = useMutation({
+    mutationFn: () => api.delete(`/cards/${slab.id}`),
+    onSuccess: () => {
+      toast.success('Slab deleted');
+      qc.invalidateQueries({ queryKey: ['overall'] });
+      onDeleted?.();
+      onClose();
+    },
+    onError: () => toast.error('Failed to delete'),
+  });
   const costBasis = slab.raw_cost + slab.grading_cost;
   const net = slab.after_ebay != null ? slab.after_ebay - costBasis : null;
   const roi = slab.roi_pct != null
@@ -189,6 +208,35 @@ export function SlabDetailModal({ slab, onClose }: Props) {
             <p className="text-sm text-zinc-300 bg-zinc-900 rounded-lg px-4 py-3">{slab.notes}</p>
           </div>
         )}
+
+        {/* Delete */}
+        <div className="pt-2 border-t border-zinc-800">
+          {confirmDelete ? (
+            <div className="flex items-center justify-between gap-3 bg-red-950/30 border border-red-800/40 rounded-lg px-4 py-3">
+              <p className="text-sm text-red-300">Permanently delete this slab? This cannot be undone.</p>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  className="bg-red-600 hover:bg-red-500 text-white border-0"
+                  disabled={deleteMut.isPending}
+                  onClick={() => deleteMut.mutate()}
+                >
+                  <Trash2 size={13} />
+                  {deleteMut.isPending ? 'Deleting…' : 'Delete'}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmDelete(true)}
+              className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-red-400 transition-colors"
+            >
+              <Trash2 size={13} />
+              Delete slab
+            </button>
+          )}
+        </div>
       </div>
     </Modal>
   );

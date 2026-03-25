@@ -272,7 +272,7 @@ export function InventorySummary() {
     qty_unsold: colMinWidth('Unsold', true,  false),
     qty_sold:   colMinWidth('Sold',   true,  false),
   };
-  const { rz, totalWidth } = useColWidths({ sku: Math.max(MINS.sku, 180), set: Math.max(MINS.set, 200), card: Math.max(MINS.card, 480), lang: Math.max(MINS.lang, 80), rarity: Math.max(MINS.rarity, 130), grader: Math.max(MINS.grader, 110), grade: Math.max(MINS.grade, 130), qty_total: Math.max(MINS.qty_total, 90), qty_unsold: Math.max(MINS.qty_unsold, 90), qty_sold: Math.max(MINS.qty_sold, 80) });
+  const { rz, totalWidth } = useColWidths({ sku: Math.max(MINS.sku, 180), set: Math.max(MINS.set, 200), card: Math.max(MINS.card, 640), lang: Math.max(MINS.lang, 80), rarity: Math.max(MINS.rarity, 130), grader: Math.max(MINS.grader, 110), grade: Math.max(MINS.grade, 130), qty_total: Math.max(MINS.qty_total, 90), qty_unsold: Math.max(MINS.qty_unsold, 90), qty_sold: Math.max(MINS.qty_sold, 80) });
 
   const { data: summaryData, isLoading: summaryLoading } = useQuery<{ data: SummaryRow[] }>({
     queryKey: ['inventory-summary'],

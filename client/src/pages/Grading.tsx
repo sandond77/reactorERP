@@ -31,8 +31,10 @@ interface Batch {
   grading_cost: number;
   status: string;
   notes: string | null;
+  submission_number: string | null;
   created_at: string;
   item_count: number;
+  total_qty: number;
   raw_cost: number;
   estimated_total: number;
 }
@@ -262,7 +264,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
       {/* Qty + estimated value — only shown once a card is selected */}
       {selected && (
         <div className="space-y-3 pt-1 border-t border-zinc-800">
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr 1.4fr' }}>
             <div>
               <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">
                 Qty <span className="text-zinc-600 normal-case">(max {selected.quantity})</span>
@@ -281,7 +283,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
             <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
               value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)}
               className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-            <Input label="Est. Value (USD)" type="number" step="0.01" min="0" placeholder="0.00"
+            <Input label="Est. Value / Card" type="number" step="0.01" min="0" placeholder="0.00"
               value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)}
               className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
           </div>
@@ -304,7 +306,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
 function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [qty,            setQty]            = useState(String(item.quantity));
-  const [expectedGrade,  setExpectedGrade]  = useState(item.expected_grade != null ? String(item.expected_grade) : '');
+  const [expectedGrade,  setExpectedGrade]  = useState(item.expected_grade != null ? String(parseFloat(String(item.expected_grade))) : '');
   const [estimatedValue, setEstimatedValue] = useState(item.estimated_value != null ? String(item.estimated_value / 100) : '');
   const [saving, setSaving] = useState(false);
 
@@ -347,7 +349,7 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
         </div>
         <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
           value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)} className={noSpinner} />
-        <Input label="Est. Value (USD)" type="number" step="0.01" min="0" placeholder="0.00"
+        <Input label="Est. Value / Card" type="number" step="0.01" min="0" placeholder="0.00"
           value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)} className={noSpinner} />
       </div>
       <div className="flex justify-end gap-2 pt-1">
@@ -360,14 +362,132 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
   );
 }
 
+// ── Close Sub Modal ───────────────────────────────────────────────────────────
+
+function CloseSubModal({ batch, onClose }: { batch: Batch; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [submissionNumber, setSubmissionNumber] = useState(batch.submission_number ?? '');
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.patch(`/grading-subs/${batch.id}`, {
+        status: 'submitted',
+        submission_number: submissionNumber || null,
+      });
+      toast.success('Submission closed');
+      qc.invalidateQueries({ queryKey: ['grading-batch', batch.id] });
+      qc.invalidateQueries({ queryKey: ['grading-batches'] });
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to close sub');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <p className="text-sm text-zinc-400">
+        This will lock the batch and mark it as submitted. Cards can no longer be added or removed.
+      </p>
+      <Input
+        label="Submission Number"
+        placeholder="e.g. 12345678"
+        value={submissionNumber}
+        onChange={(e) => setSubmissionNumber(e.target.value)}
+        autoFocus
+      />
+      <div className="flex justify-end gap-2 pt-2">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="submit" disabled={saving}>
+          {saving && <Loader2 size={14} className="animate-spin" />}
+          Close &amp; Lock Sub
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// ── Edit Batch Modal ──────────────────────────────────────────────────────────
+
+function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [company,          setCompany]          = useState(batch.company);
+  const [tier,             setTier]             = useState(batch.tier);
+  const [submittedAt,      setSubmittedAt]      = useState(batch.submitted_at?.slice(0, 10) ?? '');
+  const [costPerCard,      setCostPerCard]      = useState(batch.grading_cost ? String(batch.grading_cost / 100) : '');
+  const [submissionNumber, setSubmissionNumber] = useState(batch.submission_number ?? '');
+  const [notes,            setNotes]            = useState(batch.notes ?? '');
+  const [saving,           setSaving]           = useState(false);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await api.patch(`/grading-subs/${batch.id}`, {
+        company,
+        tier:              tier || undefined,
+        submitted_at:      submittedAt || undefined,
+        grading_cost:      costPerCard ? Math.round(parseFloat(costPerCard) * 100) : undefined,
+        submission_number: submissionNumber || null,
+        notes:             notes || undefined,
+      });
+      toast.success('Batch updated');
+      qc.invalidateQueries({ queryKey: ['grading-batch', batch.id] });
+      qc.invalidateQueries({ queryKey: ['grading-batches'] });
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to update');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <Select label="Company" value={company} onChange={(e) => setCompany(e.target.value)}>
+          {GRADING_COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </Select>
+        <Input label="Tier / Service Level" placeholder="e.g. Bulk, Value, Regular"
+          value={tier} onChange={(e) => setTier(e.target.value)} />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Submitted Date" type="date" value={submittedAt} onChange={(e) => setSubmittedAt(e.target.value)} />
+        <Input label="Grading Cost Per Card (USD)" type="number" step="0.01" min="0" placeholder="0.00"
+          value={costPerCard} onChange={(e) => setCostPerCard(e.target.value)} />
+      </div>
+      <Input
+        label="Submission Number"
+        placeholder="e.g. 12345678"
+        value={submissionNumber}
+        onChange={(e) => setSubmissionNumber(e.target.value)}
+      />
+      <Input label="Notes" placeholder="Optional notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
+      <div className="flex justify-end gap-2 pt-2">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="submit" disabled={saving}>
+          {saving && <Loader2 size={14} className="animate-spin" />}
+          Save Changes
+        </Button>
+      </div>
+    </form>
+  );
+}
+
 // ── Batch Detail ─────────────────────────────────────────────────────────────
 
 function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => void }) {
   const qc = useQueryClient();
   const [showAddCard, setShowAddCard]     = useState(false);
   const [confirmingId, setConfirmingId]   = useState<string | null>(null);
-  const [confirmClose, setConfirmClose]   = useState(false);
+  const [showCloseSub, setShowCloseSub]   = useState(false);
   const [editingItem, setEditingItem]     = useState<BatchItem | null>(null);
+  const [showEdit, setShowEdit]           = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const { data, isLoading } = useQuery<BatchDetail>({
     queryKey: ['grading-batch', batchId],
@@ -380,12 +500,21 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
     onError:    () => toast.error('Failed to remove'),
   });
 
+  const deleteBatch = useMutation({
+    mutationFn: () => api.delete(`/grading-subs/${batchId}`),
+    onSuccess:  () => {
+      toast.success('Batch deleted');
+      qc.invalidateQueries({ queryKey: ['grading-batches'] });
+      onBack();
+    },
+    onError: () => toast.error('Failed to delete batch'),
+  });
+
   const setStatus = useMutation({
     mutationFn: (status: string) => api.patch(`/grading-subs/${batchId}`, { status }),
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
-      setConfirmClose(false);
     },
     onError: () => toast.error('Failed to update status'),
   });
@@ -413,25 +542,37 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
           </Badge>
         </div>
         <div className="flex items-center gap-2">
+          {confirmDelete ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-400">Delete this batch and revert all cards?</span>
+              <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+              <Button
+                size="sm"
+                className="bg-red-600 hover:bg-red-500 text-white border-0"
+                disabled={deleteBatch.isPending}
+                onClick={() => deleteBatch.mutate()}
+              >
+                <Trash2 size={13} />
+                {deleteBatch.isPending ? 'Deleting…' : 'Delete'}
+              </Button>
+            </div>
+          ) : (
+            <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(true)}>
+              <Trash2 size={13} /> Delete
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => setShowEdit(true)}>
+            Edit Details
+          </Button>
           {data.status === 'submitted' ? (
             <Button size="sm" variant="ghost" onClick={() => setStatus.mutate('pending')} disabled={setStatus.isPending}>
               Unlock Sub
             </Button>
           ) : (
             <>
-              {confirmClose ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-zinc-400">Close and lock this sub?</span>
-                  <Button size="sm" variant="ghost" onClick={() => setConfirmClose(false)}>Cancel</Button>
-                  <Button size="sm" onClick={() => setStatus.mutate('submitted')} disabled={setStatus.isPending}>
-                    Confirm Close
-                  </Button>
-                </div>
-              ) : (
-                <Button size="sm" variant="ghost" onClick={() => setConfirmClose(true)}>
-                  Close Sub
-                </Button>
-              )}
+              <Button size="sm" variant="ghost" onClick={() => setShowCloseSub(true)}>
+                Close Sub
+              </Button>
               <Button size="sm" onClick={() => setShowAddCard(true)}>
                 <Plus size={14} /> Add Card
               </Button>
@@ -453,6 +594,9 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
               {formatCurrency(data.stats.maxGain, 'USD')}
             </span></span>
           </>
+        )}
+        {data.submission_number && (
+          <span>Sub #: <span className="text-zinc-200 font-mono">{data.submission_number}</span></span>
         )}
         {data.submitted_at && (
           <span className="ml-auto">Submitted: <span className="text-zinc-300">{formatDate(data.submitted_at)}</span></span>
@@ -542,6 +686,14 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
       <Modal open={showAddCard} onClose={() => setShowAddCard(false)} title="Add Card to Batch">
         <AddCardModal batchId={batchId} onClose={() => setShowAddCard(false)} />
       </Modal>
+
+      <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Submission Details">
+        {showEdit && <EditBatchModal batch={data} onClose={() => setShowEdit(false)} />}
+      </Modal>
+
+      <Modal open={showCloseSub} onClose={() => setShowCloseSub(false)} title="Close Submission">
+        {showCloseSub && <CloseSubModal batch={data} onClose={() => setShowCloseSub(false)} />}
+      </Modal>
     </div>
   );
 }
@@ -578,43 +730,84 @@ export function Grading() {
             No grading batches yet.
           </div>
         ) : (
-          <table className="w-full text-xs border-collapse">
+          <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', minWidth: '100%', width: 'max-content' }}>
+            <colgroup>
+              <col style={{ minWidth: 200 }} />
+              <col style={{ minWidth: 70 }} />
+              <col style={{ minWidth: 100 }} />
+              <col style={{ minWidth: 55 }} />
+              <col style={{ minWidth: 105 }} />
+              <col style={{ minWidth: 105 }} />
+              <col style={{ minWidth: 105 }} />
+              <col style={{ minWidth: 100 }} />
+              <col style={{ minWidth: 100 }} />
+              <col style={{ minWidth: 100 }} />
+              <col style={{ minWidth: 110 }} />
+              <col style={{ minWidth: 180 }} />
+            </colgroup>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-400 uppercase tracking-wide text-[10px]">
                 <th className="px-4 py-2 text-left font-medium">Batch</th>
                 <th className="px-4 py-2 text-left font-medium">Company</th>
                 <th className="px-4 py-2 text-left font-medium">Tier</th>
                 <th className="px-4 py-2 text-right font-medium">Cards</th>
-                <th className="px-4 py-2 text-right font-medium">Grading Cost</th>
+                <th className="px-4 py-2 text-right font-medium">Cost/Card</th>
+                <th className="px-4 py-2 text-right font-medium">Raw Cost</th>
+                <th className="px-4 py-2 text-right font-medium">Grade Cost</th>
+                <th className="px-4 py-2 text-right font-medium">Total Cost</th>
+                <th className="px-4 py-2 text-right font-medium">Est. Value</th>
+                <th className="px-4 py-2 text-right font-medium">Est. Gain</th>
                 <th className="px-4 py-2 text-left font-medium">Status</th>
-                <th className="px-4 py-2 text-left font-medium">Submitted</th>
-                <th className="px-4 py-2 text-left font-medium">Notes</th>
+                <th className="px-4 py-2 text-left font-medium">Submitted / Notes</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {data.map((batch) => (
-                <tr key={batch.id}
-                  className="hover:bg-zinc-800/30 cursor-pointer transition-colors"
-                  onClick={() => setSelectedId(batch.id)}>
-                  <td className="px-4 py-2.5">
-                    <p className="text-zinc-100 font-medium">{batch.name ?? batch.batch_id}</p>
-                    <p className="text-[10px] text-zinc-600 font-mono">{batch.batch_id}</p>
-                  </td>
-                  <td className="px-4 py-2.5 text-zinc-300">{batch.company}</td>
-                  <td className="px-4 py-2.5 text-zinc-400">{batch.tier}</td>
-                  <td className="px-4 py-2.5 text-right text-zinc-300">{batch.item_count}</td>
-                  <td className="px-4 py-2.5 text-right text-zinc-400">
-                    {batch.grading_cost ? formatCurrency(batch.grading_cost, 'USD') : '—'}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge className={BATCH_STATUS_COLORS[batch.status] ?? 'bg-zinc-700/50 text-zinc-400'}>
-                      {batch.status}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2.5 text-zinc-500">{formatDate(batch.submitted_at)}</td>
-                  <td className="px-4 py-2.5 text-zinc-600 truncate max-w-[200px]">{batch.notes ?? '—'}</td>
-                </tr>
-              ))}
+              {data.map((batch) => {
+                const totalGrading = (batch.grading_cost ?? 0) * (batch.total_qty ?? batch.item_count);
+                const totalCost    = batch.raw_cost + totalGrading;
+                const estGain      = batch.estimated_total - totalCost;
+                const statusLabel  = batch.status === 'pending' ? 'Adding Cards' : batch.status;
+                return (
+                  <tr key={batch.id}
+                    className="hover:bg-zinc-800/30 cursor-pointer transition-colors"
+                    onClick={() => setSelectedId(batch.id)}>
+                    <td className="px-4 py-2.5">
+                      <p className="text-zinc-100 font-medium">{batch.name ?? batch.batch_id}</p>
+                      <p className="text-[10px] text-zinc-600 font-mono">{batch.batch_id}</p>
+                    </td>
+                    <td className="px-4 py-2.5 text-zinc-300">{batch.company}</td>
+                    <td className="px-4 py-2.5 text-zinc-400">{batch.tier}</td>
+                    <td className="px-4 py-2.5 text-right text-zinc-300">{batch.item_count}</td>
+                    <td className="px-4 py-2.5 text-right text-zinc-400">
+                      {batch.grading_cost ? formatCurrency(batch.grading_cost, 'USD') : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-zinc-400">
+                      {batch.raw_cost ? formatCurrency(batch.raw_cost, 'USD') : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-zinc-400">
+                      {totalGrading ? formatCurrency(totalGrading, 'USD') : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-zinc-200 font-medium">
+                      {totalCost ? formatCurrency(totalCost, 'USD') : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-zinc-300">
+                      {batch.estimated_total ? formatCurrency(batch.estimated_total, 'USD') : '—'}
+                    </td>
+                    <td className={`px-4 py-2.5 text-right font-medium ${estGain > 0 ? 'text-emerald-400' : estGain < 0 ? 'text-red-400' : 'text-zinc-500'}`}>
+                      {totalCost ? formatCurrency(estGain, 'USD') : '—'}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <Badge className={BATCH_STATUS_COLORS[batch.status] ?? 'bg-zinc-700/50 text-zinc-400'}>
+                        {statusLabel}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <p className="text-zinc-500 text-[11px]">{formatDate(batch.submitted_at) ?? '—'}</p>
+                      {batch.notes && <p className="text-zinc-600 text-[10px] truncate">{batch.notes}</p>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
