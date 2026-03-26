@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { X } from 'lucide-react';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { X, Trash2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
@@ -8,6 +8,9 @@ import { loadFilters, saveFilters } from '../lib/filter-store';
 import { InspectionPanel } from './raw/InspectionPanel';
 import type { PurchaseRow, PurchaseType } from './raw/types';
 import { STATUS_COLORS, TYPE_COLORS } from './raw/types';
+import { Button } from '../components/ui/Button';
+import { Modal } from '../components/ui/Modal';
+import toast from 'react-hot-toast';
 
 const DEFAULTS = {
   search: '',
@@ -16,11 +19,13 @@ const DEFAULTS = {
 
 export function Inspection() {
   const saved = loadFilters('inspection', DEFAULTS);
+  const qc = useQueryClient();
   const [page, setPage]               = useState(1);
   const [search, setSearch]           = useState(saved.search);
   const [debouncedSearch, setDebounced] = useState(saved.search);
   const [fType, setFType]             = useState<PurchaseType | null>(saved.fType);
   const [drillRow, setDrillRow]       = useState<PurchaseRow | null>(null);
+  const [deleteRow, setDeleteRow]     = useState<PurchaseRow | null>(null);
 
   const MINS = {
     pid:     colMinWidth('ID',         true, false),
@@ -71,6 +76,14 @@ export function Inspection() {
   const { data, isLoading } = useQuery<{ data: PurchaseRow[]; total: number; totalPages: number }>({
     queryKey: ['raw-purchases', params],
     queryFn: () => api.get('/raw-purchases', { params }).then((r) => r.data),
+  });
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['raw-purchases'] });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/raw-purchases/${id}`),
+    onSuccess: () => { invalidate(); setDeleteRow(null); toast.success('Purchase deleted'); },
+    onError: () => toast.error('Failed to delete'),
   });
 
   const hasActiveFilters = !!debouncedSearch || fType !== null;
@@ -135,18 +148,19 @@ export function Inspection() {
                 <ColHeader label="Inspected" col="inspected_count" {...sh} {...rz('inspect')}   minWidth={MINS.inspect}   align="right" />
                 <ColHeader label="For Sale"  col="sell_raw_count"  {...sh} {...rz('for_sale')}  minWidth={MINS.for_sale}  align="right" />
                 <ColHeader label="For Grade" col="grade_count"     {...sh} {...rz('for_grade')} minWidth={MINS.for_grade} align="right" />
+                <th className="w-10" />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
               {!data?.data.length ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-10 text-center text-zinc-500">
+                  <td colSpan={13} className="px-4 py-10 text-center text-zinc-500">
                     No purchases found.
                   </td>
                 </tr>
               ) : data.data.map((row) => (
                 <tr key={row.id}
-                  className="hover:bg-zinc-800/25 cursor-pointer transition-colors"
+                  className="hover:bg-zinc-800/25 cursor-pointer transition-colors group"
                   onClick={() => setDrillRow(row)}>
                   <td className="px-4 py-2">
                     <span className="font-mono text-indigo-300">{row.purchase_id}</span>
@@ -191,6 +205,14 @@ export function Inspection() {
                       {row.grade_count > 0 ? row.grade_count : '—'}
                     </span>
                   </td>
+                  <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => setDeleteRow(row)}
+                      title="Delete purchase"
+                      className="p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
+                      <Trash2 size={14} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -211,6 +233,24 @@ export function Inspection() {
           </div>
         </div>
       )}
+      {/* Delete confirmation */}
+      <Modal open={!!deleteRow} onClose={() => setDeleteRow(null)} title="Delete Purchase">
+        {deleteRow && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-300">
+              Delete <span className="font-medium text-zinc-100">{deleteRow.purchase_id}</span>
+              {deleteRow.card_name ? ` — ${deleteRow.card_name}` : ''}?
+            </p>
+            <p className="text-xs text-zinc-500">This will permanently remove the purchase record and cannot be undone.</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setDeleteRow(null)}>Keep</Button>
+              <Button size="sm" className="bg-red-600 hover:bg-red-500" onClick={() => deleteMut.mutate(deleteRow.id)}>
+                Delete
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

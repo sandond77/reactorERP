@@ -272,7 +272,18 @@ function PurchaseForm({
         form={form}
         catalogMatch={catalogMatch}
         catalogId={catalogId}
-        onSelect={(m) => { setCatalogMatch(m); setCatalogId(m.id); }}
+        onSelect={(m) => {
+          setCatalogMatch(m);
+          setCatalogId(m.id);
+          setForm((prev) => ({
+            ...prev,
+            card_name:   m.card_name   || prev.card_name,
+            set_name:    m.set_name    || prev.set_name,
+            card_number: m.card_number || prev.card_number,
+            language:    m.language    || prev.language,
+          }));
+          setErrors({});
+        }}
         onClear={() => { setCatalogMatch(null); setCatalogId(null); }}
       />
 

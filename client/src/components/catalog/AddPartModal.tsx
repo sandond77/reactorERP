@@ -1,14 +1,64 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
+import { filterSets } from '../../lib/set-codes';
 
 const GAMES = [
   { value: 'pokemon',   label: 'Pokémon' },
   { value: 'one_piece', label: 'One Piece' },
   { value: 'old_maid',  label: 'Old Maid' },
 ];
+
+function SetCodeCombobox({
+  value,
+  language,
+  inputCls,
+  onChange,
+}: {
+  value: string;
+  language: 'JP' | 'EN';
+  inputCls: string;
+  onChange: (code: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const suggestions = filterSets(language, value).slice(0, 12);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <input
+        className={inputCls}
+        value={value}
+        placeholder="e.g. SV3"
+        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+      />
+      {open && suggestions.length > 0 && (
+        <ul className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl text-xs">
+          {suggestions.map((s) => (
+            <li
+              key={s.code}
+              onMouseDown={(e) => { e.preventDefault(); onChange(s.code); setOpen(false); }}
+              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-zinc-800">
+              <span className="font-mono text-indigo-300 w-24 shrink-0">{s.code}</span>
+              <span className="text-zinc-400 truncate">{s.name}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export interface CreatedPart {
   id: string;
@@ -147,7 +197,18 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Set Code</label>
-              <input className={inputCls} value={form.set_code} onChange={field('set_code')} placeholder="e.g. SV3" />
+              <SetCodeCombobox
+                value={form.set_code}
+                language={form.language as 'JP' | 'EN'}
+                inputCls={inputCls}
+                onChange={(code) => {
+                  setForm((prev) => {
+                    const next = { ...prev, set_code: code };
+                    if (!skuManual) next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+                    return next;
+                  });
+                }}
+              />
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Card #</label>
