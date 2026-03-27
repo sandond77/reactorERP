@@ -5,6 +5,8 @@ import { env } from '../config/env';
 import { db } from '../config/database';
 import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
 import { normalizeGradeLabel } from '../utils/grade-labels';
+import { createRawPurchase } from './raw-purchases.service';
+import { createCard } from './cards.service';
 
 const THINKING: Anthropic.ThinkingConfigParam = { type: 'adaptive' };
 
@@ -412,15 +414,125 @@ export interface AgentChatMessage {
   content: string;
 }
 
+const AGENT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'create_raw_purchase',
+    description: 'Create a new raw purchase / intake record. Use this when the user wants to log a new card purchase or bulk purchase.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: { type: 'string', enum: ['raw', 'bulk'], description: 'Purchase type: raw (individual cards) or bulk (lot/bundle)' },
+        source: { type: 'string', description: 'Where purchased from, e.g. eBay, Mercari, card show' },
+        order_number: { type: 'string', description: 'Order or transaction ID from the platform' },
+        language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Card language (default JP)' },
+        card_name: { type: 'string', description: 'Card name (for single-card purchases)' },
+        set_name: { type: 'string', description: 'Set name' },
+        card_number: { type: 'string', description: 'Card number' },
+        total_cost_yen: { type: 'number', description: 'Total cost in Japanese Yen' },
+        fx_rate: { type: 'number', description: 'JPY to USD exchange rate used' },
+        total_cost_usd: { type: 'number', description: 'Total cost in USD' },
+        card_count: { type: 'number', description: 'Number of cards in this purchase' },
+        status: { type: 'string', enum: ['ordered', 'in_transit', 'received', 'needs_inspection'], description: 'Current status (default: ordered)' },
+        purchased_at: { type: 'string', description: 'Purchase date in YYYY-MM-DD format' },
+        notes: { type: 'string', description: 'Any additional notes' },
+      },
+      required: ['type'],
+    },
+  },
+  {
+    name: 'add_card_to_purchase',
+    description: 'Add a card instance to an existing raw purchase. Use this after create_raw_purchase to attach individual card details.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        raw_purchase_id: { type: 'string', description: 'The internal UUID of the raw purchase (from create_raw_purchase result)' },
+        catalog_id: { type: 'string', description: 'Card catalog ID if known' },
+        card_name_override: { type: 'string', description: 'Card name (if not using catalog_id)' },
+        set_name_override: { type: 'string', description: 'Set name override' },
+        card_number_override: { type: 'string', description: 'Card number override' },
+        quantity: { type: 'number', description: 'Number of copies' },
+        purchase_cost: { type: 'number', description: 'Cost per card in cents (e.g. 1000 = $10.00)' },
+        currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency for purchase_cost' },
+        condition: { type: 'string', description: 'Card condition: NM, LP, MP, HP, DMG' },
+        language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Card language' },
+        notes: { type: 'string', description: 'Notes about this specific card' },
+      },
+      required: ['raw_purchase_id'],
+    },
+  },
+  {
+    name: 'lookup_catalog',
+    description: 'Search the card catalog to find a catalog_id for a card before adding it to a purchase.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string', description: 'Card name, set name, or card number to search for' },
+        language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Filter by language' },
+      },
+      required: ['query'],
+    },
+  },
+];
+
+async function executeAgentTool(userId: string, toolName: string, toolInput: Record<string, unknown>): Promise<unknown> {
+  if (toolName === 'create_raw_purchase') {
+    const input = toolInput as unknown as Parameters<typeof createRawPurchase>[1];
+    const result = await createRawPurchase(userId, input);
+    return { success: true, id: result.id, purchase_id: result.purchase_id };
+  }
+
+  if (toolName === 'add_card_to_purchase') {
+    const { raw_purchase_id, catalog_id, card_name_override, set_name_override, card_number_override,
+            quantity, purchase_cost, currency, condition, language, notes } = toolInput as Record<string, unknown>;
+    const card = await createCard(userId, {
+      raw_purchase_id: raw_purchase_id as string,
+      catalog_id: (catalog_id as string) ?? null,
+      card_name_override: (card_name_override as string) ?? null,
+      set_name_override: (set_name_override as string) ?? null,
+      card_number_override: (card_number_override as string) ?? null,
+      quantity: (quantity as number) ?? 1,
+      purchase_cost: (purchase_cost as number) ?? 0,
+      currency: ((currency as string) ?? 'JPY') as 'USD' | 'JPY',
+      condition: (condition as string) ?? null,
+      language: ((language as string) ?? 'JP') as 'JP' | 'EN' | 'KR',
+      notes: (notes as string) ?? null,
+      status: 'purchased_raw',
+      purchase_type: 'raw',
+      card_game: 'pokemon',
+    });
+    return { success: true, id: card.id };
+  }
+
+  if (toolName === 'lookup_catalog') {
+    const { query, language } = toolInput as { query: string; language?: string };
+    const q = db.selectFrom('card_catalog').select(['id', 'card_name', 'set_name', 'card_number', 'sku', 'language'])
+      .where((eb) => eb.or([
+        eb('card_name', 'ilike', `%${query}%`),
+        eb('set_name', 'ilike', `%${query}%`),
+        eb('card_number', 'ilike', `%${query}%`),
+      ]));
+    const rows = language
+      ? await q.where('language', '=', language).limit(5).execute()
+      : await q.limit(5).execute();
+    return rows;
+  }
+
+  throw new Error(`Unknown tool: ${toolName}`);
+}
+
 export async function chatWithAgent(
   userId: string,
   messages: AgentChatMessage[]
 ): Promise<string> {
-  // Fetch a summary of user's inventory for context
   const summary = await getUserInventorySummary(userId);
 
   const systemPrompt = `You are Reactor AI, an assistant for a trading card inventory management system.
 You help users manage their Pokemon and trading card inventory, track grading submissions, analyze P&L, and provide card market insights.
+You can read inventory data AND write to the system using the tools provided.
+
+When the user asks to add, log, or create a purchase or intake record, use the create_raw_purchase tool.
+If they provide card details, also use add_card_to_purchase to attach the card.
+Use lookup_catalog to find the correct catalog_id before adding a card when possible.
 
 Current user inventory summary:
 ${JSON.stringify(summary, null, 2)}
@@ -435,15 +547,49 @@ Formatting rules — follow these strictly:
 - Keep responses short and direct
 - When discussing money, format as USD or JPY as appropriate`;
 
-  const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    thinking: THINKING,
-    system: systemPrompt,
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
-  });
+  const apiMessages: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }));
 
-  return response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
+  // Agentic loop — run until end_turn or no more tool calls
+  for (let i = 0; i < 5; i++) {
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      thinking: THINKING,
+      system: systemPrompt,
+      tools: AGENT_TOOLS,
+      messages: apiMessages,
+    });
+
+    if (response.stop_reason === 'end_turn') {
+      return response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
+    }
+
+    if (response.stop_reason === 'tool_use') {
+      // Add assistant turn with all content blocks
+      apiMessages.push({ role: 'assistant', content: response.content });
+
+      // Execute each tool call and collect results
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      for (const block of response.content) {
+        if (block.type !== 'tool_use') continue;
+        try {
+          const result = await executeAgentTool(userId, block.name, block.input as Record<string, unknown>);
+          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: `Error: ${msg}`, is_error: true });
+        }
+      }
+
+      apiMessages.push({ role: 'user', content: toolResults });
+      continue;
+    }
+
+    // Unexpected stop reason — return whatever text we have
+    return response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
+  }
+
+  return 'I was unable to complete the request within the allowed steps.';
 }
 
 async function getUserInventorySummary(userId: string) {

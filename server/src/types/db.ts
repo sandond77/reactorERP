@@ -32,6 +32,9 @@ export type ListingStatus = 'active' | 'sold' | 'expired' | 'cancelled';
 
 export type ImportStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
+export type RawPurchaseType = 'raw' | 'bulk';
+export type RawPurchaseStatus = 'ordered' | 'received' | 'cancelled';
+
 export type UserPlan = 'free' | 'pro' | 'enterprise';
 
 // ============================================================
@@ -94,6 +97,8 @@ export interface CardInstancesTable {
   image_front_url: string | null;
   image_back_url: string | null;
   purchased_at: Date | null;
+  raw_purchase_id: string | null;
+  decision: string | null;
   is_card_show: Generated<boolean>;
   is_personal_collection: Generated<boolean>;
   created_at: Generated<Date>;
@@ -205,6 +210,38 @@ export interface AuditLogTable {
   created_at: Generated<Date>;
 }
 
+export interface RawPurchasesTable {
+  id: Generated<string>;
+  user_id: string;
+  purchase_id: string;
+  type: RawPurchaseType;
+  source: string | null;
+  order_number: string | null;
+  language: string;
+  catalog_id: string | null;
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  total_cost_yen: number | null;
+  fx_rate: number | null;
+  total_cost_usd: number | null;
+  card_count: number;
+  status: RawPurchaseStatus;
+  purchased_at: Date | null;
+  received_at: Date | null;
+  reserved: Generated<boolean>;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface RawPurchaseSequencesTable {
+  user_id: string;
+  year: number;
+  type: RawPurchaseType;
+  next_seq: number;
+}
+
 export interface PokemonSetAliasesTable {
   id: Generated<string>;
   language: string;
@@ -212,6 +249,39 @@ export interface PokemonSetAliasesTable {
   set_code: string;
   set_name: string | null;
   created_at: Generated<Date>;
+}
+
+export interface GradingBatchesTable {
+  id: Generated<string>;
+  user_id: string;
+  batch_id: string;
+  name: string | null;
+  company: string;
+  tier: string;
+  submitted_at: Date | null;
+  grading_cost: Generated<number>;  // cost per card, in cents
+  status: Generated<string>;
+  notes: string | null;
+  submission_number: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface GradingBatchItemsTable {
+  id: Generated<string>;
+  batch_id: string;
+  card_instance_id: string;
+  line_item_num: number;
+  quantity: Generated<number>;
+  expected_grade: number | null;
+  estimated_value: number | null;
+  created_at: Generated<Date>;
+}
+
+export interface GradingBatchSequencesTable {
+  user_id: string;
+  year: number;
+  next_seq: number;
 }
 
 // ============================================================
@@ -229,6 +299,11 @@ export interface Database {
   csv_imports: CsvImportsTable;
   audit_log: AuditLogTable;
   pokemon_set_aliases: PokemonSetAliasesTable;
+  raw_purchases: RawPurchasesTable;
+  raw_purchase_sequences: RawPurchaseSequencesTable;
+  grading_batches: GradingBatchesTable;
+  grading_batch_items: GradingBatchItemsTable;
+  grading_batch_sequences: GradingBatchSequencesTable;
 }
 
 // ============================================================

@@ -1,11 +1,13 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { ExternalLink, X } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ExternalLink, Plus, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
+import { Modal } from '../components/ui/Modal';
 import { formatCurrency } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { SlabDetailModal } from '../components/inventory/SlabDetailModal';
+import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 
 interface SlabRow {
@@ -102,6 +104,8 @@ const OVERALL_FILTER_DEFAULTS = {
 export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
   const filterKey = cardShowMode ? 'card-show' : 'overall';
   const saved = loadFilters(filterKey, OVERALL_FILTER_DEFAULTS);
+  const qc = useQueryClient();
+  const [addOpen, setAddOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
@@ -241,6 +245,11 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
             onChange={(e) => handleSearchChange(e.target.value)}
             className="w-64 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           />
+          {!cardShowMode && (
+            <Button size="sm" onClick={() => setAddOpen(true)}>
+              <Plus size={14} /> Add Slab
+            </Button>
+          )}
         </div>
       </div>
 
@@ -343,6 +352,9 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
       {selectedSlab && (
         <SlabDetailModal slab={selectedSlab} onClose={() => setSelectedSlab(null)} />
       )}
+      <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Slab">
+        <AddSlabForm onSuccess={() => { setAddOpen(false); qc.invalidateQueries({ queryKey: ['overall'] }); }} />
+      </Modal>
 
       {data && (
         <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
