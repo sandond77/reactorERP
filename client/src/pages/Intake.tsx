@@ -517,7 +517,7 @@ export function Intake() {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h1 className="text-xl font-bold text-zinc-100">Intake</h1>
+        <h1 className="text-xl font-bold text-zinc-100">Purchases</h1>
         <div className="flex items-center gap-3">
           {hasActiveFilters && (
             <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">

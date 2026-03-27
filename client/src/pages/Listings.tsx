@@ -50,6 +50,17 @@ interface SlabResult {
   is_personal_collection: boolean;
 }
 
+interface RawCardResult {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  condition: string | null;
+  quantity: number;
+  purchase_cost: number | null;
+  currency: string;
+}
+
 type SortDir = 'asc' | 'desc';
 
 // ── Set Slot ──────────────────────────────────────────────────────────────────
@@ -210,8 +221,8 @@ function SetSlotRow({
 
 function AddListingModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState<'type' | 'sub-type' | 'set-count' | 'search' | 'quantity' | 'details' | 'set-search' | 'set-details'>('type');
-  const [listingMode, setListingMode] = useState<'single' | 'set'>('single');
+  const [step, setStep] = useState<'type' | 'sub-type' | 'set-count' | 'search' | 'quantity' | 'details' | 'set-search' | 'set-details' | 'raw-search'>('type');
+  const [listingMode, setListingMode] = useState<'single' | 'set' | 'raw'>('single');
 
   // Step: search (single)
   const [cardSearch, setCardSearch] = useState('');
@@ -227,6 +238,11 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const [setTargetCount, setSetTargetCount] = useState('');
   const [setSlotList, setSetSlotList] = useState<SetSlot[]>([]);
 
+  // Raw mode
+  const [rawSearch, setRawSearch] = useState('');
+  const [debouncedRawSearch, setDebouncedRawSearch] = useState('');
+  const [selectedRawCard, setSelectedRawCard] = useState<RawCardResult | null>(null);
+
   // Step: details (shared)
   const [price, setPrice] = useState('');
   const [listedAt, setListedAt] = useState('');
@@ -238,6 +254,10 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(t);
   }, [cardSearch]);
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedRawSearch(rawSearch), 300);
+    return () => clearTimeout(t);
+  }, [rawSearch]);
 
   // Reset grade + qty + custom when card selection changes
   useEffect(() => {
@@ -264,6 +284,15 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     enabled: !!selectedCardName && (step === 'quantity' || step === 'details'),
   });
 
+
+  // Raw card search
+  const { data: rawResults, isFetching: isRawSearching } = useQuery<PaginatedResult<RawCardResult>>({
+    queryKey: ['listing-raw-search', debouncedRawSearch],
+    queryFn: () => api.get('/cards', {
+      params: { search: debouncedRawSearch, status: 'raw_for_sale', limit: 100, sort_by: 'card_name', sort_dir: 'asc' },
+    }).then(r => r.data),
+    enabled: debouncedRawSearch.length >= 2 && step === 'raw-search',
+  });
 
   const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName) ?? [];
   const availableCopies = allCopies.filter(c => !c.is_listed && !c.is_card_show && !c.is_personal_collection);
@@ -299,12 +328,18 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const copiesToList = listingMode === 'set' ? setSlabs : selectedCopies;  // setSlabs is derived above
-    if (copiesToList.length === 0) { toast.error('No copies selected'); return; }
     if (!price) { toast.error('Enter a list price'); return; }
     setSubmitting(true);
     try {
-      await Promise.all(copiesToList.map(copy =>
+      let instancesToList: { id: string }[];
+      if (listingMode === 'raw') {
+        if (!selectedRawCard) { toast.error('No card selected'); setSubmitting(false); return; }
+        instancesToList = [selectedRawCard];
+      } else {
+        instancesToList = listingMode === 'set' ? setSlabs : selectedCopies;
+        if (instancesToList.length === 0) { toast.error('No copies selected'); setSubmitting(false); return; }
+      }
+      await Promise.all(instancesToList.map(copy =>
         api.post('/listings', {
           card_instance_id: copy.id,
           platform: 'ebay',
@@ -314,7 +349,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
           ebay_listing_url: ebayUrl || undefined,
         })
       ));
-      const n = copiesToList.length;
+      const n = instancesToList.length;
       toast.success(n === 1 ? 'Listing recorded!' : `${n} listings recorded!`);
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       onClose();
@@ -337,10 +372,11 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
           <p className="text-sm font-semibold text-indigo-300">Graded</p>
           <p className="text-xs text-zinc-500 mt-0.5">PSA, BGS, CGC slabs</p>
         </button>
-        <button type="button" disabled
-          className="rounded-xl border-2 border-zinc-700 bg-zinc-800/40 px-4 py-5 text-left opacity-40 cursor-not-allowed">
-          <p className="text-sm font-semibold text-zinc-400">Raw</p>
-          <p className="text-xs text-zinc-600 mt-0.5">Coming soon</p>
+        <button type="button"
+          onClick={() => { setListingMode('raw'); setStep('raw-search'); }}
+          className="rounded-xl border-2 border-zinc-600 bg-zinc-800/40 px-4 py-5 text-left hover:bg-zinc-700/40 hover:border-zinc-500 transition-colors">
+          <p className="text-sm font-semibold text-zinc-200">Raw</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Ungraded cards</p>
         </button>
       </div>
       <div className="flex justify-end pt-1">
@@ -533,6 +569,54 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 
+  // ── Step: raw-search ─────────────────────────────────────────────────────
+
+  if (step === 'raw-search') return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+        <span className="text-xs text-zinc-600">Raw</span>
+      </div>
+      <div className="relative">
+        <Input label="Search Card" placeholder="Card name or part number…"
+          value={rawSearch} onChange={(e) => setRawSearch(e.target.value)}
+          autoComplete="off" autoFocus />
+        {isRawSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
+      </div>
+
+      {debouncedRawSearch.length >= 2 && (
+        rawResults && rawResults.data.length > 0 ? (
+          <div className="rounded-lg border border-zinc-700 overflow-hidden">
+            {rawResults.data.map((card) => (
+              <button key={card.id} type="button"
+                className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 transition-colors"
+                onClick={() => { setSelectedRawCard(card); setStep('details'); }}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-zinc-200 truncate">{card.card_name ?? 'Unknown'}</span>
+                  <div className="shrink-0 flex items-center gap-2">
+                    {card.condition && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300">{card.condition}</span>
+                    )}
+                    <span className="text-[10px] text-zinc-500 tabular-nums">{card.quantity} card{card.quantity !== 1 ? 's' : ''}</span>
+                  </div>
+                </div>
+                {card.set_name && (
+                  <p className="text-[11px] text-zinc-500 mt-0.5 truncate">{card.set_name}{card.card_number ? ` · ${card.card_number}` : ''}</p>
+                )}
+              </button>
+            ))}
+          </div>
+        ) : !isRawSearching ? (
+          <p className="text-xs text-zinc-500 px-1">No raw cards found for sale.</p>
+        ) : null
+      )}
+
+      <div className="flex justify-end pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+
   // ── Step: set-count ──────────────────────────────────────────────────────
 
   if (step === 'set-count') return (
@@ -601,10 +685,9 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 
-  // ── Step: details (shared for single + set) ──────────────────────────────
+  // ── Step: details (shared for single + set + raw) ────────────────────────
 
-  const copiesToList = listingMode === 'set' ? setSlabs : selectedCopies;
-  const detailsBackStep: typeof step = listingMode === 'set' ? 'set-search' : 'quantity';
+  const detailsBackStep: typeof step = listingMode === 'set' ? 'set-search' : listingMode === 'raw' ? 'raw-search' : 'quantity';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -622,6 +705,21 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
                   {s.card_name} · <span className="font-mono">{formatCertNumber(s.cert_number)}</span> · {s.grade_label}
                 </p>
               ))}
+            </div>
+          </>
+        ) : listingMode === 'raw' && selectedRawCard ? (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm font-medium text-zinc-100 truncate">{selectedRawCard.card_name ?? 'Unknown'}</p>
+              <button type="button" onClick={() => setStep('raw-search')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
+            </div>
+            <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+              {selectedRawCard.set_name && <span>{selectedRawCard.set_name}</span>}
+              {selectedRawCard.card_number && <span className="font-mono">{selectedRawCard.card_number}</span>}
+              {selectedRawCard.condition && (
+                <span className="font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{selectedRawCard.condition}</span>
+              )}
+              <span>{selectedRawCard.quantity} card{selectedRawCard.quantity !== 1 ? 's' : ''}</span>
             </div>
           </>
         ) : (
@@ -653,9 +751,9 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={() => setStep(detailsBackStep)}>Back</Button>
-        <Button type="submit" disabled={submitting || copiesToList.length === 0}>
+        <Button type="submit" disabled={submitting || (listingMode === 'raw' ? !selectedRawCard : listingMode === 'set' ? setSlabs.length === 0 : selectedCopies.length === 0)}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
-          {submitting ? 'Recording…' : listingMode === 'set' ? `Record Set (${setSlabs.length} slabs)` : `Record ${qty > 1 ? `${qty} Listings` : 'Listing'}`}
+          {submitting ? 'Recording…' : listingMode === 'set' ? `Record Set (${setSlabs.length} slabs)` : listingMode === 'raw' ? 'Record Listing' : `Record ${qty > 1 ? `${qty} Listings` : 'Listing'}`}
         </Button>
       </div>
     </form>

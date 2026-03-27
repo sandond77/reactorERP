@@ -11,7 +11,7 @@ import { useAuth } from '../../contexts/AuthContext';
 const RAW_ROUTES = ['/intake', '/inspection', '/raw-inventory', '/ungraded', '/grading', '/sub-returns'];
 const RAW_NAV = [
   { to: '/raw-inventory', icon: PackageOpen,         label: 'Raw Inventory' },
-  { to: '/intake',        icon: ClipboardList,       label: 'Intake' },
+  { to: '/intake',        icon: ClipboardList,       label: 'Purchases' },
   { to: '/inspection',    icon: ScanSearch,          label: 'Inspection' },
   { to: '/ungraded',      icon: GalleryVerticalEnd,  label: 'Ungraded' },
   { to: '/grading',       icon: Star,                label: 'Grading' },
