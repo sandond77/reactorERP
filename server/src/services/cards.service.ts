@@ -363,7 +363,16 @@ export async function createCard(
   return card;
 }
 
-export async function updateCard(userId: string, cardId: string, data: CardInstanceUpdate) {
+export async function updateCard(
+  userId: string,
+  cardId: string,
+  data: CardInstanceUpdate & {
+    slab_cert_number?: number | null;
+    slab_grade?: number | null;
+    slab_grade_label?: string | null;
+    slab_grading_cost?: number | null;
+  }
+) {
   const existing = await db
     .selectFrom('card_instances')
     .selectAll()
@@ -374,13 +383,31 @@ export async function updateCard(userId: string, cardId: string, data: CardInsta
 
   if (!existing) throw new AppError(404, 'Card not found');
 
+  const { slab_cert_number, slab_grade, slab_grade_label, slab_grading_cost, ...instanceData } = data;
+
   const updated = await db
     .updateTable('card_instances')
-    .set(data)
+    .set({ ...instanceData, updated_at: new Date() })
     .where('id', '=', cardId)
     .where('user_id', '=', userId)
     .returningAll()
     .executeTakeFirstOrThrow();
+
+  // Update slab_details if any slab fields were provided
+  const hasSlabFields = slab_cert_number !== undefined || slab_grade !== undefined ||
+    slab_grade_label !== undefined || slab_grading_cost !== undefined;
+  if (hasSlabFields) {
+    const slabUpdate: Record<string, unknown> = { updated_at: new Date() };
+    if (slab_cert_number !== undefined) slabUpdate.cert_number = slab_cert_number;
+    if (slab_grade !== undefined)       slabUpdate.grade = slab_grade;
+    if (slab_grade_label !== undefined) slabUpdate.grade_label = slab_grade_label;
+    if (slab_grading_cost !== undefined) slabUpdate.grading_cost = slab_grading_cost;
+    await db.updateTable('slab_details')
+      .set(slabUpdate)
+      .where('card_instance_id', '=', cardId)
+      .where('user_id', '=', userId)
+      .execute();
+  }
 
   await logAudit(userId, 'card_instances', cardId, 'updated', existing, updated);
   return updated;
