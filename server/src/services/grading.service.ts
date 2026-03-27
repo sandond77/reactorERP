@@ -5,6 +5,21 @@ import type { GradingCompany } from '../types/db';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 
+// Build a word-split fuzzy search clause: each word must appear in the name (AND logic)
+function fuzzyNameClause(search: string | undefined, nameExpr: string, certExpr?: string) {
+  if (!search) return sql``;
+  const words = search.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return sql``;
+  const parts = words.map((w) => {
+    const term = `%${w}%`;
+    if (certExpr) {
+      return sql`AND (${sql.raw(nameExpr)} ILIKE ${term} OR ${sql.raw(certExpr)} ILIKE ${term})`;
+    }
+    return sql`AND ${sql.raw(nameExpr)} ILIKE ${term}`;
+  });
+  return sql.join(parts, sql` `);
+}
+
 // Whitelist of sortable columns → SQL expression
 const SLAB_SORT_COLS: Record<string, string> = {
   cert_number:       'sd.cert_number',
@@ -124,7 +139,7 @@ export async function listSlabs(
     WHERE ci.user_id = ${userId}
     AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
-    ${search ? sql`AND (ci.card_name_override ILIKE ${'%' + search + '%'} OR sd.cert_number::text ILIKE ${'%' + search + '%'})` : sql``}
+    ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
     ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
   `.execute(db);
 
@@ -208,7 +223,7 @@ export async function listSlabs(
     WHERE ci.user_id = ${userId}
     AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
-    ${search ? sql`AND (ci.card_name_override ILIKE ${'%' + search + '%'} OR sd.cert_number::text ILIKE ${'%' + search + '%'})` : sql``}
+    ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
     ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
     ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
     LIMIT ${pagination.limit} OFFSET ${offset}
@@ -261,7 +276,7 @@ export async function listSubmissions(
 
   const companyIn    = filterCompanies === undefined ? sql`` : filterCompanies.length ? sql`AND gs.company IN (${sql.join(filterCompanies.map((v) => sql.val(v)))})` : sql`AND 1=0`;
   const statusIn     = filterStatuses  === undefined ? sql`` : filterStatuses.length  ? sql`AND gs.status  IN (${sql.join(filterStatuses.map((v) => sql.val(v)))})` : sql`AND 1=0`;
-  const searchClause = search ? sql`AND COALESCE(ci.card_name_override, cc.card_name) ILIKE ${'%' + search + '%'}` : sql``;
+  const searchClause = fuzzyNameClause(search, 'COALESCE(ci.card_name_override, cc.card_name)');
 
   const countResult = await sql<{ count: string }>`
     SELECT COUNT(*) AS count

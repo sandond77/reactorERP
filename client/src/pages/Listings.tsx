@@ -4,7 +4,6 @@ import { ExternalLink, Plus, X, Loader2, Minus } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
-import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency, formatDate, formatCertNumber } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
@@ -53,33 +52,183 @@ interface SlabResult {
 
 type SortDir = 'asc' | 'desc';
 
-const LISTING_PLATFORMS = [
-  { value: 'ebay',      label: 'eBay' },
-  { value: 'card_show', label: 'Card Show' },
-  { value: 'local',     label: 'Private' },
-  { value: 'other',     label: 'Other' },
-] as const;
+// ── Set Slot ──────────────────────────────────────────────────────────────────
+
+type SetSlot = { cardName: string | null; slab: SlabResult | null };
+
+function SetSlotRow({
+  index,
+  slot,
+  takenIds,
+  onUpdate,
+}: {
+  index: number;
+  slot: SetSlot;
+  takenIds: Set<string>;
+  onUpdate: (slot: SetSlot) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [open, setOpen] = useState(!slot.slab); // collapsed once cert picked
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: searchData, isFetching: isSearching } = useQuery<PaginatedResult<SlabResult>>({
+    queryKey: ['set-slot-search', index, debounced],
+    queryFn: () => api.get('/grading/slabs', {
+      params: { search: debounced, limit: 100, status: 'unsold', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
+    }).then(r => r.data),
+    enabled: debounced.length >= 2 && !slot.cardName,
+  });
+
+  const { data: copiesData, isFetching: isLoadingCopies } = useQuery<PaginatedResult<SlabResult>>({
+    queryKey: ['set-slot-copies', index, slot.cardName],
+    queryFn: () => api.get('/grading/slabs', {
+      params: { search: slot.cardName, limit: 200, status: 'unsold', sort_by: 'cert_number', sort_dir: 'asc', personal_collection: 'no' },
+    }).then(r => r.data),
+    enabled: !!slot.cardName && !slot.slab,
+  });
+
+  const uniqueNames = searchData
+    ? Array.from(searchData.data.reduce((m, s) => {
+        if (!s.is_card_show) m.set(s.card_name ?? '', (m.get(s.card_name ?? '') ?? 0) + 1);
+        return m;
+      }, new Map<string, number>())).filter(([n, c]) => n && c > 0)
+    : [];
+
+  const copies = (copiesData?.data ?? []).filter(
+    c => c.card_name === slot.cardName && !c.is_listed && !c.is_card_show && !c.is_personal_collection
+  );
+
+  // Collapsed state — cert has been picked
+  if (slot.slab && !open) {
+    return (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-zinc-700/40 bg-zinc-800/30">
+        <div className="w-4 h-4 rounded-full bg-indigo-500 shrink-0 flex items-center justify-center">
+          <span className="text-[8px] text-white font-bold">✓</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-zinc-200 truncate">{slot.slab.card_name}</p>
+          <p className="text-[10px] text-zinc-500 font-mono">{formatCertNumber(slot.slab.cert_number)} · {slot.slab.grade_label}</p>
+        </div>
+        <button type="button" onClick={() => setOpen(true)}
+          className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors shrink-0">
+          Change
+        </button>
+        <button type="button" onClick={() => onUpdate({ cardName: null, slab: null })}
+          className="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
+          <X size={13} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-700/50 bg-zinc-800/20 overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800/60">
+        <span className="text-[10px] text-zinc-500 uppercase tracking-wide font-medium">Card {index + 1}</span>
+        {slot.cardName && (
+          <button type="button" onClick={() => { onUpdate({ cardName: null, slab: null }); setSearch(''); }}
+            className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors">
+            ← Change card
+          </button>
+        )}
+      </div>
+
+      <div className="p-2.5 space-y-2">
+        {/* Card search */}
+        {!slot.cardName ? (
+          <>
+            <div className="relative">
+              <input
+                type="text" placeholder="Search card name…" value={search}
+                onChange={(e) => setSearch(e.target.value)} autoFocus={index === 0}
+                className="w-full px-2.5 py-1.5 text-xs bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+              />
+              {isSearching && <Loader2 size={11} className="absolute right-2 top-2 animate-spin text-zinc-500" />}
+            </div>
+            {debounced.length >= 2 && (
+              uniqueNames.length > 0 ? (
+                <div className="rounded border border-zinc-700/50 overflow-hidden max-h-36 overflow-y-auto">
+                  {uniqueNames.map(([name, count]) => (
+                    <button key={name} type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-zinc-700/40 border-b border-zinc-700/30 last:border-0 flex items-center justify-between gap-2 transition-colors"
+                      onClick={() => { onUpdate({ cardName: name, slab: null }); setSearch(''); }}>
+                      <span className="text-xs text-zinc-200 truncate">{name}</span>
+                      <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">{count} unsold</span>
+                    </button>
+                  ))}
+                </div>
+              ) : !isSearching ? (
+                <p className="text-[11px] text-zinc-600 px-1">No results.</p>
+              ) : null
+            )}
+          </>
+        ) : (
+          /* Cert picker */
+          <>
+            <p className="text-xs text-zinc-300 font-medium truncate px-0.5">{slot.cardName}</p>
+            {isLoadingCopies ? (
+              <div className="flex items-center gap-1.5 py-1 text-[11px] text-zinc-600">
+                <Loader2 size={11} className="animate-spin" /> Loading certs…
+              </div>
+            ) : copies.length === 0 ? (
+              <p className="text-[11px] text-zinc-600 py-1">No unlisted copies available.</p>
+            ) : (
+              <div className="divide-y divide-zinc-800/60 rounded border border-zinc-700/40 overflow-hidden max-h-40 overflow-y-auto">
+                {copies.map(copy => {
+                  const isPickedHere = slot.slab?.id === copy.id;
+                  const takenElsewhere = !isPickedHere && takenIds.has(copy.id);
+                  return (
+                    <button key={copy.id} type="button" disabled={takenElsewhere}
+                      onClick={() => { onUpdate({ cardName: slot.cardName, slab: copy }); setOpen(false); }}
+                      className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left transition-colors ${
+                        takenElsewhere ? 'opacity-25 cursor-not-allowed' :
+                        isPickedHere ? 'bg-indigo-500/10' : 'hover:bg-zinc-700/30'
+                      }`}>
+                      <div className={`w-3 h-3 rounded-full border shrink-0 flex items-center justify-center transition-colors ${isPickedHere ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600'}`}>
+                        {isPickedHere && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                      </div>
+                      <span className="font-mono text-xs text-zinc-200">{formatCertNumber(copy.cert_number)}</span>
+                      <span className="text-[11px] text-zinc-500">{copy.grade_label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ── Add Listing Modal ─────────────────────────────────────────────────────────
 
 function AddListingModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState<'type' | 'search' | 'quantity' | 'details'>('type');
+  const [step, setStep] = useState<'type' | 'sub-type' | 'set-count' | 'search' | 'quantity' | 'details' | 'set-search' | 'set-details'>('type');
+  const [listingMode, setListingMode] = useState<'single' | 'set'>('single');
 
-  // Step: search
+  // Step: search (single)
   const [cardSearch, setCardSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCardName, setSelectedCardName] = useState<string | null>(null);
 
-  // Step: quantity
+  // Step: quantity (single)
   const [qty, setQty] = useState(1);
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
   const [customSelected, setCustomSelected] = useState<Set<string>>(new Set());
 
-  // Step: details
-  const [platform, setPlatform] = useState('ebay');
+  // Set mode
+  const [setTargetCount, setSetTargetCount] = useState('');
+  const [setSlotList, setSetSlotList] = useState<SetSlot[]>([]);
+
+  // Step: details (shared)
   const [price, setPrice] = useState('');
-  const [currency, setCurrency] = useState('USD');
   const [listedAt, setListedAt] = useState('');
   const [ebayUrl, setEbayUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -89,6 +238,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(t);
   }, [cardSearch]);
 
+
   // Reset grade + qty + custom when card selection changes
   useEffect(() => {
     setSelectedGrade(null);
@@ -96,7 +246,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     setCustomSelected(new Set());
   }, [selectedCardName]);
 
-  // Phase 1: search for unique card names
+  // Phase 1: search for unique card names (single mode)
   const { data: searchResults, isFetching: isSearching } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['listing-card-search', debouncedSearch],
     queryFn: () => api.get('/grading/slabs', {
@@ -105,7 +255,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     enabled: debouncedSearch.length >= 2 && step === 'search',
   });
 
-  // Phase 2: fetch all unsold copies of selected card, sorted by cert number (FIFO)
+  // Phase 2: fetch all unsold copies of selected card (single mode)
   const { data: copiesResult, isFetching: isLoadingCopies } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['listing-copies', selectedCardName],
     queryFn: () => api.get('/grading/slabs', {
@@ -114,11 +264,10 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     enabled: !!selectedCardName && (step === 'quantity' || step === 'details'),
   });
 
+
   const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName) ?? [];
-  // Unlisted copies only, excluding card show & personal collection
   const availableCopies = allCopies.filter(c => !c.is_listed && !c.is_card_show && !c.is_personal_collection);
 
-  // Grade breakdown: ordered map of grade_label → count
   const gradeBreakdown = availableCopies.reduce((map, c) => {
     const key = c.grade_label ?? 'Ungraded';
     map.set(key, (map.get(key) ?? 0) + 1);
@@ -128,17 +277,19 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const gradeKeys = Array.from(gradeBreakdown.keys());
   const activeGrade = selectedGrade ?? gradeKeys[0] ?? null;
   const copiesForGrade = availableCopies.filter(c => (c.grade_label ?? 'Ungraded') === activeGrade);
-
-  // When customSelected is empty, fall back to FIFO (top N by cert number)
   const fifoIds = new Set(copiesForGrade.slice(0, qty).map(c => c.id));
   const effectiveIds = customSelected.size > 0 ? customSelected : fifoIds;
   const selectedCopies = copiesForGrade.filter(c => effectiveIds.has(c.id));
+
+  // Derived set slabs (only slots with a cert picked)
+  const setSlabs = setSlotList.map(s => s.slab).filter((s): s is SlabResult => s != null);
+  const takenSetIds = new Set(setSlabs.map(s => s.id));
 
   // Deduplicate search results by card name
   const uniqueCardNames = searchResults
     ? Array.from(
         searchResults.data.reduce((map, s) => {
-          if (s.is_card_show) return map; // exclude card show inventory from count
+          if (s.is_card_show) return map;
           const name = s.card_name ?? 'Unknown';
           map.set(name, (map.get(name) ?? 0) + 1);
           return map;
@@ -148,21 +299,22 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (selectedCopies.length === 0) { toast.error('No copies selected'); return; }
+    const copiesToList = listingMode === 'set' ? setSlabs : selectedCopies;  // setSlabs is derived above
+    if (copiesToList.length === 0) { toast.error('No copies selected'); return; }
     if (!price) { toast.error('Enter a list price'); return; }
     setSubmitting(true);
     try {
-      await Promise.all(selectedCopies.map(copy =>
+      await Promise.all(copiesToList.map(copy =>
         api.post('/listings', {
           card_instance_id: copy.id,
-          platform,
+          platform: 'ebay',
           list_price: price,
-          currency,
+          currency: 'USD',
           listed_at: listedAt || undefined,
           ebay_listing_url: ebayUrl || undefined,
         })
       ));
-      const n = selectedCopies.length;
+      const n = copiesToList.length;
       toast.success(n === 1 ? 'Listing recorded!' : `${n} listings recorded!`);
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       onClose();
@@ -180,7 +332,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       <p className="text-xs text-zinc-500">What type of inventory are you listing?</p>
       <div className="grid grid-cols-2 gap-3">
         <button type="button"
-          onClick={() => setStep('search')}
+          onClick={() => setStep('sub-type')}
           className="rounded-xl border-2 border-indigo-500 bg-indigo-500/10 px-4 py-5 text-left hover:bg-indigo-500/20 transition-colors">
           <p className="text-sm font-semibold text-indigo-300">Graded</p>
           <p className="text-xs text-zinc-500 mt-0.5">PSA, BGS, CGC slabs</p>
@@ -197,13 +349,42 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 
-  // ── Step: search ─────────────────────────────────────────────────────────
+  // ── Step: sub-type ───────────────────────────────────────────────────────
+
+  if (step === 'sub-type') return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+        <span className="text-xs text-zinc-600">Graded</span>
+      </div>
+      <p className="text-xs text-zinc-500">Single slab or a set?</p>
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button"
+          onClick={() => { setListingMode('single'); setStep('search'); }}
+          className="rounded-xl border-2 border-indigo-500 bg-indigo-500/10 px-4 py-5 text-left hover:bg-indigo-500/20 transition-colors">
+          <p className="text-sm font-semibold text-indigo-300">Single Slab</p>
+          <p className="text-xs text-zinc-500 mt-0.5">One card per listing</p>
+        </button>
+        <button type="button"
+          onClick={() => { setListingMode('set'); setStep('set-count'); }}
+          className="rounded-xl border-2 border-zinc-600 bg-zinc-800/40 px-4 py-5 text-left hover:bg-zinc-700/40 hover:border-zinc-500 transition-colors">
+          <p className="text-sm font-semibold text-zinc-200">Set</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Multiple slabs, one listing</p>
+        </button>
+      </div>
+      <div className="flex justify-end pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+
+  // ── Step: search (single) ────────────────────────────────────────────────
 
   if (step === 'search') return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
-        <span className="text-xs text-zinc-600">Graded</span>
+        <button type="button" onClick={() => setStep('sub-type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+        <span className="text-xs text-zinc-600">Graded · Single Slab</span>
       </div>
       <div className="relative">
         <Input label="Search Card" placeholder="Card name or part number…"
@@ -218,11 +399,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
             {uniqueCardNames.map(([name, count]) => (
               <button key={name} type="button"
                 className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors"
-                onClick={() => {
-                  setSelectedCardName(name);
-                  setQty(1);
-                  setStep('quantity');
-                }}>
+                onClick={() => { setSelectedCardName(name); setQty(1); setStep('quantity'); }}>
                 <span className="text-sm text-zinc-200 truncate">{name}</span>
                 <span className="shrink-0 text-[10px] text-zinc-500 font-mono tabular-nums">{count} unsold</span>
               </button>
@@ -239,7 +416,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 
-  // ── Step: quantity ───────────────────────────────────────────────────────
+  // ── Step: quantity (single) ──────────────────────────────────────────────
 
   if (step === 'quantity') return (
     <div className="space-y-4">
@@ -262,7 +439,6 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <>
-          {/* Grade selector — only shown when multiple grades available */}
           {gradeKeys.length > 1 && (
             <div className="flex flex-wrap gap-2">
               {gradeKeys.map(grade => (
@@ -282,7 +458,6 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* Quantity stepper */}
           <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 p-4">
             <div className="flex items-center justify-between">
               <div className="space-y-0.5">
@@ -299,14 +474,12 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
               </div>
               <div className="flex flex-col items-end gap-1">
                 <div className="flex items-center gap-3">
-                  <button type="button"
-                    onClick={() => setQty(q => Math.max(1, q - 1))}
+                  <button type="button" onClick={() => setQty(q => Math.max(1, q - 1))}
                     className="w-8 h-8 rounded-lg bg-zinc-700 hover:bg-zinc-600 flex items-center justify-center text-zinc-200 transition-colors">
                     <Minus size={14} />
                   </button>
                   <span className="text-xl font-bold text-zinc-100 w-6 text-center tabular-nums">{qty}</span>
-                  <button type="button"
-                    onClick={() => setQty(q => Math.min(copiesForGrade.length, q + 1))}
+                  <button type="button" onClick={() => setQty(q => Math.min(copiesForGrade.length, q + 1))}
                     className="w-8 h-8 rounded-lg bg-zinc-700 hover:bg-zinc-600 flex items-center justify-center text-zinc-200 transition-colors">
                     <Plus size={14} />
                   </button>
@@ -318,7 +491,6 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* Cert list — always clickable, capped at qty */}
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
             {copiesForGrade.map((copy, idx) => {
               const isSelected = effectiveIds.has(copy.id);
@@ -328,7 +500,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
               return (
                 <div key={copy.id}
                   onClick={atLimit ? undefined : () => setCustomSelected(() => {
-                    const next = new Set(effectiveIds); // start from current effective selection
+                    const next = new Set(effectiveIds);
                     next.has(copy.id) ? next.delete(copy.id) : next.add(copy.id);
                     return next;
                   })}
@@ -361,39 +533,116 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 
-  // ── Step: details ────────────────────────────────────────────────────────
+  // ── Step: set-count ──────────────────────────────────────────────────────
+
+  if (step === 'set-count') return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => setStep('sub-type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+        <span className="text-xs text-zinc-600">Graded · Set</span>
+      </div>
+      <p className="text-sm text-zinc-300">How many slabs are in this set?</p>
+      <input
+        type="number" min={2} max={50} placeholder="e.g. 5"
+        value={setTargetCount}
+        onChange={(e) => setSetTargetCount(e.target.value)}
+        autoFocus
+        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+      />
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="button"
+          disabled={!setTargetCount || parseInt(setTargetCount) < 2}
+          onClick={() => {
+            const n = parseInt(setTargetCount);
+            setSetSlotList(Array.from({ length: n }, () => ({ cardName: null, slab: null })));
+            setStep('set-search');
+          }}>
+          Continue →
+        </Button>
+      </div>
+    </div>
+  );
+
+  // ── Step: set-search ─────────────────────────────────────────────────────
+
+  if (step === 'set-search') return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setStep('set-count')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+          <span className="text-xs text-zinc-600">Graded · Set</span>
+        </div>
+        <span className="text-xs text-zinc-500 tabular-nums">
+          {setSlabs.length} / {setSlotList.length} ready
+        </span>
+      </div>
+
+      <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+        {setSlotList.map((slot, idx) => (
+          <SetSlotRow
+            key={idx}
+            index={idx}
+            slot={slot}
+            takenIds={takenSetIds}
+            onUpdate={(updated) => setSetSlotList(prev => prev.map((s, i) => i === idx ? updated : s))}
+          />
+        ))}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="button"
+          disabled={setSlabs.length < 2 || setSlabs.length !== setSlotList.length}
+          onClick={() => setStep('set-details')}>
+          Continue → ({setSlabs.length}/{setSlotList.length} ready)
+        </Button>
+      </div>
+    </div>
+  );
+
+  // ── Step: details (shared for single + set) ──────────────────────────────
+
+  const copiesToList = listingMode === 'set' ? setSlabs : selectedCopies;
+  const detailsBackStep: typeof step = listingMode === 'set' ? 'set-search' : 'quantity';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Summary */}
       <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 px-4 py-3 space-y-1">
-        <div className="flex items-start justify-between gap-3">
-          <p className="text-sm font-medium text-zinc-100 truncate">{selectedCardName}</p>
-          <button type="button" onClick={() => setStep('quantity')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
-        </div>
-        <p className="text-[11px] text-zinc-500">
-          Listing {selectedCopies.length} cert{selectedCopies.length !== 1 ? 's' : ''}:
-          {' '}{selectedCopies.map(c => formatCertNumber(c.cert_number)).join(', ')}
-        </p>
+        {listingMode === 'set' ? (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm font-medium text-zinc-100">Set — {setSlabs.length} slabs</p>
+              <button type="button" onClick={() => setStep('set-search')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
+            </div>
+            <div className="space-y-0.5 max-h-28 overflow-y-auto">
+              {setSlabs.map(s => (
+                <p key={s.id} className="text-[11px] text-zinc-500 truncate">
+                  {s.card_name} · <span className="font-mono">{formatCertNumber(s.cert_number)}</span> · {s.grade_label}
+                </p>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm font-medium text-zinc-100 truncate">{selectedCardName}</p>
+              <button type="button" onClick={() => setStep('quantity')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
+            </div>
+            <p className="text-[11px] text-zinc-500">
+              Listing {selectedCopies.length} cert{selectedCopies.length !== 1 ? 's' : ''}:
+              {' '}{selectedCopies.map(c => formatCertNumber(c.cert_number)).join(', ')}
+            </p>
+          </>
+        )}
       </div>
 
-      {platform === 'ebay' && (
-        <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
-          value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
-      )}
+      <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
+        value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
 
       <div className="grid grid-cols-2 gap-3">
-        <Select label="Platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-          {LISTING_PLATFORMS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </Select>
-        <Select label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-          <option value="USD">USD</option>
-          <option value="JPY">JPY</option>
-        </Select>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Input label="List Price" type="number" step="0.01" min="0" placeholder="0.00"
+        <Input label={listingMode === 'set' ? 'Set Price (total)' : 'List Price'} type="number" step="0.01" min="0" placeholder="0.00"
           value={price} onChange={(e) => setPrice(e.target.value)} />
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Listed Date</label>
@@ -403,10 +652,10 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" onClick={() => setStep('quantity')}>Back</Button>
-        <Button type="submit" disabled={submitting || selectedCopies.length === 0}>
+        <Button type="button" variant="ghost" onClick={() => setStep(detailsBackStep)}>Back</Button>
+        <Button type="submit" disabled={submitting || copiesToList.length === 0}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
-          {submitting ? 'Recording…' : `Record ${qty > 1 ? `${qty} Listings` : 'Listing'}`}
+          {submitting ? 'Recording…' : listingMode === 'set' ? `Record Set (${setSlabs.length} slabs)` : `Record ${qty > 1 ? `${qty} Listings` : 'Listing'}`}
         </Button>
       </div>
     </form>
@@ -417,9 +666,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
 function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [platform, setPlatform] = useState(row.platform);
   const [price, setPrice] = useState(row.list_price != null ? (row.list_price / 100).toFixed(2) : '');
-  const [currency, setCurrency] = useState(row.currency);
   const [ebayUrl, setEbayUrl] = useState(row.ebay_listing_url ?? '');
   const [saving, setSaving] = useState(false);
   const [deleteStep, setDeleteStep] = useState<null | 'confirm' | 'deleting'>(null);
@@ -440,9 +687,7 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
       await api.patch('/listings/group', {
         ...groupKey,
         list_price: price || undefined,
-        ...(platform !== row.platform ? { platform_new: platform } : {}),
-        ...(currency !== row.currency ? { currency_new: currency } : {}),
-        ebay_listing_url: platform === 'ebay' ? (ebayUrl || null) : null,
+        ebay_listing_url: ebayUrl || null,
       });
       toast.success('Listing updated');
       queryClient.invalidateQueries({ queryKey: ['listings'] });
@@ -482,20 +727,8 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
         </div>
       </div>
 
-      {platform === 'ebay' && (
-        <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
-          value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
-      )}
-
-      <div className="grid grid-cols-2 gap-3">
-        <Select label="Platform" value={platform} onChange={(e) => setPlatform(e.target.value)}>
-          {LISTING_PLATFORMS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </Select>
-        <Select label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-          <option value="USD">USD</option>
-          <option value="JPY">JPY</option>
-        </Select>
-      </div>
+      <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
+        value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
 
       <Input label="List Price" type="number" step="0.01" min="0" placeholder="0.00"
         value={price} onChange={(e) => setPrice(e.target.value)} />
