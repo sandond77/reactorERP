@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Plus, X, Loader2, Minus } from 'lucide-react';
+import { ExternalLink, Plus, X, Loader2, Minus, Trash2 } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -59,6 +59,8 @@ interface RawCardResult {
   quantity: number;
   purchase_cost: number | null;
   currency: string;
+  raw_purchase_label: string | null;
+  is_listed: boolean;
 }
 
 type SortDir = 'asc' | 'desc';
@@ -221,7 +223,7 @@ function SetSlotRow({
 
 function AddListingModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState<'type' | 'sub-type' | 'set-count' | 'search' | 'quantity' | 'details' | 'set-search' | 'set-details' | 'raw-search'>('type');
+  const [step, setStep] = useState<'type' | 'sub-type' | 'set-count' | 'search' | 'quantity' | 'details' | 'set-search' | 'set-details' | 'raw-search' | 'raw-select'>('type');
   const [listingMode, setListingMode] = useState<'single' | 'set' | 'raw'>('single');
 
   // Step: search (single)
@@ -241,7 +243,8 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   // Raw mode
   const [rawSearch, setRawSearch] = useState('');
   const [debouncedRawSearch, setDebouncedRawSearch] = useState('');
-  const [selectedRawCard, setSelectedRawCard] = useState<RawCardResult | null>(null);
+  const [selectedRawCardName, setSelectedRawCardName] = useState<string | null>(null);
+  const [selectedRawIds, setSelectedRawIds] = useState<Set<string>>(new Set());
 
   // Step: details (shared)
   const [price, setPrice] = useState('');
@@ -289,9 +292,9 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const { data: rawResults, isFetching: isRawSearching } = useQuery<PaginatedResult<RawCardResult>>({
     queryKey: ['listing-raw-search', debouncedRawSearch],
     queryFn: () => api.get('/cards', {
-      params: { search: debouncedRawSearch, status: 'raw_for_sale', limit: 100, sort_by: 'card_name', sort_dir: 'asc' },
+      params: { search: debouncedRawSearch, decision: 'sell_raw', status: 'purchased_raw,inspected,raw_for_sale', limit: 100, sort_by: 'card_name', sort_dir: 'asc' },
     }).then(r => r.data),
-    enabled: debouncedRawSearch.length >= 2 && step === 'raw-search',
+    enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select'),
   });
 
   const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName) ?? [];
@@ -326,6 +329,20 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       ).filter(([, count]) => count > 0)
     : [];
 
+  // Raw: group by card name, then per-instance selector
+  const uniqueRawCardNames = rawResults
+    ? Array.from(
+        rawResults.data.reduce((map, c) => {
+          if (c.is_listed) return map;
+          const name = c.card_name ?? 'Unknown';
+          map.set(name, (map.get(name) ?? 0) + 1);
+          return map;
+        }, new Map<string, number>())
+      )
+    : [];
+  const rawCopiesForName = (rawResults?.data ?? []).filter(c => c.card_name === selectedRawCardName && !c.is_listed);
+  const selectedRawCards = rawCopiesForName.filter(c => selectedRawIds.has(c.id));
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!price) { toast.error('Enter a list price'); return; }
@@ -333,8 +350,8 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     try {
       let instancesToList: { id: string }[];
       if (listingMode === 'raw') {
-        if (!selectedRawCard) { toast.error('No card selected'); setSubmitting(false); return; }
-        instancesToList = [selectedRawCard];
+        if (selectedRawCards.length === 0) { toast.error('No card selected'); setSubmitting(false); return; }
+        instancesToList = selectedRawCards;
       } else {
         instancesToList = listingMode === 'set' ? setSlabs : selectedCopies;
         if (instancesToList.length === 0) { toast.error('No copies selected'); setSubmitting(false); return; }
@@ -352,6 +369,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       const n = instancesToList.length;
       toast.success(n === 1 ? 'Listing recorded!' : `${n} listings recorded!`);
       queryClient.invalidateQueries({ queryKey: ['listings'] });
+      queryClient.invalidateQueries({ queryKey: ['raw-inventory-grouped'] });
       onClose();
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to create listing');
@@ -578,31 +596,23 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
         <span className="text-xs text-zinc-600">Raw</span>
       </div>
       <div className="relative">
-        <Input label="Search Card" placeholder="Card name or part number…"
+        <Input label="Search Card" placeholder="Card name, part number, or purchase ID…"
           value={rawSearch} onChange={(e) => setRawSearch(e.target.value)}
           autoComplete="off" autoFocus />
         {isRawSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
       </div>
 
       {debouncedRawSearch.length >= 2 && (
-        rawResults && rawResults.data.length > 0 ? (
+        uniqueRawCardNames.length > 0 ? (
           <div className="rounded-lg border border-zinc-700 overflow-hidden">
-            {rawResults.data.map((card) => (
-              <button key={card.id} type="button"
+            {uniqueRawCardNames.map(([name, count]) => (
+              <button key={name} type="button"
                 className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 transition-colors"
-                onClick={() => { setSelectedRawCard(card); setStep('details'); }}>
+                onClick={() => { setSelectedRawCardName(name); setSelectedRawIds(new Set()); setStep('raw-select'); }}>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm text-zinc-200 truncate">{card.card_name ?? 'Unknown'}</span>
-                  <div className="shrink-0 flex items-center gap-2">
-                    {card.condition && (
-                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-700 text-zinc-300">{card.condition}</span>
-                    )}
-                    <span className="text-[10px] text-zinc-500 tabular-nums">{card.quantity} card{card.quantity !== 1 ? 's' : ''}</span>
-                  </div>
+                  <span className="text-sm text-zinc-200 truncate">{name}</span>
+                  <span className="shrink-0 text-[10px] text-zinc-500 tabular-nums">{count} card{count !== 1 ? 's' : ''}</span>
                 </div>
-                {card.set_name && (
-                  <p className="text-[11px] text-zinc-500 mt-0.5 truncate">{card.set_name}{card.card_number ? ` · ${card.card_number}` : ''}</p>
-                )}
               </button>
             ))}
           </div>
@@ -613,6 +623,50 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
       <div className="flex justify-end pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+
+  // ── Step: raw-select ─────────────────────────────────────────────────────
+
+  if (step === 'raw-select') return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 min-w-0">
+        <button type="button" onClick={() => { setStep('raw-search'); setSelectedRawCardName(null); }}
+          className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0">← Back</button>
+        <p className="text-xs font-medium text-zinc-300 truncate">{selectedRawCardName}</p>
+      </div>
+
+      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+        {rawCopiesForName.map((copy) => {
+          const isSelected = selectedRawIds.has(copy.id);
+          return (
+            <div key={copy.id}
+              onClick={() => setSelectedRawIds((prev) => {
+                const next = new Set(prev);
+                next.has(copy.id) ? next.delete(copy.id) : next.add(copy.id);
+                return next;
+              })}
+              className={`rounded-lg border px-3 py-2 flex items-center gap-2 cursor-pointer transition-colors ${
+                isSelected ? 'border-indigo-500/40 bg-indigo-500/8' : 'border-zinc-700/30 bg-zinc-800/20 opacity-50 hover:opacity-70'
+              }`}>
+              <div className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center transition-colors ${isSelected ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600'}`}>
+                {isSelected && <span className="text-[8px] text-white font-bold">✓</span>}
+              </div>
+              <span className="text-sm font-mono text-zinc-200">{copy.raw_purchase_label ?? '—'}</span>
+              {copy.condition && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{copy.condition}</span>}
+              <span className="text-[10px] text-zinc-500">{copy.quantity} card{copy.quantity !== 1 ? 's' : ''}</span>
+              {isSelected && <span className="ml-auto text-[10px] text-indigo-400 font-medium">Will list</span>}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="button" disabled={selectedRawIds.size === 0} onClick={() => setStep('details')}>
+          Continue →
+        </Button>
       </div>
     </div>
   );
@@ -687,7 +741,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
   // ── Step: details (shared for single + set + raw) ────────────────────────
 
-  const detailsBackStep: typeof step = listingMode === 'set' ? 'set-search' : listingMode === 'raw' ? 'raw-search' : 'quantity';
+  const detailsBackStep: typeof step = listingMode === 'set' ? 'set-search' : listingMode === 'raw' ? 'raw-select' : 'quantity';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -707,20 +761,23 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
               ))}
             </div>
           </>
-        ) : listingMode === 'raw' && selectedRawCard ? (
+        ) : listingMode === 'raw' && selectedRawCards.length > 0 ? (
           <>
             <div className="flex items-start justify-between gap-3">
-              <p className="text-sm font-medium text-zinc-100 truncate">{selectedRawCard.card_name ?? 'Unknown'}</p>
-              <button type="button" onClick={() => setStep('raw-search')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
+              <p className="text-sm font-medium text-zinc-100 truncate">{selectedRawCardName ?? 'Unknown'}</p>
+              <button type="button" onClick={() => setStep('raw-select')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
             </div>
-            <div className="flex items-center gap-3 text-[11px] text-zinc-500">
-              {selectedRawCard.set_name && <span>{selectedRawCard.set_name}</span>}
-              {selectedRawCard.card_number && <span className="font-mono">{selectedRawCard.card_number}</span>}
-              {selectedRawCard.condition && (
-                <span className="font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{selectedRawCard.condition}</span>
+            <div className="flex items-center gap-3 text-[11px] text-zinc-500 flex-wrap">
+              {selectedRawCards[0].set_name && <span>{selectedRawCards[0].set_name}</span>}
+              {selectedRawCards[0].card_number && <span className="font-mono">{selectedRawCards[0].card_number}</span>}
+              {selectedRawCards[0].condition && (
+                <span className="font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{selectedRawCards[0].condition}</span>
               )}
-              <span>{selectedRawCard.quantity} card{selectedRawCard.quantity !== 1 ? 's' : ''}</span>
+              <span>{selectedRawCards.reduce((s, c) => s + c.quantity, 0)} card{selectedRawCards.reduce((s, c) => s + c.quantity, 0) !== 1 ? 's' : ''}</span>
             </div>
+            <p className="text-[11px] text-zinc-500 mt-0.5">
+              ID{selectedRawCards.length !== 1 ? 's' : ''}: {selectedRawCards.map(c => c.raw_purchase_label ?? '—').join(', ')}
+            </p>
           </>
         ) : (
           <>
@@ -751,7 +808,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={() => setStep(detailsBackStep)}>Back</Button>
-        <Button type="submit" disabled={submitting || (listingMode === 'raw' ? !selectedRawCard : listingMode === 'set' ? setSlabs.length === 0 : selectedCopies.length === 0)}>
+        <Button type="submit" disabled={submitting || (listingMode === 'raw' ? selectedRawCards.length === 0 : listingMode === 'set' ? setSlabs.length === 0 : selectedCopies.length === 0)}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
           {submitting ? 'Recording…' : listingMode === 'set' ? `Record Set (${setSlabs.length} slabs)` : listingMode === 'raw' ? 'Record Listing' : `Record ${qty > 1 ? `${qty} Listings` : 'Listing'}`}
         </Button>
@@ -831,45 +888,35 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
       <Input label="List Price" type="number" step="0.01" min="0" placeholder="0.00"
         value={price} onChange={(e) => setPrice(e.target.value)} />
 
-      {/* Delete zone */}
-      <div className="border-t border-zinc-800 pt-4">
-        {deleteStep === null && (
-          <button type="button" onClick={() => setDeleteStep('confirm')}
-            className="text-xs text-red-500 hover:text-red-400 transition-colors">
-            Cancel listing{row.num_listed !== 1 ? `s (${row.num_listed})` : ''}…
-          </button>
-        )}
-        {deleteStep === 'confirm' && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/8 px-4 py-3 space-y-3">
-            <p className="text-xs text-red-300 font-medium">
-              Cancel {row.num_listed} active listing{row.num_listed !== 1 ? 's' : ''}?
-            </p>
-            <p className="text-[11px] text-zinc-500">This marks the listing as cancelled. Sales history is preserved.</p>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setDeleteStep(null)}
-                className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
-                Never mind
-              </button>
-              <button type="button" onClick={handleDelete}
-                className="ml-auto px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-xs text-white font-medium transition-colors">
-                Yes, cancel listing{row.num_listed !== 1 ? 's' : ''}
-              </button>
+      <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
+        <div>
+          {deleteStep === 'confirm' ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-red-300">Cancel listing{row.num_listed !== 1 ? `s (${row.num_listed})` : ''}?</span>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setDeleteStep(null)}>No</Button>
+              <Button type="button" size="sm"
+                className="bg-red-600 hover:bg-red-500 text-white border-0"
+                disabled={deleteStep === 'deleting'}
+                onClick={handleDelete}>
+                <Trash2 size={13} />
+                {deleteStep === 'deleting' ? 'Cancelling…' : 'Yes, cancel'}
+              </Button>
             </div>
-          </div>
-        )}
-        {deleteStep === 'deleting' && (
-          <div className="flex items-center gap-2 text-xs text-zinc-500">
-            <Loader2 size={12} className="animate-spin" /> Cancelling…
-          </div>
-        )}
-      </div>
-
-      <div className="flex justify-end gap-2 pt-1">
-        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={saving}>
-          {saving && <Loader2 size={14} className="animate-spin" />}
-          {saving ? 'Saving…' : 'Save Changes'}
-        </Button>
+          ) : (
+            <button type="button" onClick={() => setDeleteStep('confirm')}
+              className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-red-400 transition-colors">
+              <Trash2 size={13} />
+              Cancel listing{row.num_listed !== 1 ? `s (${row.num_listed})` : ''}
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={saving}>
+            {saving && <Loader2 size={14} className="animate-spin" />}
+            {saving ? 'Saving…' : 'Save Changes'}
+          </Button>
+        </div>
       </div>
     </form>
   );
@@ -906,6 +953,7 @@ export function Listings() {
   const [fPrice, setFPrice] = useState<string[] | null>(saved.fPrice);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
+  const [listingTab, setListingTab] = useState<'graded' | 'raw'>('graded');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editRow, setEditRow] = useState<AggregatedListing | null>(null);
 
@@ -918,19 +966,25 @@ export function Listings() {
     card:        colMinWidth('Card Name', true,  true),   // ~145
     company:     colMinWidth('Company',   false, true),   // ~115
     grade:       colMinWidth('Grade',     false, true),   // ~95
+    condition:   colMinWidth('Condition', false, true),   // ~100
     platform:    colMinWidth('Platform',  true,  true),   // ~140
     price:       colMinWidth('Price',     true,  true),   // ~110
     link:        colMinWidth('Listing',   false, false),  // ~85
     num_listed:  colMinWidth('# Listed',  true,  true),   // ~130
     num_sold:    colMinWidth('# Sold',    true,  true),   // ~115
   };
-  const { rz, totalWidth } = useColWidths({
+  const { rz, totalWidth: _totalWidth } = useColWidths({
     part: Math.max(MINS.part, 190), card: Math.max(MINS.card, 500),
     company: Math.max(MINS.company, 90), grade: Math.max(MINS.grade, 175),
+    condition: Math.max(MINS.condition, 100),
     platform: Math.max(MINS.platform, 110), price: Math.max(MINS.price, 100),
     link: Math.max(MINS.link, 70), num_listed: Math.max(MINS.num_listed, 110),
     num_sold: Math.max(MINS.num_sold, 100),
   });
+  // raw tab: swap company+grade for condition
+  const totalWidth = listingTab === 'raw'
+    ? _totalWidth - Math.max(MINS.company, 90) - Math.max(MINS.grade, 175) + Math.max(MINS.condition, 100)
+    : _totalWidth - Math.max(MINS.condition, 100);
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
@@ -972,6 +1026,7 @@ export function Listings() {
     card_names: activeFilter(fCardName, filterOptions?.card_names)?.join(','),
     prices: activeFilter(fPrice, filterOptions?.prices)?.join(','),
     search: debouncedSearch || undefined,
+    listing_type: listingTab,
   };
 
   const { data, isLoading } = useQuery<PaginatedResult<AggregatedListing>>({
@@ -996,6 +1051,14 @@ export function Listings() {
               <X size={12} /> Clear filters
             </button>
           )}
+          <div className="flex gap-1">
+            {(['graded', 'raw'] as const).map((t) => (
+              <button key={t} onClick={() => setListingTab(t)}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${listingTab === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {t === 'graded' ? 'Graded' : 'Raw'}
+              </button>
+            ))}
+          </div>
           <input
             type="text"
             placeholder="Search card…"
@@ -1020,10 +1083,16 @@ export function Listings() {
                   filterOptions={filterOptions?.part_numbers} filterSelected={fPartNumber} onFilterChange={(v) => { setFPartNumber(v); setPage(1); }} />
                 <ColHeader label="Card Name"    col="card_name"  {...sh} {...rz('card')}    minWidth={MINS.card}
                   filterOptions={filterOptions?.card_names} filterSelected={fCardName} onFilterChange={(v) => { setFCardName(v); setPage(1); }} />
-                <ColHeader label="Company"                         {...sh} {...rz('company')} minWidth={MINS.company}
-                  filterOptions={filterOptions?.companies} filterSelected={fCompany} onFilterChange={(v) => { setFCompany(v); setPage(1); }} />
-                <ColHeader label="Grade"                          {...sh} {...rz('grade')}   minWidth={MINS.grade}
-                  filterOptions={filterOptions?.grades} filterSelected={fGrade} onFilterChange={(v) => { setFGrade(v); setPage(1); }} />
+                {listingTab === 'graded' ? (
+                  <>
+                    <ColHeader label="Company" {...sh} {...rz('company')} minWidth={MINS.company}
+                      filterOptions={filterOptions?.companies} filterSelected={fCompany} onFilterChange={(v) => { setFCompany(v); setPage(1); }} />
+                    <ColHeader label="Grade"   {...sh} {...rz('grade')}   minWidth={MINS.grade}
+                      filterOptions={filterOptions?.grades} filterSelected={fGrade} onFilterChange={(v) => { setFGrade(v); setPage(1); }} />
+                  </>
+                ) : (
+                  <ColHeader label="Condition" {...sh} {...rz('condition')} minWidth={MINS.condition} />
+                )}
                 <ColHeader label="Platform"     col="platform"   {...sh} {...rz('platform')} minWidth={MINS.platform}
                   filterOptions={filterOptions?.platforms} filterSelected={fPlatform} onFilterChange={(v) => { setFPlatform(v); setPage(1); }} />
                 <ColHeader label="Price"      col="list_price"  {...sh} {...rz('price')} align="right" minWidth={MINS.price}
@@ -1037,7 +1106,7 @@ export function Listings() {
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {!data?.data.length ? (
-                <tr><td colSpan={9} className="px-3 py-10 text-center text-zinc-500">No listings found.</td></tr>
+                <tr><td colSpan={listingTab === 'graded' ? 9 : 8} className="px-3 py-10 text-center text-zinc-500">No listings found.</td></tr>
               ) : data.data.map((row, i) => (
                 <tr key={i} onClick={() => setEditRow(row)} className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
                   <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>{row.part_number ?? '—'}</td>
@@ -1045,8 +1114,14 @@ export function Listings() {
                     <p className="font-medium text-zinc-200 truncate" title={row.card_name ?? ''}>{row.card_name ?? 'Unknown'}</p>
                     {row.set_name && <p className="text-[10px] text-zinc-500 truncate">{row.set_name}</p>}
                   </td>
-                  <td className="px-3 py-2 text-zinc-400 text-[11px]">{row.grading_company ?? '—'}</td>
-                  <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.grade_label ?? '—'}</td>
+                  {listingTab === 'graded' ? (
+                    <>
+                      <td className="px-3 py-2 text-zinc-400 text-[11px]">{row.grading_company ?? '—'}</td>
+                      <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.grade_label ?? '—'}</td>
+                    </>
+                  ) : (
+                    <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.condition ?? '—'}</td>
+                  )}
                   <td className="px-3 py-2 text-zinc-300 capitalize">{row.platform}</td>
                   <td className="px-3 py-2 text-right text-zinc-300">
                     {formatCurrency(row.list_price ?? 0, row.currency)}

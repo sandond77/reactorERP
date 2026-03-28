@@ -2,6 +2,7 @@ import { sql } from 'kysely';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
+import { createRawPurchase } from './raw-purchases.service';
 import type { CardStatus, NewCardInstance, CardInstanceUpdate } from '../types/db';
 import type { PaginationParams } from '../utils/pagination';
 
@@ -24,6 +25,7 @@ export interface CardFilters {
   condition?: string;
   purchase_type?: string;
   decision?: string;
+  exclude_decision?: string;
 }
 
 export async function listCards(
@@ -36,6 +38,10 @@ export async function listCards(
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
+    .leftJoin(
+      db.selectFrom('listings').select('card_instance_id').where('listing_status', '=', 'active').as('al'),
+      'al.card_instance_id', 'ci.id'
+    )
     .select([
       'ci.id',
       'ci.status',
@@ -62,6 +68,7 @@ export async function listCards(
       'ci.decision',
       'ci.notes',
       'rp.purchase_id as raw_purchase_label',
+      sql<boolean>`(al.card_instance_id IS NOT NULL)`.as('is_listed'),
     ])
     .where('ci.user_id', '=', userId)
     .where('ci.deleted_at', 'is', null);
@@ -88,18 +95,25 @@ export async function listCards(
   }
   if (filters.purchase_type) query = query.where('ci.purchase_type', '=', filters.purchase_type as any);
   if (filters.decision) query = query.where('ci.decision', '=', filters.decision as any);
+  if (filters.exclude_decision) query = query.where((eb) => eb.or([
+    eb('ci.decision', 'is', null),
+    eb('ci.decision', '!=', filters.exclude_decision as any),
+  ]));
   if (filters.search) {
-    const term = `%${filters.search}%`;
-    query = query.where((eb) =>
-      eb.or([
-        eb('cc.card_name', 'ilike', term),
-        eb('ci.card_name_override', 'ilike', term),
-        eb('cc.set_name', 'ilike', term),
-        eb('ci.set_name_override', 'ilike', term),
-        sql<boolean>`sd.cert_number::text ilike ${term}`,
-        eb('rp.purchase_id', 'ilike', term),
-      ])
-    );
+    const words = filters.search.trim().split(/\s+/).filter(Boolean);
+    for (const word of words) {
+      const term = `%${word}%`;
+      query = query.where((eb) =>
+        eb.or([
+          eb('cc.card_name', 'ilike', term),
+          eb('ci.card_name_override', 'ilike', term),
+          eb('cc.set_name', 'ilike', term),
+          eb('ci.set_name_override', 'ilike', term),
+          sql<boolean>`sd.cert_number::text ilike ${term}`,
+          eb('rp.purchase_id', 'ilike', term),
+        ])
+      );
+    }
   }
 
   // Count via separate query
@@ -230,15 +244,19 @@ export async function listCardsGroupedByPart(
   }
 
   if (search) {
-    const term = `%${search}%`;
-    query = query.where((eb) =>
-      eb.or([
-        eb('cc.card_name', 'ilike', term),
-        eb('ci.card_name_override', 'ilike', term),
-        eb('cc.set_name', 'ilike', term),
-        eb('ci.set_name_override', 'ilike', term),
-      ])
-    );
+    const words = search.trim().split(/\s+/).filter(Boolean);
+    for (const word of words) {
+      const term = `%${word}%`;
+      query = query.where((eb) =>
+        eb.or([
+          eb('cc.card_name', 'ilike', term),
+          eb('ci.card_name_override', 'ilike', term),
+          eb('cc.set_name', 'ilike', term),
+          eb('ci.set_name_override', 'ilike', term),
+          eb('rp.purchase_id', 'ilike', term),
+        ])
+      );
+    }
   }
 
   const rows = await query.execute();
@@ -307,6 +325,7 @@ export async function getCardById(userId: string, cardId: string) {
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .leftJoin('grading_submissions as gs', 'gs.id', 'sd.grading_submission_id')
+    .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
     .selectAll('ci')
     .select([
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
@@ -321,6 +340,7 @@ export async function getCardById(userId: string, cardId: string) {
       'gs.service_level',
       'gs.submitted_at',
       'gs.estimated_return',
+      'rp.purchase_id as raw_purchase_label',
     ])
     .where('ci.id', '=', cardId)
     .where('ci.user_id', '=', userId)
@@ -336,10 +356,33 @@ export async function createCard(
   data: Omit<NewCardInstance, 'user_id'>,
   slab?: { company: string; grade: number; grade_label?: string; cert_number?: string; additional_cost?: number }
 ) {
-  const status = slab ? 'graded' : data.status ?? 'purchased_raw';
+  // 'bulk' is a raw_purchases.type, not a card_instances.purchase_type — map it to 'raw'
+  const incomingType = slab ? 'pre_graded' : (data.purchase_type ?? 'raw');
+  const rawPurchaseType = incomingType === 'bulk' ? 'bulk' : 'raw';
+  const purchaseType = (incomingType === 'bulk' ? 'raw' : incomingType) as 'raw' | 'pre_graded';
+  const status = slab ? 'graded' : ((data as any).decision === 'sell_raw' ? 'raw_for_sale' : (data.status ?? 'purchased_raw'));
+
+  // Auto-create a raw_purchase record for raw cards added outside the intake workflow
+  let rawPurchaseId = (data as any).raw_purchase_id ?? null;
+  if ((purchaseType === 'raw') && !rawPurchaseId) {
+    const purchase = await createRawPurchase(userId, {
+      type: rawPurchaseType,
+      language: (data.language as string) ?? 'EN',
+      catalog_id: (data as any).catalog_id ?? undefined,
+      card_name: (data as any).card_name_override ?? undefined,
+      set_name: (data as any).set_name_override ?? undefined,
+      card_number: (data as any).card_number_override ?? undefined,
+      total_cost_usd: (data.purchase_cost as number) ?? undefined,
+      card_count: (data.quantity as number) ?? 1,
+      status: 'received',
+      purchased_at: data.purchased_at ? new Date(data.purchased_at as any).toISOString() : undefined,
+    });
+    rawPurchaseId = purchase.id;
+  }
+
   const card = await db
     .insertInto('card_instances')
-    .values({ ...data, user_id: userId, status, purchase_type: slab ? 'pre_graded' : (data.purchase_type ?? 'raw') })
+    .values({ ...data, user_id: userId, status, purchase_type: purchaseType, raw_purchase_id: rawPurchaseId })
     .returningAll()
     .executeTakeFirstOrThrow();
 
@@ -384,6 +427,15 @@ export async function updateCard(
   if (!existing) throw new AppError(404, 'Card not found');
 
   const { slab_cert_number, slab_grade, slab_grade_label, slab_grading_cost, ...instanceData } = data;
+
+  // When decision changes to sell_raw on a raw card, promote status to raw_for_sale
+  if (instanceData.decision === 'sell_raw' && ['purchased_raw', 'inspected'].includes(existing.status)) {
+    (instanceData as any).status = 'raw_for_sale';
+  }
+  // When decision changes away from sell_raw on a non-listed raw card, revert status
+  if (instanceData.decision === 'grade' && existing.status === 'raw_for_sale' && existing.decision === 'sell_raw') {
+    (instanceData as any).status = 'purchased_raw';
+  }
 
   const updated = await db
     .updateTable('card_instances')

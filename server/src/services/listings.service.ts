@@ -11,6 +11,7 @@ export type ListingAggRow = {
   part_number: string | null;
   grade_label: string | null;
   grading_company: string | null;
+  condition: string | null;
   platform: string;
   list_price: number | null;
   currency: string;
@@ -127,7 +128,7 @@ export async function getListingFilterOptions(userId: string) {
 
 export async function listListings(
   userId: string,
-  filters: { platforms?: string[]; search?: string; grades?: string[]; companies?: string[]; part_numbers?: string[]; num_listed?: string[]; num_sold?: string[]; card_names?: string[]; prices?: string[] },
+  filters: { platforms?: string[]; search?: string; grades?: string[]; companies?: string[]; part_numbers?: string[]; num_listed?: string[]; num_sold?: string[]; card_names?: string[]; prices?: string[]; listing_type?: 'graded' | 'raw' },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
@@ -195,6 +196,11 @@ export async function listListings(
         : sql`AND num_sold IN (${sql.join(filters.num_sold.map((n) => sql.val(Number(n))))})`
       : sql``;
 
+  const listingTypeCond =
+    filters.listing_type === 'raw' ? sql`AND sd.id IS NULL` :
+    filters.listing_type === 'graded' ? sql`AND sd.id IS NOT NULL` :
+    sql``;
+
   const result = await sql<ListingAggRow & { total_count: number }>`
     WITH sales_agg AS (
       SELECT
@@ -217,6 +223,7 @@ export async function listListings(
         cc.sku                                                                                              AS part_number,
         sd.grade_label,
         sd.company                                                                                          AS grading_company,
+        (ARRAY_AGG(ci.condition ORDER BY l.listed_at DESC NULLS LAST))[1]                                  AS condition,
         l.platform,
         (ARRAY_AGG(l.list_price       ORDER BY l.listed_at DESC NULLS LAST))[1]                            AS list_price,
         l.currency,
@@ -245,6 +252,7 @@ export async function listListings(
       ${companyCond}
       ${partNumberCond}
       ${priceCond}
+      ${listingTypeCond}
       GROUP BY
         cc.sku,
         CASE WHEN cc.sku IS NULL THEN COALESCE(ci.card_name_override, cc.card_name) END,
@@ -281,6 +289,15 @@ export async function createListing(userId: string, input: CreateListingInput) {
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');
+
+  const existing = await db
+    .selectFrom('listings')
+    .select('id')
+    .where('card_instance_id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .where('listing_status', '=', 'active')
+    .executeTakeFirst();
+  if (existing) throw new AppError(409, 'This card already has an active listing');
 
   const listing = await db
     .insertInto('listings')
@@ -375,13 +392,43 @@ export async function updateListingsByGroup(
 }
 
 export async function cancelListingsByGroup(userId: string, key: ListingGroupKey) {
+  // Fetch the listings so we know which card_instance_ids are affected
   const ids = await groupIdSubquery(userId, key).execute(db);
   if (ids.rows.length === 0) throw new AppError(404, 'No active listings found for this group');
+
+  // Get card_instance_ids from these listings
+  const listingRows = await db
+    .selectFrom('listings')
+    .select(['id', 'card_instance_id'])
+    .where('id', 'in', ids.rows.map(r => r.id))
+    .execute();
+
   await db
     .updateTable('listings')
     .set({ listing_status: 'cancelled' })
     .where('id', 'in', ids.rows.map(r => r.id))
     .execute();
+
+  // Revert raw_for_sale cards back to purchased_raw if they have no remaining active listings
+  const cardIds = [...new Set(listingRows.map(r => r.card_instance_id))];
+  for (const cardId of cardIds) {
+    const remaining = await db
+      .selectFrom('listings')
+      .select('id')
+      .where('card_instance_id', '=', cardId)
+      .where('listing_status', '=', 'active')
+      .executeTakeFirst();
+    if (!remaining) {
+      await db
+        .updateTable('card_instances')
+        .set({ status: 'purchased_raw' })
+        .where('id', '=', cardId)
+        .where('status', '=', 'raw_for_sale')
+        .where('user_id', '=', userId)
+        .execute();
+    }
+  }
+
   return { cancelled: ids.rows.length };
 }
 

@@ -11,6 +11,7 @@ const cardFiltersSchema = z.object({
   language: z.string().optional(),
   condition: z.string().optional(),
   purchase_type: z.string().optional(),
+  exclude_decision: z.string().optional(),
   page: z.coerce.number().default(1),
   limit: z.coerce.number().min(1).max(100).default(25),
 });
@@ -57,7 +58,7 @@ const createCardSchema = z.object({
   language: z.string().default('EN'),
   variant: z.string().optional(),
   rarity: z.string().optional(),
-  purchase_type: z.enum(['raw', 'pre_graded']).default('raw'),
+  purchase_type: z.enum(['raw', 'bulk', 'pre_graded']).default('raw'),
   quantity: z.coerce.number().int().min(1).default(1),
   purchase_cost: z.union([z.string(), z.number()]).transform((v) => toCents(v)),
   currency: z.enum(['USD', 'JPY']).default('USD'),
@@ -66,6 +67,7 @@ const createCardSchema = z.object({
   source_link: z.string().url().optional(),
   order_number: z.string().optional(),
   notes: z.string().optional(),
+  decision: z.enum(['grade', 'sell_raw']).optional(),
   is_personal_collection: z.boolean().default(false),
   purchased_at: z.string().optional().transform((v) => v ? new Date(v) : null),
   // Optional slab fields — when provided, a slab_details record is created and status set to 'graded'

@@ -27,6 +27,7 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   });
 
   // Edit state — initialized when editing starts
+  const [editDecision,    setEditDecision]    = useState('');
   const [editCondition,   setEditCondition]   = useState('');
   const [editQuantity,    setEditQuantity]     = useState('');
   const [editPurchasedAt, setEditPurchasedAt] = useState('');
@@ -34,6 +35,7 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   const [editNotes,       setEditNotes]        = useState('');
 
   function startEdit() {
+    setEditDecision(card.decision ?? '');
     setEditCondition(card.condition ?? '');
     setEditQuantity(String(card.quantity ?? 1));
     setEditPurchasedAt(card.purchased_at ? card.purchased_at.slice(0, 10) : '');
@@ -44,6 +46,7 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
 
   const saveMut = useMutation({
     mutationFn: () => api.patch(`/cards/${card.id}`, {
+      decision:     editDecision    || undefined,
       condition:    editCondition   || undefined,
       quantity:     parseInt(editQuantity) || undefined,
       purchased_at: editPurchasedAt || undefined,
@@ -103,6 +106,14 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
               {editing ? (
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Intent</label>
+                    <select value={editDecision} onChange={(e) => setEditDecision(e.target.value)} className={inputCls}>
+                      <option value="">—</option>
+                      <option value="sell_raw">For Sale</option>
+                      <option value="grade">To Grade</option>
+                    </select>
+                  </div>
+                  <div>
                     <label className="block text-xs text-zinc-500 mb-1">Condition</label>
                     <select value={editCondition} onChange={(e) => setEditCondition(e.target.value)} className={inputCls}>
                       <option value="">—</option>
@@ -149,6 +160,7 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                   <div><span className="text-zinc-500">Game:</span> <span className="text-zinc-300">{card.card_game}</span></div>
                   <div><span className="text-zinc-500">Language:</span> <span className="text-zinc-300">{card.language}</span></div>
                   <div><span className="text-zinc-500">Cost:</span> <span className="text-zinc-300">{formatCurrency(card.purchase_cost, card.currency)}</span></div>
+                  <div><span className="text-zinc-500">Intent:</span> <span className="text-zinc-300">{card.decision === 'sell_raw' ? 'For Sale' : card.decision === 'grade' ? 'To Grade' : '—'}</span></div>
                   <div><span className="text-zinc-500">Condition:</span> <span className="text-zinc-300">{card.condition ?? '—'}</span></div>
                   {card.grade && (
                     <>
@@ -158,6 +170,9 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                   )}
                   <div><span className="text-zinc-500">Purchased:</span> <span className="text-zinc-300">{formatDate(card.purchased_at)}</span></div>
                   <div><span className="text-zinc-500">Quantity:</span> <span className="text-zinc-300">{card.quantity}</span></div>
+                  {card.raw_purchase_label && (
+                    <div><span className="text-zinc-500">ID:</span> <span className="font-mono text-zinc-300">{card.raw_purchase_label}</span></div>
+                  )}
                 </div>
               )}
 

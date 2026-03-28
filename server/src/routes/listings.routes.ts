@@ -18,6 +18,7 @@ const querySchema = z.object({
   card_names: z.string().optional(),
   prices: z.string().optional(),
   search: z.string().optional(),
+  listing_type: z.enum(['graded', 'raw']).optional(),
   status: z.string().optional(),
   sort_by: z.string().optional(),
   sort_dir: z.enum(['asc', 'desc']).default('desc'),
@@ -50,7 +51,7 @@ listingsRouter.get('/', requireAuth, async (req, res, next) => {
     const q = querySchema.parse(req.query);
     const result = await listingsService.listListings(
       req.user!.id,
-      { platforms: splitCSV(q.platforms), grades: splitCSV(q.grades), companies: splitCSV(q.companies), part_numbers: splitCSV(q.part_numbers), num_listed: splitCSV(q.num_listed), num_sold: splitCSV(q.num_sold), card_names: splitCSV(q.card_names), prices: splitCSV(q.prices), search: q.search },
+      { platforms: splitCSV(q.platforms), grades: splitCSV(q.grades), companies: splitCSV(q.companies), part_numbers: splitCSV(q.part_numbers), num_listed: splitCSV(q.num_listed), num_sold: splitCSV(q.num_sold), card_names: splitCSV(q.card_names), prices: splitCSV(q.prices), search: q.search, listing_type: q.listing_type },
       { page: q.page, limit: q.limit },
       q.sort_by,
       q.sort_dir
