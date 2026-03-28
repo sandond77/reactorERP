@@ -138,20 +138,25 @@ export async function lookupCardInfo(
   query: string,
   game: string = 'pokemon'
 ): Promise<CardInfoResult[]> {
-  // 1. Check our own catalog first
-  const catalogResults = await db
+  // 1. Check our own catalog first — word-split fuzzy: each word must match at least one field
+  const words = query.trim().split(/\s+/).filter(Boolean);
+  let catalogQuery = db
     .selectFrom('card_catalog')
     .selectAll()
-    .where('game', '=', game)
-    .where((eb) =>
+    .where('game', '=', game);
+
+  for (const word of words) {
+    const term = `%${word}%`;
+    catalogQuery = catalogQuery.where((eb) =>
       eb.or([
-        eb('card_name', 'ilike', `%${query}%`),
-        eb('set_name', 'ilike', `%${query}%`),
-        eb('card_number', 'ilike', `%${query}%`),
+        eb('card_name', 'ilike', term),
+        eb('set_name', 'ilike', term),
+        eb('card_number', 'ilike', term),
       ])
-    )
-    .limit(10)
-    .execute();
+    );
+  }
+
+  const catalogResults = await catalogQuery.limit(10).execute();
 
   if (catalogResults.length > 0) {
     return catalogResults.map((c) => ({

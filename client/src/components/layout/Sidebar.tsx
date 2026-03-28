@@ -13,7 +13,7 @@ const RAW_NAV = [
   { to: '/raw-inventory', icon: PackageOpen,         label: 'Raw Inventory' },
   { to: '/intake',        icon: ClipboardList,       label: 'Purchases' },
   { to: '/inspection',    icon: ScanSearch,          label: 'Inspection' },
-  { to: '/ungraded',      icon: GalleryVerticalEnd,  label: 'Ungraded' },
+  { to: '/ungraded',      icon: GalleryVerticalEnd,  label: 'To Be Submitted' },
   { to: '/grading',       icon: Star,                label: 'Grading' },
   { to: '/sub-returns',   icon: PackageCheck,        label: 'Sub Returns' },
 ];
