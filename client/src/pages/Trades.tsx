@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useLocations } from '../hooks/useLocations';
 import { Plus, X, Loader2, Sparkles, CheckCircle, AlertCircle, ChevronRight, ArrowRightLeft, Upload, Pencil, Trash2 } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
@@ -92,6 +93,7 @@ interface IncomingCardData {
   purchase_cost: string;
   currency: string;
   catalog_id?: string;
+  location_id?: string;
   slab_company?: string;
   slab_grade_label?: string;
   slab_cert_number?: string;
@@ -101,6 +103,7 @@ const SLAB_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'
 
 function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData) => void; tradePercent: number }) {
   const [type, setType] = useState<'raw' | 'graded'>('raw');
+  const { locations: availableLocations } = useLocations(type);
   const [gradingLabel, setGradingLabel] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -120,6 +123,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
   const [company, setCompany] = useState('');
   const [gradeLabel, setGradeLabel] = useState('');
   const [certNumber, setCertNumber] = useState('');
+  const [locationId, setLocationId] = useState('');
 
   const tradeCredit = marketValue ? (parseFloat(marketValue) * tradePercent / 100) : null;
 
@@ -200,6 +204,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
       purchase_cost: credit,
       currency,
       catalog_id: catalogId || undefined,
+      location_id: locationId || undefined,
       slab_company: type === 'graded' ? (company || undefined) : undefined,
       slab_grade_label: type === 'graded' ? (gradeLabel || undefined) : undefined,
       slab_cert_number: type === 'graded' ? (certNumber || undefined) : undefined,
@@ -208,6 +213,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
     setCardName(''); setSetName(''); setCardNumber(''); setRarity('');
     setLanguage('EN'); setCondition(''); setDecision('sell_raw');
     setMarketValue(''); setCurrency('USD'); setCompany(''); setGradeLabel(''); setCertNumber('');
+    setLocationId('');
   }
 
   return (
@@ -323,6 +329,15 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
         </Select>
       </div>
 
+      {availableLocations.length > 0 && (
+        <Select label="Location" value={locationId} onChange={e => setLocationId(e.target.value)}>
+          <option value="">— No location —</option>
+          {availableLocations.map(l => (
+            <option key={l.id} value={l.id}>{l.name}{l.is_card_show ? ' (Card Show)' : ''}</option>
+          ))}
+        </Select>
+      )}
+
       <div className="flex justify-end">
         <Button type="button" size="sm" onClick={handleAdd}>
           <Plus size={13} /> Add Card
@@ -425,6 +440,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
           purchase_cost: e.purchase_cost,
           currency: e.currency,
           catalog_id: e.catalog_id,
+          location_id: e.location_id,
           slab_company: e.slab_company,
           slab_grade_label: e.slab_grade_label,
           slab_cert_number: e.slab_cert_number,

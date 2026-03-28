@@ -69,6 +69,7 @@ const createCardSchema = z.object({
   notes: z.string().optional(),
   decision: z.enum(['grade', 'sell_raw']).optional(),
   is_personal_collection: z.boolean().default(false),
+  location_id: z.string().uuid().optional().nullable(),
   purchased_at: z.string().optional().transform((v) => v ? new Date(v) : null),
   // Optional slab fields — when provided, a slab_details record is created and status set to 'graded'
   slab_company: z.enum(['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER']).optional(),

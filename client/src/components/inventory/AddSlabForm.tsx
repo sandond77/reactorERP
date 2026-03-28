@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
+import { useLocations } from '../../hooks/useLocations';
 
 const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'] as const;
 
@@ -23,6 +24,7 @@ const schema = z.object({
   currency: z.enum(['USD', 'JPY']).default('USD'),
   purchased_at: z.string().min(1, 'Purchase date required'),
   notes: z.string().optional(),
+  location_id: z.string().uuid().optional().nullable(),
   is_personal_collection: z.boolean().default(false),
   slab_company: z.enum(GRADING_COMPANIES),
   slab_grade: z.coerce.number().min(1, 'Grade required').max(10),
@@ -37,6 +39,7 @@ interface AddSlabFormProps {
 }
 
 export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
+  const { locations: gradedLocations } = useLocations('graded');
   const [autoFilling, setAutoFilling] = useState(false);
   const [gradingLabel, setGradingLabel] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -341,6 +344,15 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       </div>
 
       <Input label="Notes" placeholder="Optional notes" {...register('notes')} />
+
+      {gradedLocations.length > 0 && (
+        <Select label="Location" {...register('location_id')}>
+          <option value="">— No location —</option>
+          {gradedLocations.map(l => (
+            <option key={l.id} value={l.id}>{l.name}{l.is_card_show ? ' (Card Show)' : ''}</option>
+          ))}
+        </Select>
+      )}
 
       <label className="flex items-center gap-3 cursor-pointer select-none">
         <input

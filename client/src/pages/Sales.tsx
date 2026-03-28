@@ -54,6 +54,7 @@ interface SlabResult {
   listing_id: string | null;
   is_listed: boolean;
   is_personal_collection: boolean;
+  location_name: string | null;
 }
 
 type SortDir = 'asc' | 'desc';
@@ -80,6 +81,7 @@ interface RawCardResult {
   currency: string;
   raw_purchase_label: string | null;
   is_listed: boolean;
+  location_name: string | null;
 }
 
 // ── Record Sale Modal ─────────────────────────────────────────────────────────
@@ -452,6 +454,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   currency: d.currency,
                   raw_purchase_label: d.raw_purchase_label ?? null,
                   is_listed: true,
+                  location_name: d.location_name ?? null,
                 });
                 setStep('details');
               } catch {
@@ -585,6 +588,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             <span className="text-[10px] font-bold uppercase tracking-wide text-amber-400">Ship this card</span>
             <span className="font-mono text-sm text-zinc-200">{selectedRawCard.raw_purchase_label ?? '—'}</span>
           </div>
+          {platform === 'ebay' && selectedRawCard.location_name && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
+              <span className="text-sm text-zinc-300">{selectedRawCard.location_name}</span>
+            </div>
+          )}
         </div>
       ) : selectedCard ? (
         <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 px-4 py-3 space-y-2">
@@ -606,6 +615,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               {selectedCard.cert_number ? `#${String(selectedCard.cert_number).padStart(8, '0')}` : '—'}
             </span>
           </div>
+          {platform === 'ebay' && selectedCard.location_name && (
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
+              <span className="text-sm text-zinc-300">{selectedCard.location_name}</span>
+            </div>
+          )}
         </div>
       ) : null}
 

@@ -73,6 +73,21 @@ export interface CardCatalogTable {
   updated_at: Generated<Date>;
 }
 
+export type LocationCardType = 'graded' | 'raw' | 'both';
+
+export interface LocationsTable {
+  id: Generated<string>;
+  user_id: string;
+  parent_id: string | null;
+  name: string;
+  card_type: LocationCardType;
+  is_card_show: Generated<boolean>;
+  is_container: Generated<boolean>;
+  notes: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface TradesTable {
   id: Generated<string>;
   user_id: string;
@@ -118,6 +133,7 @@ export interface CardInstancesTable {
   purchased_at: Date | null;
   raw_purchase_id: string | null;
   trade_id: string | null;
+  location_id: string | null;
   decision: string | null;
   is_card_show: Generated<boolean>;
   is_personal_collection: Generated<boolean>;
@@ -310,6 +326,7 @@ export interface GradingBatchSequencesTable {
 // ============================================================
 
 export interface Database {
+  locations: LocationsTable;
   users: UsersTable;
   card_catalog: CardCatalogTable;
   card_instances: CardInstancesTable;

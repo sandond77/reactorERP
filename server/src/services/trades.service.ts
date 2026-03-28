@@ -25,6 +25,7 @@ export interface IncomingInput {
   purchase_cost_cents: number; // trade credit in cents
   currency: string;
   catalog_id?: string;
+  location_id?: string;
   slab_company?: string;
   slab_grade_label?: string;
   slab_cert_number?: string;
@@ -137,6 +138,7 @@ export async function createTrade(userId: string, input: CreateTradeInput) {
         purchase_cost: item.purchase_cost_cents,
         currency: item.currency,
         catalog_id: item.catalog_id,
+        location_id: item.location_id ?? null,
         raw_purchase_id: rawPurchaseId,
         notes: input.notes,
         purchased_at: soldAt ?? null,

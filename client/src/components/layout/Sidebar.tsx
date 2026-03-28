@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, PackageOpen, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
-  ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft,
+  ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -97,8 +97,9 @@ export function Sidebar() {
         <NavItem to="/trades"    icon={ArrowRightLeft}  label="Trades" />
 
         <NavItem to="/reports" icon={BarChart3} label="Reports" />
-        <NavItem to="/parts"   icon={Layers}   label="Parts" />
-        <NavItem to="/import" icon={Upload}  label="Import" />
+        <NavItem to="/parts"      icon={Layers}   label="Parts" />
+        <NavItem to="/locations"  icon={MapPin}   label="Locations" />
+        <NavItem to="/import"     icon={Upload}   label="Import" />
       </nav>
 
       {/* User */}

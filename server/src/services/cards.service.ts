@@ -38,6 +38,7 @@ export async function listCards(
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
+    .leftJoin('locations as loc', 'loc.id', 'ci.location_id')
     .leftJoin(
       db.selectFrom('listings').select('card_instance_id').where('listing_status', '=', 'active').as('al'),
       'al.card_instance_id', 'ci.id'
@@ -69,6 +70,7 @@ export async function listCards(
       'ci.notes',
       'rp.purchase_id as raw_purchase_label',
       sql<boolean>`(al.card_instance_id IS NOT NULL)`.as('is_listed'),
+      'loc.name as location_name',
     ])
     .where('ci.user_id', '=', userId)
     .where('ci.deleted_at', 'is', null);
@@ -380,9 +382,17 @@ export async function createCard(
     rawPurchaseId = purchase.id;
   }
 
+  // Sync is_card_show from location if location_id provided
+  let isCardShow = (data as any).is_card_show ?? false;
+  const locationId = (data as any).location_id ?? null;
+  if (locationId) {
+    const loc = await db.selectFrom('locations').select('is_card_show').where('id', '=', locationId).executeTakeFirst();
+    if (loc) isCardShow = loc.is_card_show;
+  }
+
   const card = await db
     .insertInto('card_instances')
-    .values({ ...data, user_id: userId, status, purchase_type: purchaseType, raw_purchase_id: rawPurchaseId })
+    .values({ ...data, user_id: userId, status, purchase_type: purchaseType, raw_purchase_id: rawPurchaseId, is_card_show: isCardShow })
     .returningAll()
     .executeTakeFirstOrThrow();
 

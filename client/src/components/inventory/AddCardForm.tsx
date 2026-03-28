@@ -8,6 +8,7 @@ import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
+import { useLocations } from '../../hooks/useLocations';
 
 const schema = z.object({
   card_name_override: z.string().min(1, 'Card name required'),
@@ -24,6 +25,7 @@ const schema = z.object({
   condition: z.string().optional(),
   purchased_at: z.string().optional(),
   notes: z.string().optional(),
+  location_id: z.string().uuid().optional().nullable(),
 });
 
 type FormData = z.infer<typeof schema>;
@@ -33,6 +35,7 @@ interface AddCardFormProps {
 }
 
 export function AddCardForm({ onSuccess }: AddCardFormProps) {
+  const { locations: rawLocations } = useLocations('raw');
   const [searchLabel, setSearchLabel] = useState('');
   const [autoFilling, setAutoFilling] = useState(false);
   const [catalogId, setCatalogId] = useState<string | null>(null);
@@ -258,6 +261,15 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
 
       <Input label="Purchase Date" type="date" {...register('purchased_at')} />
       <Input label="Notes" placeholder="Optional notes" {...register('notes')} />
+
+      {rawLocations.length > 0 && (
+        <Select label="Location" {...register('location_id')}>
+          <option value="">— No location —</option>
+          {rawLocations.map(l => (
+            <option key={l.id} value={l.id}>{l.name}{l.is_card_show ? ' (Card Show)' : ''}</option>
+          ))}
+        </Select>
+      )}
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="submit" disabled={isSubmitting}>

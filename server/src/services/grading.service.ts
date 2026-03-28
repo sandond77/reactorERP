@@ -174,6 +174,7 @@ export async function listSlabs(
     is_card_show: boolean;
     is_personal_collection: boolean;
     order_details_link: string | null;
+    location_name: string | null;
   }>`
     SELECT
       ci.id,
@@ -210,10 +211,12 @@ export async function listSlabs(
       ci.notes,
       ci.is_card_show,
       ci.is_personal_collection,
-      s.order_details_link
+      s.order_details_link,
+      loc.name AS location_name
     FROM card_instances ci
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+    LEFT JOIN locations loc ON loc.id = ci.location_id
     LEFT JOIN LATERAL (
       SELECT id, list_price, platform, ebay_listing_url, listed_at
       FROM listings

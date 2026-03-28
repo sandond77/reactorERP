@@ -13,6 +13,7 @@ import { setsRouter } from './sets.routes';
 import rawPurchasesRouter from './raw-purchases.routes';
 import { gradingSubsRouter } from './grading-submissions.routes';
 import { tradesRouter } from './trades.routes';
+import { locationsRouter } from './locations.routes';
 
 export const apiRouter = Router();
 
@@ -47,3 +48,4 @@ apiRouter.use('/sets', setsRouter);
 apiRouter.use('/raw-purchases', rawPurchasesRouter);
 apiRouter.use('/grading-subs', gradingSubsRouter);
 apiRouter.use('/trades', tradesRouter);
+apiRouter.use('/locations', locationsRouter);
