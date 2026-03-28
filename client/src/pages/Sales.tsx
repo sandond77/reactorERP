@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { Plus, X, Loader2, Pencil, Trash2, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -111,7 +111,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [rawUrlLookupLoading, setRawUrlLookupLoading] = useState(false);
 
   // Step 2 — sale details
-  const [platform, setPlatform] = useState<string>('ebay');
+  const [platform, setPlatform] = useState<string>('card_show');
   const [strikePrice, setStrikePrice] = useState('');
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
@@ -668,7 +668,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     </form>
   );
 }
-
 // ── Sale Action Modal (Edit / Delete) ─────────────────────────────────────────
 
 function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
@@ -974,6 +973,7 @@ export function Sales() {
       <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="Record Sale" className="max-w-2xl">
         <RecordSaleModal onClose={() => setShowAddModal(false)} />
       </Modal>
+
 
       <Modal open={!!selectedSale} onClose={() => setSelectedSale(null)} title="Sale">
         {selectedSale && <SaleActionModal sale={selectedSale} onClose={() => setSelectedSale(null)} />}

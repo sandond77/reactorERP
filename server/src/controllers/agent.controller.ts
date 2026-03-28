@@ -36,7 +36,7 @@ export async function lookupCard(req: Request, res: Response, next: NextFunction
 export async function autoFill(req: Request, res: Response, next: NextFunction) {
   try {
     let imageBuffer = req.file?.buffer;
-    if (imageBuffer && imageBuffer.byteLength > 4 * 1024 * 1024) {
+    if (imageBuffer) {
       imageBuffer = await sharp(imageBuffer)
         .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
         .jpeg({ quality: 85 })
