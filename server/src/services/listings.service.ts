@@ -5,6 +5,13 @@ import type { NewListing } from '../types/db';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 
+export type CertDetail = {
+  cert_number: string | null;
+  grade_label: string | null;
+  list_price: number | null;
+  ebay_listing_url: string | null;
+};
+
 export type ListingAggRow = {
   card_name: string | null;
   set_name: string | null;
@@ -19,6 +26,8 @@ export type ListingAggRow = {
   listed_at: string | null;
   num_listed: number;
   num_sold: number;
+  raw_purchase_label: string | null;
+  cert_details: CertDetail[] | null;
 };
 
 const LISTINGS_SORT_COLS: Record<string, string> = {
@@ -230,11 +239,20 @@ export async function listListings(
         (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST))[1]                            AS ebay_listing_url,
         MIN(l.listed_at)                                                                                    AS listed_at,
         COUNT(DISTINCT l.id)::int                                                                           AS num_listed,
-        MAX(COALESCE(sa.num_sold, 0))::int                                                                  AS num_sold
+        MAX(COALESCE(sa.num_sold, 0))::int                                                                  AS num_sold,
+        (ARRAY_AGG(rp.purchase_id ORDER BY l.listed_at DESC NULLS LAST))[1]                                AS raw_purchase_label,
+        JSON_AGG(JSON_BUILD_OBJECT(
+          'cert_number',    sd.cert_number,
+          'grade_label',    sd.grade_label,
+          'list_price',     l.list_price,
+          'ebay_listing_url', l.ebay_listing_url
+        ) ORDER BY l.listed_at DESC NULLS LAST)
+        FILTER (WHERE sd.id IS NOT NULL)                                                                    AS cert_details
       FROM listings l
       JOIN card_instances ci ON ci.id = l.card_instance_id
       LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
       LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+      LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
       LEFT JOIN sales_agg sa ON
         (
           cc.sku IS NOT NULL AND sa.sku IS NOT DISTINCT FROM cc.sku

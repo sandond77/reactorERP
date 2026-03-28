@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Plus, X, Loader2, Minus, Trash2 } from 'lucide-react';
+import { ExternalLink, Plus, X, Loader2, Minus, Trash2, ChevronRight } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -10,12 +10,20 @@ import { loadFilters, saveFilters } from '../lib/filter-store';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import toast from 'react-hot-toast';
 
+interface CertDetail {
+  cert_number: string | null;
+  grade_label: string | null;
+  list_price: number | null;
+  ebay_listing_url: string | null;
+}
+
 interface AggregatedListing {
   card_name: string | null;
   set_name: string | null;
   part_number: string | null;
   grade_label: string | null;
   grading_company: string | null;
+  condition: string | null;
   platform: string;
   list_price: number | null;
   currency: string;
@@ -23,6 +31,8 @@ interface AggregatedListing {
   listed_at: string | null;
   num_listed: number;
   num_sold: number;
+  raw_purchase_label: string | null;
+  cert_details: CertDetail[] | null;
 }
 
 interface ListingFilterOptions {
@@ -954,37 +964,53 @@ export function Listings() {
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [listingTab, setListingTab] = useState<'graded' | 'raw'>('graded');
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [showAddModal, setShowAddModal] = useState(false);
   const [editRow, setEditRow] = useState<AggregatedListing | null>(null);
+
+  useEffect(() => { setExpandedKeys(new Set()); }, [listingTab]);
+
+  function rowKey(row: AggregatedListing) {
+    return `${row.part_number}|${row.card_name}|${row.grade_label}|${row.grading_company}|${row.platform}|${row.currency}`;
+  }
+  function toggleExpand(key: string) {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
 
   useEffect(() => {
     saveFilters('listings', { sortCol, sortDir, fPlatform, fGrade, fCompany, fPartNumber, fNumListed, fNumSold, fCardName, fPrice, search });
   }, [sortCol, sortDir, fPlatform, fGrade, fCompany, fPartNumber, fNumListed, fNumSold, fCardName, fPrice, search]);
 
   const MINS = {
-    part:        colMinWidth('Part #',    false, true),   // ~100
-    card:        colMinWidth('Card Name', true,  true),   // ~145
-    company:     colMinWidth('Company',   false, true),   // ~115
-    grade:       colMinWidth('Grade',     false, true),   // ~95
-    condition:   colMinWidth('Condition', false, true),   // ~100
-    platform:    colMinWidth('Platform',  true,  true),   // ~140
-    price:       colMinWidth('Price',     true,  true),   // ~110
-    link:        colMinWidth('Listing',   false, false),  // ~85
-    num_listed:  colMinWidth('# Listed',  true,  true),   // ~130
-    num_sold:    colMinWidth('# Sold',    true,  true),   // ~115
+    part:        colMinWidth('Part #',       false, true),   // ~100
+    card:        colMinWidth('Card Name',    true,  true),   // ~145
+    raw_id:      colMinWidth('Purchase ID',  false, false),  // ~90
+    company:     colMinWidth('Company',      false, true),   // ~115
+    grade:       colMinWidth('Grade',        false, true),   // ~95
+    condition:   colMinWidth('Condition',    false, true),   // ~100
+    platform:    colMinWidth('Platform',     true,  true),   // ~140
+    price:       colMinWidth('Price',        true,  true),   // ~110
+    link:        colMinWidth('Listing',      false, false),  // ~85
+    num_listed:  colMinWidth('# Listed',     true,  true),   // ~130
+    num_sold:    colMinWidth('# Sold',       true,  true),   // ~115
   };
   const { rz, totalWidth: _totalWidth } = useColWidths({
     part: Math.max(MINS.part, 190), card: Math.max(MINS.card, 500),
+    raw_id: Math.max(MINS.raw_id, 150),
     company: Math.max(MINS.company, 90), grade: Math.max(MINS.grade, 175),
     condition: Math.max(MINS.condition, 100),
     platform: Math.max(MINS.platform, 110), price: Math.max(MINS.price, 100),
     link: Math.max(MINS.link, 70), num_listed: Math.max(MINS.num_listed, 110),
     num_sold: Math.max(MINS.num_sold, 100),
   });
-  // raw tab: swap company+grade for condition
+  // graded tab: hide condition + raw_id; raw tab: hide company + grade
   const totalWidth = listingTab === 'raw'
     ? _totalWidth - Math.max(MINS.company, 90) - Math.max(MINS.grade, 175) + Math.max(MINS.condition, 100)
-    : _totalWidth - Math.max(MINS.condition, 100);
+    : _totalWidth - Math.max(MINS.condition, 100) - Math.max(MINS.raw_id, 150);
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
@@ -1083,6 +1109,9 @@ export function Listings() {
                   filterOptions={filterOptions?.part_numbers} filterSelected={fPartNumber} onFilterChange={(v) => { setFPartNumber(v); setPage(1); }} />
                 <ColHeader label="Card Name"    col="card_name"  {...sh} {...rz('card')}    minWidth={MINS.card}
                   filterOptions={filterOptions?.card_names} filterSelected={fCardName} onFilterChange={(v) => { setFCardName(v); setPage(1); }} />
+                {listingTab === 'raw' && (
+                  <ColHeader label="Purchase ID" {...sh} {...rz('raw_id')} minWidth={MINS.raw_id} />
+                )}
                 {listingTab === 'graded' ? (
                   <>
                     <ColHeader label="Company" {...sh} {...rz('company')} minWidth={MINS.company}
@@ -1106,47 +1135,91 @@ export function Listings() {
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {!data?.data.length ? (
-                <tr><td colSpan={listingTab === 'graded' ? 9 : 8} className="px-3 py-10 text-center text-zinc-500">No listings found.</td></tr>
-              ) : data.data.map((row, i) => (
-                <tr key={i} onClick={() => setEditRow(row)} className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
-                  <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>{row.part_number ?? '—'}</td>
-                  <td className="px-3 py-2">
-                    <p className="font-medium text-zinc-200 truncate" title={row.card_name ?? ''}>{row.card_name ?? 'Unknown'}</p>
-                    {row.set_name && <p className="text-[10px] text-zinc-500 truncate">{row.set_name}</p>}
-                  </td>
-                  {listingTab === 'graded' ? (
-                    <>
-                      <td className="px-3 py-2 text-zinc-400 text-[11px]">{row.grading_company ?? '—'}</td>
-                      <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.grade_label ?? '—'}</td>
-                    </>
-                  ) : (
-                    <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.condition ?? '—'}</td>
-                  )}
-                  <td className="px-3 py-2 text-zinc-300 capitalize">{row.platform}</td>
-                  <td className="px-3 py-2 text-right text-zinc-300">
-                    {formatCurrency(row.list_price ?? 0, row.currency)}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    {row.ebay_listing_url ? (
-                      <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-blue-400 hover:text-blue-300">
-                        <ExternalLink size={13} />
-                      </a>
-                    ) : '—'}
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded bg-indigo-500/15 text-indigo-300 text-[11px] font-semibold tabular-nums">
-                      {row.num_listed}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-center">
-                    {row.num_sold > 0 ? (
-                      <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded bg-emerald-500/15 text-emerald-400 text-[11px] font-semibold tabular-nums">
-                        {row.num_sold}
-                      </span>
-                    ) : <span className="text-zinc-600">0</span>}
-                  </td>
-                </tr>
-              ))}
+                <tr><td colSpan={9} className="px-3 py-10 text-center text-zinc-500">No listings found.</td></tr>
+              ) : data.data.map((row, i) => {
+                const key = rowKey(row);
+                const isExpanded = expandedKeys.has(key);
+                const isGraded = listingTab === 'graded';
+                return (
+                  <React.Fragment key={i}>
+                    <tr
+                      onClick={() => isGraded ? toggleExpand(key) : setEditRow(row)}
+                      className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
+                      <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>
+                        {isGraded && (
+                          <ChevronRight size={11} className={`inline-block mr-1 text-zinc-600 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
+                        )}
+                        {row.part_number ?? '—'}
+                      </td>
+                      <td className="px-3 py-2">
+                        <p className="font-medium text-zinc-200 truncate" title={row.card_name ?? ''}>{row.card_name ?? 'Unknown'}</p>
+                        {row.set_name && <p className="text-[10px] text-zinc-500 truncate">{row.set_name}</p>}
+                      </td>
+                      {!isGraded && (
+                        <td className="px-3 py-2 font-mono text-indigo-300/70 text-[11px] truncate">
+                          {row.raw_purchase_label ?? '—'}
+                        </td>
+                      )}
+                      {isGraded ? (
+                        <>
+                          <td className="px-3 py-2 text-zinc-400 text-[11px]">{row.grading_company ?? '—'}</td>
+                          <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.grade_label ?? '—'}</td>
+                        </>
+                      ) : (
+                        <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.condition ?? '—'}</td>
+                      )}
+                      <td className="px-3 py-2 text-zinc-300 capitalize">{row.platform}</td>
+                      <td className="px-3 py-2 text-right text-zinc-300">
+                        {formatCurrency(row.list_price ?? 0, row.currency)}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {row.ebay_listing_url ? (
+                          <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-blue-400 hover:text-blue-300">
+                            <ExternalLink size={13} />
+                          </a>
+                        ) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded bg-indigo-500/15 text-indigo-300 text-[11px] font-semibold tabular-nums">
+                          {row.num_listed}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {row.num_sold > 0 ? (
+                          <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded bg-emerald-500/15 text-emerald-400 text-[11px] font-semibold tabular-nums">
+                            {row.num_sold}
+                          </span>
+                        ) : <span className="text-zinc-600">0</span>}
+                      </td>
+                    </tr>
+                    {isGraded && isExpanded && row.cert_details?.map((cert, ci) => (
+                      <tr key={ci}
+                        className="border-b border-zinc-800/40 bg-zinc-900/40 hover:bg-zinc-800/50 cursor-pointer transition-colors"
+                        onClick={() => setEditRow(row)}>
+                        <td className="px-3 py-1.5 text-center">
+                          <div className="w-px h-3 bg-zinc-700 mx-auto" />
+                        </td>
+                        <td className="px-3 py-1.5 pl-5" colSpan={3}>
+                          <span className="text-[10px] text-zinc-600 mr-1">Cert</span>
+                          <span className="font-mono text-[11px] text-indigo-300/70">{formatCertNumber(cert.cert_number) ?? '—'}</span>
+                        </td>
+                        <td className="px-3 py-1.5" />
+                        <td className="px-3 py-1.5 text-right text-zinc-400 text-[11px]">
+                          {cert.list_price != null ? formatCurrency(cert.list_price, row.currency) : '—'}
+                        </td>
+                        <td className="px-3 py-1.5 text-center">
+                          {cert.ebay_listing_url ? (
+                            <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-blue-400/60 hover:text-blue-300">
+                              <ExternalLink size={12} />
+                            </a>
+                          ) : '—'}
+                        </td>
+                        <td colSpan={2} />
+                      </tr>
+                    ))}
+                  </React.Fragment>
+                );
+              })}
             </tbody>
           </table>
         )}
