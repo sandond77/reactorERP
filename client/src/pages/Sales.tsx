@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Loader2, Pencil, Trash2 } from 'lucide-react';
+import { Plus, X, Loader2, Pencil, Trash2, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -69,27 +69,53 @@ function platformLabel(value: string) {
   return PLATFORMS.find(p => p.value === value)?.label ?? value;
 }
 
+interface RawCardResult {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  condition: string | null;
+  quantity: number;
+  purchase_cost: number | null;
+  currency: string;
+  raw_purchase_label: string | null;
+  is_listed: boolean;
+}
+
 // ── Record Sale Modal ─────────────────────────────────────────────────────────
 
 function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState<'search' | 'copies' | 'details'>('search');
+  const [step, setStep] = useState<'type' | 'search' | 'copies' | 'raw-search' | 'raw-select' | 'details'>('type');
+  const [saleMode, setSaleMode] = useState<'graded' | 'raw'>('graded');
 
-  // Step 1a — card name search
+  // Step 1a — card name search (graded)
+  const [gradedSearchMode, setGradedSearchMode] = useState<'name' | 'url'>('name');
   const [cardSearch, setCardSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCardName, setSelectedCardName] = useState<string | null>(null);
+  const [listingUrl, setListingUrl] = useState('');
+  const [urlLookupLoading, setUrlLookupLoading] = useState(false);
 
-  // Step 1b — copy selection
+  // Step 1b — copy selection (graded)
   const [selectedCard, setSelectedCard] = useState<SlabResult | null>(null);
   const [listedOnly, setListedOnly] = useState(true);
 
+  // Raw mode
+  const [rawSearchMode, setRawSearchMode] = useState<'name' | 'id' | 'url'>('name');
+  const [rawSearch, setRawSearch] = useState('');
+  const [debouncedRawSearch, setDebouncedRawSearch] = useState('');
+  const [selectedRawCardName, setSelectedRawCardName] = useState<string | null>(null);
+  const [selectedRawCard, setSelectedRawCard] = useState<RawCardResult | null>(null);
+  const [rawListingUrl, setRawListingUrl] = useState('');
+  const [rawUrlLookupLoading, setRawUrlLookupLoading] = useState(false);
+
   // Step 2 — sale details
-  const [platform, setPlatform] = useState<string>('ebay');
+  const [platform, setPlatform] = useState<string>('card_show');
   const [strikePrice, setStrikePrice] = useState('');
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
-  const [cardShowDetail, setCardShowDetail] = useState('');
+  const [notes, setNotes] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [soldAt, setSoldAt] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
@@ -99,6 +125,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const t = setTimeout(() => setDebouncedSearch(cardSearch), 300);
     return () => clearTimeout(t);
   }, [cardSearch]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedRawSearch(rawSearch), 300);
+    return () => clearTimeout(t);
+  }, [rawSearch]);
 
   // Phase 1: search for card names (deduped by name in the dropdown)
   const { data: searchResults, isFetching: isSearching } = useQuery<PaginatedResult<SlabResult>>({
@@ -117,6 +148,26 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     }).then(r => r.data),
     enabled: !!selectedCardName && step === 'copies',
   });
+
+  // Raw card search
+  const { data: rawResults, isFetching: isRawSearching } = useQuery<PaginatedResult<RawCardResult>>({
+    queryKey: ['sale-raw-search', debouncedRawSearch],
+    queryFn: () => api.get('/cards', {
+      params: { search: debouncedRawSearch, decision: 'sell_raw', status: 'purchased_raw,inspected,raw_for_sale', limit: 100, sort_by: 'card_name', sort_dir: 'asc' },
+    }).then(r => r.data),
+    enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select'),
+  });
+
+  const uniqueRawCardNames = rawResults
+    ? Array.from(
+        rawResults.data.reduce((map, c) => {
+          const name = c.card_name ?? 'Unknown';
+          map.set(name, (map.get(name) ?? 0) + 1);
+          return map;
+        }, new Map<string, number>())
+      )
+    : [];
+  const rawCopiesForName = (rawResults?.data ?? []).filter(c => c.card_name === selectedRawCardName);
 
   // Deduplicate search results by card_name
   const uniqueCardNames = searchResults
@@ -147,24 +198,25 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedCard) { toast.error('Select a card'); return; }
+    const cardId = saleMode === 'raw' ? selectedRawCard?.id : selectedCard?.id;
+    if (!cardId) { toast.error('Select a card'); return; }
     if (!strikePrice) { toast.error('Enter a strike price'); return; }
     const strikeCents = Math.round(parseFloat(strikePrice) * 100);
-    const earningsCents = orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : 0;
+    const earningsCents = platform === 'ebay' && orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : strikeCents;
     const feesCents = Math.max(0, strikeCents - earningsCents);
     setSubmitting(true);
     try {
       await api.post('/sales', {
-        card_instance_id: selectedCard.id,
-        listing_id: selectedCard.listing_id ?? undefined,
+        card_instance_id: cardId,
+        listing_id: saleMode === 'raw' ? undefined : (selectedCard?.listing_id ?? undefined),
         platform,
         sale_price: strikePrice,
         platform_fees: feesCents > 0 ? String(feesCents / 100) : undefined,
         currency,
         sold_at: soldAt || undefined,
-        unique_id: orderNumber || undefined,
-        unique_id_2: cardShowDetail || undefined,
-        order_details_link: ebayLink || undefined,
+        unique_id: platform === 'ebay' ? (orderNumber || undefined) : undefined,
+        unique_id_2: notes || undefined,
+        order_details_link: platform === 'ebay' ? (ebayLink || undefined) : undefined,
       });
       toast.success('Sale recorded!');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -176,45 +228,96 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     }
   }
 
-  // ── Step 1a: Search by card name ──────────────────────────────────────────
+  // ── Step: type ────────────────────────────────────────────────────────────
+
+  if (step === 'type') return (
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-500">What type of card are you selling?</p>
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button"
+          onClick={() => { setSaleMode('graded'); setStep('search'); }}
+          className="rounded-xl border-2 border-indigo-500 bg-indigo-500/10 px-4 py-5 text-left hover:bg-indigo-500/20 transition-colors">
+          <p className="text-sm font-semibold text-indigo-300">Graded</p>
+          <p className="text-xs text-zinc-500 mt-0.5">PSA, BGS, CGC slabs</p>
+        </button>
+        <button type="button"
+          onClick={() => { setSaleMode('raw'); setStep('raw-search'); }}
+          className="rounded-xl border-2 border-zinc-700 bg-zinc-800/40 px-4 py-5 text-left hover:border-zinc-500 hover:bg-zinc-800 transition-colors">
+          <p className="text-sm font-semibold text-zinc-200">Raw</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Ungraded cards</p>
+        </button>
+      </div>
+      <div className="flex justify-end pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+
+  // ── Step 1a: Search by card name (graded) ─────────────────────────────────
 
   if (step === 'search') return (
     <div className="space-y-3">
-      <div className="relative">
-        <Input
-          label="Search Card"
-          placeholder="Card name or part number…"
-          value={cardSearch}
-          onChange={(e) => setCardSearch(e.target.value)}
-          autoComplete="off"
-          autoFocus
-        />
-        {isSearching && (
-          <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />
-        )}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+          <span className="text-xs text-zinc-600">Graded</span>
+        </div>
+        <div className="flex gap-1">
+          {(['name', 'url'] as const).map((m) => (
+            <button key={m} type="button" onClick={() => setGradedSearchMode(m)}
+              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${gradedSearchMode === m ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+              {m === 'name' ? 'Name' : 'Listing URL'}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* In-flow results so modal height adjusts naturally */}
-      {debouncedSearch.length >= 2 && (
-        uniqueCardNames.length > 0 ? (
-          <div className="rounded-lg border border-zinc-700 overflow-hidden">
-            {uniqueCardNames.map(([name, count]) => (
-              <button key={name} type="button"
-                className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors"
-                onClick={() => {
-                  setSelectedCardName(name);
-                  setCardSearch(name);
-                  setSelectedCard(null);
-                  setStep('copies');
-                }}>
-                <span className="text-sm text-zinc-200 truncate">{name}</span>
-                <span className="shrink-0 text-[10px] text-zinc-500 font-mono tabular-nums">{count} unsold</span>
-              </button>
-            ))}
+      {gradedSearchMode === 'name' ? (
+        <>
+          <div className="relative">
+            <Input label="Search Card" placeholder="Card name or cert number…"
+              value={cardSearch} onChange={(e) => setCardSearch(e.target.value)}
+              autoComplete="off" autoFocus />
+            {isSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
           </div>
-        ) : !isSearching ? (
-          <p className="text-xs text-zinc-500 px-1">No unsold copies found.</p>
-        ) : null
+          {debouncedSearch.length >= 2 && (
+            uniqueCardNames.length > 0 ? (
+              <div className="rounded-lg border border-zinc-700 overflow-hidden">
+                {uniqueCardNames.map(([name, count]) => (
+                  <button key={name} type="button"
+                    className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors"
+                    onClick={() => { setSelectedCardName(name); setCardSearch(name); setSelectedCard(null); setStep('copies'); }}>
+                    <span className="text-sm text-zinc-200 truncate">{name}</span>
+                    <span className="shrink-0 text-[10px] text-zinc-500 tabular-nums">{count} unsold</span>
+                  </button>
+                ))}
+              </div>
+            ) : !isSearching ? (
+              <p className="text-xs text-zinc-500 px-1">No unsold copies found.</p>
+            ) : null
+          )}
+        </>
+      ) : (
+        <>
+          <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
+            value={listingUrl} onChange={(e) => setListingUrl(e.target.value)} autoFocus />
+          <Button type="button" disabled={!listingUrl || urlLookupLoading}
+            onClick={async () => {
+              setUrlLookupLoading(true);
+              try {
+                const res = await api.get('/listings/by-url', { params: { url: listingUrl } });
+                setSelectedCard(res.data.data);
+                setStep('details');
+              } catch {
+                toast.error('No active listing found for that URL');
+              } finally {
+                setUrlLookupLoading(false);
+              }
+            }}>
+            {urlLookupLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+            Find Card
+          </Button>
+        </>
       )}
 
       <div className="flex justify-end pt-1">
@@ -309,12 +412,181 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 
+  // ── Step: raw-search ─────────────────────────────────────────────────────
+
+  if (step === 'raw-search') return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+          <span className="text-xs text-zinc-600">Raw</span>
+        </div>
+        <div className="flex gap-1">
+          {(['name', 'id', 'url'] as const).map((m) => (
+            <button key={m} type="button" onClick={() => setRawSearchMode(m)}
+              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${rawSearchMode === m ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+              {m === 'name' ? 'Name' : m === 'id' ? 'Purchase ID' : 'Listing URL'}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {rawSearchMode === 'url' ? (
+        <>
+          <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
+            value={rawListingUrl} onChange={(e) => setRawListingUrl(e.target.value)} autoFocus />
+          <Button type="button" disabled={!rawListingUrl || rawUrlLookupLoading}
+            onClick={async () => {
+              setRawUrlLookupLoading(true);
+              try {
+                const res = await api.get('/listings/by-url', { params: { url: rawListingUrl } });
+                const d = res.data.data;
+                setSelectedRawCard({
+                  id: d.id,
+                  card_name: d.card_name,
+                  set_name: d.set_name,
+                  card_number: null,
+                  condition: d.condition ?? null,
+                  quantity: 1,
+                  purchase_cost: null,
+                  currency: d.currency,
+                  raw_purchase_label: d.raw_purchase_label ?? null,
+                  is_listed: true,
+                });
+                setStep('details');
+              } catch {
+                toast.error('No active raw listing found for that URL');
+              } finally {
+                setRawUrlLookupLoading(false);
+              }
+            }}>
+            {rawUrlLookupLoading ? <Loader2 size={14} className="animate-spin" /> : null}
+            Find Card
+          </Button>
+        </>
+      ) : (
+        <>
+          <div className="relative">
+            <Input
+              label="Search Card"
+              placeholder={rawSearchMode === 'name' ? 'Card name or part number…' : 'Purchase ID (e.g. 2026R10)…'}
+              value={rawSearch} onChange={(e) => setRawSearch(e.target.value)}
+              autoComplete="off" autoFocus
+            />
+            {isRawSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
+          </div>
+
+          {debouncedRawSearch.length >= 2 && (
+            rawSearchMode === 'name' ? (
+              uniqueRawCardNames.length > 0 ? (
+                <div className="rounded-lg border border-zinc-700 overflow-hidden">
+                  {uniqueRawCardNames.map(([name, count]) => (
+                    <button key={name} type="button"
+                      className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors"
+                      onClick={() => { setSelectedRawCardName(name); setSelectedRawCard(null); setStep('raw-select'); }}>
+                      <span className="text-sm text-zinc-200 truncate">{name}</span>
+                      <span className="shrink-0 text-[10px] text-zinc-500 tabular-nums">{count} card{count !== 1 ? 's' : ''}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : !isRawSearching ? (
+                <p className="text-xs text-zinc-500 px-1">No raw cards found for sale.</p>
+              ) : null
+            ) : (
+              (rawResults?.data ?? []).length > 0 ? (
+                <div className="rounded-lg border border-zinc-700 overflow-hidden">
+                  {(rawResults?.data ?? []).map((card) => (
+                    <button key={card.id} type="button"
+                      className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 transition-colors"
+                      onClick={() => { setSelectedRawCard(card); setStep('details'); }}>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="font-mono text-sm text-indigo-300">{card.raw_purchase_label ?? '—'}</span>
+                        {card.condition && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{card.condition}</span>}
+                      </div>
+                      <p className="text-[11px] text-zinc-500 mt-0.5 truncate">{card.card_name}</p>
+                    </button>
+                  ))}
+                </div>
+              ) : !isRawSearching ? (
+                <p className="text-xs text-zinc-500 px-1">No raw cards found for that ID.</p>
+              ) : null
+            )
+          )}
+        </>
+      )}
+
+      <div className="flex justify-end pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+
+  // ── Step: raw-select ─────────────────────────────────────────────────────
+
+  if (step === 'raw-select') return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-2 min-w-0">
+        <button type="button" onClick={() => { setStep('raw-search'); setSelectedRawCardName(null); setSelectedRawCard(null); }}
+          className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0">← Back</button>
+        <p className="text-xs font-medium text-zinc-300 truncate">{selectedRawCardName}</p>
+      </div>
+
+      <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+        {rawCopiesForName.map((copy, idx) => {
+          const isFifo = idx === 0;
+          const isSelected = selectedRawCard?.id === copy.id;
+          return (
+            <button key={copy.id} type="button"
+              onClick={() => setSelectedRawCard(copy)}
+              className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
+                isSelected ? 'border-amber-500/50 bg-amber-500/10' : 'border-zinc-700/50 bg-zinc-800/40 hover:bg-zinc-800'
+              }`}>
+              <div className="flex items-center gap-2">
+                {isFifo && (
+                  <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-1 py-0.5">FIFO</span>
+                )}
+                <span className="text-sm font-mono text-zinc-200">{copy.raw_purchase_label ?? '—'}</span>
+                {copy.condition && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{copy.condition}</span>}
+                <span className="text-[10px] text-zinc-500">{copy.quantity} card{copy.quantity !== 1 ? 's' : ''}</span>
+                {isSelected && <span className="ml-auto text-[10px] text-amber-400 font-medium">Selected</span>}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="button" disabled={!selectedRawCard} onClick={() => setStep('details')}>
+          Continue →
+        </Button>
+      </div>
+    </div>
+  );
+
   // ── Step 2: Sale details ──────────────────────────────────────────────────
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {/* Selected cert summary */}
-      {selectedCard && (
+      {/* Selected card summary */}
+      {saleMode === 'raw' && selectedRawCard ? (
+        <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 px-4 py-3 space-y-2">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-zinc-100 truncate">{selectedRawCard.card_name}</p>
+              <p className="text-[11px] text-zinc-500 mt-0.5">
+                {selectedRawCard.set_name}{selectedRawCard.card_number ? ` · ${selectedRawCard.card_number}` : ''}
+                {selectedRawCard.condition ? <span className="ml-2 font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{selectedRawCard.condition}</span> : ''}
+              </p>
+            </div>
+            <button type="button" onClick={() => setStep('raw-select')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
+          </div>
+          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-amber-400">Ship this card</span>
+            <span className="font-mono text-sm text-zinc-200">{selectedRawCard.raw_purchase_label ?? '—'}</span>
+          </div>
+        </div>
+      ) : selectedCard ? (
         <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 px-4 py-3 space-y-2">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
@@ -335,7 +607,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             </span>
           </div>
         </div>
-      )}
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3">
         <Select label="Sale Method" value={platform} onChange={(e) => setPlatform(e.target.value)}>
@@ -347,34 +619,47 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </Select>
       </div>
 
-      {platform === 'card_show' && (
-        <Input label="Card Show Detail" placeholder="e.g. show name, location"
-          value={cardShowDetail} onChange={(e) => setCardShowDetail(e.target.value)} />
+      {platform === 'card_show' && (selectedCard?.is_listed || selectedRawCard?.is_listed) && (
+        <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
+          <span className="text-amber-400 text-sm shrink-0">⚠</span>
+          <p className="text-xs text-amber-300 leading-relaxed">
+            This card has an active eBay listing — remember to delist it after recording this sale.
+          </p>
+        </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      {platform === 'ebay' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Strike Price" type="number" step="0.01" min="0" placeholder="0.00"
+            value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+          <Input label="Order Earnings (After Fees)" type="number" step="0.01" min="0" placeholder="0.00"
+            value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
+        </div>
+      ) : (
         <Input label="Strike Price" type="number" step="0.01" min="0" placeholder="0.00"
           value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
-        <Input label="Order Earnings (After Fees)" type="number" step="0.01" min="0" placeholder="0.00"
-          value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
-      </div>
-
-      {platform === 'ebay' && (
-        <Input label="eBay Link" type="url" placeholder="https://www.ebay.com/…"
-          value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
-          <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
-            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
-        </div>
-        <Input label="Order #" placeholder="e.g. eBay order number" value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
+      {platform === 'ebay' && (
+        <>
+          <Input label="eBay Link" type="url" placeholder="https://www.ebay.com/…"
+            value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
+          <Input label="Order #" placeholder="e.g. eBay order number"
+            value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
+        </>
+      )}
+
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
+        <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
+          className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
       </div>
 
+      <Input label="Notes" placeholder="Card Show, Location, Person, Etc..."
+        value={notes} onChange={(e) => setNotes(e.target.value)} />
+
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" onClick={() => setStep('copies')}>Back</Button>
+        <Button type="button" variant="ghost" onClick={() => setStep(saleMode === 'raw' ? (rawSearchMode === 'id' ? 'raw-search' : 'raw-select') : (gradedSearchMode === 'url' ? 'search' : 'copies'))}>Back</Button>
         <Button type="submit" disabled={submitting}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
           Record Sale
@@ -383,7 +668,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     </form>
   );
 }
-
 // ── Sale Action Modal (Edit / Delete) ─────────────────────────────────────────
 
 function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
@@ -393,7 +677,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
   const [strikePrice, setStrikePrice] = useState((sale.sale_price / 100).toFixed(2));
   const [orderEarnings, setOrderEarnings] = useState((sale.net_proceeds / 100).toFixed(2));
   const [ebayLink, setEbayLink] = useState(sale.order_details_link ?? '');
-  const [cardShowDetail, setCardShowDetail] = useState(sale.unique_id_2 ?? '');
+  const [notes, setNotes] = useState(sale.unique_id_2 ?? '');
   const [currency, setCurrency] = useState(sale.currency);
   const [soldAt, setSoldAt] = useState(sale.sold_at ? sale.sold_at.slice(0, 10) : '');
   const [orderNumber, setOrderNumber] = useState(sale.unique_id ?? '');
@@ -403,7 +687,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
     e.preventDefault();
     setSubmitting(true);
     const strikeCents = Math.round(parseFloat(strikePrice) * 100);
-    const earningsCents = orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : 0;
+    const earningsCents = platform === 'ebay' && orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : strikeCents;
     const feesCents = Math.max(0, strikeCents - earningsCents);
     try {
       await api.put(`/sales/${sale.id}`, {
@@ -413,9 +697,9 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
         shipping_cost: '0',
         currency,
         sold_at: soldAt || undefined,
-        unique_id: orderNumber || undefined,
-        unique_id_2: cardShowDetail || undefined,
-        order_details_link: ebayLink || undefined,
+        unique_id: platform === 'ebay' ? (orderNumber || undefined) : undefined,
+        unique_id_2: notes || undefined,
+        order_details_link: platform === 'ebay' ? (ebayLink || undefined) : undefined,
       });
       toast.success('Sale updated');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -462,25 +746,26 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
           <option value="JPY">JPY</option>
         </Select>
       </div>
-      {platform === 'card_show' && (
-        <Input label="Card Show Detail" placeholder="e.g. show name, location"
-          value={cardShowDetail} onChange={(e) => setCardShowDetail(e.target.value)} />
-      )}
-      <div className="grid grid-cols-2 gap-3">
-        <Input label="Strike Price" type="number" step="0.01" min="0" value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
-        <Input label="Order Earnings (After Fees)" type="number" step="0.01" min="0" value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
-      </div>
-      {platform === 'ebay' && (
-        <Input label="eBay Link" type="url" placeholder="https://www.ebay.com/…" value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
-      )}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
-          <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
-            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
+      {platform === 'ebay' ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Input label="Strike Price" type="number" step="0.01" min="0" value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+          <Input label="Order Earnings (After Fees)" type="number" step="0.01" min="0" value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
         </div>
-        <Input label="Order #" value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
+      ) : (
+        <Input label="Strike Price" type="number" step="0.01" min="0" value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+      )}
+      {platform === 'ebay' && (
+        <>
+          <Input label="eBay Link" type="url" placeholder="https://www.ebay.com/…" value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
+          <Input label="Order #" value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
+        </>
+      )}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
+        <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
+          className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
       </div>
+      <Input label="Notes" placeholder="Card Show, Location, Person, Etc..." value={notes} onChange={(e) => setNotes(e.target.value)} />
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={() => setMode('prompt')}>Back</Button>
         <Button type="submit" disabled={submitting}>
@@ -688,6 +973,7 @@ export function Sales() {
       <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="Record Sale" className="max-w-2xl">
         <RecordSaleModal onClose={() => setShowAddModal(false)} />
       </Modal>
+
 
       <Modal open={!!selectedSale} onClose={() => setSelectedSale(null)} title="Sale">
         {selectedSale && <SaleActionModal sale={selectedSale} onClose={() => setSelectedSale(null)} />}

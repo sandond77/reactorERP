@@ -230,7 +230,36 @@ async function enrichWithSku(suggestions: CardInfoResult[]): Promise<CardInfoRes
     if (!rawCode) return { ...s, catalog_exists: false };
     const setCode = lookupSetCode(lang, rawCode) ?? lookupSetCode(lang, s.set_name ?? '') ?? rawCode;
     const sku = generatePartNumber(lang, setCode, s.card_number);
-    const row = await db.selectFrom('card_catalog').select(['id', 'card_name']).where('sku', '=', sku).executeTakeFirst();
+    let row = await db.selectFrom('card_catalog').select(['id', 'card_name', 'sku']).where('sku', '=', sku).executeTakeFirst();
+    // Fallback 1: fuzzy match by card_name + card_number (AI may return wrong set code)
+    if (!row && s.card_name && s.card_number) {
+      const cardNum = s.card_number.replace(/\/.*$/, '').replace(/^0+/, '');
+      row = await db.selectFrom('card_catalog')
+        .select(['id', 'card_name', 'sku'])
+        .where('card_name', 'ilike', `%${s.card_name}%`)
+        .where('card_number', 'ilike', `%${cardNum}%`)
+        .where('language', '=', lang)
+        .limit(1)
+        .executeTakeFirst() ?? undefined;
+    }
+    // Fallback 2: fuzzy match by card_name + set_name (AI may return wrong card number, e.g. AR variant)
+    if (!row && s.card_name && s.set_name) {
+      const setWords = s.set_name.split(/\s+/).filter(w => w.length > 3);
+      let q = db.selectFrom('card_catalog')
+        .select(['id', 'card_name', 'sku'])
+        .where('card_name', 'ilike', `%${s.card_name}%`)
+        .where('language', '=', lang);
+      for (const word of setWords) {
+        q = q.where('set_name', 'ilike', `%${word}%`);
+      }
+      // If rarity available, prefer matching rarity
+      if (s.rarity) {
+        const withRarity = await q.where('rarity', 'ilike', `%${s.rarity}%`).limit(1).executeTakeFirst();
+        row = withRarity ?? await q.limit(1).executeTakeFirst() ?? undefined;
+      } else {
+        row = await q.limit(1).executeTakeFirst() ?? undefined;
+      }
+    }
     if (!row) return { ...s, sku, catalog_exists: false };
     // Use the established card name from an existing inventory entry for this SKU
     const established = await db
@@ -242,7 +271,8 @@ async function enrichWithSku(suggestions: CardInfoResult[]): Promise<CardInfoRes
       .limit(1)
       .executeTakeFirst();
     const catalog_card_name = established?.card_name_override ?? row.card_name ?? undefined;
-    return { ...s, sku, catalog_id: row.id, catalog_exists: true, catalog_card_name };
+    const resolvedSku = row.sku ?? sku;
+    return { ...s, sku: resolvedSku, catalog_id: row.id, catalog_exists: true, catalog_card_name };
   }));
 }
 

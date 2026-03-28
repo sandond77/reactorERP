@@ -73,6 +73,25 @@ export interface CardCatalogTable {
   updated_at: Generated<Date>;
 }
 
+export interface TradesTable {
+  id: Generated<string>;
+  user_id: string;
+  trade_label: string | null;
+  trade_date: Date | null;
+  person: string | null;
+  cash_from_customer_cents: Generated<number>;
+  cash_to_customer_cents: Generated<number>;
+  trade_percent: Generated<number>;
+  notes: string | null;
+  created_at: Generated<Date>;
+}
+
+export interface TradeSequencesTable {
+  user_id: string;
+  year: number;
+  next_seq: number;
+}
+
 export interface CardInstancesTable {
   id: Generated<string>;
   user_id: string;
@@ -98,6 +117,7 @@ export interface CardInstancesTable {
   image_back_url: string | null;
   purchased_at: Date | null;
   raw_purchase_id: string | null;
+  trade_id: string | null;
   decision: string | null;
   is_card_show: Generated<boolean>;
   is_personal_collection: Generated<boolean>;
@@ -167,6 +187,7 @@ export interface SalesTable {
   user_id: string;
   card_instance_id: string;
   listing_id: string | null;
+  trade_id: string | null;
   platform: ListingPlatform;
   sale_price: number;
   platform_fees: number;
@@ -296,6 +317,8 @@ export interface Database {
   slab_details: SlabDetailsTable;
   listings: ListingsTable;
   sales: SalesTable;
+  trades: TradesTable;
+  trade_sequences: TradeSequencesTable;
   csv_imports: CsvImportsTable;
   audit_log: AuditLogTable;
   pokemon_set_aliases: PokemonSetAliasesTable;

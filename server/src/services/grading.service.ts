@@ -109,7 +109,8 @@ export async function listSlabs(
   purchaseYears?: string[],
   listedYears?: string[],
   soldYears?: string[],
-  personalCollection?: string
+  personalCollection?: string,
+  forSale?: string
 ) {
   const offset = getPaginationOffset(pagination.page, pagination.limit);
   const status = statusFilter === 'all' || !statusFilter ? null : statusFilter;
@@ -128,6 +129,9 @@ export async function listSlabs(
   const personalCollectionCond = personalCollection === 'yes' ? sql`AND ci.is_personal_collection = true`
                                 : personalCollection === 'no'  ? sql`AND ci.is_personal_collection = false`
                                 : sql``;
+  const forSaleCond = forSale === 'yes'
+    ? sql`AND (EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.listing_status = 'active') OR ci.is_card_show = true)`
+    : sql``;
   const purchaseYearIn = purchaseYears === undefined ? sql`` : purchaseYears.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql`AND 1=0`;
   const listedYearIn   = listedYears   === undefined ? sql`` : listedYears.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
   const soldYearIn     = soldYears     === undefined ? sql`` : soldYears.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
@@ -140,7 +144,7 @@ export async function listSlabs(
     AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
-    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond}
   `.execute(db);
 
   const total = Number(countResult.rows[0]?.count ?? 0);
@@ -224,7 +228,7 @@ export async function listSlabs(
     AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
-    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond}
     ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
     LIMIT ${pagination.limit} OFFSET ${offset}
   `.execute(db);

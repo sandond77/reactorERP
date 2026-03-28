@@ -10,6 +10,7 @@ import { RawInventory } from './pages/RawInventory';
 import { Grading } from './pages/Grading';
 import { Listings } from './pages/Listings';
 import { Sales } from './pages/Sales';
+import { Trades } from './pages/Trades';
 import { Reports } from './pages/Reports';
 import { Import } from './pages/Import';
 import { Overall } from './pages/Overall';
@@ -49,6 +50,7 @@ export default function App() {
               <Route path="/card-show" element={<CardShow />} />
               <Route path="/listings" element={<Listings />} />
               <Route path="/sales" element={<Sales />} />
+              <Route path="/trades" element={<Trades />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/import" element={<Import />} />
               <Route path="/parts" element={<InventorySummary />} />
