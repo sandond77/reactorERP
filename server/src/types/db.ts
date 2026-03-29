@@ -325,7 +325,30 @@ export interface GradingBatchSequencesTable {
 // Database interface (used by Kysely)
 // ============================================================
 
+export interface ExpensesTable {
+  id: Generated<string>;
+  user_id: string;
+  expense_id: string | null;
+  date: Date;
+  description: string;
+  type: string;
+  amount: number;
+  currency: string;
+  link: string | null;
+  order_number: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface ExpenseSequencesTable {
+  user_id: string;
+  year: number;
+  next_seq: number;
+}
+
 export interface Database {
+  expenses: ExpensesTable;
+  expense_sequences: ExpenseSequencesTable;
   locations: LocationsTable;
   users: UsersTable;
   card_catalog: CardCatalogTable;

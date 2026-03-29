@@ -1,10 +1,8 @@
-/** Convert a dollar/yen string like "12.99" or "1299" to integer cents */
+/** Convert a dollar amount (string or number) to integer cents. Always treats input as dollars. */
 export function toCents(value: string | number): number {
-  if (typeof value === 'number') return Math.round(value);
-  const parsed = parseFloat(value.replace(/[^0-9.]/g, ''));
+  const parsed = typeof value === 'number' ? value : parseFloat(String(value).replace(/[^0-9.]/g, ''));
   if (isNaN(parsed)) return 0;
-  // If the value looks like it already has decimals (e.g. "12.99"), multiply
-  return value.includes('.') ? Math.round(parsed * 100) : Math.round(parsed);
+  return Math.round(parsed * 100);
 }
 
 /** Format integer cents as a decimal string: 1299 → "12.99" */
