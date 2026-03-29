@@ -121,7 +121,7 @@ export function RawInventory() {
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h1 className="text-xl font-bold text-zinc-100">Raw Inventory</h1>
+        <h1 className="text-xl font-bold text-zinc-100">Raw Summary</h1>
         <div className="flex items-center gap-3">
           {hasActiveFilters && (
             <button onClick={() => { setSearch(''); setFSet(null); }}

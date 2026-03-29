@@ -110,7 +110,7 @@ export function UngradedInventory() {
     });
   }
 
-  const hasActiveFilters = tab !== null || (fSet !== null && fSet.length > 0) || !!debouncedSearch;
+  const hasActiveFilters = (fSet !== null && fSet.length > 0) || !!debouncedSearch;
   const totalCards = data.reduce((s, g) => s + g.instances.reduce((a, i) => a + i.quantity, 0), 0);
   const sh = { sortCol, sortDir, onSort: handleSort };
 

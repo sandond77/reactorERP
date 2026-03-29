@@ -303,12 +303,12 @@ export function Inventory() {
                   <td className="px-3 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
                     {row.order_details_link ? (
                       <a href={row.order_details_link} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex text-amber-400 hover:text-amber-300" title="Order details">
+                        className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="Order details">
                         <ExternalLink size={12} />
                       </a>
                     ) : row.listing_url ? (
                       <a href={row.listing_url} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex text-blue-400 hover:text-blue-300" title="eBay listing">
+                        className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="eBay listing">
                         <ExternalLink size={12} />
                       </a>
                     ) : (

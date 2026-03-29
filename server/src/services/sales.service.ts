@@ -91,36 +91,38 @@ export async function getSaleFilterOptions(userId: string) {
 
 export async function listSales(
   userId: string,
-  filters: { platforms?: string[]; search?: string; from?: Date; to?: Date },
+  filters: { platforms?: string[]; search?: string; from?: Date; to?: Date; cardType?: 'all' | 'graded' | 'raw' },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
 ) {
-  const total = Number(
-    (await db
-      .selectFrom('sales as s')
-      .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
-      .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
-      .select((eb) => eb.fn.count<number>('s.id').as('count'))
-      .where('s.user_id', '=', userId)
-      .$if(filters.platforms !== undefined, (qb) =>
-        filters.platforms!.length === 0
-          ? qb.where(sql`1=0`)
-          : qb.where('s.platform', 'in', filters.platforms! as any)
-      )
-      .$if(!!filters.search, (qb) => qb.where(
-        sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
-      ))
-      .$if(!!filters.from, (qb) => qb.where('s.sold_at', '>=', filters.from!))
-      .$if(!!filters.to, (qb) => qb.where('s.sold_at', '<=', filters.to!))
-      .executeTakeFirst())?.count ?? 0
-  );
-
-  const data = await db
+  const baseQuery = () => db
     .selectFrom('sales as s')
     .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .where('s.user_id', '=', userId)
+    .$if(filters.platforms !== undefined, (qb) =>
+      filters.platforms!.length === 0
+        ? qb.where(sql`1=0`)
+        : qb.where('s.platform', 'in', filters.platforms! as any)
+    )
+    .$if(!!filters.search, (qb) => qb.where(
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
+    ))
+    .$if(!!filters.from, (qb) => qb.where('s.sold_at', '>=', filters.from!))
+    .$if(!!filters.to, (qb) => qb.where('s.sold_at', '<=', filters.to!))
+    .$if(filters.cardType === 'graded', (qb) => qb.where('sd.company', 'is not', null))
+    .$if(filters.cardType === 'raw', (qb) => qb.where('sd.company', 'is', null));
+
+  const total = Number(
+    (await baseQuery()
+      .select((eb) => eb.fn.count<number>('s.id').as('count'))
+      .executeTakeFirst())?.count ?? 0
+  );
+
+  const data = await baseQuery()
+    .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
     .leftJoin('listings as l', 'l.id', 's.listing_id')
     .select([
       's.id',
@@ -146,20 +148,10 @@ export async function listSales(
       'sd.company as grading_company',
       'sd.cert_number',
       'sd.grading_cost',
+      'rp.purchase_id as raw_purchase_label',
       'l.list_price as listed_price',
       sql<number>`(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`.as('profit'),
     ])
-    .where('s.user_id', '=', userId)
-    .$if(filters.platforms !== undefined, (qb) =>
-      filters.platforms!.length === 0
-        ? qb.where(sql`1=0`)
-        : qb.where('s.platform', 'in', filters.platforms! as any)
-    )
-    .$if(!!filters.search, (qb) => qb.where(
-      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
-    ))
-    .$if(!!filters.from, (qb) => qb.where('s.sold_at', '>=', filters.from!))
-    .$if(!!filters.to, (qb) => qb.where('s.sold_at', '<=', filters.to!))
     .orderBy(sql.raw(SALES_SORT_COLS[sortBy ?? ''] ?? 's.sold_at'), sortDir ?? 'desc')
     .limit(pagination.limit)
     .offset(getPaginationOffset(pagination.page, pagination.limit))

@@ -1,16 +1,16 @@
 import { useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
-  LayoutDashboard, PackageOpen, Star, TrendingUp, ListOrdered,
+  LayoutDashboard, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
-  ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin,
+  ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
 
-const RAW_ROUTES = ['/intake', '/inspection', '/raw-inventory', '/ungraded', '/grading', '/sub-returns'];
+const RAW_ROUTES = ['/intake', '/inspection', '/raw-overall', '/ungraded', '/grading', '/sub-returns'];
 const RAW_NAV = [
-  { to: '/raw-inventory', icon: PackageOpen,         label: 'Raw Inventory' },
+  { to: '/raw-overall',   icon: TableProperties,     label: 'Raw Overall' },
   { to: '/intake',        icon: ClipboardList,       label: 'Purchases' },
   { to: '/inspection',    icon: ScanSearch,          label: 'Inspection' },
   { to: '/ungraded',      icon: GalleryVerticalEnd,  label: 'To Be Submitted' },

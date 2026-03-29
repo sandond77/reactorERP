@@ -20,6 +20,7 @@ import { Intake } from './pages/Intake';
 import { Inspection } from './pages/Inspection';
 import { UngradedInventory } from './pages/UngradedInventory';
 import { SubReturns } from './pages/SubReturns';
+import { RawOverall } from './pages/RawOverall';
 import LocationManager from './pages/LocationManager';
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
@@ -45,6 +46,7 @@ export default function App() {
               <Route path="/intake" element={<Intake />} />
               <Route path="/inspection" element={<Inspection />} />
               <Route path="/raw-inventory" element={<RawInventory />} />
+              <Route path="/raw-overall" element={<RawOverall />} />
               <Route path="/grading" element={<Grading />} />
               <Route path="/sub-returns" element={<SubReturns />} />
               <Route path="/ungraded" element={<UngradedInventory />} />

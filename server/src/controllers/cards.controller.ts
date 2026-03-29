@@ -116,3 +116,55 @@ export async function deleteCard(req: Request, res: Response, next: NextFunction
     res.status(204).send();
   } catch (err) { next(err); }
 }
+
+const rawFlatQuerySchema = z.object({
+  page:  z.coerce.number().default(1),
+  limit: z.coerce.number().min(1).max(200).default(100),
+  search:    z.string().optional(),
+  status:    z.enum(['all', 'unsold', 'sold', 'for_sale', 'to_grade', 'submitted']).default('unsold'),
+  sort_by:   z.string().optional(),
+  sort_dir:  z.enum(['asc', 'desc']).default('desc'),
+  conditions:     z.string().optional(),
+  is_listed:      z.string().optional(),
+  purchase_years: z.string().optional(),
+  listed_years:   z.string().optional(),
+  sold_years:     z.string().optional(),
+  purchase_date:  z.string().optional(),
+  listed_date:    z.string().optional(),
+  sold_date:      z.string().optional(),
+});
+
+function splitCSVRaw(val?: string): string[] | undefined {
+  if (val === undefined) return undefined;
+  return val.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+export async function listRawFlat(req: Request, res: Response, next: NextFunction) {
+  try {
+    const q = rawFlatQuerySchema.parse(req.query);
+    const result = await cardsService.listRawFlat(
+      req.user!.id,
+      { page: q.page, limit: q.limit },
+      q.search,
+      q.status,
+      q.sort_by,
+      q.sort_dir,
+      splitCSVRaw(q.conditions),
+      q.is_listed,
+      splitCSVRaw(q.purchase_years),
+      splitCSVRaw(q.listed_years),
+      splitCSVRaw(q.sold_years),
+      q.purchase_date,
+      q.listed_date,
+      q.sold_date,
+    );
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
+export async function getRawFlatFilters(req: Request, res: Response, next: NextFunction) {
+  try {
+    const options = await cardsService.getRawFlatFilterOptions(req.user!.id);
+    res.json(options);
+  } catch (err) { next(err); }
+}
