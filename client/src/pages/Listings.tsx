@@ -1174,7 +1174,7 @@ export function Listings() {
                       </td>
                       <td className="px-3 py-2 text-center">
                         {row.ebay_listing_url ? (
-                          <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-blue-400 hover:text-blue-300">
+                          <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors">
                             <ExternalLink size={13} />
                           </a>
                         ) : '—'}
@@ -1209,7 +1209,7 @@ export function Listings() {
                         </td>
                         <td className="px-3 py-1.5 text-center">
                           {cert.ebay_listing_url ? (
-                            <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-blue-400/60 hover:text-blue-300">
+                            <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors">
                               <ExternalLink size={12} />
                             </a>
                           ) : '—'}

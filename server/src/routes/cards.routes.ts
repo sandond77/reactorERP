@@ -8,6 +8,8 @@ cardsRouter.use(requireAuth);
 
 cardsRouter.get('/filters', cardsController.getCardFilters);
 cardsRouter.get('/by-part', cardsController.listCardsGrouped);
+cardsRouter.get('/raw-flat/filters', cardsController.getRawFlatFilters);
+cardsRouter.get('/raw-flat', cardsController.listRawFlat);
 cardsRouter.get('/', cardsController.listCards);
 cardsRouter.post('/', cardsController.createCard);
 cardsRouter.get('/:id', cardsController.getCard);

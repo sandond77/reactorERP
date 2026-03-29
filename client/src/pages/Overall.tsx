@@ -140,7 +140,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     location:           colMinWidth('Location',  false, false),
     card_show:          colMinWidth('Card Show?', false, true),
   };
-  const { rz, totalWidth } = useColWidths({ part_number: Math.max(MINS.part_number, 110), cert_number: Math.max(MINS.cert_number, 120), grade: Math.max(MINS.grade, 160), card_name: Math.max(MINS.card_name, 560), company: Math.max(MINS.company, 115), is_listed: Math.max(MINS.is_listed, 80), listed_price: Math.max(MINS.listed_price, 75), listing: Math.max(MINS.listing, 55), location: Math.max(MINS.location, 130), card_show: Math.max(MINS.card_show, 60), raw_cost: Math.max(MINS.raw_cost, 75), grading_cost: Math.max(MINS.grading_cost, 75), strike_price: Math.max(MINS.strike_price, 75), after_ebay: Math.max(MINS.after_ebay, 75), net: Math.max(MINS.net, 75), raw_purchase_date: Math.max(MINS.raw_purchase_date, 80), date_listed: Math.max(MINS.date_listed, 75), date_sold: Math.max(MINS.date_sold, 75), roi_pct: Math.max(MINS.roi_pct, 65), notes: Math.max(MINS.notes, 160) });
+  const { rz, totalWidth } = useColWidths({ part_number: Math.max(MINS.part_number, 110), cert_number: Math.max(MINS.cert_number, 120), grade: Math.max(MINS.grade, 160), card_name: Math.max(MINS.card_name, 560), company: Math.max(MINS.company, 115), is_listed: Math.max(MINS.is_listed, 80), listed_price: Math.max(MINS.listed_price, 75), listing: Math.max(MINS.listing, 55), location: Math.max(MINS.location, 130), card_show: Math.max(MINS.card_show, 60), raw_cost: Math.max(MINS.raw_cost, 75), grading_cost: Math.max(MINS.grading_cost, 75), strike_price: Math.max(MINS.strike_price, 75), after_ebay: Math.max(MINS.after_ebay, 75), net: Math.max(MINS.net, 75), raw_purchase_date: Math.max(MINS.raw_purchase_date, 80), date_listed: Math.max(MINS.date_listed, 75), date_sold: Math.max(MINS.date_sold, 75), roi_pct: Math.max(MINS.roi_pct, 65), notes: Math.max(MINS.notes, 500) });
 
   // Per-column filters
   const [selectedSlab, setSelectedSlab] = useState<SlabRow | null>(null);
@@ -230,7 +230,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h1 className="text-xl font-bold text-zinc-100">{cardShowMode ? 'Card Show Inventory' : 'Overall'}</h1>
+        <h1 className="text-xl font-bold text-zinc-100">{cardShowMode ? 'Card Show Inventory' : 'Graded Overall'}</h1>
         <div className="flex items-center gap-3">
           {hasActiveFilters && (
             <button onClick={clearAllFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
@@ -335,12 +335,12 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                     <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
                       {row.order_details_link ? (
                         <a href={row.order_details_link} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex text-amber-400 hover:text-amber-300" title="Order details">
+                          className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="Order details">
                           <ExternalLink size={11} />
                         </a>
                       ) : row.listing_url ? (
                         <a href={row.listing_url} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex text-blue-400 hover:text-blue-300" title="eBay listing">
+                          className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="eBay listing">
                           <ExternalLink size={11} />
                         </a>
                       ) : ''}

@@ -579,3 +579,188 @@ async function logAudit(
     .execute()
     .catch((err) => console.error('[audit] Failed to write audit log:', err));
 }
+
+// ─── Raw flat overview ────────────────────────────────────────────────────────
+
+function fuzzyRawClause(search: string | undefined) {
+  if (!search) return sql``;
+  const words = search.trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return sql``;
+  const parts = words.map((w) => {
+    const term = `%${w}%`;
+    return sql`AND (COALESCE(ci.card_name_override, cc.card_name) ILIKE ${term} OR rp.purchase_id ILIKE ${term} OR COALESCE(cc.set_name, ci.set_name_override) ILIKE ${term})`;
+  });
+  return sql.join(parts, sql` `);
+}
+
+const RAW_FLAT_SORT_COLS: Record<string, string> = {
+  card_name:          `COALESCE(ci.card_name_override, cc.card_name)`,
+  condition:          'ci.condition',
+  raw_purchase_label: 'rp.purchase_id',
+  listed_price:       'l.list_price',
+  raw_cost:           'ci.purchase_cost',
+  after_ebay:         'after_ebay',
+  raw_purchase_date:  'ci.purchased_at',
+  date_listed:        'l.listed_at',
+  date_sold:          's.sold_at',
+  roi_pct:            'roi_pct',
+  location_name:      'loc.name',
+};
+
+export async function getRawFlatFilterOptions(userId: string) {
+  const [conditions, purchaseYears, listedYears, soldYears] = await Promise.all([
+    sql<{ value: string }>`
+      SELECT DISTINCT ci.condition AS value FROM card_instances ci
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+        AND ci.raw_purchase_id IS NOT NULL AND ci.condition IS NOT NULL
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT EXTRACT(YEAR FROM ci.purchased_at)::int::text AS value FROM card_instances ci
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+        AND ci.raw_purchase_id IS NOT NULL AND ci.purchased_at IS NOT NULL
+        AND EXTRACT(YEAR FROM ci.purchased_at) >= 2000
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT EXTRACT(YEAR FROM l.listed_at)::int::text AS value
+      FROM listings l INNER JOIN card_instances ci ON ci.id = l.card_instance_id
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+        AND ci.raw_purchase_id IS NOT NULL AND l.listed_at IS NOT NULL
+        AND EXTRACT(YEAR FROM l.listed_at) >= 2000
+      ORDER BY value
+    `.execute(db),
+    sql<{ value: string }>`
+      SELECT DISTINCT EXTRACT(YEAR FROM s.sold_at)::int::text AS value
+      FROM sales s INNER JOIN card_instances ci ON ci.id = s.card_instance_id
+      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+        AND ci.raw_purchase_id IS NOT NULL AND EXTRACT(YEAR FROM s.sold_at) >= 2000
+      ORDER BY value
+    `.execute(db),
+  ]);
+  return {
+    conditions: conditions.rows.map((r) => r.value),
+    listed: ['Yes', 'No'],
+    purchase_years: purchaseYears.rows.map((r) => r.value),
+    listed_years:   listedYears.rows.map((r) => r.value),
+    sold_years:     soldYears.rows.map((r) => r.value),
+  };
+}
+
+export async function listRawFlat(
+  userId: string,
+  pagination: PaginationParams,
+  search?: string,
+  statusFilter?: 'all' | 'unsold' | 'sold' | 'for_sale' | 'to_grade' | 'submitted',
+  sortBy?: string,
+  sortDir?: 'asc' | 'desc',
+  filterConditions?: string[],
+  isListed?: string,
+  purchaseYears?: string[],
+  listedYears?: string[],
+  soldYears?: string[],
+  purchaseDate?: string,
+  listedDate?: string,
+  soldDate?: string,
+) {
+  const offset = getPaginationOffset(pagination.page, pagination.limit);
+  const dir = sortDir === 'asc' ? sql`ASC` : sql`DESC`;
+  const sortExpr = RAW_FLAT_SORT_COLS[sortBy ?? ''] ?? 'ci.created_at';
+
+  const statusCond = statusFilter === 'unsold' ? sql`AND ci.status NOT IN ('sold')`
+    : statusFilter === 'sold'     ? sql`AND ci.status = 'sold'`
+    : statusFilter === 'for_sale' ? sql`AND ci.status = 'raw_for_sale'`
+    : statusFilter === 'to_grade'  ? sql`AND ci.decision = 'grade' AND ci.status IN ('purchased_raw', 'inspected', 'raw_for_sale')`
+    : statusFilter === 'submitted' ? sql`AND ci.status = 'grading_submitted'`
+    : sql``;
+
+  const conditionIn   = filterConditions === undefined ? sql`` : filterConditions.length ? sql`AND ci.condition IN (${sql.join(filterConditions.map((v) => sql.val(v)))})` : sql`AND 1=0`;
+  const listedCond    = isListed === 'yes' ? sql`AND l.id IS NOT NULL` : isListed === 'no' ? sql`AND l.id IS NULL` : sql``;
+  const purchaseYearIn = purchaseYears === undefined ? sql`` : purchaseYears.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::int::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql`AND 1=0`;
+  const listedYearIn   = listedYears   === undefined ? sql`` : listedYears.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::int::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
+  const soldYearIn     = soldYears     === undefined ? sql`` : soldYears.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::int::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
+  const purchaseDateCond = purchaseDate ? sql`AND ci.purchased_at = ${purchaseDate}::date` : sql``;
+  const listedDateCond   = listedDate   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.listed_at::date = ${listedDate}::date)` : sql``;
+  const soldDateCond     = soldDate     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND s2.sold_at::date = ${soldDate}::date)` : sql``;
+  const searchCond = fuzzyRawClause(search);
+
+  const BASE_FROM = sql`
+    FROM card_instances ci
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
+    LEFT JOIN locations loc ON loc.id = ci.location_id
+    LEFT JOIN LATERAL (
+      SELECT id, list_price, ebay_listing_url, listed_at
+      FROM listings WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
+    ) l ON true
+    LEFT JOIN LATERAL (
+      SELECT sale_price, platform_fees, shipping_cost, sold_at, order_details_link
+      FROM sales WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
+    ) s ON true
+    WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND ci.raw_purchase_id IS NOT NULL
+    ${statusCond} ${conditionIn} ${listedCond}
+    ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
+    ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
+    ${searchCond}
+  `;
+
+  const countResult = await sql<{ count: string }>`SELECT COUNT(*) AS count ${BASE_FROM}`.execute(db);
+  const total = Number(countResult.rows[0]?.count ?? 0);
+
+  const rows = await sql<{
+    id: string;
+    raw_purchase_label: string | null;
+    card_name: string | null;
+    set_name: string | null;
+    card_number: string | null;
+    condition: string | null;
+    is_listed: boolean;
+    listed_price: number | null;
+    listing_url: string | null;
+    listing_id: string | null;
+    raw_cost: number;
+    strike_price: number | null;
+    after_ebay: number | null;
+    raw_purchase_date: string | null;
+    date_listed: string | null;
+    date_sold: string | null;
+    roi_pct: number | null;
+    notes: string | null;
+    location_name: string | null;
+    location_id: string | null;
+    order_details_link: string | null;
+  }>`
+    SELECT
+      ci.id,
+      rp.purchase_id                                      AS raw_purchase_label,
+      COALESCE(ci.card_name_override, cc.card_name)      AS card_name,
+      COALESCE(cc.set_name, ci.set_name_override)        AS set_name,
+      COALESCE(cc.card_number, ci.card_number_override)  AS card_number,
+      ci.condition,
+      (l.id IS NOT NULL)                                 AS is_listed,
+      l.list_price                                       AS listed_price,
+      l.ebay_listing_url                                 AS listing_url,
+      l.id                                               AS listing_id,
+      ci.purchase_cost                                   AS raw_cost,
+      s.sale_price                                       AS strike_price,
+      CASE WHEN s.sale_price IS NOT NULL
+        THEN s.sale_price - s.platform_fees - s.shipping_cost ELSE NULL
+      END                                                AS after_ebay,
+      ci.purchased_at                                    AS raw_purchase_date,
+      l.listed_at                                        AS date_listed,
+      s.sold_at                                          AS date_sold,
+      CASE WHEN ci.purchase_cost > 0 AND s.sale_price IS NOT NULL
+        THEN ROUND((s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost)::numeric / ci.purchase_cost * 100, 2)
+        ELSE NULL
+      END                                                AS roi_pct,
+      ci.notes,
+      loc.name                                           AS location_name,
+      ci.location_id,
+      s.order_details_link
+    ${BASE_FROM}
+    ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
+    LIMIT ${pagination.limit} OFFSET ${offset}
+  `.execute(db);
+
+  return buildPaginatedResult(rows.rows, total, pagination.page, pagination.limit);
+}

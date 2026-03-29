@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Loader2, Pencil, Trash2, Sparkles, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plus, X, Loader2, Pencil, Trash2, Sparkles, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -28,6 +28,7 @@ interface Sale {
   grade_label: string | null;
   grading_company: string | null;
   cert_number: string | null;
+  raw_purchase_label: string | null;
   unique_id: string | null;
   unique_id_2: string | null;
   raw_cost: number;
@@ -816,10 +817,13 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+type CardTypeFilter = 'all' | 'graded' | 'raw';
+
 const SALES_FILTER_DEFAULTS = {
   sortCol: 'sold_at' as string | null,
   sortDir: 'desc' as SortDir,
   fPlatform: null as string[] | null,
+  cardType: 'all' as CardTypeFilter,
   search: '',
 };
 
@@ -829,15 +833,17 @@ export function Sales() {
   const [sortCol, setSortCol] = useState<string | null>(saved.sortCol);
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
   const [fPlatform, setFPlatform] = useState<string[] | null>(saved.fPlatform);
+  const [cardType, setCardType] = useState<CardTypeFilter>(saved.cardType ?? 'all');
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const MINS = {
     date:         colMinWidth('Date Sold',     true,  false),
-    cert:         colMinWidth('Cert',          true,  false),
+    cert:         colMinWidth('Cert / ID', true, false),
     card:         colMinWidth('Card',          true,  false),
     sale_method:  colMinWidth('Sale Method',   true,  true),
+    link:         50,
     raw_cost:     colMinWidth('Raw Cost',      true,  false),
     grading_cost: colMinWidth('Grading Cost',  true,  false),
     listed_price: colMinWidth('Listing Price', true,  false),
@@ -845,7 +851,7 @@ export function Sales() {
     after_ebay:   colMinWidth('After Fees',    true,  false),
     net:          colMinWidth('Net',           true,  false),
   };
-  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 130), card: Math.max(MINS.card, 460), sale_method: Math.max(MINS.sale_method, 140), raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
+  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 155), card: Math.max(MINS.card, 460), sale_method: Math.max(MINS.sale_method, 140), link: 50, raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
@@ -853,8 +859,8 @@ export function Sales() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('sales', { sortCol, sortDir, fPlatform, search });
-  }, [sortCol, sortDir, fPlatform, search]);
+    saveFilters('sales', { sortCol, sortDir, fPlatform, cardType, search });
+  }, [sortCol, sortDir, fPlatform, cardType, search]);
 
   const handleSort = useCallback((col: string) => {
     setSortCol((prev) => {
@@ -884,6 +890,7 @@ export function Sales() {
     sort_dir: sortDir,
     platforms: activeFilter(fPlatform, filterOptions?.platforms)?.join(','),
     search: debouncedSearch || undefined,
+    card_type: cardType !== 'all' ? cardType : undefined,
   };
 
   const { data, isLoading } = useQuery<PaginatedResult<Sale>>({
@@ -901,11 +908,19 @@ export function Sales() {
         <h1 className="text-xl font-bold text-zinc-100">Sales</h1>
         <div className="flex items-center gap-3">
           {hasActiveFilters && (
-            <button onClick={() => { setFPlatform(null); setSearch(''); }}
+            <button onClick={() => { setFPlatform(null); setCardType('all'); setSearch(''); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
               <X size={12} /> Clear filters
             </button>
           )}
+          <div className="flex items-center gap-1">
+            {(['all', 'graded', 'raw'] as CardTypeFilter[]).map((t) => (
+              <button key={t} onClick={() => { setCardType(t); setPage(1); }}
+                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${cardType === t ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                {t.charAt(0).toUpperCase() + t.slice(1)}
+              </button>
+            ))}
+          </div>
           <input
             type="text"
             placeholder="Search card…"
@@ -927,10 +942,11 @@ export function Sales() {
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Date Sold"      col="sold_at"      {...sh} {...rz('date')} minWidth={MINS.date} />
-                <ColHeader label="Cert"           col="cert_number"  {...sh} {...rz('cert')} minWidth={MINS.cert} />
+                <ColHeader label="Cert / ID" col="cert_number" {...sh} {...rz('cert')} minWidth={MINS.cert} wrap />
                 <ColHeader label="Card"           col="card_name"    {...sh} {...rz('card')} minWidth={MINS.card} />
                 <ColHeader label="Sale Method"    col="platform"     {...sh} {...rz('sale_method')} minWidth={MINS.sale_method}
                   filterOptions={filterOptions?.platforms} filterSelected={fPlatform} onFilterChange={(v) => { setFPlatform(v); setPage(1); }} />
+                <th style={{ width: MINS.link + 'px', minWidth: MINS.link + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide">Link</th>
                 <ColHeader label="Raw Cost"       col="raw_cost"     {...sh} {...rz('raw_cost')} align="right" minWidth={MINS.raw_cost} />
                 <ColHeader label="Grading Cost"   col="grading_cost" {...sh} {...rz('grading_cost')} align="right" minWidth={MINS.grading_cost} />
                 <ColHeader label="Listing Price"  col="listed_price" {...sh} {...rz('listed_price')} align="right" minWidth={MINS.listed_price} />
@@ -941,12 +957,14 @@ export function Sales() {
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {!data?.data.length ? (
-                <tr><td colSpan={10} className="px-3 py-10 text-center text-zinc-500">No sales found.</td></tr>
+                <tr><td colSpan={11} className="px-3 py-10 text-center text-zinc-500">No sales found.</td></tr>
               ) : data.data.map((sale) => (
                 <tr key={sale.id} className="hover:bg-zinc-800/30 transition-colors cursor-pointer" onClick={() => setSelectedSale(sale)}>
                   <td className="px-3 py-2 text-zinc-500">{formatDate(sale.sold_at)}</td>
                   <td className="px-3 py-2 font-mono text-zinc-400 text-[11px]">
-                    {sale.cert_number ? String(sale.cert_number).padStart(8, '0') : '—'}
+                    {sale.cert_number
+                      ? String(sale.cert_number).padStart(8, '0')
+                      : sale.raw_purchase_label ?? '—'}
                   </td>
                   <td className="px-3 py-2">
                     <p className="font-medium text-zinc-200 truncate" title={sale.card_name ?? ''}>{sale.card_name ?? 'Unknown'}</p>
@@ -956,6 +974,15 @@ export function Sales() {
                   </td>
                   <td className="px-3 py-2">
                     <span className="text-xs text-zinc-400">{platformLabel(sale.platform)}</span>
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    {sale.order_details_link && (
+                      <a href={sale.order_details_link} target="_blank" rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center justify-center text-indigo-400 hover:text-indigo-300 transition-colors">
+                        <ExternalLink size={13} />
+                      </a>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right text-zinc-400">{formatCurrency(sale.raw_cost, sale.currency)}</td>
                   <td className="px-3 py-2 text-right text-zinc-400">{sale.grading_cost ? formatCurrency(sale.grading_cost, sale.currency) : '—'}</td>
