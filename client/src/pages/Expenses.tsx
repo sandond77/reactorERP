@@ -353,14 +353,14 @@ function ExportModal({ allTypes, availableYears, onClose }: { allTypes: string[]
         <div>
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Types</p>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setSelectedTypes([...allTypes])}
-                className="text-xs text-zinc-500 hover:text-zinc-300">All</button>
-              <button type="button" onClick={() => setSelectedTypes([])}
-                className="text-xs text-zinc-500 hover:text-zinc-300">Clear</button>
-            </div>
+            <button type="button" onClick={() => setSelectedTypes([])}
+              className="text-xs text-zinc-500 hover:text-zinc-300">Clear</button>
           </div>
           <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setSelectedTypes([...allTypes])}
+              className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
+                selectedTypes.length === allTypes.length ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+              }`}>All</button>
             {allTypes.map((t) => {
               const active = selectedTypes.includes(t);
               return (
@@ -582,7 +582,7 @@ export function Expenses() {
       )}
 
       <Modal open={showExport} onClose={() => setShowExport(false)} title="Export Expenses">
-        <ExportModal allTypes={filterOptions?.types ?? []} onClose={() => setShowExport(false)} />
+        <ExportModal allTypes={filterOptions?.types ?? []} availableYears={filterOptions?.years ?? []} onClose={() => setShowExport(false)} />
       </Modal>
 
       <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add Expense">

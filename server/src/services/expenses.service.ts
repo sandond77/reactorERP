@@ -160,14 +160,14 @@ export async function exportCSV(userId: string, filters: ExportFilters): Promise
   const lines = [
     headers.join(','),
     ...rows.map((r) => [
-      r.expense_id ?? '',
-      fmtDate(r.date),
-      r.type,
+      `"${r.expense_id ?? ''}"`,
+      `"${fmtDate(r.date)}"`,
+      `"${r.type}"`,
       `"${(r.description ?? '').replace(/"/g, '""')}"`,
       (r.amount / 100).toFixed(2),
       r.currency,
-      r.order_number ?? '',
-      r.link ?? '',
+      `"${(r.order_number ?? '').replace(/"/g, '""')}"`,
+      `"${(r.link ?? '').replace(/"/g, '""')}"`,
     ].join(',')),
   ];
   return lines.join('\r\n');
