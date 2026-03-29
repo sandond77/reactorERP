@@ -190,6 +190,7 @@ export async function listCardsGroupedByPart(
     .selectFrom('card_instances as ci')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
+    .leftJoin('locations as loc', 'loc.id', 'ci.location_id')
     .leftJoin(
       db.selectFrom('grading_batch_items')
         .select(['card_instance_id', db.fn.sum<number>('quantity').as('batch_qty')])
@@ -216,6 +217,7 @@ export async function listCardsGroupedByPart(
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
       sql<number>`COALESCE(gbi.batch_qty, 0)`.as('batch_qty'),
+      'loc.name as location_name',
     ])
     .where('ci.user_id', '=', userId)
     .where('ci.deleted_at', 'is', null)
@@ -328,6 +330,7 @@ export async function getCardById(userId: string, cardId: string) {
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .leftJoin('grading_submissions as gs', 'gs.id', 'sd.grading_submission_id')
     .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
+    .leftJoin('locations as loc', 'loc.id', 'ci.location_id')
     .selectAll('ci')
     .select([
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
@@ -343,6 +346,7 @@ export async function getCardById(userId: string, cardId: string) {
       'gs.submitted_at',
       'gs.estimated_return',
       'rp.purchase_id as raw_purchase_label',
+      'loc.name as location_name',
     ])
     .where('ci.id', '=', cardId)
     .where('ci.user_id', '=', userId)

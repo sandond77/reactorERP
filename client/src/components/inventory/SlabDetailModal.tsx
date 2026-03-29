@@ -5,6 +5,7 @@ import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { api } from '../../lib/api';
+import { useLocations } from '../../hooks/useLocations';
 import toast from 'react-hot-toast';
 
 function certLink(company: string, cert: string): string | null {
@@ -45,6 +46,8 @@ interface SlabRow {
   date_sold: string | null;
   roi_pct: number | null;
   notes: string | null;
+  location_name: string | null;
+  location_id: string | null;
   is_card_show: boolean;
 }
 
@@ -91,6 +94,9 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
   const [editGrade,        setEditGrade]        = useState('');
   const [editGradingCost,  setEditGradingCost]  = useState('');
   const [editNotes,        setEditNotes]        = useState('');
+  const [editLocationId,   setEditLocationId]   = useState<string>('');
+
+  const { locations: gradedLocations } = useLocations('graded');
 
   function startEdit() {
     setEditName(slab.card_name ?? '');
@@ -99,18 +105,27 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
     setEditGrade(slab.numeric_grade != null ? String(slab.numeric_grade) : '');
     setEditGradingCost(slab.grading_cost ? String(slab.grading_cost / 100) : '');
     setEditNotes(slab.notes ?? '');
+    setEditLocationId(slab.location_id ?? '');
     setEditing(true);
   }
 
   const saveMut = useMutation({
-    mutationFn: () => api.patch(`/cards/${slab.id}`, {
-      card_name_override:  editName || undefined,
-      notes:               editNotes || null,
-      slab_cert_number:    editCert ? Number(editCert) : null,
-      slab_grade:          editGrade ? parseFloat(editGrade) : null,
-      slab_grade_label:    editGradeLabel || null,
-      slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : null,
-    }),
+    mutationFn: async () => {
+      await api.patch(`/cards/${slab.id}`, {
+        card_name_override:  editName || undefined,
+        notes:               editNotes || null,
+        slab_cert_number:    editCert ? Number(editCert) : null,
+        slab_grade:          editGrade ? parseFloat(editGrade) : null,
+        slab_grade_label:    editGradeLabel || null,
+        slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : null,
+      });
+      if (editLocationId !== (slab.location_id ?? '')) {
+        await api.post('/locations/assign', {
+          card_instance_id: slab.id,
+          location_id: editLocationId || null,
+        });
+      }
+    },
     onSuccess: () => {
       toast.success('Saved');
       qc.invalidateQueries({ queryKey: ['overall'] });
@@ -181,6 +196,17 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
                   <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
                     placeholder="Optional notes…" className={inputCls} />
                 </div>
+                {gradedLocations.length > 0 && (
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Location</label>
+                    <select value={editLocationId} onChange={(e) => setEditLocationId(e.target.value)} className={inputCls}>
+                      <option value="">— No location —</option>
+                      {gradedLocations.map(l => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -208,6 +234,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
                 />
                 <Row label="Company" value={slab.company} />
                 <Row label="Grade" value={slab.grade_label ?? '—'} />
+                {slab.location_name && <Row label="Location" value={<span className="text-zinc-300">{slab.location_name}</span>} />}
               </div>
             </div>
 

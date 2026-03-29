@@ -57,28 +57,31 @@ export async function getSlabFilterOptions(userId: string) {
     `.execute(db),
 
     sql<{ value: string }>`
-      SELECT DISTINCT EXTRACT(YEAR FROM ci.purchased_at)::text AS value
+      SELECT DISTINCT EXTRACT(YEAR FROM ci.purchased_at)::int::text AS value
       FROM card_instances ci
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
       WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND ci.purchased_at IS NOT NULL
+        AND EXTRACT(YEAR FROM ci.purchased_at) >= 2000
       ORDER BY value
     `.execute(db),
 
     sql<{ value: string }>`
-      SELECT DISTINCT EXTRACT(YEAR FROM l.listed_at)::text AS value
+      SELECT DISTINCT EXTRACT(YEAR FROM l.listed_at)::int::text AS value
       FROM listings l
       INNER JOIN card_instances ci ON ci.id = l.card_instance_id
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
       WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND l.listed_at IS NOT NULL
+        AND EXTRACT(YEAR FROM l.listed_at) >= 2000
       ORDER BY value
     `.execute(db),
 
     sql<{ value: string }>`
-      SELECT DISTINCT EXTRACT(YEAR FROM s.sold_at)::text AS value
+      SELECT DISTINCT EXTRACT(YEAR FROM s.sold_at)::int::text AS value
       FROM sales s
       INNER JOIN card_instances ci ON ci.id = s.card_instance_id
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
       WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+        AND EXTRACT(YEAR FROM s.sold_at) >= 2000
       ORDER BY value
     `.execute(db),
   ]);
@@ -110,7 +113,10 @@ export async function listSlabs(
   listedYears?: string[],
   soldYears?: string[],
   personalCollection?: string,
-  forSale?: string
+  forSale?: string,
+  purchaseDate?: string,
+  listedDate?: string,
+  soldDate?: string
 ) {
   const offset = getPaginationOffset(pagination.page, pagination.limit);
   const status = statusFilter === 'all' || !statusFilter ? null : statusFilter;
@@ -132,9 +138,12 @@ export async function listSlabs(
   const forSaleCond = forSale === 'yes'
     ? sql`AND (EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.listing_status = 'active') OR ci.is_card_show = true)`
     : sql``;
-  const purchaseYearIn = purchaseYears === undefined ? sql`` : purchaseYears.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql`AND 1=0`;
-  const listedYearIn   = listedYears   === undefined ? sql`` : listedYears.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
-  const soldYearIn     = soldYears     === undefined ? sql`` : soldYears.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
+  const purchaseYearIn   = purchaseYears === undefined ? sql`` : purchaseYears.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::int::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql`AND 1=0`;
+  const listedYearIn     = listedYears   === undefined ? sql`` : listedYears.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::int::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
+  const soldYearIn       = soldYears     === undefined ? sql`` : soldYears.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::int::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
+  const purchaseDateCond = purchaseDate ? sql`AND ci.purchased_at = ${purchaseDate}::date` : sql``;
+  const listedDateCond   = listedDate   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.listed_at::date = ${listedDate}::date)` : sql``;
+  const soldDateCond     = soldDate     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND s2.sold_at::date = ${soldDate}::date)` : sql``;
 
   const countResult = await sql<{ count: string }>`
     SELECT COUNT(*) AS count
@@ -144,7 +153,7 @@ export async function listSlabs(
     AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
-    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
   `.execute(db);
 
   const total = Number(countResult.rows[0]?.count ?? 0);
@@ -175,6 +184,8 @@ export async function listSlabs(
     is_personal_collection: boolean;
     order_details_link: string | null;
     location_name: string | null;
+    location_id: string | null;
+    raw_purchase_label: string | null;
   }>`
     SELECT
       ci.id,
@@ -212,11 +223,14 @@ export async function listSlabs(
       ci.is_card_show,
       ci.is_personal_collection,
       s.order_details_link,
-      loc.name AS location_name
+      loc.name AS location_name,
+      ci.location_id,
+      rp.purchase_id AS raw_purchase_label
     FROM card_instances ci
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
     LEFT JOIN locations loc ON loc.id = ci.location_id
+    LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     LEFT JOIN LATERAL (
       SELECT id, list_price, platform, ebay_listing_url, listed_at
       FROM listings
@@ -231,7 +245,7 @@ export async function listSlabs(
     AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
-    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
     ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
     LIMIT ${pagination.limit} OFFSET ${offset}
   `.execute(db);

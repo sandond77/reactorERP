@@ -11,9 +11,11 @@ interface ColumnFilterProps {
   selected: string[] | null;
   onChange: (vals: string[] | null) => void;
   align?: 'left' | 'right';
+  dateValue?: string;
+  onDateChange?: (date: string) => void;
 }
 
-export function ColumnFilter({ options, selected, onChange, align = 'left' }: ColumnFilterProps) {
+export function ColumnFilter({ options, selected, onChange, align = 'left', dateValue, onDateChange }: ColumnFilterProps) {
   const [open, setOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
   const ref = useRef<HTMLDivElement>(null);
@@ -58,6 +60,17 @@ export function ColumnFilter({ options, selected, onChange, align = 'left' }: Co
 
       {open && (
         <div className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 z-50 w-max min-w-[14rem] max-w-[44rem] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl`}>
+          {onDateChange && (
+            <div className="px-3 pt-3 pb-2 border-b border-zinc-800">
+              <label className="block text-[10px] text-zinc-500 mb-1 uppercase tracking-wide">Exact date</label>
+              <input
+                type="date"
+                value={dateValue ?? ''}
+                onChange={(e) => onDateChange(e.target.value)}
+                className="w-full px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 focus:outline-none focus:border-indigo-500 [color-scheme:dark]"
+              />
+            </div>
+          )}
           {options.length > 8 && (
             <div className="px-3 pt-3 pb-1">
               <input
@@ -130,7 +143,10 @@ export interface ColHeaderProps {
   filterSelected?: string[] | null;
   onFilterChange?: (vals: string[] | null) => void;
   filterAlign?: 'left' | 'right';
+  filterDateValue?: string;
+  onFilterDateChange?: (date: string) => void;
   align?: 'left' | 'right' | 'center';
+  wrap?: boolean;
   className?: string;
   width?: number;
   minWidth?: number;
@@ -140,7 +156,8 @@ export interface ColHeaderProps {
 export function ColHeader({
   label, col, sortCol, sortDir, onSort,
   filterOptions, filterSelected, onFilterChange, filterAlign = 'left',
-  align = 'left', className = '', width, minWidth = 40, onWidthChange,
+  filterDateValue, onFilterDateChange,
+  align = 'left', wrap = false, className = '', width, minWidth = 40, onWidthChange,
 }: ColHeaderProps) {
   const isActive = col && sortCol === col;
   const SortBtn = col ? (
@@ -151,12 +168,12 @@ export function ColHeader({
     </button>
   ) : null;
 
-  const FilterBtn = filterOptions?.length && onFilterChange
-    ? <ColumnFilter options={filterOptions} selected={filterSelected ?? null} onChange={onFilterChange} align={filterAlign} />
+  const filterActive = (filterDateValue ?? '') !== '' || (filterSelected !== null && (filterSelected?.length ?? 0) > 0 && (filterSelected?.length ?? 0) < (filterOptions?.length ?? 0));
+  const FilterBtn = (filterOptions?.length && onFilterChange) || onFilterDateChange
+    ? <span className="shrink-0"><ColumnFilter options={filterOptions ?? []} selected={filterSelected ?? null} onChange={onFilterChange ?? (() => {})} align={filterAlign} dateValue={filterDateValue} onDateChange={onFilterDateChange} /></span>
     : null;
 
-  const sel = filterSelected ?? null;
-  const labelActive = sel !== null && sel.length > 0 && sel.length < (filterOptions?.length ?? 0);
+  const labelActive = filterActive;
 
   function handlePointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -173,11 +190,11 @@ export function ColHeader({
 
   return (
     <th
-      className={`px-4 py-2 font-medium relative select-none ${className}`}
+      className={`px-4 py-2 font-medium relative select-none ${wrap ? 'whitespace-normal leading-tight' : ''} ${className}`}
       style={width ? { width: `${width}px` } : undefined}
     >
-      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
-        <span className={labelActive ? 'text-indigo-400' : ''}>{label}</span>
+      <div className={`flex items-center gap-2 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : ''}`}>
+        <span className={`${wrap ? 'min-w-0 whitespace-normal leading-tight' : ''} ${labelActive ? 'text-indigo-400' : ''}`}>{label}</span>
         {SortBtn}
         {FilterBtn}
       </div>

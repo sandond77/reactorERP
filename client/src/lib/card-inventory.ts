@@ -14,6 +14,7 @@ export interface CardInstance {
   purchased_at: string | null;
   notes: string | null;
   raw_purchase_label: string | null;
+  location_name: string | null;
 }
 
 export interface CardGroup {

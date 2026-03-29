@@ -6,6 +6,7 @@ import { Modal } from '../ui/Modal';
 import { Badge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { formatCurrency, formatDate, STATUS_LABELS, STATUS_COLORS } from '../../lib/utils';
+import { useLocations } from '../../hooks/useLocations';
 
 const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 
@@ -33,6 +34,9 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   const [editPurchasedAt, setEditPurchasedAt] = useState('');
   const [editCost,        setEditCost]         = useState('');
   const [editNotes,       setEditNotes]        = useState('');
+  const [editLocationId,  setEditLocationId]   = useState('');
+
+  const { locations: rawLocations } = useLocations('raw');
 
   function startEdit() {
     setEditDecision(card.decision ?? '');
@@ -41,18 +45,27 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
     setEditPurchasedAt(card.purchased_at ? card.purchased_at.slice(0, 10) : '');
     setEditCost(card.purchase_cost != null ? String(card.purchase_cost / 100) : '');
     setEditNotes(card.notes ?? '');
+    setEditLocationId(card.location_id ?? '');
     setEditing(true);
   }
 
   const saveMut = useMutation({
-    mutationFn: () => api.patch(`/cards/${card.id}`, {
-      decision:     editDecision    || undefined,
-      condition:    editCondition   || undefined,
-      quantity:     parseInt(editQuantity) || undefined,
-      purchased_at: editPurchasedAt || undefined,
-      purchase_cost: editCost ? Math.round(parseFloat(editCost) * 100) : undefined,
-      notes: editNotes || null,
-    }),
+    mutationFn: async () => {
+      await api.patch(`/cards/${card.id}`, {
+        decision:     editDecision    || undefined,
+        condition:    editCondition   || undefined,
+        quantity:     parseInt(editQuantity) || undefined,
+        purchased_at: editPurchasedAt || undefined,
+        purchase_cost: editCost ? Math.round(parseFloat(editCost) * 100) : undefined,
+        notes: editNotes || null,
+      });
+      if (editLocationId !== (card.location_id ?? '')) {
+        await api.post('/locations/assign', {
+          card_instance_id: card.id,
+          location_id: editLocationId || null,
+        });
+      }
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['card', cardId] });
       qc.invalidateQueries({ queryKey: ['ungraded-inventory'] });
@@ -154,6 +167,17 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                       className={inputCls}
                     />
                   </div>
+                  {rawLocations.length > 0 && (
+                    <div className="col-span-2">
+                      <label className="block text-xs text-zinc-500 mb-1">Location</label>
+                      <select value={editLocationId} onChange={(e) => setEditLocationId(e.target.value)} className={inputCls}>
+                        <option value="">— No location —</option>
+                        {rawLocations.map(l => (
+                          <option key={l.id} value={l.id}>{l.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -172,6 +196,9 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                   <div><span className="text-zinc-500">Quantity:</span> <span className="text-zinc-300">{card.quantity}</span></div>
                   {card.raw_purchase_label && (
                     <div><span className="text-zinc-500">ID:</span> <span className="font-mono text-zinc-300">{card.raw_purchase_label}</span></div>
+                  )}
+                  {card.location_name && (
+                    <div><span className="text-zinc-500">Location:</span> <span className="text-zinc-300">{card.location_name}</span></div>
                   )}
                 </div>
               )}

@@ -205,6 +205,12 @@ export function RawInventory() {
                         <td className="px-3 py-1.5 pl-5">
                           <span className="text-[10px] text-zinc-600 mr-1">Cond</span>
                           <span className="text-zinc-400 text-[11px]">{inst.condition ?? '—'}</span>
+                          {inst.location_name && (
+                            <span className="ml-3 text-[10px] text-zinc-600 mr-1">Loc</span>
+                          )}
+                          {inst.location_name && (
+                            <span className="text-zinc-400 text-[11px]">{inst.location_name}</span>
+                          )}
                         </td>
                         <td className="px-3 py-1.5">
                           <span className="text-[10px] text-zinc-600 mr-1">Avg</span>
