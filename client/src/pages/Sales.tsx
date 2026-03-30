@@ -916,7 +916,7 @@ export function Sales() {
           <div className="flex items-center gap-1">
             {(['all', 'graded', 'raw'] as CardTypeFilter[]).map((t) => (
               <button key={t} onClick={() => { setCardType(t); setPage(1); }}
-                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${cardType === t ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${cardType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </button>
             ))}

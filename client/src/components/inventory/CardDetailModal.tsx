@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Pencil } from 'lucide-react';
+import { Trash2, Pencil, Upload, Loader2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { api } from '../../lib/api';
 import { Modal } from '../ui/Modal';
 import { Badge } from '../ui/Badge';
@@ -37,6 +38,22 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   const [editLocationId,  setEditLocationId]   = useState('');
 
   const { locations: rawLocations } = useLocations('raw');
+
+  const frontRef = useRef<HTMLInputElement>(null);
+  const backRef = useRef<HTMLInputElement>(null);
+
+  const uploadImageMut = useMutation({
+    mutationFn: ({ file, side }: { file: File; side: 'front' | 'back' }) => {
+      const fd = new FormData();
+      fd.append('image', file);
+      return api.post(`/cards/${cardId}/image?side=${side}`, fd).then((r) => r.data.data);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['card', cardId] });
+      toast.success('Image uploaded');
+    },
+    onError: () => toast.error('Upload failed'),
+  });
 
   function startEdit() {
     setEditDecision(card.decision ?? '');
@@ -100,13 +117,50 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
       ) : card ? (
         <div className="space-y-4">
           <div className="flex gap-4">
-            {(card.image_front_url || card.catalog_image_url) && (
-              <img
-                src={card.image_front_url ?? card.catalog_image_url}
-                alt={card.card_name}
-                className="w-24 h-32 object-contain rounded-lg bg-zinc-800"
-              />
-            )}
+            {/* Card images */}
+            <div className="flex gap-2 shrink-0">
+              {(['front', 'back'] as const).map((side) => {
+                const url = side === 'front'
+                  ? (card.image_front_url ?? card.catalog_image_url)
+                  : card.image_back_url;
+                const ref = side === 'front' ? frontRef : backRef;
+                const isUploading = uploadImageMut.isPending && uploadImageMut.variables?.side === side;
+                return (
+                  <div key={side} className="relative group">
+                    {url ? (
+                      <img
+                        src={url}
+                        alt={`${card.card_name} ${side}`}
+                        className="w-20 h-28 object-contain rounded-lg bg-zinc-800"
+                      />
+                    ) : (
+                      <div className="w-20 h-28 rounded-lg bg-zinc-800 border border-zinc-700 border-dashed flex items-center justify-center text-zinc-600 text-xs">
+                        {side}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => ref.current?.click()}
+                      disabled={isUploading}
+                      className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 bg-black/60 rounded-b-lg py-1 text-xs text-zinc-300 opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      {isUploading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
+                      {isUploading ? '…' : 'Upload'}
+                    </button>
+                    <input
+                      ref={ref}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) uploadImageMut.mutate({ file, side });
+                        e.target.value = '';
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
             <div className="flex-1 space-y-2">
               <div className="flex items-start justify-between">
                 <div>

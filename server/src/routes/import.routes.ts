@@ -19,6 +19,7 @@ export const importRouter = Router();
 
 importRouter.use(requireAuth);
 
+importRouter.get('/template/:type', importController.getTemplate);
 importRouter.get('/', importController.listImports);
 importRouter.post('/upload', upload.single('file'), importController.uploadCsv);
 importRouter.post('/:id/mapping', importController.saveMapping);

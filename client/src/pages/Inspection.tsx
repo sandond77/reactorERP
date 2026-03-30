@@ -110,13 +110,13 @@ export function Inspection() {
           {/* Type filter */}
           <div className="flex gap-1">
             <button onClick={() => { setFType(null); setPage(1); }}
-              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${fType === null ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${fType === null ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
               All
             </button>
             {(['raw', 'bulk'] as PurchaseType[]).map((t) => (
               <button key={t}
                 onClick={() => { setFType(t); setPage(1); }}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors capitalize ${fType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors capitalize ${fType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 {t}
               </button>
             ))}

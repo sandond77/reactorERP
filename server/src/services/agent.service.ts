@@ -708,3 +708,55 @@ Only return the JSON object, no other text.`;
   const json = text.match(/\{[\s\S]*\}/)?.[0] ?? '{}';
   return JSON.parse(json) as ParsedExpenseData;
 }
+
+// ── Card image scanning ───────────────────────────────────────
+
+export interface ScannedCardData {
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  cert_number: string | null;
+  grade: string | null;
+  company: string | null;
+  condition: string | null;
+  confidence: 'high' | 'medium' | 'low';
+  notes: string | null;
+}
+
+export async function scanCardImage(
+  imageBase64: string,
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp'
+): Promise<ScannedCardData> {
+  const prompt = `Analyze this trading card image and extract all visible information.
+
+Return a JSON object:
+{
+  "card_name": "full card name or null",
+  "set_name": "set/expansion name or null",
+  "card_number": "card number (e.g. '4/102') or null",
+  "cert_number": "PSA/BGS/CGC certification number if visible on label or null",
+  "grade": "numeric grade if graded (e.g. '9', '9.5', '10') or null",
+  "company": "grading company if graded (PSA, BGS, CGC, SGC, etc.) or null",
+  "condition": "raw card condition if ungraded (NM, LP, MP, HP, DMG) or null",
+  "confidence": "high" | "medium" | "low",
+  "notes": "any relevant observations or null"
+}
+
+Only return the JSON object, no other text.`;
+
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 512,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
+        { type: 'text', text: prompt },
+      ],
+    }],
+  });
+
+  const text = response.content.find((b) => b.type === 'text')?.text ?? '{}';
+  const json = text.match(/\{[\s\S]*\}/)?.[0] ?? '{}';
+  return JSON.parse(json) as ScannedCardData;
+}

@@ -1,3 +1,4 @@
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -48,6 +49,9 @@ app.use(session({
 // Passport
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Static uploads
+app.use('/uploads', express.static(path.join(__dirname, '../../uploads')));
 
 // Routes
 app.use('/api/v1', apiRouter);

@@ -1,8 +1,12 @@
+import fs from 'fs';
+import path from 'path';
 import type { Request, Response, NextFunction } from 'express';
 import * as cardsService from '../services/cards.service';
+import * as agentService from '../services/agent.service';
 import { paginationSchema } from '../middleware/validate';
 import { z } from 'zod';
 import { toCents } from '../utils/cents';
+import { db } from '../config/database';
 
 const cardFiltersSchema = z.object({
   status: z.string().optional(),
@@ -166,5 +170,43 @@ export async function getRawFlatFilters(req: Request, res: Response, next: NextF
   try {
     const options = await cardsService.getRawFlatFilterOptions(req.user!.id);
     res.json(options);
+  } catch (err) { next(err); }
+}
+
+export async function uploadCardImage(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.file) { res.status(400).json({ error: 'No image provided' }); return; }
+    const cardId = req.params['id'] as string;
+    const side = (req.query['side'] as string) === 'back' ? 'back' : 'front';
+
+    // Verify card belongs to user
+    const card = await db.selectFrom('card_instances').select('id')
+      .where('id', '=', cardId).where('user_id', '=', req.user!.id)
+      .where('deleted_at', 'is', null).executeTakeFirst();
+    if (!card) { res.status(404).json({ error: 'Card not found' }); return; }
+
+    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    const dir = path.join(__dirname, '../../../uploads/card-images', req.user!.id);
+    fs.mkdirSync(dir, { recursive: true });
+    const filename = `${cardId}-${side}.${ext}`;
+    fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+
+    const url = `/uploads/card-images/${req.user!.id}/${filename}`;
+    const field = side === 'back' ? 'image_back_url' : 'image_front_url';
+
+    await db.updateTable('card_instances').set({ [field]: url } as any)
+      .where('id', '=', cardId).execute();
+
+    res.json({ data: { url } });
+  } catch (err) { next(err); }
+}
+
+export async function scanImage(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.file) { res.status(400).json({ error: 'No image provided' }); return; }
+    const imageBase64 = req.file.buffer.toString('base64');
+    const mediaType = req.file.mimetype as 'image/jpeg' | 'image/png' | 'image/webp';
+    const result = await agentService.scanCardImage(imageBase64, mediaType);
+    res.json({ data: result });
   } catch (err) { next(err); }
 }

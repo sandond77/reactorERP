@@ -129,12 +129,12 @@ export function UngradedInventory() {
           )}
           <div className="flex gap-1">
             <button onClick={() => setTab(null)}
-              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${tab === null ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${tab === null ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
               All
             </button>
             {(['raw', 'bulk'] as ('raw' | 'bulk')[]).map((t) => (
               <button key={t} onClick={() => setTab(t)}
-                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${tab === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${tab === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 {t === 'raw' ? 'Raw' : 'Bulk'}
               </button>
             ))}

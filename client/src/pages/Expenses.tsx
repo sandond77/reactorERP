@@ -323,14 +323,14 @@ function ExportModal({ allTypes, availableYears, onClose }: { allTypes: string[]
         <div className="flex gap-2 mb-2">
           {availableYears.map((y) => (
             <button key={y} type="button" onClick={() => applyYear(y)}
-              className={`px-3 py-1 text-xs rounded font-medium transition-colors ${
+              className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${
                 from === `${y}-01-01` && to === `${y}-12-31`
                   ? 'bg-indigo-600 text-white'
                   : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
               }`}>{y}</button>
           ))}
           <button type="button" onClick={() => { setFrom(''); setTo(''); }}
-            className="px-3 py-1 text-xs rounded font-medium bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors">
+            className="px-3 py-1 text-xs rounded-full font-medium bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors">
             All
           </button>
         </div>
