@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocations } from '../hooks/useLocations';
 import { Plus, X, Loader2, Sparkles, CheckCircle, AlertCircle, ChevronRight, ArrowRightLeft, Upload, Pencil, Trash2 } from 'lucide-react';
@@ -887,8 +887,8 @@ export function Trades() {
                 const cashTo   = trade.cash_to_customer_cents;
                 const balanced = Math.abs((outTotal + cashTo) - (inTotal + cashFrom)) < 1;
                 return (
-                  <>
-                    <tr key={trade.id}
+                  <React.Fragment key={trade.id}>
+                    <tr
                       onClick={() => toggleExpand(trade.id)}
                       className="border-b border-zinc-800/60 hover:bg-zinc-800/30 cursor-pointer transition-colors group">
                       <td className="px-4 py-3 text-zinc-600">
@@ -990,7 +990,7 @@ export function Trades() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 );
               })}
             </tbody>

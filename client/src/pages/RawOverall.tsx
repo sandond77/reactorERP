@@ -70,7 +70,7 @@ function RoiCell({ roi, afterEbay, raw }: { roi: number | null; afterEbay: numbe
 const RAW_OVERALL_DEFAULTS = {
   sortCol: null as string | null,
   sortDir: 'asc' as SortDir,
-  statusFilter: 'unsold' as StatusFilter,
+  statusFilter: 'all' as StatusFilter,
   fCondition: null as string[] | null,
   fListed: null as string[] | null,
   fPurchYear: null as string[] | null,
@@ -278,13 +278,13 @@ export function RawOverall() {
           )}
           <div className="flex items-center gap-1">
             {STATUS_TABS.map(({ value, label }, i) => (
-              <>
-                {i === 1 && <div key="divider" className="w-px h-4 bg-zinc-700 mx-1" />}
-                <button key={value} onClick={() => { setStatusFilter(value); setPage(1); }}
+              <React.Fragment key={value}>
+                {i === 1 && <div className="w-px h-4 bg-zinc-700 mx-1" />}
+                <button onClick={() => { setStatusFilter(value); setPage(1); }}
                   className={`px-3 py-1 text-xs rounded font-medium transition-colors ${statusFilter === value ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
                   {label}
                 </button>
-              </>
+              </React.Fragment>
             ))}
           </div>
           <input
