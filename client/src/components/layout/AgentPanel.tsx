@@ -19,10 +19,30 @@ const SUGGESTIONS = [
 ];
 
 const MAX_ATTACHMENTS = 5;
+const STORAGE_KEY = 'reactor_agent_messages';
+const MAX_STORED = 40;
+
+function loadMessages(): Message[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Message[];
+    // Strip imageUrls — blob URLs don't survive page refresh
+    return parsed.map(({ role, content }) => ({ role, content }));
+  } catch { return []; }
+}
+
+function saveMessages(msgs: Message[]) {
+  try {
+    // Only persist role+content (no imageUrls), keep last MAX_STORED
+    const toStore = msgs.slice(-MAX_STORED).map(({ role, content }) => ({ role, content }));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore));
+  } catch { /* storage full — ignore */ }
+}
 
 export function AgentPanel() {
   const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<Message[]>(loadMessages);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
@@ -33,6 +53,15 @@ export function AgentPanel() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    saveMessages(messages);
+  }, [messages]);
+
+  function clearChat() {
+    setMessages([]);
+    localStorage.removeItem(STORAGE_KEY);
+  }
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -121,9 +150,16 @@ export function AgentPanel() {
                 <p className="text-xs text-zinc-400">Inventory assistant</p>
               </div>
             </div>
-            <button onClick={() => setOpen(false)} className="text-zinc-400 hover:text-zinc-200 transition-colors">
-              <X size={18} />
-            </button>
+            <div className="flex items-center gap-3">
+              {messages.length > 0 && (
+                <button onClick={clearChat} className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+                  Clear
+                </button>
+              )}
+              <button onClick={() => setOpen(false)} className="text-zinc-400 hover:text-zinc-200 transition-colors">
+                <X size={18} />
+              </button>
+            </div>
           </div>
 
           {/* Messages */}
@@ -135,7 +171,7 @@ export function AgentPanel() {
                     <Bot size={18} className="text-indigo-400" />
                   </div>
                   <p className="text-sm font-medium text-zinc-200">Reactor AI</p>
-                  <p className="text-xs text-zinc-500 leading-relaxed">Ask about your inventory, log a purchase or sale, upload a card image, or check your P&L.</p>
+                  <p className="text-xs text-zinc-500 leading-relaxed">Ask about your inventory, log a purchase or sale, upload a card image, or check your P&amp;L.</p>
                 </div>
                 <div className="px-2">
                   <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-2 px-1">Suggestions</p>

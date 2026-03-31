@@ -638,11 +638,10 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         const best = enriched.suggestions?.[0];
         if (best?.catalog_id) {
           resolvedCatalogId = best.catalog_id;
-          // Use simple card_name for display (not the full normalized PSA label)
-          // catalog_card_name may be the full normalized label — skip it here
-          resolvedCardName = best.card_name ?? resolvedCardName;
-          resolvedSetName = best.set_name ?? resolvedSetName;
-          resolvedCardNumber = best.card_number ?? resolvedCardNumber;
+          // When catalog_id is found, clear the override so catalog name/set/number take over via COALESCE
+          resolvedCardName = null;
+          resolvedSetName = null;
+          resolvedCardNumber = null;
         }
       } catch { /* enrichment failure is non-fatal */ }
     }

@@ -710,6 +710,7 @@ export async function listRawFlat(
   const rows = await sql<{
     id: string;
     raw_purchase_label: string | null;
+    sku: string | null;
     card_name: string | null;
     set_name: string | null;
     card_number: string | null;
@@ -733,6 +734,7 @@ export async function listRawFlat(
     SELECT
       ci.id,
       rp.purchase_id                                      AS raw_purchase_label,
+      cc.sku,
       COALESCE(ci.card_name_override, cc.card_name)      AS card_name,
       COALESCE(cc.set_name, ci.set_name_override)        AS set_name,
       COALESCE(cc.card_number, ci.card_number_override)  AS card_number,

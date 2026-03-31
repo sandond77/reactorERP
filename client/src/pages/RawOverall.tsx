@@ -15,6 +15,7 @@ import type { CardGroup } from '../lib/card-inventory';
 interface RawRow {
   id: string;
   raw_purchase_label: string | null;
+  sku: string | null;
   card_name: string | null;
   set_name: string | null;
   card_number: string | null;
@@ -111,6 +112,7 @@ export function RawOverall() {
 
   const MINS = {
     id:                colMinWidth('ID',            true,  false),
+    sku:               colMinWidth('Part #',        true,  false),
     card_name:         colMinWidth('Card',          true,  false),
     condition:         colMinWidth('Condition',     true,  true),
     is_listed:         colMinWidth('Listed?',       true,  true),
@@ -130,6 +132,7 @@ export function RawOverall() {
 
   const { rz, totalWidth } = useColWidths({
     id:                Math.max(MINS.id,                130),
+    sku:               Math.max(MINS.sku,               190),
     card_name:         Math.max(MINS.card_name,          500),
     condition:         Math.max(MINS.condition,           90),
     is_listed:         Math.max(MINS.is_listed,           80),
@@ -387,6 +390,7 @@ export function RawOverall() {
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="ID"               col="raw_purchase_label" {...sh} {...rz('id')}               minWidth={MINS.id} />
+                <ColHeader label="Part #"           col="sku"                {...sh} {...rz('sku')}               minWidth={MINS.sku} />
                 <ColHeader label="Card"             col="card_name"          {...sh} {...rz('card_name')}         minWidth={MINS.card_name} />
                 <ColHeader label="Condition"        col="condition"          {...sh} {...rz('condition')}         minWidth={MINS.condition}
                   filterOptions={filterOptions?.conditions} filterSelected={fCondition} onFilterChange={(v) => { setFCondition(v); setPage(1); }} />
@@ -414,10 +418,11 @@ export function RawOverall() {
             </thead>
             <tbody>
               {!data?.data.length ? (
-                <tr><td colSpan={16} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
+                <tr><td colSpan={17} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
               ) : data.data.map((row) => (
                 <tr key={row.id} onClick={() => setSelectedRow(row)} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
                   <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
+                  <td className="px-3 py-1 font-mono text-[11px] text-zinc-400">{row.sku ?? '—'}</td>
                   <td className="px-3 py-1 text-zinc-200 truncate" title={row.card_name ?? ''}>{row.card_name ?? ''}</td>
                   <td className="px-3 py-1 text-zinc-300">{row.condition ?? ''}</td>
                   <td className="px-3 py-1 text-center">
