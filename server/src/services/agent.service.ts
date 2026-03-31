@@ -510,7 +510,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
       properties: {
         raw_purchase_id: { type: 'string', description: 'The internal UUID of the raw purchase (from create_raw_purchase result)' },
         catalog_id: { type: 'string', description: 'Card catalog ID if known' },
-        card_name_override: { type: 'string', description: 'Card name (if not using catalog_id)' },
+        card_name_override: { type: 'string', description: 'Display name chosen by the user. Use this when the user wants a specific name (e.g. full PSA label) instead of the catalog short name. Leave empty if user accepts the catalog name.' },
         set_name_override: { type: 'string', description: 'Set name override' },
         card_number_override: { type: 'string', description: 'Card number override' },
         quantity: { type: 'number', description: 'Number of copies' },
@@ -631,6 +631,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     let resolvedSetName = (set_name_override as string) ?? null;
     let resolvedCardNumber = (card_number_override as string) ?? null;
 
+    const userProvidedName = resolvedCardName; // preserve what the user explicitly chose
     if (!resolvedCatalogId && resolvedCardName) {
       try {
         const searchTerm = [resolvedCardName, resolvedSetName, resolvedCardNumber].filter(Boolean).join(' ');
@@ -638,8 +639,8 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         const best = enriched.suggestions?.[0];
         if (best?.catalog_id) {
           resolvedCatalogId = best.catalog_id;
-          // When catalog_id is found, clear the override so catalog name/set/number take over via COALESCE
-          resolvedCardName = null;
+          // Keep user's explicit name as override; only clear fallback search terms
+          resolvedCardName = userProvidedName; // may be null if user accepted catalog name
           resolvedSetName = null;
           resolvedCardNumber = null;
         }
@@ -855,11 +856,13 @@ You can read inventory data AND write to the system using the tools provided:
 REQUIRED FIELDS — you MUST collect ALL of these before calling any write tool. No exceptions.
 
 Raw card purchase (create_raw_purchase + add_card_to_purchase):
-  - card name
+  - card name AND display name (see below)
   - purchase cost (and currency)
   - condition: NM, LP, MP, HP, or DMG
   - decision: "sell raw" or "grade"
   - Optional but ask if not mentioned: purchase date, source/platform, order number, language
+
+Display name: When a catalog match is found, always show the user the catalog's short name (e.g. "Shining Mew") and ask: "What display name should I save this as? You can use the catalog name or provide the full grading label (e.g. PSA format: 2001 POKEMON JAPANESE PROMO COROCORO COMICS 151 SHINING MEW HOLOFOIL)." Store whatever the user provides as card_name_override. If the user says to use the catalog name, leave card_name_override empty.
 
 Sale (record_sale):
   - which card (use list_inventory to confirm)
