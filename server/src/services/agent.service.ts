@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
 import { sql } from 'kysely';
@@ -621,12 +623,34 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   if (toolName === 'add_card_to_purchase') {
     const { raw_purchase_id, catalog_id, card_name_override, set_name_override, card_number_override,
             quantity, purchase_cost, currency, condition, language, notes } = toolInput as Record<string, unknown>;
+
+    // Auto-enrich: if no catalog_id, try to find catalog match for proper sku/part number
+    let resolvedCatalogId = (catalog_id as string) ?? null;
+    let resolvedCardName = (card_name_override as string) ?? null;
+    let resolvedSetName = (set_name_override as string) ?? null;
+    let resolvedCardNumber = (card_number_override as string) ?? null;
+
+    if (!resolvedCatalogId && resolvedCardName) {
+      try {
+        const searchTerm = [resolvedCardName, resolvedSetName, resolvedCardNumber].filter(Boolean).join(' ');
+        const enriched = await autoFillCardData({ partial_name: searchTerm, game: 'pokemon' });
+        const best = enriched.suggestions?.[0];
+        if (best?.catalog_id) {
+          resolvedCatalogId = best.catalog_id;
+          // Use established catalog name if available, otherwise keep agent's name
+          resolvedCardName = best.catalog_card_name ?? best.card_name ?? resolvedCardName;
+          resolvedSetName = best.set_name ?? resolvedSetName;
+          resolvedCardNumber = best.card_number ?? resolvedCardNumber;
+        }
+      } catch { /* enrichment failure is non-fatal */ }
+    }
+
     const card = await createCard(userId, {
       raw_purchase_id: raw_purchase_id as string,
-      catalog_id: (catalog_id as string) ?? null,
-      card_name_override: (card_name_override as string) ?? null,
-      set_name_override: (set_name_override as string) ?? null,
-      card_number_override: (card_number_override as string) ?? null,
+      catalog_id: resolvedCatalogId,
+      card_name_override: resolvedCardName,
+      set_name_override: resolvedSetName,
+      card_number_override: resolvedCardNumber,
       quantity: (quantity as number) ?? 1,
       purchase_cost: (purchase_cost as number) ?? 0,
       currency: ((currency as string) ?? 'JPY') as 'USD' | 'JPY',
@@ -637,7 +661,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       purchase_type: 'raw',
       card_game: 'pokemon',
     });
-    return { success: true, id: card.id };
+    return { success: true, id: card.id, catalog_matched: !!resolvedCatalogId };
   }
 
   if (toolName === 'lookup_catalog') {
@@ -765,6 +789,22 @@ export interface AgentImage {
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp';
 }
 
+async function saveImageToCards(userId: string, cardIds: string[], image: AgentImage) {
+  try {
+    const dir = path.join(__dirname, '../../../uploads/card-images', userId);
+    fs.mkdirSync(dir, { recursive: true });
+    const ext = image.mediaType === 'image/png' ? 'png' : 'jpg';
+    const buffer = Buffer.from(image.base64, 'base64');
+    for (const cardId of cardIds) {
+      const filename = `${cardId}-front.${ext}`;
+      fs.writeFileSync(path.join(dir, filename), buffer);
+      const url = `/uploads/card-images/${userId}/${filename}`;
+      await db.updateTable('card_instances').set({ image_front_url: url })
+        .where('id', '=', cardId).where('user_id', '=', userId).execute();
+    }
+  } catch { /* image save failure is non-fatal */ }
+}
+
 export async function chatWithAgent(
   userId: string,
   messages: AgentChatMessage[],
@@ -838,6 +878,9 @@ Formatting rules:
     return { role: m.role, content: m.content };
   });
 
+  // Track card IDs created this session so we can attach the image after the loop
+  const createdCardIds: string[] = [];
+
   // Agentic loop — run until end_turn or no more tool calls
   for (let i = 0; i < 5; i++) {
     const response = await client.messages.create({
@@ -849,7 +892,12 @@ Formatting rules:
     });
 
     if (response.stop_reason === 'end_turn') {
-      return response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
+      const text = response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
+      // Save the uploaded image to any cards created this session
+      if (image && createdCardIds.length > 0) {
+        await saveImageToCards(userId, createdCardIds, image);
+      }
+      return text;
     }
 
     if (response.stop_reason === 'tool_use') {
@@ -862,6 +910,10 @@ Formatting rules:
         if (block.type !== 'tool_use') continue;
         try {
           const result = await executeAgentTool(userId, block.name, block.input as Record<string, unknown>);
+          // Track any card instance IDs created
+          if (block.name === 'add_card_to_purchase' && typeof result === 'object' && result !== null && 'id' in result) {
+            createdCardIds.push(result.id as string);
+          }
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
