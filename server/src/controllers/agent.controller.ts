@@ -61,7 +61,11 @@ const chatSchema = z.object({
   messages: z.array(
     z.object({
       role: z.enum(['user', 'assistant']),
-      content: z.string().max(600),
+      content: z.string().max(10000),
+    }).superRefine((msg, ctx) => {
+      if (msg.role === 'user' && msg.content.length > 600) {
+        ctx.addIssue({ code: 'too_big', maximum: 600, type: 'string', inclusive: true, exact: false, message: 'User message must be 600 characters or less' });
+      }
     })
   ).min(1).max(40),
 });
