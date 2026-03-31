@@ -6,7 +6,10 @@ import { db } from '../config/database';
 import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
 import { normalizeGradeLabel } from '../utils/grade-labels';
 import { createRawPurchase } from './raw-purchases.service';
-import { createCard } from './cards.service';
+import { createCard, updateCard, transitionCardStatus } from './cards.service';
+import { recordSale } from './sales.service';
+import { createExpense } from './expenses.service';
+import * as gradingService from './grading-submissions.service';
 
 const THINKING: Anthropic.ThinkingConfigParam = { type: 'adaptive' };
 
@@ -449,6 +452,24 @@ export interface AgentChatMessage {
   content: string;
 }
 
+// Quick Haiku call to classify whether the message is on-topic before burning Sonnet
+async function isCardRelated(message: string): Promise<boolean> {
+  const response = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 5,
+    messages: [{
+      role: 'user',
+      content: `You are a classifier. Answer only YES or NO.
+
+Is this message about trading cards, card inventory management, card grading, card purchases, card sales, or related business expenses?
+
+Message: "${message.slice(0, 300)}"`,
+    }],
+  });
+  const text = response.content.find((b) => b.type === 'text')?.text?.trim().toUpperCase() ?? '';
+  return text.startsWith('YES');
+}
+
 const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: 'create_raw_purchase',
@@ -507,6 +528,82 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'list_inventory',
+    description: 'Search the user\'s card inventory. Use this to find card_instance_ids before recording sales, updating cards, or submitting to grading.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        search: { type: 'string', description: 'Search term matching card name, set name, or cert number' },
+        status: { type: 'string', description: 'Filter by status: purchased_raw, inspected, grading_submitted, graded, raw_for_sale, sold' },
+        limit: { type: 'number', description: 'Max results to return (default 10, max 20)' },
+      },
+    },
+  },
+  {
+    name: 'record_sale',
+    description: 'Record a sale for a card. Use list_inventory first to find the card_instance_id. Sale price and fees are in dollars (e.g. 150.00).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_instance_id: { type: 'string', description: 'UUID of the card instance being sold (from list_inventory)' },
+        platform: { type: 'string', enum: ['ebay', 'tcgplayer', 'card_show', 'facebook', 'instagram', 'local', 'other'], description: 'Platform where it was sold' },
+        sale_price: { type: 'number', description: 'Sale price in dollars (e.g. 150.00)' },
+        platform_fees: { type: 'number', description: 'Platform/seller fees in dollars' },
+        shipping_cost: { type: 'number', description: 'Shipping cost in dollars' },
+        currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
+        sold_at: { type: 'string', description: 'Sale date in YYYY-MM-DD format (default today)' },
+        unique_id: { type: 'string', description: 'Order number or transaction ID from the platform' },
+      },
+      required: ['card_instance_id', 'platform', 'sale_price'],
+    },
+  },
+  {
+    name: 'update_card',
+    description: 'Update a card\'s decision, condition, or notes. Also use this to transition status (e.g. mark as inspected, raw_for_sale). Use list_inventory first to find the card_instance_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_instance_id: { type: 'string', description: 'UUID of the card instance (from list_inventory)' },
+        status: { type: 'string', enum: ['purchased_raw', 'inspected', 'grading_submitted', 'graded', 'raw_for_sale', 'lost_damaged'], description: 'New status to transition to' },
+        decision: { type: 'string', enum: ['grade', 'sell_raw'], description: 'Intent: grade or sell raw' },
+        condition: { type: 'string', enum: ['NM', 'LP', 'MP', 'HP', 'DMG'], description: 'Card condition (required for inspection)' },
+        notes: { type: 'string', description: 'Notes about the card' },
+      },
+      required: ['card_instance_id'],
+    },
+  },
+  {
+    name: 'submit_to_grading',
+    description: 'Add a card to a grading batch. If no batch_id is provided, a new batch is created. Use list_inventory first to find the card_instance_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_instance_id: { type: 'string', description: 'UUID of the card instance to submit (from list_inventory)' },
+        batch_id: { type: 'string', description: 'UUID of an existing grading batch to add to (optional — omit to create a new batch)' },
+        company: { type: 'string', enum: ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'], description: 'Grading company (required if creating a new batch)' },
+        tier: { type: 'string', description: 'Grading tier/service level, e.g. "Regular", "Economy", "Bulk" (required if creating a new batch)' },
+        grading_cost: { type: 'number', description: 'Cost per card in dollars for this batch (optional)' },
+      },
+      required: ['card_instance_id'],
+    },
+  },
+  {
+    name: 'record_expense',
+    description: 'Log a business expense such as shipping, grading fees, supplies, or card show costs.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        description: { type: 'string', description: 'What the expense was for' },
+        type: { type: 'string', description: 'Expense type: Shipping, Grading, Supplies, Card Show, Food, Travel, Other' },
+        amount: { type: 'number', description: 'Amount in dollars (e.g. 12.99)' },
+        currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
+        date: { type: 'string', description: 'Expense date in YYYY-MM-DD format (default today)' },
+        order_number: { type: 'string', description: 'Order or reference number if applicable' },
+      },
+      required: ['description', 'type', 'amount'],
+    },
+  },
 ];
 
 async function executeAgentTool(userId: string, toolName: string, toolInput: Record<string, unknown>): Promise<unknown> {
@@ -552,6 +649,109 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     return rows;
   }
 
+  if (toolName === 'list_inventory') {
+    const { search, status, limit: rawLimit } = toolInput as { search?: string; status?: string; limit?: number };
+    const limit = Math.min(rawLimit ?? 10, 20);
+    let q = db
+      .selectFrom('card_instances as ci')
+      .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+      .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+      .select([
+        'ci.id',
+        sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+        sql<string>`COALESCE(ci.set_name_override, cc.set_name)`.as('set_name'),
+        'ci.status',
+        'ci.condition',
+        'ci.decision',
+        'ci.quantity',
+        'ci.purchase_cost',
+        'ci.currency',
+        'ci.raw_purchase_id',
+        'sd.grade',
+        'sd.company as grading_company',
+        'sd.cert_number',
+      ])
+      .where('ci.user_id', '=', userId)
+      .where('ci.deleted_at', 'is', null);
+    if (status) q = q.where('ci.status', '=', status as any);
+    if (search) {
+      const term = `%${search}%`;
+      q = q.where((eb) => eb.or([
+        eb(sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', term),
+        eb(sql<string>`COALESCE(ci.set_name_override, cc.set_name)`, 'ilike', term),
+        eb(sql<string>`sd.cert_number`, 'ilike', term),
+      ]));
+    }
+    const rows = await q.limit(limit).execute();
+    return rows.map((r) => ({
+      ...r,
+      purchase_cost_usd: r.purchase_cost ? (r.purchase_cost / 100).toFixed(2) : null,
+    }));
+  }
+
+  if (toolName === 'record_sale') {
+    const { card_instance_id, platform, sale_price, platform_fees, shipping_cost, currency, sold_at, unique_id } =
+      toolInput as { card_instance_id: string; platform: string; sale_price: number; platform_fees?: number; shipping_cost?: number; currency?: string; sold_at?: string; unique_id?: string };
+    const sale = await recordSale(userId, {
+      card_instance_id,
+      platform: platform as any,
+      sale_price: Math.round(sale_price * 100),
+      platform_fees: platform_fees ? Math.round(platform_fees * 100) : 0,
+      shipping_cost: shipping_cost ? Math.round(shipping_cost * 100) : 0,
+      currency: currency ?? 'USD',
+      sold_at: sold_at ? new Date(sold_at) : new Date(),
+      unique_id: unique_id ?? undefined,
+    });
+    return { success: true, sale_id: sale.id, net_proceeds_usd: ((sale.net_proceeds ?? 0) / 100).toFixed(2) };
+  }
+
+  if (toolName === 'update_card') {
+    const { card_instance_id, status, decision, condition, notes } =
+      toolInput as { card_instance_id: string; status?: string; decision?: string; condition?: string; notes?: string };
+    if (status) {
+      await transitionCardStatus(userId, card_instance_id, status as any);
+    }
+    if (decision !== undefined || condition !== undefined || notes !== undefined) {
+      await updateCard(userId, card_instance_id, {
+        ...(decision !== undefined && { decision }),
+        ...(condition !== undefined && { condition }),
+        ...(notes !== undefined && { notes }),
+      });
+    }
+    return { success: true };
+  }
+
+  if (toolName === 'submit_to_grading') {
+    const { card_instance_id, batch_id, company, tier, grading_cost } =
+      toolInput as { card_instance_id: string; batch_id?: string; company?: string; tier?: string; grading_cost?: number };
+    let resolvedBatchId = batch_id;
+    if (!resolvedBatchId) {
+      if (!company || !tier) throw new Error('company and tier are required when creating a new grading batch');
+      const batch = await gradingService.createBatch(userId, {
+        company,
+        tier,
+        grading_cost: grading_cost ? Math.round(grading_cost * 100) : 0,
+      });
+      resolvedBatchId = batch.id;
+    }
+    await gradingService.addItem(userId, resolvedBatchId, { card_instance_id });
+    return { success: true, batch_id: resolvedBatchId };
+  }
+
+  if (toolName === 'record_expense') {
+    const { description, type, amount, currency, date, order_number } =
+      toolInput as { description: string; type: string; amount: number; currency?: string; date?: string; order_number?: string };
+    const expense = await createExpense(userId, {
+      description,
+      type,
+      amount: Math.round(amount * 100),
+      currency: currency ?? 'USD',
+      date: date ? new Date(date) : new Date(),
+      order_number: order_number ?? undefined,
+    });
+    return { success: true, expense_id: expense.expense_id };
+  }
+
   throw new Error(`Unknown tool: ${toolName}`);
 }
 
@@ -559,28 +759,46 @@ export async function chatWithAgent(
   userId: string,
   messages: AgentChatMessage[]
 ): Promise<string> {
+  // Pre-screen the latest user message with Haiku before burning Sonnet
+  const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
+  if (lastUserMessage) {
+    const onTopic = await isCardRelated(lastUserMessage.content);
+    if (!onTopic) {
+      return 'I can only help with trading card inventory, purchases, sales, grading, and expenses. Please ask something related to your card collection or business.';
+    }
+  }
+
   const summary = await getUserInventorySummary(userId);
 
-  const systemPrompt = `You are Reactor AI, an assistant for a trading card inventory management system.
-You help users manage their Pokemon and trading card inventory, track grading submissions, analyze P&L, and provide card market insights.
-You can read inventory data AND write to the system using the tools provided.
+  const systemPrompt = `You are Reactor AI, an assistant exclusively for trading card inventory management.
 
-When the user asks to add, log, or create a purchase or intake record, use the create_raw_purchase tool.
-If they provide card details, also use add_card_to_purchase to attach the card.
-Use lookup_catalog to find the correct catalog_id before adding a card when possible.
+STRICT SCOPE: You ONLY answer questions and perform actions related to trading cards, card inventory, grading submissions, card sales, card purchases, and related business expenses. If asked about anything else, refuse and redirect.
 
-Current user inventory summary:
+You can read inventory data AND write to the system using the tools provided:
+- list_inventory: find cards in the user's inventory (do this first before any action on a specific card)
+- get_card details via list_inventory
+- create_raw_purchase + add_card_to_purchase: log new card purchases
+- record_sale: record a card sale (requires card_instance_id from list_inventory)
+- update_card: change status, condition, decision, or notes on a card
+- submit_to_grading: add a card to a grading batch (create batch if needed)
+- record_expense: log a business expense
+- lookup_catalog: find catalog entries before adding cards
+
+Workflow guidance:
+- To record a sale: first use list_inventory to find the card, then record_sale with the card_instance_id
+- To submit to grading: first use list_inventory to find the card, then submit_to_grading
+- Card condition (NM/LP/MP/HP/DMG) must come from the user — never assume it
+- When the user provides partial info (e.g. just a card name), use list_inventory to confirm which card they mean before acting
+
+Current inventory summary:
 ${JSON.stringify(summary, null, 2)}
 
-Formatting rules — follow these strictly:
-- Never use markdown (no **, no *, no #, no bullet points with dashes)
-- Never use emojis
-- When presenting options or a list of capabilities, use plain numbered lists like:
-  1. Inventory questions
-  2. P&L analysis
-  3. Grading recommendations
-- Keep responses short and direct
-- When discussing money, format as USD or JPY as appropriate`;
+Formatting rules:
+- No markdown (no **, no *, no #, no dashes for lists)
+- No emojis
+- Numbered lists only: 1. Item 2. Item
+- Short and direct responses
+- Money as USD or JPY as appropriate`;
 
   const apiMessages: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }));
 

@@ -61,9 +61,9 @@ const chatSchema = z.object({
   messages: z.array(
     z.object({
       role: z.enum(['user', 'assistant']),
-      content: z.string(),
+      content: z.string().max(600),
     })
-  ).min(1),
+  ).min(1).max(40),
 });
 
 export async function chat(req: Request, res: Response, next: NextFunction) {
