@@ -74,16 +74,18 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
       : req.body.messages;
     const { messages } = chatSchema.parse({ messages: rawMessages });
 
-    let image: agentService.AgentImage | undefined;
-    if (req.file) {
-      const resized = await sharp(req.file.buffer)
-        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 85 })
-        .toBuffer();
-      image = { base64: resized.toString('base64'), mediaType: 'image/jpeg' };
-    }
+    const files = (req.files as Express.Multer.File[]) ?? [];
+    const images: agentService.AgentImage[] = await Promise.all(
+      files.map(async (file) => {
+        const resized = await sharp(file.buffer)
+          .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 85 })
+          .toBuffer();
+        return { base64: resized.toString('base64'), mediaType: 'image/jpeg' as const };
+      })
+    );
 
-    const reply = await agentService.chatWithAgent(req.user!.id, messages, image);
+    const reply = await agentService.chatWithAgent(req.user!.id, messages, images.length > 0 ? images : undefined);
     res.json({ data: { reply } });
   } catch (err) { next(err); }
 }

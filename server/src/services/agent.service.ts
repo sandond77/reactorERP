@@ -637,8 +637,9 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         const best = enriched.suggestions?.[0];
         if (best?.catalog_id) {
           resolvedCatalogId = best.catalog_id;
-          // Use established catalog name if available, otherwise keep agent's name
-          resolvedCardName = best.catalog_card_name ?? best.card_name ?? resolvedCardName;
+          // Use simple card_name for display (not the full normalized PSA label)
+          // catalog_card_name may be the full normalized label — skip it here
+          resolvedCardName = best.card_name ?? resolvedCardName;
           resolvedSetName = best.set_name ?? resolvedSetName;
           resolvedCardNumber = best.card_number ?? resolvedCardNumber;
         }
@@ -789,18 +790,24 @@ export interface AgentImage {
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp';
 }
 
-async function saveImageToCards(userId: string, cardIds: string[], image: AgentImage) {
+async function saveImageToCards(userId: string, cardIds: string[], images: AgentImage[]) {
+  if (!images.length) return;
   try {
     const dir = path.join(__dirname, '../../../uploads/card-images', userId);
     fs.mkdirSync(dir, { recursive: true });
-    const ext = image.mediaType === 'image/png' ? 'png' : 'jpg';
-    const buffer = Buffer.from(image.base64, 'base64');
     for (const cardId of cardIds) {
-      const filename = `${cardId}-front.${ext}`;
-      fs.writeFileSync(path.join(dir, filename), buffer);
-      const url = `/uploads/card-images/${userId}/${filename}`;
-      await db.updateTable('card_instances').set({ image_front_url: url })
-        .where('id', '=', cardId).where('user_id', '=', userId).execute();
+      // Save front from first image, back from second if present
+      const sides: Array<'front' | 'back'> = ['front', 'back'];
+      for (let i = 0; i < Math.min(images.length, 2); i++) {
+        const image = images[i];
+        const ext = image.mediaType === 'image/png' ? 'png' : 'jpg';
+        const filename = `${cardId}-${sides[i]}.${ext}`;
+        fs.writeFileSync(path.join(dir, filename), Buffer.from(image.base64, 'base64'));
+        const url = `/uploads/card-images/${userId}/${filename}`;
+        const field = sides[i] === 'front' ? 'image_front_url' : 'image_back_url';
+        await db.updateTable('card_instances').set({ [field]: url } as any)
+          .where('id', '=', cardId).where('user_id', '=', userId).execute();
+      }
     }
   } catch { /* image save failure is non-fatal */ }
 }
@@ -808,11 +815,12 @@ async function saveImageToCards(userId: string, cardIds: string[], image: AgentI
 export async function chatWithAgent(
   userId: string,
   messages: AgentChatMessage[],
-  image?: AgentImage
+  images?: AgentImage[]
 ): Promise<string> {
   // Pre-screen + inventory summary in parallel to avoid sequential round trips
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
-  const shouldPreScreen = !image && !!lastUserMessage && lastUserMessage.content.trim().length > 10;
+  const hasImages = !!images?.length;
+  const shouldPreScreen = !hasImages && !!lastUserMessage && lastUserMessage.content.trim().length > 10;
 
   const [onTopic, summary] = await Promise.all([
     shouldPreScreen ? isCardRelated(lastUserMessage!.content) : Promise.resolve(true),
@@ -839,14 +847,17 @@ You can read inventory data AND write to the system using the tools provided:
 Workflow guidance:
 - To record a sale: first use list_inventory to find the card, then record_sale with the card_instance_id
 - To submit to grading: first use list_inventory to find the card, then submit_to_grading
-- Card condition (NM/LP/MP/HP/DMG) must come from the user — never assume it
-- When the user provides partial info, ask specifically for what is missing before acting
+- ALWAYS ask before acting if any required field is missing
+- Required fields for a raw card purchase: cost, condition (NM/LP/MP/HP/DMG), decision (sell raw or grade)
+- Required fields for a sale: platform, sale price
+- Required fields for a grading submission: company, tier
+- Never assume condition, decision, or any price — always ask the user
+- Ask all missing questions in one message, not one at a time
 
 Image handling:
 - If given a card image: extract card name, set, card number, language, and any grade/cert info visible
-- Then ask the user for any missing purchase details: cost, purchase date, source/platform, condition (if raw), order number
-- Ask all missing questions in one message, not one at a time
-- Do not create any record until you have at minimum: card name and purchase cost
+- Then ask the user for everything missing: cost, date, source/platform, condition, decision (sell raw or grade), order number
+- Do not create any record until you have at minimum: card name, purchase cost, condition, and decision
 - If given a receipt or invoice image: extract all visible transaction data, summarize what you found, ask the user to confirm before creating records
 
 After completing any write action, always report back:
@@ -865,13 +876,16 @@ Formatting rules:
 - Money as USD or JPY as appropriate`;
 
   const apiMessages: Anthropic.MessageParam[] = messages.map((m, i) => {
-    // Attach image to the last user message
-    if (image && i === messages.length - 1 && m.role === 'user') {
+    // Attach all images to the last user message
+    if (hasImages && i === messages.length - 1 && m.role === 'user') {
       return {
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } },
-          { type: 'text', text: m.content || 'Please analyze this image.' },
+          ...images!.map((img) => ({
+            type: 'image' as const,
+            source: { type: 'base64' as const, media_type: img.mediaType, data: img.base64 },
+          })),
+          { type: 'text' as const, text: m.content || 'Please analyze these images.' },
         ],
       };
     }
@@ -893,9 +907,9 @@ Formatting rules:
 
     if (response.stop_reason === 'end_turn') {
       const text = response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
-      // Save the uploaded image to any cards created this session
-      if (image && createdCardIds.length > 0) {
-        await saveImageToCards(userId, createdCardIds, image);
+      // Save uploaded images to any cards created this session
+      if (hasImages && createdCardIds.length > 0) {
+        await saveImageToCards(userId, createdCardIds, images!);
       }
       return text;
     }

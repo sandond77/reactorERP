@@ -6,7 +6,7 @@ import { api } from '../../lib/api';
 interface Message {
   role: 'user' | 'assistant';
   content: string;
-  imageUrl?: string;
+  imageUrls?: string[];
 }
 
 const SUGGESTIONS = [
@@ -18,13 +18,15 @@ const SUGGESTIONS = [
   'Show cards ready for sale',
 ];
 
+const MAX_ATTACHMENTS = 5;
+
 export function AgentPanel() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [attachment, setAttachment] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -33,17 +35,25 @@ export function AgentPanel() {
   }, [messages]);
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setAttachment(file);
-    setPreview(URL.createObjectURL(file));
+    const files = Array.from(e.target.files ?? []);
+    if (!files.length) return;
+    const remaining = MAX_ATTACHMENTS - attachments.length;
+    const toAdd = files.slice(0, remaining);
+    setAttachments(prev => [...prev, ...toAdd]);
+    setPreviews(prev => [...prev, ...toAdd.map(f => URL.createObjectURL(f))]);
     e.target.value = '';
   }
 
-  function clearAttachment(revokeUrl = true) {
-    setAttachment(null);
-    if (revokeUrl && preview) URL.revokeObjectURL(preview);
-    setPreview(null);
+  function removeAttachment(i: number) {
+    setPreviews(prev => { URL.revokeObjectURL(prev[i]); return prev.filter((_, idx) => idx !== i); });
+    setAttachments(prev => prev.filter((_, idx) => idx !== i));
+  }
+
+  function clearAttachments(revoke = true) {
+    if (revoke) previews.forEach(URL.revokeObjectURL);
+    setAttachments([]);
+    setPreviews([]);
+    if (fileRef.current) fileRef.current.value = '';
   }
 
   async function sendText(text: string) {
@@ -63,24 +73,21 @@ export function AgentPanel() {
 
   async function send() {
     const text = input.trim();
-    if ((!text && !attachment) || loading) return;
+    if ((!text && attachments.length === 0) || loading) return;
     setInput('');
 
-    const imageUrl = preview ?? undefined;
+    const imageUrls = previews.length > 0 ? [...previews] : undefined;
     const userContent = text || 'What is this?';
-    const newMessages: Message[] = [...messages, { role: 'user', content: userContent, imageUrl }];
+    const newMessages: Message[] = [...messages, { role: 'user', content: userContent, imageUrls }];
     setMessages(newMessages);
-    // Don't revoke the URL — it's now referenced by the message bubble
-    clearAttachment(false);
-    if (fileRef.current) fileRef.current.value = '';
+    // Keep URLs alive for message bubbles — clear state without revoking
+    clearAttachments(false);
     setLoading(true);
 
     try {
-      // Always send through the agent chat — image gets attached as vision content
       const form = new FormData();
-      // Strip imageUrl before sending to server (server doesn't need it)
       form.append('messages', JSON.stringify(newMessages.map(({ role, content }) => ({ role, content }))));
-      if (attachment) form.append('image', attachment);
+      attachments.forEach(f => form.append('images', f));
 
       const { data } = await api.post('/agent/chat', form);
       setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
@@ -100,7 +107,6 @@ export function AgentPanel() {
 
   return (
     <>
-      {/* Floating chat popup */}
       {open && (
         <div className="fixed bottom-16 right-5 z-50 w-96 flex flex-col bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
           style={{ height: '520px' }}>
@@ -156,10 +162,14 @@ export function AgentPanel() {
                     ? 'bg-indigo-600 text-white rounded-br-sm'
                     : 'bg-zinc-800 text-zinc-200 rounded-bl-sm'
                 )}>
-                  {m.imageUrl && (
-                    <img src={m.imageUrl} alt="attachment" className="w-full max-h-48 object-cover" />
+                  {m.imageUrls && m.imageUrls.length > 0 && (
+                    <div className={cn('grid gap-0.5', m.imageUrls.length > 1 ? 'grid-cols-2' : 'grid-cols-1')}>
+                      {m.imageUrls.map((url, idx) => (
+                        <img key={idx} src={url} alt={`attachment ${idx + 1}`} className="w-full max-h-40 object-cover" />
+                      ))}
+                    </div>
                   )}
-                  {(m.content && m.content !== 'What is this?') || !m.imageUrl ? (
+                  {(m.content && m.content !== 'What is this?') || !m.imageUrls?.length ? (
                     <p className="px-4 py-2.5 whitespace-pre-wrap">{m.content}</p>
                   ) : null}
                 </div>
@@ -175,19 +185,28 @@ export function AgentPanel() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Image preview */}
-          {preview && (
-            <div className="px-4 pb-2 flex items-center gap-2">
-              <div className="relative inline-block">
-                <img src={preview} alt="attachment" className="h-16 w-16 object-cover rounded-lg border border-zinc-700" />
+          {/* Attachment previews */}
+          {previews.length > 0 && (
+            <div className="px-4 pb-2 flex items-center gap-2 flex-wrap">
+              {previews.map((url, i) => (
+                <div key={i} className="relative shrink-0">
+                  <img src={url} alt="attachment" className="h-14 w-14 object-cover rounded-lg border border-zinc-700" />
+                  <button
+                    onClick={() => removeAttachment(i)}
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-zinc-700 hover:bg-zinc-600 rounded-full flex items-center justify-center"
+                  >
+                    <X size={10} className="text-zinc-300" />
+                  </button>
+                </div>
+              ))}
+              {attachments.length < MAX_ATTACHMENTS && (
                 <button
-                  onClick={clearAttachment}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-zinc-700 hover:bg-zinc-600 rounded-full flex items-center justify-center"
+                  onClick={() => fileRef.current?.click()}
+                  className="h-14 w-14 rounded-lg border border-dashed border-zinc-600 hover:border-indigo-500 flex items-center justify-center text-zinc-500 hover:text-indigo-400 transition-colors shrink-0"
                 >
-                  <X size={10} className="text-zinc-300" />
+                  <Paperclip size={14} />
                 </button>
-              </div>
-              <p className="text-xs text-zinc-400 truncate max-w-[240px]">{attachment?.name}</p>
+              )}
             </div>
           )}
 
@@ -197,27 +216,30 @@ export function AgentPanel() {
               ref={fileRef}
               type="file"
               accept="image/jpeg,image/png,image/webp"
+              multiple
               className="hidden"
               onChange={onFileChange}
             />
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="w-10 h-10 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-zinc-300 flex items-center justify-center transition-colors shrink-0"
-              title="Attach image"
-            >
-              <Paperclip size={16} />
-            </button>
+            {previews.length === 0 && (
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="w-10 h-10 rounded-xl bg-zinc-700 hover:bg-zinc-600 text-zinc-300 flex items-center justify-center transition-colors shrink-0"
+                title="Attach images"
+              >
+                <Paperclip size={16} />
+              </button>
+            )}
             <textarea
               rows={1}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={attachment ? 'Describe what to do with this image…' : 'Message Reactor AI…'}
+              placeholder={attachments.length > 0 ? 'Describe what to do with these images…' : 'Message Reactor AI…'}
               className="flex-1 bg-zinc-800 text-zinc-200 text-sm rounded-xl px-4 py-2.5 resize-none outline-none placeholder:text-zinc-500 border border-zinc-700 focus:border-indigo-500 transition-colors min-h-[42px] max-h-32"
             />
             <button
               onClick={send}
-              disabled={(!input.trim() && !attachment) || loading}
+              disabled={(!input.trim() && attachments.length === 0) || loading}
               className="w-10 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white flex items-center justify-center transition-colors shrink-0"
             >
               <Send size={16} />
