@@ -72,6 +72,7 @@ export function AgentPanel() {
     setMessages(newMessages);
     // Don't revoke the URL — it's now referenced by the message bubble
     clearAttachment(false);
+    if (fileRef.current) fileRef.current.value = '';
     setLoading(true);
 
     try {
