@@ -9,6 +9,15 @@ interface Message {
   imageUrl?: string;
 }
 
+const SUGGESTIONS = [
+  'What is my inventory summary?',
+  'Add a raw card purchase',
+  'Record a sale',
+  'Submit cards to grading',
+  'Log an expense',
+  'Show cards ready for sale',
+];
+
 export function AgentPanel() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -35,6 +44,21 @@ export function AgentPanel() {
     setAttachment(null);
     if (revokeUrl && preview) URL.revokeObjectURL(preview);
     setPreview(null);
+  }
+
+  async function sendText(text: string) {
+    setInput('');
+    const newMessages: Message[] = [...messages, { role: 'user', content: text }];
+    setMessages(newMessages);
+    setLoading(true);
+    try {
+      const { data } = await api.post('/agent/chat', { messages: newMessages.map(({ role, content }) => ({ role, content })) });
+      setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function send() {
@@ -98,12 +122,29 @@ export function AgentPanel() {
           {/* Messages */}
           <div className="flex-1 flex flex-col gap-3 px-4 py-4 overflow-y-auto">
             {messages.length === 0 && (
-              <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-6">
-                <div className="w-12 h-12 rounded-full bg-indigo-600/20 flex items-center justify-center">
-                  <Bot size={22} className="text-indigo-400" />
+              <div className="flex flex-col gap-4 pt-2">
+                <div className="flex flex-col items-center gap-2 text-center px-4 pt-2">
+                  <div className="w-10 h-10 rounded-full bg-indigo-600/20 flex items-center justify-center">
+                    <Bot size={18} className="text-indigo-400" />
+                  </div>
+                  <p className="text-sm font-medium text-zinc-200">Reactor AI</p>
+                  <p className="text-xs text-zinc-500 leading-relaxed">Ask about your inventory, log a purchase or sale, upload a card image, or check your P&L.</p>
                 </div>
-                <p className="text-sm font-medium text-zinc-300">How can I help?</p>
-                <p className="text-xs text-zinc-500">Ask about your inventory, P&L, or upload a receipt/image to scan.</p>
+                <div className="px-2">
+                  <p className="text-xs font-medium text-zinc-500 uppercase tracking-wide mb-2 px-1">Suggestions</p>
+                  <div className="flex flex-col gap-1.5">
+                    {SUGGESTIONS.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => sendText(s)}
+                        disabled={loading}
+                        className="w-full text-left px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 text-sm text-zinc-300 transition-colors"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
             {messages.map((m, i) => (
