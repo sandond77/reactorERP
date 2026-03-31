@@ -516,11 +516,12 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         quantity: { type: 'number', description: 'Number of copies' },
         purchase_cost: { type: 'number', description: 'Cost per card in cents (e.g. 1000 = $10.00)' },
         currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency for purchase_cost' },
-        condition: { type: 'string', description: 'Card condition: NM, LP, MP, HP, DMG' },
+        condition: { type: 'string', enum: ['NM', 'LP', 'MP', 'HP', 'DMG'], description: 'Card condition — required, must come from user' },
+        decision: { type: 'string', enum: ['grade', 'sell_raw'], description: 'Intent for this card: grade (send to grading) or sell_raw (sell as-is) — required, must come from user' },
         language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Card language' },
         notes: { type: 'string', description: 'Notes about this specific card' },
       },
-      required: ['raw_purchase_id'],
+      required: ['raw_purchase_id', 'condition', 'decision'],
     },
   },
   {
@@ -622,7 +623,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
 
   if (toolName === 'add_card_to_purchase') {
     const { raw_purchase_id, catalog_id, card_name_override, set_name_override, card_number_override,
-            quantity, purchase_cost, currency, condition, language, notes } = toolInput as Record<string, unknown>;
+            quantity, purchase_cost, currency, condition, decision, language, notes } = toolInput as Record<string, unknown>;
 
     // Auto-enrich: if no catalog_id, try to find catalog match for proper sku/part number
     let resolvedCatalogId = (catalog_id as string) ?? null;
@@ -656,6 +657,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       purchase_cost: (purchase_cost as number) ?? 0,
       currency: ((currency as string) ?? 'JPY') as 'USD' | 'JPY',
       condition: (condition as string) ?? null,
+      decision: (decision as string) ?? null,
       language: ((language as string) ?? 'JP') as 'JP' | 'EN' | 'KR',
       notes: (notes as string) ?? null,
       status: 'purchased_raw',
@@ -790,6 +792,9 @@ export interface AgentImage {
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp';
 }
 
+// Persist images across multi-turn conversations (image sent in turn 1, card created in turn 2+)
+const pendingImages = new Map<string, AgentImage[]>();
+
 async function saveImageToCards(userId: string, cardIds: string[], images: AgentImage[]) {
   if (!images.length) return;
   try {
@@ -817,9 +822,13 @@ export async function chatWithAgent(
   messages: AgentChatMessage[],
   images?: AgentImage[]
 ): Promise<string> {
+  // Store new images for this user; fall back to any images from a previous turn in this conversation
+  if (images?.length) pendingImages.set(userId, images);
+  const sessionImages = pendingImages.get(userId);
+  const hasImages = !!sessionImages?.length;
+
   // Pre-screen + inventory summary in parallel to avoid sequential round trips
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
-  const hasImages = !!images?.length;
   const shouldPreScreen = !hasImages && !!lastUserMessage && lastUserMessage.content.trim().length > 10;
 
   const [onTopic, summary] = await Promise.all([
@@ -902,7 +911,7 @@ Formatting rules:
       return {
         role: 'user',
         content: [
-          ...images!.map((img) => ({
+          ...sessionImages!.map((img) => ({
             type: 'image' as const,
             source: { type: 'base64' as const, media_type: img.mediaType, data: img.base64 },
           })),
@@ -928,9 +937,10 @@ Formatting rules:
 
     if (response.stop_reason === 'end_turn') {
       const text = response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
-      // Save uploaded images to any cards created this session
-      if (hasImages && createdCardIds.length > 0) {
-        await saveImageToCards(userId, createdCardIds, images!);
+      // Save uploaded images to any cards created this session, then clear the pending store
+      if (createdCardIds.length > 0 && sessionImages?.length) {
+        await saveImageToCards(userId, createdCardIds, sessionImages);
+        pendingImages.delete(userId);
       }
       return text;
     }
