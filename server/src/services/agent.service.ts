@@ -454,20 +454,25 @@ export interface AgentChatMessage {
 
 // Quick Haiku call to classify whether the message is on-topic before burning Sonnet
 async function isCardRelated(message: string): Promise<boolean> {
-  const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 5,
-    messages: [{
-      role: 'user',
-      content: `You are a classifier. Answer only YES or NO.
+  try {
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 16,
+      messages: [{
+        role: 'user',
+        content: `You are a classifier. Answer only YES or NO.
 
 Is this message about trading cards, card inventory management, card grading, card purchases, card sales, or related business expenses?
 
 Message: "${message.slice(0, 300)}"`,
-    }],
-  });
-  const text = response.content.find((b) => b.type === 'text')?.text?.trim().toUpperCase() ?? '';
-  return text.startsWith('YES');
+      }],
+    });
+    const text = response.content.find((b) => b.type === 'text')?.text?.trim().toUpperCase() ?? '';
+    return text.startsWith('YES');
+  } catch {
+    // Fail open — if pre-screen errors, let the message through
+    return true;
+  }
 }
 
 const AGENT_TOOLS: Anthropic.Tool[] = [
@@ -755,13 +760,20 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   throw new Error(`Unknown tool: ${toolName}`);
 }
 
+export interface AgentImage {
+  base64: string;
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp';
+}
+
 export async function chatWithAgent(
   userId: string,
-  messages: AgentChatMessage[]
+  messages: AgentChatMessage[],
+  image?: AgentImage
 ): Promise<string> {
   // Pre-screen the latest user message with Haiku before burning Sonnet
+  // Skip pre-screen if an image is attached with minimal/no text (assume card-related)
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
-  if (lastUserMessage) {
+  if (lastUserMessage && lastUserMessage.content.trim().length > 10 && !image) {
     const onTopic = await isCardRelated(lastUserMessage.content);
     if (!onTopic) {
       return 'I can only help with trading card inventory, purchases, sales, grading, and expenses. Please ask something related to your card collection or business.';
@@ -776,7 +788,6 @@ STRICT SCOPE: You ONLY answer questions and perform actions related to trading c
 
 You can read inventory data AND write to the system using the tools provided:
 - list_inventory: find cards in the user's inventory (do this first before any action on a specific card)
-- get_card details via list_inventory
 - create_raw_purchase + add_card_to_purchase: log new card purchases
 - record_sale: record a card sale (requires card_instance_id from list_inventory)
 - update_card: change status, condition, decision, or notes on a card
@@ -788,7 +799,19 @@ Workflow guidance:
 - To record a sale: first use list_inventory to find the card, then record_sale with the card_instance_id
 - To submit to grading: first use list_inventory to find the card, then submit_to_grading
 - Card condition (NM/LP/MP/HP/DMG) must come from the user — never assume it
-- When the user provides partial info (e.g. just a card name), use list_inventory to confirm which card they mean before acting
+- When the user provides partial info, ask specifically for what is missing before acting
+
+Image handling:
+- If given a card image: extract card name, set, card number, language, and any grade/cert info visible
+- Then ask the user for any missing purchase details: cost, purchase date, source/platform, condition (if raw), order number
+- Ask all missing questions in one message, not one at a time
+- Do not create any record until you have at minimum: card name and purchase cost
+- If given a receipt or invoice image: extract all visible transaction data, summarize what you found, ask the user to confirm before creating records
+
+After completing any write action, always report back:
+- What was created/updated
+- The internal ID(s) assigned (e.g. purchase ID, card ID, sale ID, expense ID)
+- A one-line summary of what was recorded
 
 Current inventory summary:
 ${JSON.stringify(summary, null, 2)}
@@ -800,7 +823,19 @@ Formatting rules:
 - Short and direct responses
 - Money as USD or JPY as appropriate`;
 
-  const apiMessages: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }));
+  const apiMessages: Anthropic.MessageParam[] = messages.map((m, i) => {
+    // Attach image to the last user message
+    if (image && i === messages.length - 1 && m.role === 'user') {
+      return {
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.base64 } },
+          { type: 'text', text: m.content || 'Please analyze this image.' },
+        ],
+      };
+    }
+    return { role: m.role, content: m.content };
+  });
 
   // Agentic loop — run until end_turn or no more tool calls
   for (let i = 0; i < 5; i++) {

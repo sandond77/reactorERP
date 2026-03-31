@@ -29,5 +29,5 @@ agentRouter.get('/card-lookup', agentController.lookupCard);
 // Auto-fill card data (text or image)
 agentRouter.post('/auto-fill', upload.single('image'), agentController.autoFill);
 
-// Chat with the AI agent about inventory
-agentRouter.post('/chat', agentController.chat);
+// Chat with the AI agent about inventory (optional image attachment)
+agentRouter.post('/chat', upload.single('image'), agentController.chat);

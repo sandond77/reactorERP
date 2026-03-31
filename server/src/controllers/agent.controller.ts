@@ -69,7 +69,17 @@ const chatSchema = z.object({
 export async function chat(req: Request, res: Response, next: NextFunction) {
   try {
     const { messages } = chatSchema.parse(req.body);
-    const reply = await agentService.chatWithAgent(req.user!.id, messages);
+
+    let image: agentService.AgentImage | undefined;
+    if (req.file) {
+      const resized = await sharp(req.file.buffer)
+        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 85 })
+        .toBuffer();
+      image = { base64: resized.toString('base64'), mediaType: 'image/jpeg' };
+    }
+
+    const reply = await agentService.chatWithAgent(req.user!.id, messages, image);
     res.json({ data: { reply } });
   } catch (err) { next(err); }
 }
