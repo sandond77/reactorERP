@@ -15,7 +15,7 @@ import * as gradingService from './grading-submissions.service';
 
 const THINKING: Anthropic.ThinkingConfigParam = { type: 'adaptive' };
 
-const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 3 });
 
 // ── TCGdex API ───────────────────────────────────────────────
 
