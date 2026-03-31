@@ -336,6 +336,7 @@ export async function getCardById(userId: string, cardId: string) {
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
+      'cc.sku',
       'cc.image_url as catalog_image_url',
       'cc.rarity',
       'sd.grade',

@@ -235,6 +235,9 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                  {card.sku && (
+                    <div className="col-span-2"><span className="text-zinc-500">Part #:</span> <span className="font-mono text-zinc-300">{card.sku}</span></div>
+                  )}
                   <div><span className="text-zinc-500">Game:</span> <span className="text-zinc-300">{card.card_game}</span></div>
                   <div><span className="text-zinc-500">Language:</span> <span className="text-zinc-300">{card.language}</span></div>
                   <div><span className="text-zinc-500">Cost:</span> <span className="text-zinc-300">{formatCurrency(card.purchase_cost, card.currency)}</span></div>
