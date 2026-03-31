@@ -68,7 +68,11 @@ const chatSchema = z.object({
 
 export async function chat(req: Request, res: Response, next: NextFunction) {
   try {
-    const { messages } = chatSchema.parse(req.body);
+    // Support both JSON body and multipart/form-data (when image is attached)
+    const rawMessages = typeof req.body.messages === 'string'
+      ? JSON.parse(req.body.messages)
+      : req.body.messages;
+    const { messages } = chatSchema.parse({ messages: rawMessages });
 
     let image: agentService.AgentImage | undefined;
     if (req.file) {

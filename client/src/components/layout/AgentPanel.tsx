@@ -6,6 +6,7 @@ import { api } from '../../lib/api';
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  imageUrl?: string;
 }
 
 export function AgentPanel() {
@@ -30,17 +31,10 @@ export function AgentPanel() {
     e.target.value = '';
   }
 
-  function clearAttachment() {
+  function clearAttachment(revokeUrl = true) {
     setAttachment(null);
-    if (preview) URL.revokeObjectURL(preview);
+    if (revokeUrl && preview) URL.revokeObjectURL(preview);
     setPreview(null);
-  }
-
-  function detectHint(text: string): 'purchase' | 'sale' | undefined {
-    const lower = text.toLowerCase();
-    if (/sale|sold|selling/.test(lower)) return 'sale';
-    if (/purchase|bought|receipt|intake/.test(lower)) return 'purchase';
-    return undefined;
   }
 
   async function send() {
@@ -48,46 +42,23 @@ export function AgentPanel() {
     if ((!text && !attachment) || loading) return;
     setInput('');
 
-    const userContent = text || (attachment ? `[Image: ${attachment.name}]` : '');
-    const newMessages: Message[] = [...messages, { role: 'user', content: userContent }];
+    const imageUrl = preview ?? undefined;
+    const userContent = text || 'What is this?';
+    const newMessages: Message[] = [...messages, { role: 'user', content: userContent, imageUrl }];
     setMessages(newMessages);
+    // Don't revoke the URL — it's now referenced by the message bubble
+    clearAttachment(false);
     setLoading(true);
 
     try {
-      if (attachment) {
-        const form = new FormData();
-        form.append('image', attachment);
-        const hint = detectHint(text);
-        if (hint) form.append('hint', hint);
-        if (text) form.append('note', text);
+      // Always send through the agent chat — image gets attached as vision content
+      const form = new FormData();
+      // Strip imageUrl before sending to server (server doesn't need it)
+      form.append('messages', JSON.stringify(newMessages.map(({ role, content }) => ({ role, content }))));
+      if (attachment) form.append('image', attachment);
 
-        clearAttachment();
-        const { data } = await api.post('/agent/parse-receipt', form, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        const result = data.data;
-        const lines: string[] = [];
-        if (result.order_number) lines.push(`Order #: ${result.order_number}`);
-        if (result.date) lines.push(`Date: ${result.date}`);
-        if (result.platform) lines.push(`Platform: ${result.platform}`);
-        if (result.cards?.length) {
-          lines.push(`\nCards found (${result.cards.length}):`);
-          result.cards.forEach((c: Record<string, string | number>, i: number) => {
-            const parts = [`${i + 1}. ${c.card_name ?? 'Unknown'}`];
-            if (c.set_name) parts.push(c.set_name as string);
-            if (c.card_number) parts.push(`#${c.card_number}`);
-            if (c.cost) parts.push(`$${c.cost}`);
-            if (c.grade) parts.push(`Grade: ${c.grade}`);
-            lines.push(parts.join(' — '));
-          });
-        }
-        if (result.notes) lines.push(`\nNotes: ${result.notes}`);
-        lines.push(`\nConfidence: ${result.confidence}`);
-        setMessages(prev => [...prev, { role: 'assistant', content: lines.join('\n') }]);
-      } else {
-        const { data } = await api.post('/agent/chat', { messages: newMessages });
-        setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
-      }
+      const { data } = await api.post('/agent/chat', form);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
     } finally {
@@ -138,12 +109,17 @@ export function AgentPanel() {
             {messages.map((m, i) => (
               <div key={i} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
                 <div className={cn(
-                  'max-w-[80%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap',
+                  'max-w-[80%] rounded-2xl text-sm leading-relaxed overflow-hidden',
                   m.role === 'user'
                     ? 'bg-indigo-600 text-white rounded-br-sm'
                     : 'bg-zinc-800 text-zinc-200 rounded-bl-sm'
                 )}>
-                  {m.content}
+                  {m.imageUrl && (
+                    <img src={m.imageUrl} alt="attachment" className="w-full max-h-48 object-cover" />
+                  )}
+                  {(m.content && m.content !== 'What is this?') || !m.imageUrl ? (
+                    <p className="px-4 py-2.5 whitespace-pre-wrap">{m.content}</p>
+                  ) : null}
                 </div>
               </div>
             ))}
