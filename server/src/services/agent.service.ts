@@ -770,17 +770,18 @@ export async function chatWithAgent(
   messages: AgentChatMessage[],
   image?: AgentImage
 ): Promise<string> {
-  // Pre-screen the latest user message with Haiku before burning Sonnet
-  // Skip pre-screen if an image is attached with minimal/no text (assume card-related)
+  // Pre-screen + inventory summary in parallel to avoid sequential round trips
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
-  if (lastUserMessage && lastUserMessage.content.trim().length > 10 && !image) {
-    const onTopic = await isCardRelated(lastUserMessage.content);
-    if (!onTopic) {
-      return 'I can only help with trading card inventory, purchases, sales, grading, and expenses. Please ask something related to your card collection or business.';
-    }
-  }
+  const shouldPreScreen = !image && !!lastUserMessage && lastUserMessage.content.trim().length > 10;
 
-  const summary = await getUserInventorySummary(userId);
+  const [onTopic, summary] = await Promise.all([
+    shouldPreScreen ? isCardRelated(lastUserMessage!.content) : Promise.resolve(true),
+    getUserInventorySummary(userId),
+  ]);
+
+  if (!onTopic) {
+    return 'I can only help with trading card inventory, purchases, sales, grading, and expenses. Please ask something related to your card collection or business.';
+  }
 
   const systemPrompt = `You are Reactor AI, an assistant exclusively for trading card inventory management.
 
@@ -842,7 +843,6 @@ Formatting rules:
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 1024,
-      thinking: THINKING,
       system: systemPrompt,
       tools: AGENT_TOOLS,
       messages: apiMessages,
