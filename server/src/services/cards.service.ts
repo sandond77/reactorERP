@@ -746,14 +746,21 @@ export async function listRawFlat(
       l.id                                               AS listing_id,
       ci.purchase_cost                                   AS raw_cost,
       s.sale_price                                       AS strike_price,
-      CASE WHEN s.sale_price IS NOT NULL
-        THEN s.sale_price - s.platform_fees - s.shipping_cost ELSE NULL
+      CASE
+        WHEN s.sale_price IS NOT NULL AND s.platform = 'ebay'
+          THEN s.sale_price - s.platform_fees - s.shipping_cost
+        WHEN s.sale_price IS NOT NULL
+          THEN s.sale_price
+        ELSE NULL
       END                                                AS after_ebay,
       ci.purchased_at                                    AS raw_purchase_date,
       l.listed_at                                        AS date_listed,
       s.sold_at                                          AS date_sold,
-      CASE WHEN ci.purchase_cost > 0 AND s.sale_price IS NOT NULL
-        THEN ROUND((s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost)::numeric / ci.purchase_cost * 100, 2)
+      CASE
+        WHEN ci.purchase_cost > 0 AND s.sale_price IS NOT NULL AND s.platform = 'ebay'
+          THEN ROUND((s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost)::numeric / ci.purchase_cost * 100, 2)
+        WHEN ci.purchase_cost > 0 AND s.sale_price IS NOT NULL
+          THEN ROUND((s.sale_price - ci.purchase_cost)::numeric / ci.purchase_cost * 100, 2)
         ELSE NULL
       END                                                AS roi_pct,
       ci.notes,

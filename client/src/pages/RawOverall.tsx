@@ -389,8 +389,8 @@ export function RawOverall() {
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
-                <ColHeader label="ID"               col="raw_purchase_label" {...sh} {...rz('id')}               minWidth={MINS.id} />
                 <ColHeader label="Part #"           col="sku"                {...sh} {...rz('sku')}               minWidth={MINS.sku} />
+                <ColHeader label="ID"               col="raw_purchase_label" {...sh} {...rz('id')}               minWidth={MINS.id} />
                 <ColHeader label="Card"             col="card_name"          {...sh} {...rz('card_name')}         minWidth={MINS.card_name} />
                 <ColHeader label="Condition"        col="condition"          {...sh} {...rz('condition')}         minWidth={MINS.condition}
                   filterOptions={filterOptions?.conditions} filterSelected={fCondition} onFilterChange={(v) => { setFCondition(v); setPage(1); }} />
@@ -403,7 +403,7 @@ export function RawOverall() {
                 <ColHeader label="Strike Price"     col="strike_price"       {...sh} {...rz('strike_price')}      minWidth={MINS.strike_price} align="right" wrap />
                 <ColHeader label="After eBay"       col="after_ebay"         {...sh} {...rz('after_ebay')}        minWidth={MINS.after_ebay} align="right" wrap />
                 <ColHeader label="Net"              col="net"                {...sh} {...rz('net')}               minWidth={MINS.net} align="right" />
-                <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('raw_purchase_date')} minWidth={MINS.raw_purchase_date} wrap
+                <ColHeader label="Date Added"        col="raw_purchase_date" {...sh} {...rz('raw_purchase_date')} minWidth={MINS.raw_purchase_date} wrap
                   filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }}
                   filterDateValue={fPurchDate} onFilterDateChange={(d) => { setFPurchDate(d); setPage(1); }} />
                 <ColHeader label="Date Listed"      col="date_listed"        {...sh} {...rz('date_listed')}       minWidth={MINS.date_listed} wrap
@@ -421,8 +421,8 @@ export function RawOverall() {
                 <tr><td colSpan={17} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
               ) : data.data.map((row) => (
                 <tr key={row.id} onClick={() => setSelectedRow(row)} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
-                  <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
                   <td className="px-3 py-1 font-mono text-[11px] text-zinc-400">{row.sku ?? '—'}</td>
+                  <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
                   <td className="px-3 py-1 text-zinc-200 truncate" title={row.card_name ?? ''}>{row.card_name ?? ''}</td>
                   <td className="px-3 py-1 text-zinc-300">{row.condition ?? ''}</td>
                   <td className="px-3 py-1 text-center">
