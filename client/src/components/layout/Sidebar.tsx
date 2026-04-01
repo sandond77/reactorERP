@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
   ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties, Receipt,
-  ScrollText, ShieldCheck, FolderClock,
+  ScrollText, ShieldCheck, FolderClock, Tag, Settings2,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -17,6 +17,19 @@ const RAW_NAV = [
   { to: '/ungraded',      icon: GalleryVerticalEnd,  label: 'To Be Submitted' },
   { to: '/grading',       icon: Star,                label: 'Grading' },
   { to: '/sub-returns',   icon: PackageCheck,        label: 'Sub Returns' },
+];
+
+const SELLING_ROUTES = ['/listings', '/sales', '/trades'];
+const SELLING_NAV = [
+  { to: '/listings', icon: ListOrdered,    label: 'Listings' },
+  { to: '/sales',    icon: TrendingUp,     label: 'Sales' },
+  { to: '/trades',   icon: ArrowRightLeft, label: 'Trades' },
+];
+
+const MANAGE_ROUTES = ['/parts', '/locations'];
+const MANAGE_NAV = [
+  { to: '/parts',     icon: Layers, label: 'Parts' },
+  { to: '/locations', icon: MapPin, label: 'Locations' },
 ];
 
 
@@ -92,21 +105,29 @@ export function Sidebar() {
           ))}
         </NavFolder>
 
-        <NavItem to="/listings"  icon={ListOrdered} label="Listings" />
+        <NavFolder icon={Tag} label="Selling" routes={SELLING_ROUTES}>
+          {SELLING_NAV.map(({ to, icon, label }) => (
+            <NavItem key={to} to={to} icon={icon} label={label} indent />
+          ))}
+        </NavFolder>
+
         <NavItem to="/card-show" icon={ShoppingBag} label="Card Show" />
-        <NavItem to="/sales"     icon={TrendingUp}      label="Sales" />
-        <NavItem to="/trades"    icon={ArrowRightLeft}  label="Trades" />
-        <NavItem to="/expenses"  icon={Receipt}         label="Expenses" />
+        <NavItem to="/expenses"  icon={Receipt}     label="Expenses" />
 
         <NavItem to="/reports" icon={BarChart3} label="Reports" />
-        <NavItem to="/parts"      icon={Layers}   label="Parts" />
-        <NavItem to="/locations"  icon={MapPin}   label="Locations" />
-        <NavItem to="/import"     icon={Upload}   label="Import" />
+
+        <NavFolder icon={Settings2} label="Manage" routes={MANAGE_ROUTES}>
+          {MANAGE_NAV.map(({ to, icon, label }) => (
+            <NavItem key={to} to={to} icon={icon} label={label} indent />
+          ))}
+        </NavFolder>
 
         <NavFolder icon={FolderClock} label="Audit" routes={['/audit']}>
-          <NavItem to="/audit/log"      icon={ScrollText}   label="Action Log" indent />
+          <NavItem to="/audit/log"      icon={ScrollText}   label="Audit Log" indent />
           <NavItem to="/audit/auditing" icon={ShieldCheck}  label="Inventory Audit" indent />
         </NavFolder>
+
+        <NavItem to="/import" icon={Upload} label="Import" />
       </nav>
 
       {/* User */}

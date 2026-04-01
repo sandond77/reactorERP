@@ -21,17 +21,19 @@ export const apiRouter = Router();
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
 });
 
 const agentLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 20,  // AI calls are expensive
+  windowMs: 60 * 1000,
+  max: 20,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
   message: { error: 'Too many AI requests. Please wait a moment.' },
 });
 

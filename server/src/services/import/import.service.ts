@@ -56,6 +56,27 @@ export async function saveColumnMapping(
     .where('id', '=', importId).returningAll().executeTakeFirstOrThrow();
 }
 
+export async function listImports(userId: string) {
+  return db
+    .selectFrom('csv_imports')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .orderBy('created_at', 'desc')
+    .limit(50)
+    .execute();
+}
+
+export async function getImportStatus(userId: string, importId: string) {
+  const record = await db
+    .selectFrom('csv_imports')
+    .selectAll()
+    .where('id', '=', importId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!record) throw new AppError(404, 'Import not found');
+  return record;
+}
+
 // ── Execute ───────────────────────────────────────────────────────────────────
 
 export async function executeImport(userId: string, importId: string, buffer: Buffer) {
