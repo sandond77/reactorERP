@@ -12,6 +12,9 @@ import { createCard, updateCard, transitionCardStatus } from './cards.service';
 import { recordSale } from './sales.service';
 import { createExpense } from './expenses.service';
 import * as gradingService from './grading-submissions.service';
+import * as listingsService from './listings.service';
+import * as tradesService from './trades.service';
+import * as locationsService from './locations.service';
 
 const THINKING: Anthropic.ThinkingConfigParam = { type: 'adaptive' };
 
@@ -636,6 +639,182 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ['description', 'type', 'amount'],
     },
   },
+  // ── Grading batch management ─────────────────────────────────────────────
+  {
+    name: 'list_grading_batches',
+    description: 'List grading batches to find an existing batch_id. Use before submit_to_grading or process_grading_return.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        status: { type: 'string', enum: ['pending', 'submitted', 'returned', 'cancelled'], description: 'Filter by batch status (optional)' },
+      },
+    },
+  },
+  {
+    name: 'update_grading_batch',
+    description: 'Update a grading batch status (e.g. mark as submitted after mailing cards, or update submission number). Use list_grading_batches to find the batch_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        batch_id: { type: 'string', description: 'UUID of the grading batch' },
+        status: { type: 'string', enum: ['pending', 'submitted', 'returned', 'cancelled'], description: 'New status for the batch' },
+        submission_number: { type: 'string', description: 'Submission/tracking number from the grading company' },
+        notes: { type: 'string', description: 'Notes to add to the batch' },
+      },
+      required: ['batch_id'],
+    },
+  },
+  {
+    name: 'process_grading_return',
+    description: 'Process graded cards returned from PSA/BGS/CGC. Records grades and cert numbers for each card in the batch. Use list_grading_batches to find the batch_id and the batch items.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        batch_id: { type: 'string', description: 'UUID of the grading batch being returned' },
+        returned_at: { type: 'string', description: 'Date cards were returned YYYY-MM-DD (default today)' },
+        items: {
+          type: 'array',
+          description: 'Grading results for each card in the batch',
+          items: {
+            type: 'object',
+            properties: {
+              batch_item_id: { type: 'string', description: 'UUID of the batch item (from list_grading_batches)' },
+              grade: { type: 'number', description: 'Numeric grade (e.g. 9, 9.5, 10)' },
+              cert_number: { type: 'string', description: 'Certification number on the slab' },
+              grade_label: { type: 'string', description: 'Grade label text (e.g. GEM MT, MINT)' },
+              card_name_override: { type: 'string', description: 'Updated card name (e.g. full PSA label) — optional' },
+            },
+            required: ['batch_item_id', 'grade'],
+          },
+        },
+      },
+      required: ['batch_id', 'items'],
+    },
+  },
+  // ── Listings management ───────────────────────────────────────────────────
+  {
+    name: 'list_listings',
+    description: 'List active listings to find listing_ids. Use before update_listing or cancel_listing.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        search: { type: 'string', description: 'Search by card name or set' },
+        limit: { type: 'number', description: 'Max results (default 10, max 20)' },
+      },
+    },
+  },
+  {
+    name: 'create_listing',
+    description: 'Create a listing for a card to sell it on a platform. Use list_inventory to find the card_instance_id first.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_instance_id: { type: 'string', description: 'UUID of the card being listed (from list_inventory)' },
+        platform: { type: 'string', enum: ['ebay', 'tcgplayer', 'card_show', 'facebook', 'instagram', 'local', 'other'], description: 'Platform where it will be listed' },
+        list_price: { type: 'number', description: 'Listing price in dollars (e.g. 150.00)' },
+        currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
+        listing_url: { type: 'string', description: 'URL to the listing (e.g. eBay listing URL)' },
+        listed_at: { type: 'string', description: 'Date listed YYYY-MM-DD (default today)' },
+      },
+      required: ['card_instance_id', 'platform', 'list_price'],
+    },
+  },
+  {
+    name: 'update_listing',
+    description: 'Update a listing price, platform, or URL. Use list_listings to find the listing_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        listing_id: { type: 'string', description: 'UUID of the listing to update (from list_listings)' },
+        list_price: { type: 'number', description: 'New price in dollars' },
+        platform: { type: 'string', enum: ['ebay', 'tcgplayer', 'card_show', 'facebook', 'instagram', 'local', 'other'], description: 'New platform' },
+        listing_url: { type: 'string', description: 'Updated listing URL' },
+      },
+      required: ['listing_id'],
+    },
+  },
+  {
+    name: 'cancel_listing',
+    description: 'Cancel an active listing (e.g. if it sold elsewhere or you changed your mind). Use list_listings to find the listing_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        listing_id: { type: 'string', description: 'UUID of the listing to cancel (from list_listings)' },
+      },
+      required: ['listing_id'],
+    },
+  },
+  // ── Trades ────────────────────────────────────────────────────────────────
+  {
+    name: 'record_trade',
+    description: 'Record a trade — cards going out and cards coming in. Supports cash adjustments. Use list_inventory to find outgoing card_instance_ids.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        outgoing: {
+          type: 'array',
+          description: 'Cards you are giving away in the trade',
+          items: {
+            type: 'object',
+            properties: {
+              card_instance_id: { type: 'string', description: 'UUID of the card being traded out (from list_inventory)' },
+              sale_price: { type: 'number', description: 'Agreed trade value for this card in dollars' },
+              currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
+            },
+            required: ['card_instance_id', 'sale_price'],
+          },
+        },
+        incoming: {
+          type: 'array',
+          description: 'Cards you are receiving in the trade',
+          items: {
+            type: 'object',
+            properties: {
+              card_name: { type: 'string', description: 'Card name' },
+              set_name: { type: 'string', description: 'Set name' },
+              condition: { type: 'string', enum: ['NM', 'LP', 'MP', 'HP', 'DMG'], description: 'Card condition (for raw cards)' },
+              decision: { type: 'string', enum: ['sell_raw', 'grade'], description: 'Intent for this card' },
+              purchase_cost: { type: 'number', description: 'Trade credit value in dollars' },
+              currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
+              language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Card language (default EN)' },
+              slab_company: { type: 'string', enum: ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'], description: 'Grading company if incoming card is a graded slab' },
+              slab_grade: { type: 'number', description: 'Grade if incoming card is a graded slab' },
+              slab_cert_number: { type: 'string', description: 'Cert number if incoming card is a graded slab' },
+            },
+            required: ['card_name', 'purchase_cost'],
+          },
+        },
+        trade_date: { type: 'string', description: 'Trade date YYYY-MM-DD (default today)' },
+        person: { type: 'string', description: 'Name of the person you traded with' },
+        cash_from_customer: { type: 'number', description: 'Cash the customer gave you in dollars (positive = you received cash)' },
+        cash_to_customer: { type: 'number', description: 'Cash you gave the customer in dollars' },
+        trade_percent: { type: 'number', description: 'Trade credit percentage (default 80 = 80%)' },
+        notes: { type: 'string', description: 'Notes about the trade' },
+      },
+      required: ['outgoing', 'incoming'],
+    },
+  },
+  // ── Locations ─────────────────────────────────────────────────────────────
+  {
+    name: 'list_locations',
+    description: 'List storage locations to find location_ids for assigning cards.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
+    name: 'assign_card_to_location',
+    description: 'Assign a card to a storage location (e.g. a binder, box, or card show display). Use list_locations to find the location_id and list_inventory for card_instance_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_instance_id: { type: 'string', description: 'UUID of the card to assign (from list_inventory)' },
+        location_id: { type: 'string', description: 'UUID of the location (from list_locations). Omit or set null to unassign.' },
+      },
+      required: ['card_instance_id'],
+    },
+  },
 ];
 
 async function executeAgentTool(userId: string, toolName: string, toolInput: Record<string, unknown>): Promise<unknown> {
@@ -847,6 +1026,178 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     return { success: true, expense_id: expense.expense_id };
   }
 
+  if (toolName === 'list_grading_batches') {
+    const { status } = toolInput as { status?: string };
+    const batches = await gradingService.listBatches(userId);
+    const filtered = status ? batches.filter((b: any) => b.status === status) : batches;
+    return filtered.map((b: any) => ({
+      id: b.id,
+      batch_id: b.batch_id,
+      company: b.company,
+      tier: b.tier,
+      status: b.status,
+      submission_number: b.submission_number,
+      submitted_at: b.submitted_at,
+      grading_cost: b.grading_cost,
+      item_count: b.item_count,
+      items: b.items?.map((item: any) => ({
+        id: item.id,
+        card_name: item.card_name,
+        cert_number: item.cert_number,
+        grade: item.grade,
+        status: item.status,
+      })),
+    }));
+  }
+
+  if (toolName === 'update_grading_batch') {
+    const { batch_id, status, submission_number, notes } =
+      toolInput as { batch_id: string; status?: string; submission_number?: string; notes?: string };
+    const result = await gradingService.updateBatch(userId, batch_id, {
+      ...(status && { status }),
+      ...(submission_number !== undefined && { submission_number }),
+      ...(notes && { notes }),
+    });
+    return { success: true, batch_id, status: result?.status };
+  }
+
+  if (toolName === 'process_grading_return') {
+    const { batch_id, returned_at, items } =
+      toolInput as { batch_id: string; returned_at?: string; items: Array<{ batch_item_id: string; grade: number; cert_number?: string; grade_label?: string; card_name_override?: string }> };
+    const result = await gradingService.processReturn(userId, batch_id, {
+      returned_at,
+      items: items.map((item) => ({
+        batch_item_id: item.batch_item_id,
+        grade: item.grade,
+        cert_number: item.cert_number,
+        grade_label: item.grade_label,
+        card_name_override: item.card_name_override,
+      })),
+    });
+    return { success: true, batch_id, status: result?.status, returned_count: items.length };
+  }
+
+  if (toolName === 'list_listings') {
+    const { search, limit: rawLimit } = toolInput as { search?: string; limit?: number };
+    const limit = Math.min(rawLimit ?? 10, 20);
+    let q = db
+      .selectFrom('listings as l')
+      .innerJoin('card_instances as ci', 'ci.id', 'l.card_instance_id')
+      .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+      .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+      .select([
+        'l.id as listing_id',
+        sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+        sql<string>`COALESCE(ci.set_name_override, cc.set_name)`.as('set_name'),
+        'l.platform',
+        'l.list_price',
+        'l.currency',
+        'l.listing_status',
+        'l.ebay_listing_url',
+        'l.listed_at',
+        'sd.company as grading_company',
+        'sd.grade',
+        'sd.cert_number',
+        'ci.condition',
+      ])
+      .where('l.user_id', '=', userId)
+      .where('l.listing_status', '=', 'active');
+    if (search) {
+      q = q.where(sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${search}%`);
+    }
+    const rows = await q.limit(limit).execute();
+    return rows.map((r) => ({
+      ...r,
+      list_price_usd: r.list_price ? (r.list_price / 100).toFixed(2) : null,
+    }));
+  }
+
+  if (toolName === 'create_listing') {
+    const { card_instance_id, platform, list_price, currency, listing_url, listed_at } =
+      toolInput as { card_instance_id: string; platform: string; list_price: number; currency?: string; listing_url?: string; listed_at?: string };
+    const listing = await listingsService.createListing(userId, {
+      card_instance_id,
+      platform: platform as any,
+      list_price: Math.round(list_price * 100),
+      currency: currency ?? 'USD',
+      ebay_listing_url: listing_url ?? null,
+      listed_at: listed_at ? new Date(listed_at) : new Date(),
+      listing_status: 'active',
+    } as any);
+    return { success: true, listing_id: listing.id };
+  }
+
+  if (toolName === 'update_listing') {
+    const { listing_id, list_price, platform, listing_url } =
+      toolInput as { listing_id: string; list_price?: number; platform?: string; listing_url?: string };
+    await listingsService.updateListing(userId, listing_id, {
+      ...(list_price !== undefined && { list_price: Math.round(list_price * 100) }),
+      ...(platform !== undefined && { platform: platform as any }),
+      ...(listing_url !== undefined && { ebay_listing_url: listing_url }),
+    });
+    return { success: true, listing_id };
+  }
+
+  if (toolName === 'cancel_listing') {
+    const { listing_id } = toolInput as { listing_id: string };
+    await listingsService.cancelListing(userId, listing_id);
+    return { success: true, listing_id };
+  }
+
+  if (toolName === 'record_trade') {
+    const { outgoing, incoming, trade_date, person, cash_from_customer, cash_to_customer, trade_percent, notes } =
+      toolInput as {
+        outgoing: Array<{ card_instance_id: string; sale_price: number; currency?: string }>;
+        incoming: Array<{ card_name: string; set_name?: string; condition?: string; decision?: string; purchase_cost: number; currency?: string; language?: string; slab_company?: string; slab_grade?: number; slab_cert_number?: string }>;
+        trade_date?: string; person?: string; cash_from_customer?: number; cash_to_customer?: number; trade_percent?: number; notes?: string;
+      };
+    const trade = await tradesService.createTrade(userId, {
+      outgoing: outgoing.map((o) => ({
+        card_instance_id: o.card_instance_id,
+        sale_price: Math.round(o.sale_price * 100),
+        currency: o.currency ?? 'USD',
+      })),
+      incoming: incoming.map((i) => ({
+        card_name_override: i.card_name,
+        set_name_override: i.set_name,
+        condition: i.condition,
+        decision: (i.decision ?? 'sell_raw') as 'sell_raw' | 'grade',
+        purchase_cost_cents: Math.round(i.purchase_cost * 100),
+        currency: i.currency ?? 'USD',
+        language: (i.language ?? 'EN') as string,
+        slab_company: i.slab_company,
+        slab_grade: i.slab_grade,
+        slab_cert_number: i.slab_cert_number,
+      })),
+      trade_date,
+      person,
+      cash_from_customer_cents: cash_from_customer ? Math.round(cash_from_customer * 100) : 0,
+      cash_to_customer_cents: cash_to_customer ? Math.round(cash_to_customer * 100) : 0,
+      trade_percent: trade_percent ?? 80,
+      notes,
+    });
+    return { success: true, trade_id: trade.id };
+  }
+
+  if (toolName === 'list_locations') {
+    const locations = await locationsService.listLocations(userId);
+    return locations.map((l: any) => ({
+      id: l.id,
+      name: l.name,
+      card_type: l.card_type,
+      is_card_show: l.is_card_show,
+      is_container: l.is_container,
+      parent_id: l.parent_id,
+      notes: l.notes,
+    }));
+  }
+
+  if (toolName === 'assign_card_to_location') {
+    const { card_instance_id, location_id } = toolInput as { card_instance_id: string; location_id?: string };
+    await locationsService.assignLocation(userId, card_instance_id, location_id ?? null);
+    return { success: true };
+  }
+
   throw new Error(`Unknown tool: ${toolName}`);
 }
 
@@ -908,18 +1259,28 @@ export async function chatWithAgent(
 STRICT SCOPE: You ONLY answer questions and perform actions related to trading cards, card inventory, grading submissions, card sales, card purchases, and related business expenses. If asked about anything else, refuse and redirect.
 
 You can read inventory data AND write to the system using the tools provided:
-- list_inventory: find cards in the user's inventory (do this first before any action on a specific card)
+- list_inventory: find cards in the user's inventory (search by name, set, cert number, or status)
+- lookup_catalog: find catalog entries by name/set before adding cards
 - create_raw_purchase + add_card_to_purchase: log new RAW card purchases (ungraded cards)
-- add_graded_card: log a pre-graded slab (PSA/BGS/CGC/etc.) directly — use this when cert number and grade are visible
-- record_sale: record a card sale (requires card_instance_id from list_inventory)
-- update_card: change status, condition, decision, or notes on a card
+- add_graded_card: log a pre-graded slab (PSA/BGS/CGC/etc.) directly — use when cert number and grade are visible
+- update_card: change status, condition, decision, or notes on a card (use for inspection: set status=inspected + condition + decision)
+- record_sale: record a card sale
+- list_grading_batches: list grading batches (use to find batch_id or batch item IDs)
 - submit_to_grading: add a card to a grading batch (create batch if needed)
+- update_grading_batch: mark batch submitted/returned, add submission number
+- process_grading_return: record grades/certs for cards returned from grader (use list_grading_batches to get batch item IDs)
+- list_listings: list active listings (use to find listing_id)
+- create_listing: list a card for sale on a platform
+- update_listing: change listing price or platform
+- cancel_listing: cancel an active listing
+- record_trade: record a trade (cards in + cards out, with optional cash adjustment)
+- list_locations: list storage locations
+- assign_card_to_location: assign a card to a storage location (binder, box, card show display)
 - record_expense: log a business expense
-- lookup_catalog: find catalog entries before adding cards
 
-GRADED vs RAW detection: If an image shows a graded slab (PSA/BGS/CGC/SGC label visible, cert number present, grade score shown), ALWAYS use add_graded_card — never the raw purchase workflow. Extract the grading company, grade, cert number, card name, and set from the label.
+GRADED vs RAW detection: If an image shows a graded slab (PSA/BGS/CGC/SGC label visible, cert number present, grade score shown), ALWAYS use add_graded_card — never the raw purchase workflow.
 
-REQUIRED FIELDS — you MUST collect ALL of these before calling any write tool. No exceptions.
+REQUIRED FIELDS — collect ALL of these before calling any write tool. Ask for all missing fields in a single message.
 
 Graded slab purchase (add_graded_card):
   - card name AND display name (ask user to confirm or provide PSA-format label)
@@ -930,36 +1291,64 @@ Graded slab purchase (add_graded_card):
   - Optional but ask: purchase date, source
 
 Raw card purchase (create_raw_purchase + add_card_to_purchase):
-  - card name AND display name (see below)
+  - card name AND display name (see Display name rule below)
   - purchase cost (and currency)
   - condition: NM, LP, MP, HP, or DMG
   - decision: "sell raw" or "grade"
   - Optional but ask if not mentioned: purchase date, source/platform, order number, language
 
-Display name: When a catalog match is found, always show the user the catalog's short name (e.g. "Shining Mew") and ask: "What display name should I save this as? You can use the catalog name or provide the full grading label (e.g. PSA format: 2001 POKEMON JAPANESE PROMO COROCORO COMICS 151 SHINING MEW HOLOFOIL)." Store whatever the user provides as card_name_override. If the user says to use the catalog name, leave card_name_override empty.
+Inspection (update_card with status=inspected):
+  - which card (use list_inventory with status=purchased_raw)
+  - condition: NM, LP, MP, HP, or DMG
+  - decision: "sell raw" or "grade"
 
 Sale (record_sale):
   - which card (use list_inventory to confirm)
   - platform: ebay, tcgplayer, card_show, facebook, instagram, local, or other
   - sale price
 
+Listing (create_listing):
+  - which card (use list_inventory to confirm)
+  - platform
+  - list price
+  - Optional: listing URL, date
+
 Grading submission (submit_to_grading):
   - which card (use list_inventory to confirm)
   - grading company: PSA, BGS, CGC, SGC, etc.
-  - tier/service level
+  - tier/service level (e.g. Regular, Economy, Bulk)
+  - Optional: existing batch_id (use list_grading_batches to find it)
+
+Grading return (process_grading_return):
+  - batch (use list_grading_batches to get batch_id AND item IDs)
+  - for each card: grade (numeric), cert number, optional grade label
+  - Optional: return date
+
+Trade (record_trade):
+  - outgoing cards (use list_inventory to find IDs), agreed trade value per card
+  - incoming cards: name, condition, decision, trade credit value
+  - Optional: person, cash adjustments, trade percentage (default 80%), date
+
+Location assignment (assign_card_to_location):
+  - which card (use list_inventory to confirm)
+  - which location (use list_locations to find it)
 
 Expense (record_expense):
-  - description
-  - type
-  - amount
+  - description, type, amount
 
-If ANY required field is missing, stop and ask for it before calling any tool. Collect all missing fields in a single message — do not ask one at a time and do not proceed until you have them all.
+Display name rule: When a catalog match is found, always show the user the catalog's short name and ask: "What display name should I save this as? You can use the catalog name or provide the full grading label." Store what the user provides as card_name_override.
 
 Never assume or guess condition, decision, platform, or any price. Always get them from the user.
 
 Workflow guidance:
-- To record a sale: use list_inventory first to find the card, then record_sale
-- To submit to grading: use list_inventory first to find the card, then submit_to_grading
+- Inspection: list_inventory (status=purchased_raw) → update_card (status=inspected, condition, decision)
+- Sale: list_inventory → record_sale
+- Listing: list_inventory → create_listing
+- Grading submission: list_inventory → submit_to_grading (with or without existing batch_id)
+- Grading return: list_grading_batches → process_grading_return (use item IDs from batch)
+- Mark batch submitted: list_grading_batches → update_grading_batch (status=submitted)
+- Trade: list_inventory (outgoing) → record_trade
+- Location: list_inventory + list_locations → assign_card_to_location
 
 Image handling:
 - If given a card image: extract what you can (card name, set, number, language, cert/grade if visible)
@@ -1045,6 +1434,13 @@ Formatting rules:
             record_sale: ['sales', 'slabs', 'cards'],
             update_card: ['cards', 'slabs'],
             submit_to_grading: ['grading', 'cards'],
+            update_grading_batch: ['grading'],
+            process_grading_return: ['grading', 'slabs', 'cards'],
+            create_listing: ['listings', 'slabs', 'cards'],
+            update_listing: ['listings'],
+            cancel_listing: ['listings', 'slabs', 'cards'],
+            record_trade: ['trades', 'cards', 'slabs', 'sales'],
+            assign_card_to_location: ['cards', 'slabs'],
             record_expense: ['expenses'],
           };
           (TOOL_RESOURCE_MAP[block.name] ?? []).forEach((r) => mutatedResources.add(r));

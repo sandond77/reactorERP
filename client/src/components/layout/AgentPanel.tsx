@@ -11,6 +11,8 @@ const RESOURCE_QUERY_KEYS: Record<string, string[]> = {
   cards:        ['raw-overall', 'raw-inventory-grouped', 'raw-flat-filter-options', 'card-picker-grading'],
   raw_purchases:['raw-overall', 'raw-inventory-grouped'],
   grading:      ['grading-batches', 'grading-batch', 'grading-subs', 'grading-sub-detail'],
+  listings:     ['listings', 'listing-filter-options'],
+  trades:       ['trades'],
   expenses:     ['expenses'],
 };
 
