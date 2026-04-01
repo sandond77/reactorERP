@@ -1,13 +1,14 @@
 import { useState } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
   ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties, Receipt,
-  ScrollText, ShieldCheck, FolderClock, Tag, Settings2,
+  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
+import { api } from '../../lib/api';
 
 const RAW_ROUTES = ['/intake', '/inspection', '/raw-overall', '/ungraded', '/grading', '/sub-returns'];
 const RAW_NAV = [
@@ -83,9 +84,15 @@ function NavFolder({ icon: Icon, label, routes, children, defaultOpen = false }:
 
 export function Sidebar() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+
+  async function handleLogout() {
+    await api.post('/auth/logout').catch(() => {});
+    navigate('/login');
+  }
 
   return (
-    <aside className="w-56 shrink-0 flex flex-col bg-zinc-950 border-r border-zinc-800 min-h-screen">
+    <aside className="w-56 shrink-0 flex flex-col bg-zinc-950 border-r border-zinc-800 h-screen overflow-y-auto">
       {/* Logo */}
       <div className="flex items-center gap-2 px-4 py-5 border-b border-zinc-800">
         <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
@@ -95,45 +102,55 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 px-2 py-3 space-y-0.5">
-        <NavItem to="/"        icon={LayoutDashboard} label="Dashboard" />
-        <NavItem to="/overall" icon={LayoutGrid}      label="Graded/Slabs" />
+      <nav className="flex-1 px-2 py-3 flex flex-col">
+        <div className="space-y-0.5">
+          <NavItem to="/"        icon={LayoutDashboard} label="Dashboard" />
+          <NavItem to="/overall" icon={LayoutGrid}      label="Graded/Slabs" />
 
-        <NavFolder icon={PackageSearch} label="Raw Cards" routes={RAW_ROUTES}>
-          {RAW_NAV.map(({ to, icon, label }) => (
-            <NavItem key={to} to={to} icon={icon} label={label} indent />
-          ))}
-        </NavFolder>
+          <NavFolder icon={PackageSearch} label="Raw Cards" routes={RAW_ROUTES}>
+            {RAW_NAV.map(({ to, icon, label }) => (
+              <NavItem key={to} to={to} icon={icon} label={label} indent />
+            ))}
+          </NavFolder>
 
-        <NavFolder icon={Tag} label="Selling" routes={SELLING_ROUTES}>
-          {SELLING_NAV.map(({ to, icon, label }) => (
-            <NavItem key={to} to={to} icon={icon} label={label} indent />
-          ))}
-        </NavFolder>
+          <NavFolder icon={Tag} label="Selling" routes={SELLING_ROUTES}>
+            {SELLING_NAV.map(({ to, icon, label }) => (
+              <NavItem key={to} to={to} icon={icon} label={label} indent />
+            ))}
+          </NavFolder>
 
-        <NavItem to="/card-show" icon={ShoppingBag} label="Card Show" />
-        <NavItem to="/expenses"  icon={Receipt}     label="Expenses" />
+          <NavItem to="/card-show" icon={ShoppingBag} label="Card Show" />
+          <NavItem to="/expenses"  icon={Receipt}     label="Expenses" />
 
-        <NavItem to="/reports" icon={BarChart3} label="Reports" />
+          <NavItem to="/reports" icon={BarChart3} label="Reports" />
 
-        <NavFolder icon={Settings2} label="Manage" routes={MANAGE_ROUTES}>
-          {MANAGE_NAV.map(({ to, icon, label }) => (
-            <NavItem key={to} to={to} icon={icon} label={label} indent />
-          ))}
-        </NavFolder>
+          <NavFolder icon={Settings2} label="Manage" routes={MANAGE_ROUTES}>
+            {MANAGE_NAV.map(({ to, icon, label }) => (
+              <NavItem key={to} to={to} icon={icon} label={label} indent />
+            ))}
+          </NavFolder>
 
-        <NavFolder icon={FolderClock} label="Audit" routes={['/audit']}>
-          <NavItem to="/audit/log"      icon={ScrollText}   label="Audit Log" indent />
-          <NavItem to="/audit/auditing" icon={ShieldCheck}  label="Inventory Audit" indent />
-        </NavFolder>
+          <NavFolder icon={FolderClock} label="Audit" routes={['/audit']}>
+            <NavItem to="/audit/log"      icon={ScrollText}   label="Audit Log" indent />
+            <NavItem to="/audit/auditing" icon={ShieldCheck}  label="Inventory Audit" indent />
+          </NavFolder>
 
-        <NavItem to="/import" icon={Upload} label="Import" />
+          <NavItem to="/import" icon={Upload} label="Import" />
+        </div>
+
+        <button
+          onClick={handleLogout}
+          className="mt-auto w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors"
+        >
+          <LogOut size={16} />
+          Log out
+        </button>
       </nav>
 
       {/* User */}
       {user && (
         <div className="px-3 py-3 border-t border-zinc-800">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 px-0.5">
             {user.avatar_url ? (
               <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full" />
             ) : (
@@ -147,6 +164,7 @@ export function Sidebar() {
           </div>
         </div>
       )}
+
     </aside>
   );
 }
