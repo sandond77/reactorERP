@@ -1,8 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Sparkles, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Sparkles, Loader2, CheckCircle, AlertCircle, ImagePlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
@@ -41,6 +41,12 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const [catalogId, setCatalogId] = useState<string | null>(null);
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, any> } | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [backFile, setBackFile] = useState<File | null>(null);
+  const [frontPreview, setFrontPreview] = useState<string | null>(null);
+  const [backPreview, setBackPreview] = useState<string | null>(null);
+  const frontRef = useRef<HTMLInputElement>(null);
+  const backRef = useRef<HTMLInputElement>(null);
   const { register, handleSubmit, setValue, getValues, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: { card_game: 'pokemon', language: 'EN', purchase_type: 'raw', quantity: 1, currency: 'USD' },
@@ -104,16 +110,35 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
     }
   };
 
+  function pickImage(side: 'front' | 'back', file: File) {
+    const url = URL.createObjectURL(file);
+    if (side === 'front') { setFrontFile(file); setFrontPreview(url); }
+    else { setBackFile(file); setBackPreview(url); }
+  }
+
+  function clearImage(side: 'front' | 'back') {
+    if (side === 'front') { if (frontPreview) URL.revokeObjectURL(frontPreview); setFrontFile(null); setFrontPreview(null); if (frontRef.current) frontRef.current.value = ''; }
+    else { if (backPreview) URL.revokeObjectURL(backPreview); setBackFile(null); setBackPreview(null); if (backRef.current) backRef.current.value = ''; }
+  }
+
   const onSubmit = async (data: FormData) => {
     const qty = data.purchase_type === 'bulk' ? (data.quantity ?? 1) : 1;
     const costPerUnit = qty > 1 ? (Number(data.purchase_cost) / qty).toFixed(2) : Number(data.purchase_cost).toFixed(2);
-    await api.post('/cards', {
+    const res = await api.post('/cards', {
       ...data,
       catalog_id: catalogId ?? undefined,
       quantity: qty,
       purchase_cost: costPerUnit,
       decision: data.decision,
     });
+    const cardId = res.data?.data?.id ?? res.data?.id;
+    if (cardId) {
+      const uploads = [frontFile && { file: frontFile, side: 'front' }, backFile && { file: backFile, side: 'back' }].filter(Boolean) as { file: File; side: string }[];
+      await Promise.all(uploads.map(({ file, side }) => {
+        const fd = new FormData(); fd.append('image', file);
+        return api.post(`/cards/${cardId}/image?side=${side}`, fd).catch(() => {});
+      }));
+    }
     toast.success('Card added!');
     onSuccess();
   };
@@ -270,6 +295,38 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
           ))}
         </Select>
       )}
+
+      {/* Front / back images */}
+      <div>
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-2">Card Images</label>
+        <div className="flex gap-3">
+          {(['front', 'back'] as const).map((side) => {
+            const preview = side === 'front' ? frontPreview : backPreview;
+            const ref = side === 'front' ? frontRef : backRef;
+            return (
+              <div key={side} className="relative group">
+                <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) pickImage(side, f); }} />
+                {preview ? (
+                  <div className="relative">
+                    <img src={preview} alt={side} className="w-20 h-28 object-contain rounded-lg bg-zinc-800 border border-zinc-700 cursor-pointer" onClick={() => ref.current?.click()} />
+                    <button type="button" onClick={() => clearImage(side)}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-zinc-700 hover:bg-zinc-600 rounded-full flex items-center justify-center">
+                      <X size={10} className="text-zinc-300" />
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => ref.current?.click()}
+                    className="w-20 h-28 rounded-lg border border-dashed border-zinc-700 hover:border-indigo-500 flex flex-col items-center justify-center gap-1 text-zinc-600 hover:text-indigo-400 transition-colors">
+                    <ImagePlus size={16} />
+                    <span className="text-[10px] capitalize">{side}</span>
+                  </button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="submit" disabled={isSubmitting}>

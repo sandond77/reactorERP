@@ -112,7 +112,7 @@ export function Inventory() {
     raw:         colMinWidth('Raw',               true,  false),
     grading_cost: colMinWidth('Grading Cost',     true,  false),
     strike:      colMinWidth('Strike Price',      true,  false),
-    after_ebay:  colMinWidth('After Ebay',        true,  false),
+    after_ebay:  colMinWidth('After Fees',         true,  false),
     net:         colMinWidth('Net',               true,  false),
     purch_date:  colMinWidth('Raw Purchase Date', true,  true),
     date_listed: colMinWidth('Date Listed',       true,  true),
@@ -252,7 +252,7 @@ export function Inventory() {
                 <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw')} align="right" minWidth={MINS.raw} />
                 <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" minWidth={MINS.grading_cost} />
                 <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike')} align="right" minWidth={MINS.strike} />
-                <ColHeader label="After Ebay"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" minWidth={MINS.after_ebay} />
+                <ColHeader label="After Fees"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" minWidth={MINS.after_ebay} />
                 <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" minWidth={MINS.net} />
                 <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('purch_date')} minWidth={MINS.purch_date}
                   filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }}
@@ -290,7 +290,13 @@ export function Inventory() {
                   <td className="px-3 py-1.5 text-zinc-200 truncate" title={row.card_name ?? ''}>
                     {row.card_name ?? '—'}
                   </td>
-                  <td className="px-3 py-1.5 text-zinc-300">{row.grade_label ?? ''}</td>
+                  <td className="px-3 py-1.5 text-zinc-300">
+                    {row.grade_label
+                      ? (row.numeric_grade && !row.grade_label.includes(String(row.numeric_grade))
+                          ? `${row.grade_label} ${row.numeric_grade}`
+                          : row.grade_label)
+                      : (row.numeric_grade ?? '—')}
+                  </td>
                   <td className="px-3 py-1.5 text-center text-zinc-400 text-[11px]">{row.company}</td>
                   <td className="px-3 py-1.5 text-center">
                     {row.is_listed ? (

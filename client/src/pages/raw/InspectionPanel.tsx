@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, ChevronLeft, Trash2, Pencil } from 'lucide-react';
+import { Plus, ChevronLeft, Trash2, Pencil, ImagePlus, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
@@ -11,18 +11,22 @@ import { CONDITIONS, DECISION_LABELS } from './types';
 
 // ── Inspection line form ──────────────────────────────────────────────────────
 
+type LineImages = { front?: File; back?: File };
+
 function InspectionLineForm({
   purchase,
   initial,
   maxQuantity,
   onSave,
   onClose,
+  showImages = true,
 }: {
   purchase: PurchaseRow;
   initial?: Partial<InspectionLine>;
   maxQuantity: number;
-  onSave: (data: Record<string, unknown>) => void;
+  onSave: (data: Record<string, unknown>, images: LineImages) => void;
   onClose: () => void;
+  showImages?: boolean;
 }) {
   const avgUsd = purchase.avg_cost_usd ?? (purchase.total_cost_usd ?? 0);
 
@@ -40,6 +44,22 @@ function InspectionLineForm({
   function set(k: string, v: unknown) { setForm((f) => ({ ...f, [k]: v })); }
 
   const [qtyError, setQtyError] = useState('');
+  const [frontFile, setFrontFile] = useState<File | null>(null);
+  const [backFile,  setBackFile]  = useState<File | null>(null);
+  const [frontPreview, setFrontPreview] = useState<string | null>(null);
+  const [backPreview,  setBackPreview]  = useState<string | null>(null);
+  const frontRef = useRef<HTMLInputElement>(null);
+  const backRef  = useRef<HTMLInputElement>(null);
+
+  function pickImage(side: 'front' | 'back', file: File) {
+    const url = URL.createObjectURL(file);
+    if (side === 'front') { setFrontFile(file); setFrontPreview(url); }
+    else { setBackFile(file); setBackPreview(url); }
+  }
+  function clearImage(side: 'front' | 'back') {
+    if (side === 'front') { if (frontPreview) URL.revokeObjectURL(frontPreview); setFrontFile(null); setFrontPreview(null); if (frontRef.current) frontRef.current.value = ''; }
+    else { if (backPreview) URL.revokeObjectURL(backPreview); setBackFile(null); setBackPreview(null); if (backRef.current) backRef.current.value = ''; }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -55,7 +75,7 @@ function InspectionLineForm({
       purchase_cost: Math.round(parseFloat(form.purchase_cost) * 100),
       currency:      form.currency,
       notes:         form.notes || undefined,
-    });
+    }, { front: frontFile ?? undefined, back: backFile ?? undefined });
   }
 
   const inp   = 'w-full px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500';
@@ -105,6 +125,38 @@ function InspectionLineForm({
         <label className={label}>Notes</label>
         <input value={form.notes} onChange={(e) => set('notes', e.target.value)} className={inp} />
       </div>
+      {showImages && (
+        <div>
+          <label className={label}>Card Images</label>
+          <div className="flex gap-3">
+            {(['front', 'back'] as const).map((side) => {
+              const preview = side === 'front' ? frontPreview : backPreview;
+              const ref = side === 'front' ? frontRef : backRef;
+              return (
+                <div key={side} className="relative">
+                  <input ref={ref} type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+                    onChange={(e) => { const f = e.target.files?.[0]; if (f) pickImage(side, f); }} />
+                  {preview ? (
+                    <div className="relative">
+                      <img src={preview} alt={side} className="w-20 h-28 object-contain rounded-lg bg-zinc-800 border border-zinc-700 cursor-pointer" onClick={() => ref.current?.click()} />
+                      <button type="button" onClick={() => clearImage(side)}
+                        className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-zinc-700 hover:bg-zinc-600 rounded-full flex items-center justify-center">
+                        <X size={10} className="text-zinc-300" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => ref.current?.click()}
+                      className="w-20 h-28 rounded-lg border border-dashed border-zinc-700 hover:border-indigo-500 flex flex-col items-center justify-center gap-1 text-zinc-600 hover:text-indigo-400 transition-colors">
+                      <ImagePlus size={16} />
+                      <span className="text-[10px] capitalize">{side}</span>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
         <Button type="submit" size="sm">Save</Button>
@@ -137,8 +189,18 @@ export function InspectionPanel({
   };
 
   const addMut = useMutation({
-    mutationFn: (body: Record<string, unknown>) =>
-      api.post(`/raw-purchases/${purchase.id}/lines`, body).then((r) => r.data),
+    mutationFn: async ({ body, images }: { body: Record<string, unknown>; images: LineImages }) => {
+      const card = await api.post(`/raw-purchases/${purchase.id}/lines`, body).then((r) => r.data);
+      const cardId = card?.id;
+      if (cardId) {
+        const uploads = ([['front', images.front], ['back', images.back]] as [string, File | undefined][]).filter(([, f]) => f);
+        await Promise.all(uploads.map(([side, file]) => {
+          const fd = new FormData(); fd.append('image', file!);
+          return api.post(`/cards/${cardId}/image?side=${side}`, fd).catch(() => {});
+        }));
+      }
+      return card;
+    },
     onSuccess: () => { invalidate(); setAddLineOpen(false); toast.success('Line added'); },
     onError: () => toast.error('Failed to add line'),
   });
@@ -271,7 +333,7 @@ export function InspectionPanel({
         <InspectionLineForm
           purchase={purchase}
           maxQuantity={remaining}
-          onSave={(body) => addMut.mutate(body)}
+          onSave={(body, images) => addMut.mutate({ body, images })}
           onClose={() => setAddLineOpen(false)}
         />
       </Modal>
@@ -282,6 +344,7 @@ export function InspectionPanel({
             purchase={purchase}
             initial={editLine}
             maxQuantity={remaining + editLine.quantity}
+            showImages={false}
             onSave={(body) => updateMut.mutate({ cardId: editLine.id, body })}
             onClose={() => setEditLine(null)}
           />

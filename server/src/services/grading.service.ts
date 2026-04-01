@@ -30,12 +30,12 @@ const SLAB_SORT_COLS: Record<string, string> = {
   raw_cost:          'ci.purchase_cost',
   grading_cost:      'sd.grading_cost',
   strike_price:      's.sale_price',
-  after_ebay:        '(s.sale_price - s.platform_fees - s.shipping_cost)',
-  net:               '(s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost - sd.grading_cost)',
+  after_ebay:        'CASE WHEN s.platform = \'ebay\' THEN (s.sale_price - s.platform_fees - s.shipping_cost) ELSE s.sale_price END',
+  net:               'CASE WHEN s.platform = \'ebay\' THEN (s.sale_price - s.platform_fees - s.shipping_cost) ELSE s.sale_price END - ci.purchase_cost - sd.grading_cost',
   raw_purchase_date: 'ci.purchased_at',
   date_listed:       'l.listed_at',
   date_sold:         's.sold_at',
-  roi_pct:           'ROUND((s.sale_price - s.platform_fees - s.shipping_cost - ci.purchase_cost - sd.grading_cost)::numeric / NULLIF(ci.purchase_cost + sd.grading_cost, 0) * 100, 2)',
+  roi_pct:           'ROUND((CASE WHEN s.platform = \'ebay\' THEN s.sale_price - s.platform_fees - s.shipping_cost ELSE s.sale_price END - ci.purchase_cost - sd.grading_cost)::numeric / NULLIF(ci.purchase_cost + sd.grading_cost, 0) * 100, 2)',
 };
 
 export async function getSlabFilterOptions(userId: string) {
@@ -44,7 +44,7 @@ export async function getSlabFilterOptions(userId: string) {
       SELECT DISTINCT sd.company AS value
       FROM slab_details sd
       INNER JOIN card_instances ci ON ci.id = sd.card_instance_id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      WHERE ci.user_id = ${userId}
       ORDER BY value
     `.execute(db),
 
@@ -52,7 +52,7 @@ export async function getSlabFilterOptions(userId: string) {
       SELECT DISTINCT sd.grade_label AS value
       FROM slab_details sd
       INNER JOIN card_instances ci ON ci.id = sd.card_instance_id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND sd.grade_label IS NOT NULL
+      WHERE ci.user_id = ${userId} AND sd.grade_label IS NOT NULL
       ORDER BY value
     `.execute(db),
 
@@ -60,7 +60,7 @@ export async function getSlabFilterOptions(userId: string) {
       SELECT DISTINCT EXTRACT(YEAR FROM ci.purchased_at)::int::text AS value
       FROM card_instances ci
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND ci.purchased_at IS NOT NULL
+      WHERE ci.user_id = ${userId} AND ci.purchased_at IS NOT NULL
         AND EXTRACT(YEAR FROM ci.purchased_at) >= 2000
       ORDER BY value
     `.execute(db),
@@ -70,7 +70,7 @@ export async function getSlabFilterOptions(userId: string) {
       FROM listings l
       INNER JOIN card_instances ci ON ci.id = l.card_instance_id
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND l.listed_at IS NOT NULL
+      WHERE ci.user_id = ${userId} AND l.listed_at IS NOT NULL
         AND EXTRACT(YEAR FROM l.listed_at) >= 2000
       ORDER BY value
     `.execute(db),
@@ -80,7 +80,7 @@ export async function getSlabFilterOptions(userId: string) {
       FROM sales s
       INNER JOIN card_instances ci ON ci.id = s.card_instance_id
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      WHERE ci.user_id = ${userId}
         AND EXTRACT(YEAR FROM s.sold_at) >= 2000
       ORDER BY value
     `.execute(db),
@@ -150,7 +150,6 @@ export async function listSlabs(
     FROM card_instances ci
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
     WHERE ci.user_id = ${userId}
-    AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
     ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
@@ -203,8 +202,11 @@ export async function listSlabs(
       ci.purchase_cost                                AS raw_cost,
       sd.grading_cost,
       s.sale_price                                    AS strike_price,
-      CASE WHEN s.sale_price IS NOT NULL
-        THEN s.sale_price - s.platform_fees - s.shipping_cost
+      CASE
+        WHEN s.sale_price IS NOT NULL AND s.platform = 'ebay'
+          THEN s.sale_price - s.platform_fees - s.shipping_cost
+        WHEN s.sale_price IS NOT NULL
+          THEN s.sale_price
         ELSE NULL
       END                                             AS after_ebay,
       ci.purchased_at                                 AS raw_purchase_date,
@@ -213,7 +215,9 @@ export async function listSlabs(
       CASE
         WHEN (ci.purchase_cost + sd.grading_cost) > 0 AND s.sale_price IS NOT NULL
         THEN ROUND(
-          (s.sale_price - s.platform_fees - s.shipping_cost
+          (CASE WHEN s.platform = 'ebay'
+            THEN s.sale_price - s.platform_fees - s.shipping_cost
+            ELSE s.sale_price END
            - ci.purchase_cost - sd.grading_cost)::numeric
           / (ci.purchase_cost + sd.grading_cost) * 100, 2
         )
@@ -237,12 +241,11 @@ export async function listSlabs(
       WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
     ) l ON true
     LEFT JOIN LATERAL (
-      SELECT sale_price, platform_fees, shipping_cost, sold_at, order_details_link
+      SELECT sale_price, platform, platform_fees, shipping_cost, sold_at, order_details_link
       FROM sales
       WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
     ) s ON true
     WHERE ci.user_id = ${userId}
-    AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
     ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
@@ -377,7 +380,6 @@ export async function submitForGrading(userId: string, input: SubmitToGradingInp
     .select(['id', 'status'])
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');

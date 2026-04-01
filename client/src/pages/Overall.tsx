@@ -297,7 +297,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                 <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw_cost')} align="right" minWidth={MINS.raw_cost} />
                 <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" minWidth={MINS.grading_cost} wrap />
                 <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike_price')} align="right" minWidth={MINS.strike_price} wrap />
-                <ColHeader label="After eBay"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" minWidth={MINS.after_ebay} wrap />
+                <ColHeader label="After Fees"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" minWidth={MINS.after_ebay} wrap />
                 <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" minWidth={MINS.net} />
                 <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('raw_purchase_date')} minWidth={MINS.raw_purchase_date} wrap
                   filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }}

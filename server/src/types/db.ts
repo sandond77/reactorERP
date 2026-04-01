@@ -139,7 +139,6 @@ export interface CardInstancesTable {
   is_personal_collection: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
-  deleted_at: Date | null;
 }
 
 export interface GradingSubmissionsTable {
@@ -241,6 +240,7 @@ export interface AuditLogTable {
   entity_type: string;
   entity_id: string;
   action: string;
+  actor: string; // 'user' | 'agent'
   old_data: unknown | null;
   new_data: unknown | null;
   ip_address: string | null;

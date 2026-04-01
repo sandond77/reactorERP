@@ -23,6 +23,8 @@ import { SubReturns } from './pages/SubReturns';
 import { RawOverall } from './pages/RawOverall';
 import LocationManager from './pages/LocationManager';
 import { Expenses } from './pages/Expenses';
+import { ActionLog } from './pages/ActionLog';
+import { Auditing } from './pages/Auditing';
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
 
@@ -60,6 +62,8 @@ export default function App() {
               <Route path="/parts" element={<InventorySummary />} />
               <Route path="/locations" element={<LocationManager />} />
               <Route path="/expenses" element={<Expenses />} />
+              <Route path="/audit/log" element={<ActionLog />} />
+              <Route path="/audit/auditing" element={<Auditing />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

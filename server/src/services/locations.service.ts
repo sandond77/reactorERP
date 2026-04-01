@@ -38,7 +38,7 @@ export async function listLocations(userId: string) {
       COUNT(ci.id) FILTER (WHERE ci.purchase_type = 'pre_graded')::int AS graded_count,
       COUNT(ci.id) FILTER (WHERE ci.purchase_type != 'pre_graded')::int AS raw_count
     FROM locations l
-    LEFT JOIN card_instances ci ON ci.location_id = l.id AND ci.deleted_at IS NULL
+    LEFT JOIN card_instances ci ON ci.location_id = l.id
     WHERE l.user_id = ${userId}
     GROUP BY l.id
     ORDER BY l.name ASC
@@ -163,7 +163,6 @@ export async function getLocationCards(userId: string, locationId: string) {
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     WHERE ci.location_id = ${locationId}
     AND ci.user_id = ${userId}
-    AND ci.deleted_at IS NULL
     ORDER BY card_name ASC
   `.execute(db);
   return rows.rows;
@@ -171,7 +170,7 @@ export async function getLocationCards(userId: string, locationId: string) {
 
 export async function assignLocation(userId: string, cardInstanceId: string, locationId: string | null) {
   // Verify the card belongs to user
-  const card = await db.selectFrom('card_instances').select(['id', 'purchase_type']).where('id', '=', cardInstanceId).where('user_id', '=', userId).where('deleted_at', 'is', null).executeTakeFirst();
+  const card = await db.selectFrom('card_instances').select(['id', 'purchase_type']).where('id', '=', cardInstanceId).where('user_id', '=', userId).executeTakeFirst();
   if (!card) throw new Error('Card not found');
 
   if (locationId) {
