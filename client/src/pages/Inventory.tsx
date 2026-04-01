@@ -290,7 +290,13 @@ export function Inventory() {
                   <td className="px-3 py-1.5 text-zinc-200 truncate" title={row.card_name ?? ''}>
                     {row.card_name ?? '—'}
                   </td>
-                  <td className="px-3 py-1.5 text-zinc-300">{row.grade_label ?? ''}</td>
+                  <td className="px-3 py-1.5 text-zinc-300">
+                    {row.grade_label
+                      ? (row.numeric_grade && !row.grade_label.includes(String(row.numeric_grade))
+                          ? `${row.grade_label} ${row.numeric_grade}`
+                          : row.grade_label)
+                      : (row.numeric_grade ?? '—')}
+                  </td>
                   <td className="px-3 py-1.5 text-center text-zinc-400 text-[11px]">{row.company}</td>
                   <td className="px-3 py-1.5 text-center">
                     {row.is_listed ? (

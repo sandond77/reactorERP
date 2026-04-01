@@ -89,7 +89,7 @@ interface RawCardResult {
 
 function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState<'type' | 'search' | 'copies' | 'raw-search' | 'raw-select' | 'details'>('type');
+  const [step, setStep] = useState<'platform-type' | 'type' | 'search' | 'copies' | 'raw-search' | 'raw-select' | 'other-lookup' | 'details'>('platform-type');
   const [saleMode, setSaleMode] = useState<'graded' | 'raw'>('graded');
 
   // Step 1a — card name search (graded)
@@ -114,7 +114,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [rawUrlLookupLoading, setRawUrlLookupLoading] = useState(false);
 
   // Step 2 — sale details
-  const [platform, setPlatform] = useState<string>('card_show');
+  const [platform, setPlatform] = useState<string>('');
   const [strikePrice, setStrikePrice] = useState('');
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
@@ -140,7 +140,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     queryFn: () => api.get('/grading/slabs', {
       params: { search: debouncedSearch, limit: 100, status: 'unsold', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
     }).then(r => r.data),
-    enabled: debouncedSearch.length >= 2 && step === 'search',
+    enabled: debouncedSearch.length >= 2 && (step === 'search' || (step === 'other-lookup' && saleMode === 'graded')),
   });
 
   // Phase 2: fetch all copies of selected card name, sorted by cert number (FIFO)
@@ -158,7 +158,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     queryFn: () => api.get('/cards', {
       params: { search: debouncedRawSearch, decision: 'sell_raw', status: 'purchased_raw,inspected,raw_for_sale', limit: 100, sort_by: 'card_name', sort_dir: 'asc' },
     }).then(r => r.data),
-    enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select'),
+    enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select' || (step === 'other-lookup' && saleMode === 'raw')),
   });
 
   const uniqueRawCardNames = rawResults
@@ -184,9 +184,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       )
     : [];
 
-  // Filter copies to exact name match, then optionally to listed-only
+  // Filter copies to exact name match, then optionally to listed-only (eBay only)
   const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName && !c.is_personal_collection) ?? [];
-  const copies = listedOnly ? allCopies.filter(c => c.is_listed) : allCopies;
+  const copies = (platform === 'ebay' && listedOnly) ? allCopies.filter(c => c.is_listed) : allCopies;
   const listedCount = allCopies.filter(c => c.is_listed).length;
 
   // Auto-select first copy in filtered list (FIFO)
@@ -231,20 +231,49 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // ── Step: platform-type ───────────────────────────────────────────────────
+
+  if (step === 'platform-type') return (
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-500">Where is this sale from?</p>
+      <div className="grid grid-cols-2 gap-3">
+        <button type="button"
+          onClick={() => { setPlatform('ebay'); setListedOnly(true); setStep('type'); }}
+          className="rounded-xl border-2 border-indigo-500 bg-indigo-500/10 px-4 py-5 text-left hover:bg-indigo-500/20 transition-colors">
+          <p className="text-sm font-semibold text-indigo-300">eBay</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Listed inventory, FIFO cert selection</p>
+        </button>
+        <button type="button"
+          onClick={() => { setPlatform('card_show'); setListedOnly(false); setStep('type'); }}
+          className="rounded-xl border-2 border-zinc-700 bg-zinc-800/40 px-4 py-5 text-left hover:border-zinc-500 hover:bg-zinc-800 transition-colors">
+          <p className="text-sm font-semibold text-zinc-200">Other</p>
+          <p className="text-xs text-zinc-500 mt-0.5">Card shows, private sales, etc.</p>
+        </button>
+      </div>
+      <div className="flex justify-end pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+
   // ── Step: type ────────────────────────────────────────────────────────────
 
   if (step === 'type') return (
     <div className="space-y-3">
+      <div className="flex items-center gap-2 mb-1">
+        <button type="button" onClick={() => setStep('platform-type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+        <span className="text-xs text-zinc-600">{platform === 'ebay' ? 'eBay' : 'Other'}</span>
+      </div>
       <p className="text-xs text-zinc-500">What type of card are you selling?</p>
       <div className="grid grid-cols-2 gap-3">
         <button type="button"
-          onClick={() => { setSaleMode('graded'); setStep('search'); }}
+          onClick={() => { setSaleMode('graded'); setStep(platform === 'ebay' ? 'search' : 'other-lookup'); }}
           className="rounded-xl border-2 border-indigo-500 bg-indigo-500/10 px-4 py-5 text-left hover:bg-indigo-500/20 transition-colors">
           <p className="text-sm font-semibold text-indigo-300">Graded</p>
           <p className="text-xs text-zinc-500 mt-0.5">PSA, BGS, CGC slabs</p>
         </button>
         <button type="button"
-          onClick={() => { setSaleMode('raw'); setStep('raw-search'); }}
+          onClick={() => { setSaleMode('raw'); setStep(platform === 'ebay' ? 'raw-search' : 'other-lookup'); }}
           className="rounded-xl border-2 border-zinc-700 bg-zinc-800/40 px-4 py-5 text-left hover:border-zinc-500 hover:bg-zinc-800 transition-colors">
           <p className="text-sm font-semibold text-zinc-200">Raw</p>
           <p className="text-xs text-zinc-500 mt-0.5">Ungraded cards</p>
@@ -265,17 +294,19 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
           <span className="text-xs text-zinc-600">Graded</span>
         </div>
-        <div className="flex gap-1">
-          {(['name', 'url'] as const).map((m) => (
-            <button key={m} type="button" onClick={() => setGradedSearchMode(m)}
-              className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${gradedSearchMode === m ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-              {m === 'name' ? 'Name' : 'Listing URL'}
-            </button>
-          ))}
-        </div>
+        {platform === 'ebay' && (
+          <div className="flex gap-1">
+            {(['name', 'url'] as const).map((m) => (
+              <button key={m} type="button" onClick={() => setGradedSearchMode(m)}
+                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${gradedSearchMode === m ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {m === 'name' ? 'Name' : 'Listing URL'}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      {gradedSearchMode === 'name' ? (
+      {(platform !== 'ebay' || gradedSearchMode === 'name') ? (
         <>
           <div className="relative">
             <Input label="Search Card" placeholder="Card name or cert number…"
@@ -568,6 +599,86 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     </div>
   );
 
+  // ── Step: other-lookup ───────────────────────────────────────────────────
+
+  if (step === 'other-lookup') return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+        <span className="text-xs text-zinc-600">{saleMode === 'graded' ? 'Graded' : 'Raw'}</span>
+      </div>
+
+      <div className="relative">
+        <Input
+          label={saleMode === 'graded' ? 'Cert # or Card Name' : 'Purchase ID or Card Name'}
+          placeholder={saleMode === 'graded' ? 'e.g. 12345678 or Charizard…' : 'e.g. RP-2024-001 or Charizard…'}
+          value={saleMode === 'graded' ? cardSearch : rawSearch}
+          onChange={(e) => saleMode === 'graded' ? setCardSearch(e.target.value) : setRawSearch(e.target.value)}
+          autoFocus autoComplete="off"
+        />
+        {(isSearching || isRawSearching) && (
+          <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />
+        )}
+      </div>
+
+      {saleMode === 'graded' ? (
+        debouncedSearch.length >= 2 && (
+          (searchResults?.data.length ?? 0) > 0 ? (
+            <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-72 overflow-y-auto">
+              {searchResults!.data.map((card) => (
+                <button key={card.id} type="button"
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 transition-colors"
+                  onClick={() => { setSelectedCard(card); setStep('details'); }}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-sm text-zinc-200 truncate">{card.card_name}</span>
+                    <span className="text-xs text-zinc-500 shrink-0">{card.company} {card.grade_label}</span>
+                  </div>
+                  {card.cert_number && (
+                    <p className="text-[10px] font-mono text-zinc-500 mt-0.5">#{String(card.cert_number).padStart(8, '0')}</p>
+                  )}
+                  {card.is_listed && (
+                    <p className="text-[10px] text-amber-400 mt-0.5">Active eBay listing — remember to delist</p>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : !isSearching ? (
+            <p className="text-xs text-zinc-500 px-1">No unsold graded cards found.</p>
+          ) : null
+        )
+      ) : (
+        debouncedRawSearch.length >= 2 && (
+          (rawResults?.data.length ?? 0) > 0 ? (
+            <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-72 overflow-y-auto">
+              {rawResults!.data.map((card) => (
+                <button key={card.id} type="button"
+                  className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 transition-colors"
+                  onClick={() => { setSelectedRawCard(card); setStep('details'); }}>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-mono text-sm text-indigo-300">{card.raw_purchase_label ?? '—'}</span>
+                    {card.condition && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{card.condition}</span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-0.5 truncate">{card.card_name}</p>
+                  {card.is_listed && (
+                    <p className="text-[10px] text-amber-400 mt-0.5">Active eBay listing — remember to delist</p>
+                  )}
+                </button>
+              ))}
+            </div>
+          ) : !isRawSearching ? (
+            <p className="text-xs text-zinc-500 px-1">No raw cards found for sale.</p>
+          ) : null
+        )
+      )}
+
+      <div className="flex justify-end pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+      </div>
+    </div>
+  );
+
   // ── Step 2: Sale details ──────────────────────────────────────────────────
 
   return (
@@ -675,7 +786,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         value={notes} onChange={(e) => setNotes(e.target.value)} />
 
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" onClick={() => setStep(saleMode === 'raw' ? (rawSearchMode === 'id' ? 'raw-search' : 'raw-select') : (gradedSearchMode === 'url' ? 'search' : 'copies'))}>Back</Button>
+        <Button type="button" variant="ghost" onClick={() => {
+          if (platform !== 'ebay') { setStep('other-lookup'); return; }
+          setStep(saleMode === 'raw' ? (rawSearchMode === 'id' ? 'raw-search' : 'raw-select') : (gradedSearchMode === 'url' ? 'search' : 'copies'));
+        }}>Back</Button>
         <Button type="submit" disabled={submitting}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
           Record Sale
@@ -969,7 +1083,7 @@ export function Sales() {
                   <td className="px-3 py-2">
                     <p className="font-medium text-zinc-200 truncate" title={sale.card_name ?? ''}>{sale.card_name ?? 'Unknown'}</p>
                     <p className="text-[10px] text-zinc-500 truncate">
-                      {sale.set_name}{sale.grade ? ` · ${sale.grading_company} ${sale.grade_label ?? sale.grade}` : ''}
+                      {sale.set_name}{sale.grade ? ` · ${sale.grading_company} ${sale.grade_label ? `${sale.grade_label} ${sale.grade}` : sale.grade}` : ''}
                     </p>
                   </td>
                   <td className="px-3 py-2">

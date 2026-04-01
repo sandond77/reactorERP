@@ -1345,13 +1345,12 @@ WRITE tools (collect required data before calling):
 
 Graded slab intake (add_graded_card):
   Required: grading company, grade (number), cert number, purchase cost, currency
-  Ask display name: show catalog short name and ask if they want that or a custom label (e.g. full PSA format)
+  Display name: always use the full PSA label format as card_name_override (e.g. "2009 POKEMON JAPANESE LUGIA LEGEND-HOLO SOULSILVER COLL-1ST ED. #029") — never ask the user, just construct it from the available card info
   Optional: purchase date, source/where bought
 
 Raw card purchase (create_raw_purchase + add_card_to_purchase):
   Required: card name, purchase cost, currency, condition (NM/LP/MP/HP/DMG), decision (sell_raw or grade)
   Optional: purchase date, source, order number, language (default JP for Pokemon)
-  Display name rule: if catalog match found, ask "use catalog name [X] or provide a custom label?"
 
 Inspection (update_card: status=inspected + condition + decision):
   Required: which card (list_inventory with status=purchased_raw), condition, decision
@@ -1420,7 +1419,7 @@ Find cards needing attention:
 
 GRADED vs RAW: If image shows PSA/BGS/CGC/SGC label with cert number and grade → add_graded_card. Never use raw workflow for slabs.
 
-Display name rule: When catalog match found, show the short catalog name and ask: "Save as [catalog name] or provide a custom label (e.g. full PSA format like '2001 POKEMON JAPANESE PROMO 151 SHINING MEW')?" Use whatever the user says as card_name_override. If they say use the catalog name, omit card_name_override.
+Display name rule: Always set card_name_override to the full PSA label format — all caps, e.g. "2009 POKEMON JAPANESE LUGIA LEGEND-HOLO SOULSILVER COLL-1ST ED. #029". Construct it from year, language (if non-English), card name, set name, and card number. Never ask the user what format to use. This matches what the sub return workflow imports and ensures consistency.
 
 Image handling:
 - Card photo: extract name, set, number, language, cert/grade if visible. Ask for missing required fields in one message.
