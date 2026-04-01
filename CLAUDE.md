@@ -56,4 +56,8 @@ No test suite exists. Validate changes by running the dev server.
 
 **Pagination:** All list endpoints return `{ data: T[], total, page, limit, total_pages }`. Default limit 25, max 100.
 
+**Table columns:** Resizable via `useColWidths` + `ColHeader` (`client/src/components/ui/TableHeader.tsx`). Each column needs a key in both `MINS` (min-width) and the `useColWidths` call, plus a `ColHeader` in `<thead>` and a `<td>` in `<tbody>` — all three must stay in sync.
+
 **Page consistency rule:** All inventory pages must have: search input, Add button, Clear Filters button, filter pattern, and empty state in `<tbody>`.
+
+**Environment:** Server runs on port 3001. Vite dev server on 5173 and proxies `/api` and `/uploads` to `localhost:3001`. Server `.env` needs `DATABASE_URL`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `CLIENT_URL`.
