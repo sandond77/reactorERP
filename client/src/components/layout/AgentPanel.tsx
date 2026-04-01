@@ -1,7 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Bot, Send, X, Loader2, Paperclip } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { api } from '../../lib/api';
+
+// Maps server resource names → React Query key prefixes to invalidate
+const RESOURCE_QUERY_KEYS: Record<string, string[]> = {
+  sales:        ['sales', 'sale-filter-options', 'sales-summary'],
+  slabs:        ['inventory-slabs', 'card-name-search', 'card-copies'],
+  cards:        ['raw-overall', 'raw-inventory-grouped', 'raw-flat-filter-options', 'card-picker-grading'],
+  raw_purchases:['raw-overall', 'raw-inventory-grouped'],
+  grading:      ['grading-batches', 'grading-batch', 'grading-subs', 'grading-sub-detail'],
+  expenses:     ['expenses'],
+};
 
 interface Message {
   role: 'user' | 'assistant';
@@ -41,6 +52,7 @@ function saveMessages(msgs: Message[]) {
 }
 
 export function AgentPanel() {
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>(loadMessages);
   const [input, setInput] = useState('');
@@ -85,6 +97,12 @@ export function AgentPanel() {
     if (fileRef.current) fileRef.current.value = '';
   }
 
+  function invalidateMutated(mutated: string[]) {
+    const keys = new Set<string>();
+    mutated.forEach((r) => (RESOURCE_QUERY_KEYS[r] ?? []).forEach((k) => keys.add(k)));
+    keys.forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
+  }
+
   async function sendText(text: string) {
     setInput('');
     const newMessages: Message[] = [...messages, { role: 'user', content: text }];
@@ -93,6 +111,7 @@ export function AgentPanel() {
     try {
       const { data } = await api.post('/agent/chat', { messages: newMessages.map(({ role, content }) => ({ role, content })) });
       setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
+      if (data.data.mutated?.length) invalidateMutated(data.data.mutated);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
     } finally {
@@ -120,6 +139,7 @@ export function AgentPanel() {
 
       const { data } = await api.post('/agent/chat', form);
       setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
+      if (data.data.mutated?.length) invalidateMutated(data.data.mutated);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
     } finally {

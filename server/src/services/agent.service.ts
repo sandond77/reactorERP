@@ -774,7 +774,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       q = q.where((eb) => eb.or([
         eb(sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', term),
         eb(sql<string>`COALESCE(ci.set_name_override, cc.set_name)`, 'ilike', term),
-        eb(sql<string>`sd.cert_number`, 'ilike', term),
+        eb(sql<string>`sd.cert_number::text`, 'ilike', term),
       ]));
     }
     const rows = await q.limit(limit).execute();
@@ -884,7 +884,7 @@ export async function chatWithAgent(
   userId: string,
   messages: AgentChatMessage[],
   images?: AgentImage[]
-): Promise<string> {
+): Promise<{ reply: string; mutated: string[] }> {
   // Store new images for this user; fall back to any images from a previous turn in this conversation
   if (images?.length) pendingImages.set(userId, images);
   const sessionImages = pendingImages.get(userId);
@@ -900,7 +900,7 @@ export async function chatWithAgent(
   ]);
 
   if (!onTopic) {
-    return 'I can only help with trading card inventory, purchases, sales, grading, and expenses. Please ask something related to your card collection or business.';
+    return { reply: 'I can only help with trading card inventory, purchases, sales, grading, and expenses. Please ask something related to your card collection or business.', mutated: [] };
   }
 
   const systemPrompt = `You are Reactor AI, an assistant exclusively for trading card inventory management.
@@ -1000,6 +1000,8 @@ Formatting rules:
 
   // Track card IDs created this session so we can attach the image after the loop
   const createdCardIds: string[] = [];
+  // Track which resource types were mutated so client can invalidate caches
+  const mutatedResources = new Set<string>();
 
   // Agentic loop — run until end_turn or no more tool calls
   for (let i = 0; i < 5; i++) {
@@ -1018,7 +1020,7 @@ Formatting rules:
         await saveImageToCards(userId, createdCardIds, sessionImages);
         pendingImages.delete(userId);
       }
-      return text;
+      return { reply: text, mutated: [...mutatedResources] };
     }
 
     if (response.stop_reason === 'tool_use') {
@@ -1035,6 +1037,17 @@ Formatting rules:
           if ((block.name === 'add_card_to_purchase' || block.name === 'add_graded_card') && typeof result === 'object' && result !== null && 'id' in result) {
             createdCardIds.push(result.id as string);
           }
+          // Track mutated resources for client cache invalidation
+          const TOOL_RESOURCE_MAP: Record<string, string[]> = {
+            create_raw_purchase: ['raw_purchases'],
+            add_card_to_purchase: ['raw_purchases', 'cards'],
+            add_graded_card: ['slabs', 'cards'],
+            record_sale: ['sales', 'slabs', 'cards'],
+            update_card: ['cards', 'slabs'],
+            submit_to_grading: ['grading', 'cards'],
+            record_expense: ['expenses'],
+          };
+          (TOOL_RESOURCE_MAP[block.name] ?? []).forEach((r) => mutatedResources.add(r));
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -1047,10 +1060,10 @@ Formatting rules:
     }
 
     // Unexpected stop reason — return whatever text we have
-    return response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
+    return { reply: response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.', mutated: [...mutatedResources] };
   }
 
-  return 'I was unable to complete the request within the allowed steps.';
+  return { reply: 'I was unable to complete the request within the allowed steps.', mutated: [...mutatedResources] };
 }
 
 async function getUserInventorySummary(userId: string) {

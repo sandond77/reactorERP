@@ -89,8 +89,8 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
       })
     );
 
-    const reply = await agentService.chatWithAgent(req.user!.id, messages, images.length > 0 ? images : undefined);
-    res.json({ data: { reply } });
+    const { reply, mutated } = await agentService.chatWithAgent(req.user!.id, messages, images.length > 0 ? images : undefined);
+    res.json({ data: { reply, mutated } });
   } catch (err: any) {
     if (err?.status === 529 || err?.error?.error?.type === 'overloaded_error') {
       return res.status(503).json({ data: { reply: "Anthropic's API is currently overloaded. Please try again in a moment." } });
