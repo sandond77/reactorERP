@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import sharp from 'sharp';
 import type { Request, Response, NextFunction } from 'express';
 import * as cardsService from '../services/cards.service';
 import * as agentService from '../services/agent.service';
@@ -185,11 +186,14 @@ export async function uploadCardImage(req: Request, res: Response, next: NextFun
       .where('deleted_at', 'is', null).executeTakeFirst();
     if (!card) { res.status(404).json({ error: 'Card not found' }); return; }
 
-    const ext = req.file.mimetype === 'image/png' ? 'png' : 'jpg';
+    const resized = await sharp(req.file.buffer)
+      .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 85 })
+      .toBuffer();
     const dir = path.join(__dirname, '../../../uploads/card-images', req.user!.id);
     fs.mkdirSync(dir, { recursive: true });
-    const filename = `${cardId}-${side}.${ext}`;
-    fs.writeFileSync(path.join(dir, filename), req.file.buffer);
+    const filename = `${cardId}-${side}.jpg`;
+    fs.writeFileSync(path.join(dir, filename), resized);
 
     const url = `/uploads/card-images/${req.user!.id}/${filename}`;
     const field = side === 'back' ? 'image_back_url' : 'image_front_url';
