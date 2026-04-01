@@ -525,6 +525,30 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'add_graded_card',
+    description: 'Log a pre-graded slab (PSA, BGS, CGC, etc.) directly into inventory. Use this when the user has a graded card with a cert number and grade — NOT the raw workflow.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_name_override: { type: 'string', description: 'Display name for the card (e.g. full PSA label or short name chosen by user)' },
+        catalog_id: { type: 'string', description: 'Catalog ID if known (from lookup_catalog)' },
+        set_name_override: { type: 'string', description: 'Set name if no catalog match' },
+        card_number_override: { type: 'string', description: 'Card number if no catalog match' },
+        language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Card language' },
+        slab_company: { type: 'string', enum: ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'], description: 'Grading company — required' },
+        slab_grade: { type: 'number', description: 'Numeric grade (e.g. 9, 9.5, 10) — required' },
+        slab_grade_label: { type: 'string', description: 'Grade label text (e.g. MINT, GEM MINT, PRISTINE)' },
+        slab_cert_number: { type: 'string', description: 'Certification number from the slab label — required' },
+        purchase_cost: { type: 'number', description: 'Purchase cost in cents (e.g. 50000 = $500.00) — required' },
+        currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency' },
+        source: { type: 'string', description: 'Where purchased from' },
+        purchased_at: { type: 'string', description: 'Purchase date YYYY-MM-DD' },
+        notes: { type: 'string', description: 'Any notes' },
+      },
+      required: ['slab_company', 'slab_grade', 'slab_cert_number', 'purchase_cost'],
+    },
+  },
+  {
     name: 'lookup_catalog',
     description: 'Search the card catalog to find a catalog_id for a card before adding it to a purchase.',
     input_schema: {
@@ -663,6 +687,45 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       status: 'purchased_raw',
       purchase_type: 'raw',
       card_game: 'pokemon',
+    });
+    return { success: true, id: card.id, catalog_matched: !!resolvedCatalogId };
+  }
+
+  if (toolName === 'add_graded_card') {
+    const { card_name_override, catalog_id, set_name_override, card_number_override, language,
+            slab_company, slab_grade, slab_grade_label, slab_cert_number,
+            purchase_cost, currency, source, purchased_at, notes } = toolInput as Record<string, unknown>;
+
+    // Try catalog enrichment if no catalog_id provided
+    let resolvedCatalogId = (catalog_id as string) ?? null;
+    let resolvedCardName = (card_name_override as string) ?? null;
+    if (!resolvedCatalogId && resolvedCardName) {
+      try {
+        const enriched = await autoFillCardData({ partial_name: resolvedCardName, game: 'pokemon' });
+        const best = enriched.suggestions?.[0];
+        if (best?.catalog_id) { resolvedCatalogId = best.catalog_id; }
+      } catch { /* non-fatal */ }
+    }
+
+    const card = await createCard(userId, {
+      catalog_id: resolvedCatalogId,
+      card_name_override: resolvedCardName,
+      set_name_override: (set_name_override as string) ?? null,
+      card_number_override: (card_number_override as string) ?? null,
+      language: ((language as string) ?? 'JP') as 'JP' | 'EN' | 'KR',
+      purchase_cost: (purchase_cost as number) ?? 0,
+      currency: ((currency as string) ?? 'USD') as 'USD' | 'JPY',
+      quantity: 1,
+      purchase_type: 'pre_graded',
+      card_game: 'pokemon',
+      notes: (notes as string) ?? null,
+      purchased_at: (purchased_at as string) ?? null,
+    } as any, {
+      company: slab_company as string,
+      grade: slab_grade as number,
+      grade_label: (slab_grade_label as string) ?? undefined,
+      cert_number: (slab_cert_number as string) ?? undefined,
+      additional_cost: 0,
     });
     return { success: true, id: card.id, catalog_matched: !!resolvedCatalogId };
   }
@@ -846,14 +909,25 @@ STRICT SCOPE: You ONLY answer questions and perform actions related to trading c
 
 You can read inventory data AND write to the system using the tools provided:
 - list_inventory: find cards in the user's inventory (do this first before any action on a specific card)
-- create_raw_purchase + add_card_to_purchase: log new card purchases
+- create_raw_purchase + add_card_to_purchase: log new RAW card purchases (ungraded cards)
+- add_graded_card: log a pre-graded slab (PSA/BGS/CGC/etc.) directly — use this when cert number and grade are visible
 - record_sale: record a card sale (requires card_instance_id from list_inventory)
 - update_card: change status, condition, decision, or notes on a card
 - submit_to_grading: add a card to a grading batch (create batch if needed)
 - record_expense: log a business expense
 - lookup_catalog: find catalog entries before adding cards
 
+GRADED vs RAW detection: If an image shows a graded slab (PSA/BGS/CGC/SGC label visible, cert number present, grade score shown), ALWAYS use add_graded_card — never the raw purchase workflow. Extract the grading company, grade, cert number, card name, and set from the label.
+
 REQUIRED FIELDS — you MUST collect ALL of these before calling any write tool. No exceptions.
+
+Graded slab purchase (add_graded_card):
+  - card name AND display name (ask user to confirm or provide PSA-format label)
+  - grading company (PSA, BGS, CGC, SGC, etc.)
+  - grade (numeric, e.g. 9 or 9.5)
+  - cert number
+  - purchase cost (and currency)
+  - Optional but ask: purchase date, source
 
 Raw card purchase (create_raw_purchase + add_card_to_purchase):
   - card name AND display name (see below)
@@ -958,7 +1032,7 @@ Formatting rules:
         try {
           const result = await executeAgentTool(userId, block.name, block.input as Record<string, unknown>);
           // Track any card instance IDs created
-          if (block.name === 'add_card_to_purchase' && typeof result === 'object' && result !== null && 'id' in result) {
+          if ((block.name === 'add_card_to_purchase' || block.name === 'add_graded_card') && typeof result === 'object' && result !== null && 'id' in result) {
             createdCardIds.push(result.id as string);
           }
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
