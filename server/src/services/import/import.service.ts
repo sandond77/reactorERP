@@ -333,7 +333,6 @@ async function executeBulkSaleImport(
           .select(['ci.id', 'ci.status'])
           .where('sd.cert_number', '=', parseInt(identifier, 10) as any)
           .where('ci.user_id', '=', userId)
-          .where('ci.deleted_at', 'is', null)
           .executeTakeFirst();
 
         if (!slab) throw new Error(`No graded card found with cert# ${identifier}`);
@@ -356,7 +355,6 @@ async function executeBulkSaleImport(
           .where('raw_purchase_id', '=', rp.id)
           .where('user_id', '=', userId)
           .where('status', '!=', 'sold' as any)
-          .where('deleted_at', 'is', null)
           .execute();
 
         if (unsold.length === 0) throw new Error(`No unsold cards for purchase ${identifier}`);

@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
+import { logAudit } from '../utils/audit';
 import type { RawPurchaseType, RawPurchaseStatus } from '../types/db';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -90,7 +91,7 @@ export async function listRawPurchases(
   let query = db
     .selectFrom('raw_purchases as rp')
     .leftJoin('card_instances as ci', (join) =>
-      join.onRef('ci.raw_purchase_id', '=', 'rp.id').on('ci.deleted_at', 'is', null)
+      join.onRef('ci.raw_purchase_id', '=', 'rp.id')
     )
     .select([
       'rp.id',
@@ -147,7 +148,7 @@ export async function listRawPurchases(
       ? db
           .selectFrom('raw_purchases as rp')
           .leftJoin('card_instances as ci', (join) =>
-            join.onRef('ci.raw_purchase_id', '=', 'rp.id').on('ci.deleted_at', 'is', null)
+            join.onRef('ci.raw_purchase_id', '=', 'rp.id')
           )
           .select('rp.id')
           .where('rp.user_id', '=', userId)
@@ -216,7 +217,6 @@ export async function getRawPurchase(userId: string, id: string) {
     ])
     .where('ci.raw_purchase_id', '=', id)
     .where('ci.user_id', '=', userId)
-    .where('ci.deleted_at', 'is', null)
     .orderBy('ci.created_at', 'asc')
     .execute();
 
@@ -230,7 +230,7 @@ export async function createRawPurchase(userId: string, input: CreateRawPurchase
 
   const purchaseId = await nextPurchaseId(userId, input.type, year);
 
-  return db
+  const purchase = await db
     .insertInto('raw_purchases')
     .values({
       user_id: userId,
@@ -255,6 +255,8 @@ export async function createRawPurchase(userId: string, input: CreateRawPurchase
     })
     .returningAll()
     .executeTakeFirstOrThrow();
+  await logAudit(userId, 'raw_purchases', purchase.id, 'created', null, purchase);
+  return purchase;
 }
 
 export async function updateRawPurchase(
@@ -262,6 +264,8 @@ export async function updateRawPurchase(
   id: string,
   input: UpdateRawPurchaseInput
 ) {
+  const existing = await db.selectFrom('raw_purchases').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
+
   const update: Record<string, unknown> = {};
   if (input.type !== undefined)          update.type = input.type;
   if (input.source !== undefined)        update.source = input.source;
@@ -281,16 +285,20 @@ export async function updateRawPurchase(
   if (input.reserved !== undefined)      update.reserved = input.reserved;
   if (input.notes !== undefined)         update.notes = input.notes;
 
-  return db
+  const updated = await db
     .updateTable('raw_purchases')
     .set(update)
     .where('id', '=', id)
     .where('user_id', '=', userId)
     .returningAll()
     .executeTakeFirst();
+  if (updated) await logAudit(userId, 'raw_purchases', id, 'updated', existing, updated);
+  return updated;
 }
 
 export async function deleteRawPurchase(userId: string, id: string) {
+  const existing = await db.selectFrom('raw_purchases').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
+
   // Unlink cards first
   await db
     .updateTable('card_instances')
@@ -299,11 +307,13 @@ export async function deleteRawPurchase(userId: string, id: string) {
     .where('user_id', '=', userId)
     .execute();
 
-  return db
+  const result = await db
     .deleteFrom('raw_purchases')
     .where('id', '=', id)
     .where('user_id', '=', userId)
     .executeTakeFirst();
+  if (existing) await logAudit(userId, 'raw_purchases', id, 'deleted', existing, null);
+  return result;
 }
 
 // ── Inspection: add/update card instance linked to a purchase ─────────────────
@@ -334,7 +344,7 @@ export async function addInspectionLine(
 
   const status = input.decision === 'sell_raw' ? 'raw_for_sale' : 'inspected';
 
-  return db
+  const card = await db
     .insertInto('card_instances')
     .values({
       user_id: userId,
@@ -357,6 +367,8 @@ export async function addInspectionLine(
     })
     .returningAll()
     .executeTakeFirstOrThrow();
+  await logAudit(userId, 'card_instances', card.id, 'created', null, card);
+  return card;
 }
 
 export async function updateInspectionLine(
@@ -364,6 +376,8 @@ export async function updateInspectionLine(
   cardInstanceId: string,
   input: Partial<InspectionLineInput>
 ) {
+  const existing = await db.selectFrom('card_instances').selectAll().where('id', '=', cardInstanceId).where('user_id', '=', userId).executeTakeFirst();
+
   const update: Record<string, unknown> = {};
   if (input.condition !== undefined)     update.condition = input.condition;
   if (input.decision !== undefined) {
@@ -374,21 +388,27 @@ export async function updateInspectionLine(
   if (input.purchase_cost !== undefined) update.purchase_cost = input.purchase_cost;
   if (input.notes !== undefined)         update.notes = input.notes;
 
-  return db
+  const updated = await db
     .updateTable('card_instances')
     .set(update)
     .where('id', '=', cardInstanceId)
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .returningAll()
     .executeTakeFirst();
+  if (updated) await logAudit(userId, 'card_instances', cardInstanceId, 'updated', existing, updated);
+  return updated;
 }
 
 export async function deleteInspectionLine(userId: string, cardInstanceId: string) {
-  return db
-    .updateTable('card_instances')
-    .set({ deleted_at: new Date() })
+  // Fetch snapshot for audit log
+  const card = await db
+    .selectFrom('card_instances')
+    .selectAll()
     .where('id', '=', cardInstanceId)
     .where('user_id', '=', userId)
     .executeTakeFirst();
+  if (!card) return null;
+  await logAudit(userId, 'card_instances', cardInstanceId, 'deleted', card, null);
+  await db.deleteFrom('card_instances').where('id', '=', cardInstanceId).where('user_id', '=', userId).execute();
+  return card;
 }

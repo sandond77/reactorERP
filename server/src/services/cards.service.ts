@@ -3,6 +3,7 @@ import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import { createRawPurchase } from './raw-purchases.service';
+import { logAudit } from '../utils/audit';
 import type { CardStatus, NewCardInstance, CardInstanceUpdate } from '../types/db';
 import type { PaginationParams } from '../utils/pagination';
 
@@ -72,8 +73,7 @@ export async function listCards(
       sql<boolean>`(al.card_instance_id IS NOT NULL)`.as('is_listed'),
       'loc.name as location_name',
     ])
-    .where('ci.user_id', '=', userId)
-    .where('ci.deleted_at', 'is', null);
+    .where('ci.user_id', '=', userId);
 
   if (filters.status) {
     const statuses = filters.status.split(',').map((s: string) => s.trim()).filter(Boolean);
@@ -124,7 +124,6 @@ export async function listCards(
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .select((eb) => eb.fn.count<number>('ci.id').as('count'))
     .where('ci.user_id', '=', userId)
-    .where('ci.deleted_at', 'is', null)
     .$if(!!filters.status, (qb) => {
       const ss = filters.status!.split(',').map((s: string) => s.trim()).filter(Boolean);
       return ss.length === 1 ? qb.where('ci.status', '=', ss[0]) : qb.where('ci.status', 'in', ss as any);
@@ -158,17 +157,17 @@ export async function getCardFilterOptions(userId: string) {
   const [games, languages, conditions] = await Promise.all([
     sql<{ value: string }>`
       SELECT DISTINCT card_game AS value FROM card_instances
-      WHERE user_id = ${userId} AND deleted_at IS NULL AND status IN ('purchased_raw', 'inspected')
+      WHERE user_id = ${userId} AND status IN ('purchased_raw', 'inspected')
       ORDER BY value
     `.execute(db),
     sql<{ value: string }>`
       SELECT DISTINCT language AS value FROM card_instances
-      WHERE user_id = ${userId} AND deleted_at IS NULL AND status IN ('purchased_raw', 'inspected')
+      WHERE user_id = ${userId} AND status IN ('purchased_raw', 'inspected')
       ORDER BY value
     `.execute(db),
     sql<{ value: string }>`
       SELECT DISTINCT condition AS value FROM card_instances
-      WHERE user_id = ${userId} AND deleted_at IS NULL AND status IN ('purchased_raw', 'inspected') AND condition IS NOT NULL
+      WHERE user_id = ${userId} AND status IN ('purchased_raw', 'inspected') AND condition IS NOT NULL
       ORDER BY value
     `.execute(db),
   ]);
@@ -220,7 +219,6 @@ export async function listCardsGroupedByPart(
       'loc.name as location_name',
     ])
     .where('ci.user_id', '=', userId)
-    .where('ci.deleted_at', 'is', null)
     .where('ci.raw_purchase_id', 'is not', null)
     .orderBy('ci.purchased_at', 'desc');
 
@@ -351,7 +349,6 @@ export async function getCardById(userId: string, cardId: string) {
     ])
     .where('ci.id', '=', cardId)
     .where('ci.user_id', '=', userId)
-    .where('ci.deleted_at', 'is', null)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');
@@ -436,7 +433,6 @@ export async function updateCard(
     .selectAll()
     .where('id', '=', cardId)
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .executeTakeFirst();
 
   if (!existing) throw new AppError(404, 'Card not found');
@@ -486,7 +482,6 @@ export async function transitionCardStatus(userId: string, cardId: string, newSt
     .select(['id', 'status'])
     .where('id', '=', cardId)
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');
@@ -511,22 +506,34 @@ export async function transitionCardStatus(userId: string, cardId: string, newSt
   return updated;
 }
 
-export async function softDeleteCard(userId: string, cardId: string) {
+export async function softDeleteCard(userId: string, cardId: string, actor: 'user' | 'agent' = 'user') {
+  // Fetch full snapshot before deleting so the audit log has the complete record
   const card = await db
     .selectFrom('card_instances')
-    .select('id')
+    .selectAll()
     .where('id', '=', cardId)
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');
 
+  // Include slab_details in snapshot if this is a graded card (needed for revert)
+  const slab = await db
+    .selectFrom('slab_details')
+    .selectAll()
+    .where('card_instance_id', '=', cardId)
+    .executeTakeFirst();
+
+  // Hard delete (slab_details cascades via FK)
   await db
-    .updateTable('card_instances')
-    .set({ deleted_at: new Date() })
+    .deleteFrom('card_instances')
     .where('id', '=', cardId)
+    .where('user_id', '=', userId)
     .execute();
+
+  // Write full snapshot (card + slab) to audit log so the record can be fully restored
+  const snapshot = slab ? { ...card, _slab: slab } : card;
+  await logAudit(userId, 'card_instances', cardId, 'deleted', snapshot, null, actor);
 }
 
 export async function computeCostBasis(cardId: string): Promise<number> {
@@ -557,28 +564,6 @@ export async function computeCostBasis(cardId: string): Promise<number> {
   if (slab) basis += slab.grading_cost ?? 0;
 
   return basis;
-}
-
-async function logAudit(
-  userId: string,
-  entityType: string,
-  entityId: string,
-  action: string,
-  oldData: unknown,
-  newData: unknown
-) {
-  await db
-    .insertInto('audit_log')
-    .values({
-      user_id: userId,
-      entity_type: entityType,
-      entity_id: entityId,
-      action,
-      old_data: oldData as any,
-      new_data: newData as any,
-    })
-    .execute()
-    .catch((err) => console.error('[audit] Failed to write audit log:', err));
 }
 
 // ─── Raw flat overview ────────────────────────────────────────────────────────
@@ -612,13 +597,13 @@ export async function getRawFlatFilterOptions(userId: string) {
   const [conditions, purchaseYears, listedYears, soldYears] = await Promise.all([
     sql<{ value: string }>`
       SELECT DISTINCT ci.condition AS value FROM card_instances ci
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      WHERE ci.user_id = ${userId}
         AND ci.raw_purchase_id IS NOT NULL AND ci.condition IS NOT NULL
       ORDER BY value
     `.execute(db),
     sql<{ value: string }>`
       SELECT DISTINCT EXTRACT(YEAR FROM ci.purchased_at)::int::text AS value FROM card_instances ci
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      WHERE ci.user_id = ${userId}
         AND ci.raw_purchase_id IS NOT NULL AND ci.purchased_at IS NOT NULL
         AND EXTRACT(YEAR FROM ci.purchased_at) >= 2000
       ORDER BY value
@@ -626,7 +611,7 @@ export async function getRawFlatFilterOptions(userId: string) {
     sql<{ value: string }>`
       SELECT DISTINCT EXTRACT(YEAR FROM l.listed_at)::int::text AS value
       FROM listings l INNER JOIN card_instances ci ON ci.id = l.card_instance_id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      WHERE ci.user_id = ${userId}
         AND ci.raw_purchase_id IS NOT NULL AND l.listed_at IS NOT NULL
         AND EXTRACT(YEAR FROM l.listed_at) >= 2000
       ORDER BY value
@@ -634,7 +619,7 @@ export async function getRawFlatFilterOptions(userId: string) {
     sql<{ value: string }>`
       SELECT DISTINCT EXTRACT(YEAR FROM s.sold_at)::int::text AS value
       FROM sales s INNER JOIN card_instances ci ON ci.id = s.card_instance_id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      WHERE ci.user_id = ${userId}
         AND ci.raw_purchase_id IS NOT NULL AND EXTRACT(YEAR FROM s.sold_at) >= 2000
       ORDER BY value
     `.execute(db),
@@ -695,10 +680,10 @@ export async function listRawFlat(
       FROM listings WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
     ) l ON true
     LEFT JOIN LATERAL (
-      SELECT sale_price, platform_fees, shipping_cost, sold_at, order_details_link
+      SELECT sale_price, platform, platform_fees, shipping_cost, sold_at, order_details_link
       FROM sales WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
     ) s ON true
-    WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND ci.raw_purchase_id IS NOT NULL
+    WHERE ci.user_id = ${userId} AND ci.raw_purchase_id IS NOT NULL
     ${statusCond} ${conditionIn} ${listedCond}
     ${purchaseYearIn} ${listedYearIn} ${soldYearIn}
     ${purchaseDateCond} ${listedDateCond} ${soldDateCond}

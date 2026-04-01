@@ -141,7 +141,6 @@ export async function getInventoryValue(userId: string) {
       sql<number>`SUM(ci.purchase_cost)::int`.as('total_cost'),
     ])
     .where('ci.user_id', '=', userId)
-    .where('ci.deleted_at', 'is', null)
     .where('ci.status', '!=', 'sold')
     .groupBy('ci.status')
     .execute();

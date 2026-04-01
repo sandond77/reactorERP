@@ -44,7 +44,7 @@ export async function getSlabFilterOptions(userId: string) {
       SELECT DISTINCT sd.company AS value
       FROM slab_details sd
       INNER JOIN card_instances ci ON ci.id = sd.card_instance_id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      WHERE ci.user_id = ${userId}
       ORDER BY value
     `.execute(db),
 
@@ -52,7 +52,7 @@ export async function getSlabFilterOptions(userId: string) {
       SELECT DISTINCT sd.grade_label AS value
       FROM slab_details sd
       INNER JOIN card_instances ci ON ci.id = sd.card_instance_id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND sd.grade_label IS NOT NULL
+      WHERE ci.user_id = ${userId} AND sd.grade_label IS NOT NULL
       ORDER BY value
     `.execute(db),
 
@@ -60,7 +60,7 @@ export async function getSlabFilterOptions(userId: string) {
       SELECT DISTINCT EXTRACT(YEAR FROM ci.purchased_at)::int::text AS value
       FROM card_instances ci
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND ci.purchased_at IS NOT NULL
+      WHERE ci.user_id = ${userId} AND ci.purchased_at IS NOT NULL
         AND EXTRACT(YEAR FROM ci.purchased_at) >= 2000
       ORDER BY value
     `.execute(db),
@@ -70,7 +70,7 @@ export async function getSlabFilterOptions(userId: string) {
       FROM listings l
       INNER JOIN card_instances ci ON ci.id = l.card_instance_id
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL AND l.listed_at IS NOT NULL
+      WHERE ci.user_id = ${userId} AND l.listed_at IS NOT NULL
         AND EXTRACT(YEAR FROM l.listed_at) >= 2000
       ORDER BY value
     `.execute(db),
@@ -80,7 +80,7 @@ export async function getSlabFilterOptions(userId: string) {
       FROM sales s
       INNER JOIN card_instances ci ON ci.id = s.card_instance_id
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
-      WHERE ci.user_id = ${userId} AND ci.deleted_at IS NULL
+      WHERE ci.user_id = ${userId}
         AND EXTRACT(YEAR FROM s.sold_at) >= 2000
       ORDER BY value
     `.execute(db),
@@ -150,7 +150,6 @@ export async function listSlabs(
     FROM card_instances ci
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
     WHERE ci.user_id = ${userId}
-    AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
     ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
@@ -247,7 +246,6 @@ export async function listSlabs(
       WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
     ) s ON true
     WHERE ci.user_id = ${userId}
-    AND ci.deleted_at IS NULL
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
     ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
@@ -382,7 +380,6 @@ export async function submitForGrading(userId: string, input: SubmitToGradingInp
     .select(['id', 'status'])
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');

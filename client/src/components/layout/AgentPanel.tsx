@@ -1,25 +1,30 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Bot, Send, X, Loader2, Paperclip } from 'lucide-react';
+import { Bot, Send, X, Loader2, Paperclip, FileSpreadsheet } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { api } from '../../lib/api';
 
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const SPREADSHEET_TYPES = ['text/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
+const ACCEPTED_TYPES = [...IMAGE_TYPES, ...SPREADSHEET_TYPES].join(',');
+
 // Maps server resource names → React Query key prefixes to invalidate
 const RESOURCE_QUERY_KEYS: Record<string, string[]> = {
-  sales:        ['sales', 'sale-filter-options', 'sales-summary'],
-  slabs:        ['inventory-slabs', 'card-name-search', 'card-copies'],
-  cards:        ['raw-overall', 'raw-inventory-grouped', 'raw-flat-filter-options', 'card-picker-grading'],
-  raw_purchases:['raw-overall', 'raw-inventory-grouped'],
-  grading:      ['grading-batches', 'grading-batch', 'grading-subs', 'grading-sub-detail'],
-  listings:     ['listings', 'listing-filter-options'],
-  trades:       ['trades'],
-  expenses:     ['expenses'],
+  sales:        ['sales', 'sale-filter-options', 'sales-summary', 'audit-log'],
+  slabs:        ['inventory-slabs', 'card-name-search', 'card-copies', 'audit-log'],
+  cards:        ['raw-overall', 'raw-inventory-grouped', 'raw-flat-filter-options', 'card-picker-grading', 'audit-log'],
+  raw_purchases:['raw-overall', 'raw-inventory-grouped', 'audit-log'],
+  grading:      ['grading-batches', 'grading-batch', 'grading-subs', 'grading-sub-detail', 'audit-log'],
+  listings:     ['listings', 'listing-filter-options', 'audit-log'],
+  trades:       ['trades', 'audit-log'],
+  expenses:     ['expenses', 'audit-log'],
 };
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
   imageUrls?: string[];
+  timestamp?: string;
 }
 
 const SUGGESTIONS = [
@@ -60,7 +65,7 @@ export function AgentPanel() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
-  const [previews, setPreviews] = useState<string[]>([]);
+  const [previews, setPreviews] = useState<(string | null)[]>([]); // null = spreadsheet (no image preview)
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -83,17 +88,21 @@ export function AgentPanel() {
     const remaining = MAX_ATTACHMENTS - attachments.length;
     const toAdd = files.slice(0, remaining);
     setAttachments(prev => [...prev, ...toAdd]);
-    setPreviews(prev => [...prev, ...toAdd.map(f => URL.createObjectURL(f))]);
+    setPreviews(prev => [...prev, ...toAdd.map(f => IMAGE_TYPES.includes(f.type) ? URL.createObjectURL(f) : null)]);
     e.target.value = '';
   }
 
   function removeAttachment(i: number) {
-    setPreviews(prev => { URL.revokeObjectURL(prev[i]); return prev.filter((_, idx) => idx !== i); });
+    setPreviews(prev => {
+      const url = prev[i];
+      if (url) URL.revokeObjectURL(url);
+      return prev.filter((_, idx) => idx !== i);
+    });
     setAttachments(prev => prev.filter((_, idx) => idx !== i));
   }
 
   function clearAttachments(revoke = true) {
-    if (revoke) previews.forEach(URL.revokeObjectURL);
+    if (revoke) previews.forEach(url => { if (url) URL.revokeObjectURL(url); });
     setAttachments([]);
     setPreviews([]);
     if (fileRef.current) fileRef.current.value = '';
@@ -107,12 +116,12 @@ export function AgentPanel() {
 
   async function sendText(text: string) {
     setInput('');
-    const newMessages: Message[] = [...messages, { role: 'user', content: text }];
+    const newMessages: Message[] = [...messages, { role: 'user', content: text, timestamp: new Date().toISOString() }];
     setMessages(newMessages);
     setLoading(true);
     try {
       const { data } = await api.post('/agent/chat', { messages: newMessages.map(({ role, content }) => ({ role, content })) });
-      setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply, timestamp: new Date().toISOString() }]);
       if (data.data.mutated?.length) invalidateMutated(data.data.mutated);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
@@ -126,9 +135,11 @@ export function AgentPanel() {
     if ((!text && attachments.length === 0) || loading) return;
     setInput('');
 
-    const imageUrls = previews.length > 0 ? [...previews] : undefined;
-    const userContent = text || 'What is this?';
-    const newMessages: Message[] = [...messages, { role: 'user', content: userContent, imageUrls }];
+    const imageUrls = previews.filter(Boolean).length > 0 ? previews.filter(Boolean) as string[] : undefined;
+    const spreadsheetNames = attachments.filter(f => SPREADSHEET_TYPES.includes(f.type)).map(f => f.name);
+    const defaultContent = imageUrls ? 'What is this?' : spreadsheetNames.length > 0 ? `Attached: ${spreadsheetNames.join(', ')}` : '';
+    const userContent = text || defaultContent;
+    const newMessages: Message[] = [...messages, { role: 'user', content: userContent, imageUrls, timestamp: new Date().toISOString() }];
     setMessages(newMessages);
     // Keep URLs alive for message bubbles — clear state without revoking
     clearAttachments(false);
@@ -137,13 +148,16 @@ export function AgentPanel() {
     try {
       const form = new FormData();
       form.append('messages', JSON.stringify(newMessages.map(({ role, content }) => ({ role, content }))));
-      attachments.forEach(f => form.append('images', f));
+      attachments.forEach(f => {
+        if (IMAGE_TYPES.includes(f.type)) form.append('images', f);
+        else form.append('files', f);
+      });
 
       const { data } = await api.post('/agent/chat', form);
-      setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply, timestamp: new Date().toISOString() }]);
       if (data.data.mutated?.length) invalidateMutated(data.data.mutated);
     } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.', timestamp: new Date().toISOString() }]);
     } finally {
       setLoading(false);
     }
@@ -213,7 +227,7 @@ export function AgentPanel() {
               </div>
             )}
             {messages.map((m, i) => (
-              <div key={i} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+              <div key={i} className={cn('flex flex-col gap-0.5', m.role === 'user' ? 'items-end' : 'items-start')}>
                 <div className={cn(
                   'max-w-[80%] rounded-2xl text-sm leading-relaxed overflow-hidden',
                   m.role === 'user'
@@ -231,6 +245,11 @@ export function AgentPanel() {
                     <p className="px-4 py-2.5 whitespace-pre-wrap">{m.content}</p>
                   ) : null}
                 </div>
+                {m.timestamp && (
+                  <span className="text-[10px] text-zinc-600 px-1">
+                    {new Date(m.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                  </span>
+                )}
               </div>
             ))}
             {loading && (
@@ -248,7 +267,14 @@ export function AgentPanel() {
             <div className="px-4 pb-2 flex items-center gap-2 flex-wrap">
               {previews.map((url, i) => (
                 <div key={i} className="relative shrink-0">
-                  <img src={url} alt="attachment" className="h-14 w-14 object-cover rounded-lg border border-zinc-700" />
+                  {url ? (
+                    <img src={url} alt="attachment" className="h-14 w-14 object-cover rounded-lg border border-zinc-700" />
+                  ) : (
+                    <div className="h-14 w-14 rounded-lg border border-zinc-700 bg-zinc-800 flex flex-col items-center justify-center gap-0.5 px-1">
+                      <FileSpreadsheet size={18} className="text-green-400 shrink-0" />
+                      <span className="text-[9px] text-zinc-400 truncate w-full text-center">{attachments[i]?.name}</span>
+                    </div>
+                  )}
                   <button
                     onClick={() => removeAttachment(i)}
                     className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-zinc-700 hover:bg-zinc-600 rounded-full flex items-center justify-center"
@@ -273,7 +299,7 @@ export function AgentPanel() {
             <input
               ref={fileRef}
               type="file"
-              accept="image/jpeg,image/png,image/webp"
+              accept={ACCEPTED_TYPES}
               multiple
               className="hidden"
               onChange={onFileChange}
@@ -292,7 +318,7 @@ export function AgentPanel() {
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKey}
-              placeholder={attachments.length > 0 ? 'Describe what to do with these images…' : 'Message Reactor AI…'}
+              placeholder={attachments.length > 0 ? 'Describe what to do with these files…' : 'Message Reactor AI…'}
               className="flex-1 bg-zinc-800 text-zinc-200 text-sm rounded-xl px-4 py-2.5 resize-none outline-none placeholder:text-zinc-500 border border-zinc-700 focus:border-indigo-500 transition-colors min-h-[42px] max-h-32"
             />
             <button

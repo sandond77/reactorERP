@@ -6,9 +6,10 @@ import { sql } from 'kysely';
 import { env } from '../config/env';
 import { db } from '../config/database';
 import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
+import { auditContext } from '../utils/audit-context';
 import { normalizeGradeLabel } from '../utils/grade-labels';
 import { createRawPurchase } from './raw-purchases.service';
-import { createCard, updateCard, transitionCardStatus } from './cards.service';
+import { createCard, updateCard, transitionCardStatus, softDeleteCard } from './cards.service';
 import { recordSale } from './sales.service';
 import { createExpense } from './expenses.service';
 import * as gradingService from './grading-submissions.service';
@@ -458,8 +459,11 @@ export interface AgentChatMessage {
 }
 
 // Quick Haiku call to classify whether the message is on-topic before burning Sonnet
-async function isCardRelated(message: string): Promise<boolean> {
+async function isCardRelated(message: string, conversationContext?: string): Promise<boolean> {
   try {
+    const contextBlock = conversationContext
+      ? `\n\nConversation context (prior messages summary):\n${conversationContext}\n`
+      : '';
     const response = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 16,
@@ -467,8 +471,7 @@ async function isCardRelated(message: string): Promise<boolean> {
         role: 'user',
         content: `You are a classifier. Answer only YES or NO.
 
-Is this message about trading cards, card inventory management, card grading, card purchases, card sales, or related business expenses?
-
+Is this message related to trading cards, card inventory management, card grading, card purchases, card sales, or related business expenses? If there is conversation context showing this is a follow-up to an ongoing card-related task, answer YES.${contextBlock}
 Message: "${message.slice(0, 300)}"`,
       }],
     });
@@ -540,7 +543,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Card language' },
         slab_company: { type: 'string', enum: ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'], description: 'Grading company — required' },
         slab_grade: { type: 'number', description: 'Numeric grade (e.g. 9, 9.5, 10) — required' },
-        slab_grade_label: { type: 'string', description: 'Grade label text (e.g. MINT, GEM MINT, PRISTINE)' },
+        slab_grade_label: { type: 'string', description: 'Raw label text from the slab (e.g. MINT, GEM MINT). Optional — the system will normalize it to the canonical label for the grading company automatically.' },
         slab_cert_number: { type: 'string', description: 'Certification number from the slab label — required' },
         purchase_cost: { type: 'number', description: 'Purchase cost in cents (e.g. 50000 = $500.00) — required' },
         currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency' },
@@ -604,6 +607,17 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         decision: { type: 'string', enum: ['grade', 'sell_raw'], description: 'Intent: grade or sell raw' },
         condition: { type: 'string', enum: ['NM', 'LP', 'MP', 'HP', 'DMG'], description: 'Card condition (required for inspection)' },
         notes: { type: 'string', description: 'Notes about the card' },
+      },
+      required: ['card_instance_id'],
+    },
+  },
+  {
+    name: 'delete_card',
+    description: 'Permanently (soft) delete a card instance added in error. Always confirm with the user before deleting. Use list_inventory to find the card_instance_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_instance_id: { type: 'string', description: 'UUID of the card instance to delete' },
       },
       required: ['card_instance_id'],
     },
@@ -681,7 +695,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
               batch_item_id: { type: 'string', description: 'UUID of the batch item (from list_grading_batches)' },
               grade: { type: 'number', description: 'Numeric grade (e.g. 9, 9.5, 10)' },
               cert_number: { type: 'string', description: 'Certification number on the slab' },
-              grade_label: { type: 'string', description: 'Grade label text (e.g. GEM MT, MINT)' },
+              grade_label: { type: 'string', description: 'Raw label text from the slab. Optional — normalized automatically by the system.' },
               card_name_override: { type: 'string', description: 'Updated card name (e.g. full PSA label) — optional' },
             },
             required: ['batch_item_id', 'grade'],
@@ -886,6 +900,13 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       } catch { /* non-fatal */ }
     }
 
+    // Always normalize grade label using canonical maps — never trust raw AI label
+    const normalizedGradeLabel = normalizeGradeLabel(
+      slab_company as string,
+      slab_grade as number,
+      slab_grade_label as string | undefined,
+    );
+
     const card = await createCard(userId, {
       catalog_id: resolvedCatalogId,
       card_name_override: resolvedCardName,
@@ -902,7 +923,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     } as any, {
       company: slab_company as string,
       grade: slab_grade as number,
-      grade_label: (slab_grade_label as string) ?? undefined,
+      grade_label: normalizedGradeLabel,
       cert_number: (slab_cert_number as string) ?? undefined,
       additional_cost: 0,
     });
@@ -952,8 +973,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         'loc.name as location_name',
         sql<boolean>`EXISTS(SELECT 1 FROM listings l WHERE l.card_instance_id = ci.id AND l.listing_status = 'active')`.as('is_listed'),
       ])
-      .where('ci.user_id', '=', userId)
-      .where('ci.deleted_at', 'is', null);
+      .where('ci.user_id', '=', userId);
     if (status) q = q.where('ci.status', '=', status as any);
     if (search) {
       const term = `%${search}%`;
@@ -1002,6 +1022,12 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         ...(notes !== undefined && { notes }),
       });
     }
+    return { success: true };
+  }
+
+  if (toolName === 'delete_card') {
+    const { card_instance_id } = toolInput as { card_instance_id: string };
+    await softDeleteCard(userId, card_instance_id, 'agent');
     return { success: true };
   }
 
@@ -1074,13 +1100,15 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   if (toolName === 'process_grading_return') {
     const { batch_id, returned_at, items } =
       toolInput as { batch_id: string; returned_at?: string; items: Array<{ batch_item_id: string; grade: number; cert_number?: string; grade_label?: string; card_name_override?: string }> };
+    const batch = await db.selectFrom('grading_batches').select('company').where('id', '=', batch_id).executeTakeFirst();
+    const company = batch?.company ?? 'PSA';
     const result = await gradingService.processReturn(userId, batch_id, {
       returned_at,
       items: items.map((item) => ({
         batch_item_id: item.batch_item_id,
         grade: item.grade,
         cert_number: item.cert_number,
-        grade_label: item.grade_label,
+        grade_label: normalizeGradeLabel(company, item.grade, item.grade_label),
         card_name_override: item.card_name_override,
       })),
     });
@@ -1244,7 +1272,8 @@ async function saveImageToCards(userId: string, cardIds: string[], images: Agent
 export async function chatWithAgent(
   userId: string,
   messages: AgentChatMessage[],
-  images?: AgentImage[]
+  images?: AgentImage[],
+  spreadsheetText?: string,
 ): Promise<{ reply: string; mutated: string[] }> {
   // Store new images for this user; fall back to any images from a previous turn in this conversation
   if (images?.length) pendingImages.set(userId, images);
@@ -1255,8 +1284,14 @@ export async function chatWithAgent(
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
   const shouldPreScreen = !hasImages && !!lastUserMessage && lastUserMessage.content.trim().length > 10;
 
+  // For follow-ups, build a short context string from prior messages so the screener can judge correctly
+  const priorMessages = messages.slice(0, -1); // everything except the last user message
+  const conversationContext = priorMessages.length > 0
+    ? priorMessages.slice(-4).map(m => `${m.role}: ${m.content.slice(0, 100)}`).join('\n')
+    : undefined;
+
   const [onTopic, summary] = await Promise.all([
-    shouldPreScreen ? isCardRelated(lastUserMessage!.content) : Promise.resolve(true),
+    shouldPreScreen ? isCardRelated(lastUserMessage!.content, conversationContext) : Promise.resolve(true),
     getUserInventorySummary(userId),
   ]);
 
@@ -1264,7 +1299,13 @@ export async function chatWithAgent(
     return { reply: 'I can only help with trading card inventory, purchases, sales, grading, and expenses. Please ask something related to your card collection or business.', mutated: [] };
   }
 
+  const now = new Date();
+  const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  const currentYear = now.getFullYear();
+
   const systemPrompt = `You are Reactor AI, a trading card inventory management expert for Reactor — a full ERP system for Pokemon card dealers. You have deep knowledge of every workflow in the system and can perform anything a user can do manually.
+
+TODAY'S DATE: ${currentDate} (year ${currentYear}). Use this when interpreting relative dates like "today", "yesterday", or partial dates like "4/1" (= April 1, ${currentYear}).
 
 SCOPE: Trading cards, card inventory, purchases, grading, sales, listings, trades, expenses, locations. Refuse anything outside this domain.
 
@@ -1330,6 +1371,7 @@ WRITE tools (collect required data before calling):
 - add_card_to_purchase: add a card line to a raw purchase
 - add_graded_card: log a pre-graded slab directly (PSA/BGS/CGC/etc.)
 - update_card: transition status, set condition/decision (inspection), update notes
+- delete_card: soft-delete a card added in error. Always confirm with the user (show card name + ID) before calling this tool.
 - submit_to_grading: add card to a grading batch (creates batch if no batch_id given)
 - update_grading_batch: change batch status, add submission number/notes
 - process_grading_return: record grades+certs when cards return from grader
@@ -1345,7 +1387,7 @@ WRITE tools (collect required data before calling):
 
 Graded slab intake (add_graded_card):
   Required: grading company, grade (number), cert number, purchase cost, currency
-  Display name: always use the full PSA label format as card_name_override (e.g. "2009 POKEMON JAPANESE LUGIA LEGEND-HOLO SOULSILVER COLL-1ST ED. #029") — never ask the user, just construct it from the available card info
+  Display name: always construct card_name_override in PSA label format — all caps, order: YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION. E.g. "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". Never ask the user.
   Optional: purchase date, source/where bought
 
 Raw card purchase (create_raw_purchase + add_card_to_purchase):
@@ -1419,11 +1461,16 @@ Find cards needing attention:
 
 GRADED vs RAW: If image shows PSA/BGS/CGC/SGC label with cert number and grade → add_graded_card. Never use raw workflow for slabs.
 
-Display name rule: Always set card_name_override to the full PSA label format — all caps, e.g. "2009 POKEMON JAPANESE LUGIA LEGEND-HOLO SOULSILVER COLL-1ST ED. #029". Construct it from year, language (if non-English), card name, set name, and card number. Never ask the user what format to use. This matches what the sub return workflow imports and ensures consistency.
+Display name rule: Always set card_name_override to the full PSA label format — all caps, exact field order: YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION. Example: "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". Rules: set name comes before card number and card name; no "#" prefix on card number; spell out "1ST EDITION" fully (not "1ST ED."); no abbreviations for set name. Never ask the user what format to use. This matches what the sub return workflow imports.
 
 Image handling:
 - Card photo: extract name, set, number, language, cert/grade if visible. Ask for missing required fields in one message.
 - Receipt/invoice: extract all data, show summary, confirm before creating records.
+
+Spreadsheet handling:
+- Spreadsheet data appears in <spreadsheet> tags. Parse columns from the header row.
+- Confirm your interpretation of the data (columns, row count) before performing any bulk operations.
+- For bulk card additions or sales, process row by row using the appropriate tools. Report progress as you go.
 
 Formatting:
 - No markdown (no **, no *, no #, no dashes for lists)
@@ -1436,18 +1483,21 @@ Current inventory summary:
 ${JSON.stringify(summary, null, 2)}`;
 
   const apiMessages: Anthropic.MessageParam[] = messages.map((m, i) => {
-    // Attach all images to the last user message
-    if (hasImages && i === messages.length - 1 && m.role === 'user') {
-      return {
-        role: 'user',
-        content: [
-          ...sessionImages!.map((img) => ({
-            type: 'image' as const,
-            source: { type: 'base64' as const, media_type: img.mediaType, data: img.base64 },
-          })),
-          { type: 'text' as const, text: m.content || 'Please analyze these images.' },
-        ],
-      };
+    const isLastUser = i === messages.length - 1 && m.role === 'user';
+    // Attach images and/or spreadsheet text to the last user message
+    if (isLastUser && (hasImages || spreadsheetText)) {
+      const contentBlocks: Anthropic.ContentBlockParam[] = [];
+      if (hasImages) {
+        sessionImages!.forEach((img) => {
+          contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.base64 } });
+        });
+      }
+      let textContent = m.content || (hasImages ? 'Please analyze these.' : '');
+      if (spreadsheetText) {
+        textContent = (textContent ? textContent + '\n\n' : '') + `<spreadsheet>\n${spreadsheetText}\n</spreadsheet>`;
+      }
+      contentBlocks.push({ type: 'text', text: textContent });
+      return { role: 'user', content: contentBlocks };
     }
     return { role: m.role, content: m.content };
   });
@@ -1486,7 +1536,7 @@ ${JSON.stringify(summary, null, 2)}`;
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         try {
-          const result = await executeAgentTool(userId, block.name, block.input as Record<string, unknown>);
+          const result = await auditContext.run({ actor: 'agent' }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
           // Track any card instance IDs created
           if ((block.name === 'add_card_to_purchase' || block.name === 'add_graded_card') && typeof result === 'object' && result !== null && 'id' in result) {
             createdCardIds.push(result.id as string);
@@ -1507,6 +1557,7 @@ ${JSON.stringify(summary, null, 2)}`;
             record_trade: ['trades', 'cards', 'slabs', 'sales'],
             assign_card_to_location: ['cards', 'slabs'],
             record_expense: ['expenses'],
+            delete_card: ['cards'],
           };
           (TOOL_RESOURCE_MAP[block.name] ?? []).forEach((r) => mutatedResources.add(r));
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
@@ -1536,7 +1587,6 @@ async function getUserInventorySummary(userId: string) {
       sql<number>`SUM(purchase_cost)::int`.as('total_cost'),
     ])
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .groupBy('status')
     .execute();
 

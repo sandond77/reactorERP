@@ -3,6 +3,7 @@ import { db } from '../config/database';
 import { recordSale } from './sales.service';
 import { createCard } from './cards.service';
 import { createRawPurchase } from './raw-purchases.service';
+import { logAudit } from '../utils/audit';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 
@@ -148,6 +149,7 @@ export async function createTrade(userId: string, input: CreateTradeInput) {
     await db.updateTable('card_instances').set({ trade_id: trade.id }).where('id', '=', card.id).execute();
   }));
 
+  await logAudit(userId, 'trades', trade.id, 'created', null, trade);
   return trade;
 }
 
@@ -208,7 +210,7 @@ export async function listTrades(userId: string, pagination: PaginationParams) {
     LEFT JOIN card_catalog cc_out ON cc_out.id = ci_out.catalog_id
     LEFT JOIN slab_details sd_out ON sd_out.card_instance_id = ci_out.id
     LEFT JOIN raw_purchases rp_out ON rp_out.id = ci_out.raw_purchase_id
-    LEFT JOIN card_instances ci_in ON ci_in.trade_id = t.id AND ci_in.deleted_at IS NULL
+    LEFT JOIN card_instances ci_in ON ci_in.trade_id = t.id
     LEFT JOIN card_catalog cc_in ON cc_in.id = ci_in.catalog_id
     LEFT JOIN slab_details sd_in ON sd_in.card_instance_id = ci_in.id
     LEFT JOIN raw_purchases rp_in ON rp_in.id = ci_in.raw_purchase_id
@@ -245,9 +247,9 @@ export async function deleteTrade(userId: string, tradeId: string) {
     }
   }));
 
-  // Collect incoming card IDs before clearing the FK
+  // Collect incoming cards (with full data) before clearing the FK
   const incomingCards = await db.selectFrom('card_instances')
-    .select('id')
+    .selectAll()
     .where('trade_id', '=', tradeId)
     .execute();
 
@@ -257,15 +259,17 @@ export async function deleteTrade(userId: string, tradeId: string) {
     .where('trade_id', '=', tradeId)
     .execute();
 
-  // Soft-delete the incoming cards
+  // Hard-delete the incoming cards and log each to audit
   if (incomingCards.length > 0) {
-    await db.updateTable('card_instances')
-      .set({ deleted_at: new Date() })
-      .where('id', 'in', incomingCards.map(c => c.id))
-      .execute();
+    for (const card of incomingCards) {
+      await logAudit(card.user_id, 'card_instances', card.id, 'deleted', card, null);
+    }
+    await db.deleteFrom('card_instances').where('id', 'in', incomingCards.map(c => c.id)).execute();
   }
 
+  const tradeSnap = await db.selectFrom('trades').selectAll().where('id', '=', tradeId).executeTakeFirst();
   await db.deleteFrom('trades').where('id', '=', tradeId).execute();
+  if (tradeSnap) await logAudit(userId, 'trades', tradeId, 'deleted', tradeSnap, null);
 }
 
 export async function updateTrade(userId: string, tradeId: string, input: {
@@ -274,10 +278,10 @@ export async function updateTrade(userId: string, tradeId: string, input: {
   notes?: string;
   trade_percent?: number;
 }) {
-  const trade = await db.selectFrom('trades').select('id').where('id', '=', tradeId).where('user_id', '=', userId).executeTakeFirst();
-  if (!trade) throw new Error('Trade not found');
+  const existing = await db.selectFrom('trades').selectAll().where('id', '=', tradeId).where('user_id', '=', userId).executeTakeFirst();
+  if (!existing) throw new Error('Trade not found');
 
-  return db.updateTable('trades')
+  const updated = await db.updateTable('trades')
     .set({
       ...(input.trade_date !== undefined && { trade_date: input.trade_date ? new Date(input.trade_date) : null }),
       ...(input.person !== undefined && { person: input.person || null }),
@@ -287,4 +291,6 @@ export async function updateTrade(userId: string, tradeId: string, input: {
     .where('id', '=', tradeId)
     .returningAll()
     .executeTakeFirstOrThrow();
+  await logAudit(userId, 'trades', tradeId, 'updated', existing, updated);
+  return updated;
 }

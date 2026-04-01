@@ -2,6 +2,7 @@ import { sql } from 'kysely';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { computeCostBasis } from './cards.service';
+import { logAudit } from '../utils/audit';
 import type { ListingPlatform } from '../types/db';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
@@ -26,7 +27,6 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
     .select(['id', 'status'])
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');
@@ -68,6 +68,7 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
       .execute();
   }
 
+  await logAudit(userId, 'sales', sale.id, 'created', null, sale);
   return sale;
 }
 
@@ -161,7 +162,7 @@ export async function listSales(
 }
 
 export async function updateSale(userId: string, saleId: string, input: Partial<RecordSaleInput>) {
-  const existing = await db.selectFrom('sales').select(['id']).where('id', '=', saleId).where('user_id', '=', userId).executeTakeFirst();
+  const existing = await db.selectFrom('sales').selectAll().where('id', '=', saleId).where('user_id', '=', userId).executeTakeFirst();
   if (!existing) throw new AppError(404, 'Sale not found');
 
   await db.updateTable('sales').set({
@@ -176,13 +177,16 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
     ...(input.order_details_link !== undefined && { order_details_link: input.order_details_link }),
   }).where('id', '=', saleId).where('user_id', '=', userId).execute();
 
-  return getSaleById(userId, saleId);
+  const updated = await getSaleById(userId, saleId);
+  await logAudit(userId, 'sales', saleId, 'updated', existing, updated);
+  return updated;
 }
 
 export async function deleteSale(userId: string, saleId: string) {
-  const sale = await db.selectFrom('sales').select(['id', 'card_instance_id', 'listing_id']).where('id', '=', saleId).where('user_id', '=', userId).executeTakeFirst();
+  const sale = await db.selectFrom('sales').selectAll().where('id', '=', saleId).where('user_id', '=', userId).executeTakeFirst();
   if (!sale) throw new AppError(404, 'Sale not found');
 
+  await logAudit(userId, 'sales', saleId, 'deleted', sale, null);
   await db.deleteFrom('sales').where('id', '=', saleId).where('user_id', '=', userId).execute();
 
   // Revert card status back to graded

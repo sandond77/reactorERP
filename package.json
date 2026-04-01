@@ -15,5 +15,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
   }
 }

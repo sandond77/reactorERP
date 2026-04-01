@@ -279,7 +279,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
                   <>
                     <Row label="Date Sold" value={fmtDate(slab.date_sold)} />
                     {slab.strike_price != null && <MoneyRow label="Strike Price" value={slab.strike_price} />}
-                    {slab.after_ebay != null && <MoneyRow label="After eBay" value={slab.after_ebay} />}
+                    {slab.after_ebay != null && <MoneyRow label="After Fees" value={slab.after_ebay} />}
                   </>
                 )}
               </div>

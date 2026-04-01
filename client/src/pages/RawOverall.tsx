@@ -401,7 +401,7 @@ export function RawOverall() {
                 <ColHeader label="Location"                                  {...sh} {...rz('location')}          minWidth={MINS.location} />
                 <ColHeader label="Cost"             col="raw_cost"           {...sh} {...rz('raw_cost')}          minWidth={MINS.raw_cost} align="right" />
                 <ColHeader label="Strike Price"     col="strike_price"       {...sh} {...rz('strike_price')}      minWidth={MINS.strike_price} align="right" wrap />
-                <ColHeader label="After eBay"       col="after_ebay"         {...sh} {...rz('after_ebay')}        minWidth={MINS.after_ebay} align="right" wrap />
+                <ColHeader label="After Fees"       col="after_ebay"         {...sh} {...rz('after_ebay')}        minWidth={MINS.after_ebay} align="right" wrap />
                 <ColHeader label="Net"              col="net"                {...sh} {...rz('net')}               minWidth={MINS.net} align="right" />
                 <ColHeader label="Date Added"        col="raw_purchase_date" {...sh} {...rz('raw_purchase_date')} minWidth={MINS.raw_purchase_date} wrap
                   filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }}

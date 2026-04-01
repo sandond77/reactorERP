@@ -183,7 +183,7 @@ export async function uploadCardImage(req: Request, res: Response, next: NextFun
     // Verify card belongs to user
     const card = await db.selectFrom('card_instances').select('id')
       .where('id', '=', cardId).where('user_id', '=', req.user!.id)
-      .where('deleted_at', 'is', null).executeTakeFirst();
+      .executeTakeFirst();
     if (!card) { res.status(404).json({ error: 'Card not found' }); return; }
 
     const resized = await sharp(req.file.buffer)

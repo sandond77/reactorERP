@@ -438,7 +438,6 @@ export async function getInventorySummary(userId: string) {
       ORDER BY created_at DESC LIMIT 1
     ) l ON true
     WHERE ci.user_id = ${userId}
-      AND ci.deleted_at IS NULL
     GROUP BY
       cc.sku, cc.card_name, ci.card_name_override,
       cc.set_name, ci.set_name_override,
@@ -521,7 +520,6 @@ export async function getEmptyCatalogEntries(userId: string) {
       SELECT 1 FROM card_instances ci
       WHERE ci.catalog_id = cc.id
         AND ci.user_id = ${userId}
-        AND ci.deleted_at IS NULL
     )
     ORDER BY cc.sku NULLS LAST, cc.card_name
   `.execute(db);

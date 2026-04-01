@@ -1,6 +1,7 @@
 import { sql } from 'kysely';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
+import { logAudit } from '../utils/audit';
 import type { NewListing } from '../types/db';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
@@ -303,7 +304,6 @@ export async function createListing(userId: string, input: CreateListingInput) {
     .select(['id', 'status'])
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
-    .where('deleted_at', 'is', null)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');
@@ -332,6 +332,7 @@ export async function createListing(userId: string, input: CreateListingInput) {
       .execute();
   }
 
+  await logAudit(userId, 'listings', listing.id, 'created', null, listing);
   return listing;
 }
 
@@ -340,21 +341,23 @@ export async function updateListing(
   listingId: string,
   data: Partial<NewListing>
 ) {
-  const listing = await db
+  const existing = await db
     .selectFrom('listings')
-    .select('id')
+    .selectAll()
     .where('id', '=', listingId)
     .where('user_id', '=', userId)
     .executeTakeFirst();
 
-  if (!listing) throw new AppError(404, 'Listing not found');
+  if (!existing) throw new AppError(404, 'Listing not found');
 
-  return db
+  const updated = await db
     .updateTable('listings')
     .set(data as any)
     .where('id', '=', listingId)
     .returningAll()
     .executeTakeFirstOrThrow();
+  await logAudit(userId, 'listings', listingId, 'updated', existing, updated);
+  return updated;
 }
 
 // ── Group operations (act on all listings belonging to an aggregated row) ─────
@@ -453,7 +456,7 @@ export async function cancelListingsByGroup(userId: string, key: ListingGroupKey
 export async function cancelListing(userId: string, listingId: string) {
   const listing = await db
     .selectFrom('listings')
-    .select('id')
+    .selectAll()
     .where('id', '=', listingId)
     .where('user_id', '=', userId)
     .executeTakeFirst();
@@ -465,4 +468,5 @@ export async function cancelListing(userId: string, listingId: string) {
     .set({ listing_status: 'cancelled' })
     .where('id', '=', listingId)
     .execute();
+  await logAudit(userId, 'listings', listingId, 'status_changed', { listing_status: listing.listing_status }, { listing_status: 'cancelled' });
 }

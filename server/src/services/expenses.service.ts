@@ -2,6 +2,7 @@ import { sql } from 'kysely';
 import PDFDocument from 'pdfkit';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
+import { logAudit } from '../utils/audit';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 
@@ -78,7 +79,7 @@ export async function getFilterOptions(userId: string) {
 export async function createExpense(userId: string, input: ExpenseInput) {
   const year = input.date.getFullYear();
   const expenseId = await nextExpenseId(userId, year);
-  return db
+  const expense = await db
     .insertInto('expenses')
     .values({
       user_id:      userId,
@@ -93,13 +94,15 @@ export async function createExpense(userId: string, input: ExpenseInput) {
     })
     .returningAll()
     .executeTakeFirstOrThrow();
+  await logAudit(userId, 'expenses', expense.id, 'created', null, expense);
+  return expense;
 }
 
 export async function updateExpense(userId: string, id: string, input: Partial<ExpenseInput>) {
-  const existing = await db.selectFrom('expenses').select('id').where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
+  const existing = await db.selectFrom('expenses').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
   if (!existing) throw new AppError(404, 'Expense not found');
 
-  return db
+  const updated = await db
     .updateTable('expenses')
     .set({
       ...(input.date        !== undefined && { date: input.date }),
@@ -115,11 +118,14 @@ export async function updateExpense(userId: string, id: string, input: Partial<E
     .where('user_id', '=', userId)
     .returningAll()
     .executeTakeFirstOrThrow();
+  await logAudit(userId, 'expenses', id, 'updated', existing, updated);
+  return updated;
 }
 
 export async function deleteExpense(userId: string, id: string) {
-  const existing = await db.selectFrom('expenses').select('id').where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
+  const existing = await db.selectFrom('expenses').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
   if (!existing) throw new AppError(404, 'Expense not found');
+  await logAudit(userId, 'expenses', id, 'deleted', existing, null);
   await db.deleteFrom('expenses').where('id', '=', id).where('user_id', '=', userId).execute();
 }
 

@@ -104,7 +104,7 @@ No test suite exists. Validate changes by running the dev server.
 
 **Server pattern:** `routes/` → `controllers/` → `services/`. Controllers handle Zod validation and HTTP concerns; services contain all DB/business logic. Errors use `AppError(statusCode, message)` with a global handler.
 
-**Database:** PostgreSQL via Kysely (type-safe query builder). Types in `server/src/types/db.ts` are the source of truth. Migrations are sequential SQL files in `server/src/db/migrations/`. Prices stored as **cents** (integers) — use `toCents()` util when converting.
+**Database:** PostgreSQL (running in Docker — do NOT use `psql` directly) via Kysely (type-safe query builder). Types in `server/src/types/db.ts` are the source of truth. Migrations are sequential SQL files in `server/src/db/migrations/`. Prices stored as **cents** (integers) — use `toCents()` util when converting. To run raw queries use the Node.js `pg` Pool via the app's `DATABASE_URL`.
 
 **Key tables:**
 - `card_catalog` — shared canonical card reference (game, set, name, SKU/part number). Not user-specific.

@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
+import { logAudit } from '../utils/audit';
 import type { GradingCompany } from '../types/db';
 
 // ── ID generation ─────────────────────────────────────────────────────────────
@@ -142,7 +143,7 @@ export async function createBatch(userId: string, input: CreateBatchInput) {
     : new Date().getFullYear();
   const batchId = await nextBatchId(userId, year);
 
-  return db
+  const batch = await db
     .insertInto('grading_batches')
     .values({
       user_id:      userId,
@@ -156,9 +157,13 @@ export async function createBatch(userId: string, input: CreateBatchInput) {
     })
     .returningAll()
     .executeTakeFirstOrThrow();
+  await logAudit(userId, 'grading_batches', batch.id, 'created', null, batch);
+  return batch;
 }
 
 export async function updateBatch(userId: string, id: string, input: UpdateBatchInput) {
+  const existing = await db.selectFrom('grading_batches').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
+
   const update: Record<string, unknown> = {};
   if (input.name !== undefined)         update.name         = input.name;
   if (input.company !== undefined)      update.company      = input.company;
@@ -169,16 +174,20 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
   if (input.notes !== undefined)             update.notes             = input.notes;
   if (input.submission_number !== undefined) update.submission_number = input.submission_number;
 
-  return db
+  const updated = await db
     .updateTable('grading_batches')
     .set({ ...update, updated_at: new Date() })
     .where('id', '=', id)
     .where('user_id', '=', userId)
     .returningAll()
     .executeTakeFirst();
+  if (updated) await logAudit(userId, 'grading_batches', id, 'updated', existing, updated);
+  return updated;
 }
 
 export async function deleteBatch(userId: string, id: string) {
+  const existing = await db.selectFrom('grading_batches').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
+
   // Revert all card instances in this batch back to inspected
   const items = await db
     .selectFrom('grading_batch_items')
@@ -196,11 +205,13 @@ export async function deleteBatch(userId: string, id: string) {
       .execute();
   }
 
-  return db
+  const result = await db
     .deleteFrom('grading_batches')
     .where('id', '=', id)
     .where('user_id', '=', userId)
     .executeTakeFirst();
+  if (existing) await logAudit(userId, 'grading_batches', id, 'deleted', existing, null);
+  return result;
 }
 
 export async function addItem(userId: string, batchId: string, input: AddItemInput) {
@@ -351,16 +362,13 @@ export async function processReturn(userId: string, batchId: string, input: Proc
         currency:              'USD',
       })
       .execute();
+    await logAudit(userId, 'card_instances', newInstance.id, 'created', null, newInstance);
 
     const newQty = original.quantity - batchItem.quantity;
     if (newQty <= 0) {
-      // All copies sent to grading — soft-delete the raw instance
-      await db
-        .updateTable('card_instances')
-        .set({ deleted_at: new Date(), updated_at: new Date() })
-        .where('id', '=', original.id)
-        .where('user_id', '=', userId)
-        .execute();
+      // All copies sent to grading — hard-delete the raw instance
+      await logAudit(userId, 'card_instances', original.id, 'deleted', original, null);
+      await db.deleteFrom('card_instances').where('id', '=', original.id).where('user_id', '=', userId).execute();
     } else {
       await db
         .updateTable('card_instances')
@@ -428,22 +436,52 @@ export async function revertReturn(userId: string, batchId: string) {
       .executeTakeFirst();
 
     if (original) {
-      if (original.deleted_at) {
-        // Was fully consumed — un-soft-delete and restore qty from batch item
-        await db
-          .updateTable('card_instances')
-          .set({ deleted_at: null, quantity: batchItem.quantity, status: 'grading_submitted', updated_at: new Date() })
-          .where('id', '=', original.id)
-          .execute();
-      } else if (slabDetail) {
-        // Graded instance existed → processReturn DID reduce the original qty, add it back
-        await db
-          .updateTable('card_instances')
+      // Partially consumed — original still exists, add quantity back
+      if (slabDetail) {
+        await db.updateTable('card_instances')
           .set({ quantity: original.quantity + batchItem.quantity, updated_at: new Date() })
-          .where('id', '=', original.id)
-          .execute();
+          .where('id', '=', original.id).execute();
       }
-      // else: processReturn never modified this instance (failed before qty update), leave as-is
+    } else {
+      // Fully consumed — was hard-deleted, restore from audit log
+      const auditRow = await db
+        .selectFrom('audit_log')
+        .select('old_data')
+        .where('entity_type', '=', 'card_instances')
+        .where('entity_id', '=', batchItem.card_instance_id)
+        .where('action', '=', 'deleted')
+        .orderBy('created_at', 'desc')
+        .limit(1)
+        .executeTakeFirst();
+      if (auditRow?.old_data) {
+        const snap = auditRow.old_data as Record<string, any>;
+        await db.insertInto('card_instances').values({
+          id: snap.id,
+          user_id: snap.user_id,
+          raw_purchase_id: snap.raw_purchase_id ?? null,
+          card_name_override: snap.card_name_override ?? null,
+          set_name_override: snap.set_name_override ?? null,
+          card_number_override: snap.card_number_override ?? null,
+          card_game: snap.card_game ?? 'pokemon',
+          language: snap.language ?? 'JP',
+          variant: snap.variant ?? null,
+          rarity: snap.rarity ?? null,
+          status: 'grading_submitted',
+          quantity: batchItem.quantity,
+          purchase_cost: snap.purchase_cost ?? 0,
+          currency: snap.currency ?? 'USD',
+          purchase_type: snap.purchase_type ?? 'raw',
+          condition: snap.condition ?? null,
+          decision: snap.decision ?? null,
+          notes: snap.notes ?? null,
+          catalog_id: snap.catalog_id ?? null,
+          location_id: snap.location_id ?? null,
+          trade_id: snap.trade_id ?? null,
+          purchased_at: snap.purchased_at ? new Date(snap.purchased_at) : null,
+          created_at: snap.created_at ? new Date(snap.created_at) : new Date(),
+          updated_at: new Date(),
+        } as any).execute();
+      }
     }
   }
 

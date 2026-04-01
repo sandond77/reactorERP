@@ -4,6 +4,7 @@ import {
   LayoutDashboard, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
   ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties, Receipt,
+  ScrollText, ShieldCheck, FolderClock,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -101,6 +102,11 @@ export function Sidebar() {
         <NavItem to="/parts"      icon={Layers}   label="Parts" />
         <NavItem to="/locations"  icon={MapPin}   label="Locations" />
         <NavItem to="/import"     icon={Upload}   label="Import" />
+
+        <NavFolder icon={FolderClock} label="Audit" routes={['/audit']}>
+          <NavItem to="/audit/log"      icon={ScrollText}   label="Action Log" indent />
+          <NavItem to="/audit/auditing" icon={ShieldCheck}  label="Inventory Audit" indent />
+        </NavFolder>
       </nav>
 
       {/* User */}

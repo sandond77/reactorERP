@@ -15,6 +15,7 @@ import { gradingSubsRouter } from './grading-submissions.routes';
 import { tradesRouter } from './trades.routes';
 import { locationsRouter } from './locations.routes';
 import { expensesRouter } from './expenses.routes';
+import { auditRouter } from './audit.routes';
 
 export const apiRouter = Router();
 
@@ -51,3 +52,4 @@ apiRouter.use('/grading-subs', gradingSubsRouter);
 apiRouter.use('/trades', tradesRouter);
 apiRouter.use('/locations', locationsRouter);
 apiRouter.use('/expenses', expensesRouter);
+apiRouter.use('/audit', auditRouter);
