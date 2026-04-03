@@ -78,3 +78,17 @@ export async function getPlatformBreakdown(req: Request, res: Response, next: Ne
     res.json({ data: result });
   } catch (err) { next(err); }
 }
+
+export async function getRawDashboard(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await reportsService.getRawDashboard(req.user!.id);
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
+export async function getGradedDashboard(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await reportsService.getGradedDashboard(req.user!.id);
+    res.json(result);
+  } catch (err) { next(err); }
+}

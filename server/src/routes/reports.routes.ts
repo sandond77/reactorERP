@@ -12,3 +12,5 @@ reportsRouter.get('/summary', reportsController.getSummary);
 reportsRouter.get('/inventory-value', reportsController.getInventoryValue);
 reportsRouter.get('/grading-roi', reportsController.getGradingRoi);
 reportsRouter.get('/platform-breakdown', reportsController.getPlatformBreakdown);
+reportsRouter.get('/raw-dashboard', reportsController.getRawDashboard);
+reportsRouter.get('/graded-dashboard', reportsController.getGradedDashboard);
