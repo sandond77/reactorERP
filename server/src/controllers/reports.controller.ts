@@ -81,14 +81,17 @@ export async function getPlatformBreakdown(req: Request, res: Response, next: Ne
 
 export async function getRawDashboard(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await reportsService.getRawDashboard(req.user!.id);
+    const view = z.enum(['all', 'sold', 'unsold']).optional().parse(req.query.view) ?? 'unsold';
+    const type = z.enum(['both', 'raw', 'bulk']).optional().parse(req.query.type) ?? 'both';
+    const result = await reportsService.getRawDashboard(req.user!.id, view, type);
     res.json(result);
   } catch (err) { next(err); }
 }
 
 export async function getGradedDashboard(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await reportsService.getGradedDashboard(req.user!.id);
+    const view = z.enum(['all', 'sold', 'unsold']).optional().parse(req.query.view) ?? 'unsold';
+    const result = await reportsService.getGradedDashboard(req.user!.id, view);
     res.json(result);
   } catch (err) { next(err); }
 }
