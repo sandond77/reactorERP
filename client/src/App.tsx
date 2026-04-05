@@ -25,6 +25,7 @@ import LocationManager from './pages/LocationManager';
 import { Expenses } from './pages/Expenses';
 import { ActionLog } from './pages/ActionLog';
 import { Auditing } from './pages/Auditing';
+import { ShowSchedule } from './pages/ShowSchedule';
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
 
@@ -54,6 +55,7 @@ export default function App() {
               <Route path="/sub-returns" element={<SubReturns />} />
               <Route path="/ungraded" element={<UngradedInventory />} />
               <Route path="/card-show" element={<CardShow />} />
+              <Route path="/card-show/schedule" element={<ShowSchedule />} />
               <Route path="/listings" element={<Listings />} />
               <Route path="/sales" element={<Sales />} />
               <Route path="/trades" element={<Trades />} />

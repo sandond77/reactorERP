@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
   ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties, Receipt,
-  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut,
+  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut, CalendarDays,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -119,7 +119,10 @@ export function Sidebar() {
             ))}
           </NavFolder>
 
-          <NavItem to="/card-show" icon={ShoppingBag} label="Card Show" />
+          <NavFolder icon={ShoppingBag} label="Card Shows" routes={['/card-show']}>
+            <NavItem to="/card-show"          icon={LayoutGrid}    label="Inventory"      indent />
+            <NavItem to="/card-show/schedule" icon={CalendarDays}  label="Show Schedule"  indent />
+          </NavFolder>
           <NavItem to="/expenses"  icon={Receipt}     label="Expenses" />
 
           <NavItem to="/reports" icon={BarChart3} label="Reports" />

@@ -2,10 +2,20 @@ import { sql } from 'kysely';
 import { db } from '../config/database';
 
 export type PnlGroupBy = 'month' | 'platform' | 'game';
+export type PnlChannel = 'all' | 'ebay' | 'card_show' | 'other';
+export type PnlCardType = 'all' | 'graded' | 'ungraded';
 
-export async function getPnlReport(userId: string, from: Date | null, to: Date | null, groupBy: PnlGroupBy = 'month') {
+export async function getPnlReport(
+  userId: string,
+  from: Date | null,
+  to: Date | null,
+  groupBy: PnlGroupBy = 'month',
+  channel: PnlChannel = 'all',
+  cardType: PnlCardType = 'all',
+) {
   type Row = {
     label: string;
+    show_id: string | null;
     num_sales: number;
     total_revenue: number;
     total_fees: number;
@@ -13,6 +23,16 @@ export async function getPnlReport(userId: string, from: Date | null, to: Date |
     total_cost_basis: number;
     total_profit: number;
   };
+
+  const channelFilter = channel === 'ebay' ? sql<boolean>`s.platform = 'ebay'`
+    : channel === 'card_show' ? sql<boolean>`s.platform = 'card_show'`
+    : channel === 'other' ? sql<boolean>`s.platform NOT IN ('ebay', 'card_show')`
+    : sql<boolean>`TRUE`;
+
+  const slabExists = sql<boolean>`EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`;
+  const cardTypeFilter = cardType === 'graded' ? slabExists
+    : cardType === 'ungraded' ? sql<boolean>`NOT ${slabExists}`
+    : sql<boolean>`TRUE`;
 
   let rows: Row[];
 
@@ -32,6 +52,8 @@ export async function getPnlReport(userId: string, from: Date | null, to: Date |
       .where('s.user_id', '=', userId)
       .$if(from != null, (qb) => qb.where('s.sold_at', '>=', from!))
       .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
+      .where(sql`${channelFilter}`)
+      .where(sql`${cardTypeFilter}`)
       .groupBy('s.platform')
       .orderBy('s.platform')
       .execute()) as Row[];
@@ -51,8 +73,34 @@ export async function getPnlReport(userId: string, from: Date | null, to: Date |
       .where('s.user_id', '=', userId)
       .$if(from != null, (qb) => qb.where('s.sold_at', '>=', from!))
       .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
+      .where(sql`${channelFilter}`)
+      .where(sql`${cardTypeFilter}`)
       .groupBy('ci.card_game')
       .orderBy('ci.card_game')
+      .execute()) as Row[];
+  } else if (channel === 'card_show') {
+    // Group by individual card show event — only shows with a linked card_show record
+    rows = (await db
+      .selectFrom('sales as s')
+      .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
+      .innerJoin('card_shows as cs', 'cs.id', 's.card_show_id')
+      .select([
+        sql<string>`cs.name || ' (' || TO_CHAR(cs.show_date, 'Mon DD, YYYY') || ')'`.as('label'),
+        sql<string>`cs.id::text`.as('show_id'),
+        sql<number>`COUNT(*)::int`.as('num_sales'),
+        sql<number>`SUM(s.sale_price)::int`.as('total_revenue'),
+        sql<number>`SUM(s.platform_fees + s.shipping_cost)::int`.as('total_fees'),
+        sql<number>`SUM(s.net_proceeds)::int`.as('total_net'),
+        sql<number>`SUM(COALESCE(s.total_cost_basis, 0))::int`.as('total_cost_basis'),
+        sql<number>`SUM(s.net_proceeds - COALESCE(s.total_cost_basis, 0))::int`.as('total_profit'),
+      ])
+      .where('s.user_id', '=', userId)
+      .$if(from != null, (qb) => qb.where('s.sold_at', '>=', from!))
+      .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
+      .$if(cardType === 'graded', (qb) => qb.where(sql<boolean>`EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`))
+      .$if(cardType === 'ungraded', (qb) => qb.where(sql<boolean>`NOT EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`))
+      .groupBy(['cs.id', 'cs.name', 'cs.show_date'])
+      .orderBy('cs.show_date', 'desc')
       .execute()) as Row[];
   } else {
     rows = (await db
@@ -70,6 +118,8 @@ export async function getPnlReport(userId: string, from: Date | null, to: Date |
       .where('s.user_id', '=', userId)
       .$if(from != null, (qb) => qb.where('s.sold_at', '>=', from!))
       .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
+      .where(sql`${channelFilter}`)
+      .where(sql`${cardTypeFilter}`)
       .groupBy(sql`TO_CHAR(s.sold_at, 'YYYY-MM')`)
       .orderBy(sql`TO_CHAR(s.sold_at, 'YYYY-MM')`)
       .execute()) as Row[];
@@ -90,7 +140,7 @@ export async function getPnlReport(userId: string, from: Date | null, to: Date |
   return { rows, totals };
 }
 
-export async function getYearlySummary(userId: string) {
+export async function getYearlySummary(userId: string, channel: PnlChannel = 'all', cardType: PnlCardType = 'all') {
   type YearRow = {
     year: string;
     num_sales: number;
@@ -101,8 +151,19 @@ export async function getYearlySummary(userId: string) {
     total_profit: number;
   };
 
+  const channelFilter = channel === 'ebay' ? sql<boolean>`s.platform = 'ebay'`
+    : channel === 'card_show' ? sql<boolean>`s.platform = 'card_show'`
+    : channel === 'other' ? sql<boolean>`s.platform NOT IN ('ebay', 'card_show')`
+    : sql<boolean>`TRUE`;
+
+  const slabExists = sql<boolean>`EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`;
+  const cardTypeFilter = cardType === 'graded' ? slabExists
+    : cardType === 'ungraded' ? sql<boolean>`NOT ${slabExists}`
+    : sql<boolean>`TRUE`;
+
   const rows = (await db
     .selectFrom('sales as s')
+    .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
     .select([
       sql<string>`TO_CHAR(s.sold_at, 'YYYY')`.as('year'),
       sql<number>`COUNT(*)::int`.as('num_sales'),
@@ -113,6 +174,8 @@ export async function getYearlySummary(userId: string) {
       sql<number>`SUM(s.net_proceeds - COALESCE(s.total_cost_basis, 0))::int`.as('total_profit'),
     ])
     .where('s.user_id', '=', userId)
+    .where(channelFilter)
+    .where(cardTypeFilter)
     .groupBy(sql`TO_CHAR(s.sold_at, 'YYYY')`)
     .orderBy(sql`TO_CHAR(s.sold_at, 'YYYY')`)
     .execute()) as YearRow[];
@@ -624,4 +687,30 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
     },
     by_condition: conditionResult.rows.map((r) => ({ condition: r.condition, count: r.count })),
   };
+}
+
+export async function getCardShowBreakdown(userId: string, showId: string) {
+  const slabCheck = sql<boolean>`EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`;
+
+  const result = await db
+    .selectFrom('sales as s')
+    .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
+    .innerJoin('card_shows as cs', 'cs.id', 's.card_show_id')
+    .select([
+      sql<number>`COUNT(*) FILTER (WHERE ${slabCheck})::int`.as('slab_count'),
+      sql<number>`COALESCE(SUM(s.sale_price) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_revenue'),
+      sql<number>`COALESCE(SUM(s.platform_fees + s.shipping_cost) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_fees'),
+      sql<number>`COALESCE(SUM(s.net_proceeds) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_net'),
+      sql<number>`COALESCE(SUM(COALESCE(s.total_cost_basis, 0)) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_cost'),
+      sql<number>`COUNT(*) FILTER (WHERE NOT ${slabCheck})::int`.as('raw_count'),
+      sql<number>`COALESCE(SUM(s.sale_price) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_revenue'),
+      sql<number>`COALESCE(SUM(s.platform_fees + s.shipping_cost) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_fees'),
+      sql<number>`COALESCE(SUM(s.net_proceeds) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_net'),
+      sql<number>`COALESCE(SUM(COALESCE(s.total_cost_basis, 0)) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_cost'),
+    ])
+    .where('s.user_id', '=', userId)
+    .where('s.card_show_id', '=', showId)
+    .executeTakeFirstOrThrow();
+
+  return result;
 }

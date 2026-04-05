@@ -203,6 +203,7 @@ export interface SalesTable {
   card_instance_id: string;
   listing_id: string | null;
   trade_id: string | null;
+  card_show_id: string | null;
   platform: ListingPlatform;
   sale_price: number;
   platform_fees: number;
@@ -214,6 +215,19 @@ export interface SalesTable {
   unique_id: string | null;
   unique_id_2: string | null;
   sold_at: Generated<Date>;
+  created_at: Generated<Date>;
+}
+
+export interface CardShowsTable {
+  id: Generated<string>;
+  user_id: string;
+  name: string;
+  location: string | null;
+  show_date: Date;
+  end_date: Date | null;
+  num_days: Generated<number>;
+  num_tables: number | null;
+  notes: string | null;
   created_at: Generated<Date>;
 }
 
@@ -367,6 +381,7 @@ export interface Database {
   grading_batches: GradingBatchesTable;
   grading_batch_items: GradingBatchItemsTable;
   grading_batch_sequences: GradingBatchSequencesTable;
+  card_shows: CardShowsTable;
 }
 
 // ============================================================

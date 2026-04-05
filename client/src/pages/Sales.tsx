@@ -115,6 +115,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   // Step 2 — sale details
   const [platform, setPlatform] = useState<string>('');
+  const [cardShowId, setCardShowId] = useState<string>('');
+  const [showArchived, setShowArchived] = useState(false);
   const [strikePrice, setStrikePrice] = useState('');
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
@@ -123,6 +125,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [soldAt, setSoldAt] = useState('');
   const [orderNumber, setOrderNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  const { data: cardShowsData } = useQuery<{ data: Array<{ id: string; name: string; show_date: string; end_date: string | null; num_days: number; location: string | null }> }>({
+    queryKey: ['card-shows'],
+    queryFn: () => api.get('/card-shows').then((r) => r.data),
+    enabled: platform === 'card_show',
+  });
+
+  const selectedShow = cardShowId ? (cardShowsData?.data ?? []).find((s) => s.id === cardShowId) : null;
+  const showDateMin = selectedShow?.show_date.slice(0, 10) ?? undefined;
+  const showDateMax = selectedShow ? (selectedShow.end_date?.slice(0, 10) ?? selectedShow.show_date.slice(0, 10)) : undefined;
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(cardSearch), 300);
@@ -213,6 +225,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         card_instance_id: cardId,
         listing_id: saleMode === 'raw' ? undefined : (selectedCard?.listing_id ?? undefined),
         platform,
+        card_show_id: platform === 'card_show' && cardShowId ? cardShowId : undefined,
         sale_price: strikePrice,
         platform_fees: feesCents > 0 ? String(feesCents / 100) : undefined,
         currency,
@@ -746,6 +759,47 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </Select>
       </div>
 
+      {platform === 'card_show' && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Card Show</label>
+          <select
+            value={cardShowId}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === '__archived__') { setShowArchived(true); return; }
+              setCardShowId(val);
+              const show = (cardShowsData?.data ?? []).find((s) => s.id === val);
+              if (show) setSoldAt(show.show_date.slice(0, 10));
+            }}
+            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors"
+          >
+            <option value="">— Select show (optional) —</option>
+            {(() => {
+              const all = cardShowsData?.data ?? [];
+              const recent = all.slice(0, 3);
+              const archived = all.slice(3);
+              const visibleShows = showArchived ? all : recent;
+              return (
+                <>
+                  {visibleShows.map((s) => {
+                    const fmt = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+                    const dateLabel = s.num_days > 1 && s.end_date ? `${fmt(s.show_date)} – ${fmt(s.end_date)}` : fmt(s.show_date);
+                    return (
+                      <option key={s.id} value={s.id}>
+                        {s.name} · {dateLabel}{s.location ? ` · ${s.location}` : ''}
+                      </option>
+                    );
+                  })}
+                  {!showArchived && archived.length > 0 && (
+                    <option value="__archived__">— Archived Show ({archived.length} more) —</option>
+                  )}
+                </>
+              );
+            })()}
+          </select>
+        </div>
+      )}
+
       {platform === 'card_show' && (selectedCard?.is_listed || selectedRawCard?.is_listed) && (
         <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5">
           <span className="text-amber-400 text-sm shrink-0">⚠</span>
@@ -779,6 +833,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
         <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
+          min={showDateMin} max={showDateMax}
           className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
       </div>
 

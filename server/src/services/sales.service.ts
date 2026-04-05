@@ -10,6 +10,7 @@ import type { PaginationParams } from '../utils/pagination';
 export interface RecordSaleInput {
   card_instance_id: string;
   listing_id?: string;
+  card_show_id?: string;
   platform: ListingPlatform;
   sale_price: number;
   platform_fees?: number;
@@ -40,6 +41,7 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
       user_id: userId,
       card_instance_id: input.card_instance_id,
       listing_id: input.listing_id ?? null,
+      card_show_id: input.card_show_id ?? null,
       platform: input.platform,
       sale_price: input.sale_price,
       platform_fees: input.platform_fees ?? 0,

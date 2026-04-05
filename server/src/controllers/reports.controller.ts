@@ -9,20 +9,23 @@ const dateRangeSchema = z.object({
   to: z.string().default(() => new Date().toISOString().split('T')[0]),
   group_by: z.enum(['month', 'platform', 'game']).optional(),
   groupBy: z.enum(['month', 'platform', 'game']).optional(),
+  channel: z.enum(['all', 'ebay', 'card_show', 'other']).optional(),
+  cardType: z.enum(['all', 'graded', 'ungraded']).optional(),
 });
 
 export async function getPnl(req: Request, res: Response, next: NextFunction) {
   try {
-    const { from, to, group_by, groupBy } = dateRangeSchema.parse(req.query);
+    const { from, to, group_by, groupBy, channel, cardType } = dateRangeSchema.parse(req.query);
     const grouping = group_by ?? groupBy ?? 'month';
-    // Pass null to get all-time data when no explicit dates provided
     const fromDate = req.query.from ? new Date(from) : null;
     const toDate = req.query.to ? new Date(to) : null;
     const result = await reportsService.getPnlReport(
       req.user!.id,
       fromDate,
       toDate,
-      grouping
+      grouping,
+      channel ?? 'all',
+      cardType ?? 'all',
     );
     res.json(result);
   } catch (err) { next(err); }
@@ -30,7 +33,9 @@ export async function getPnl(req: Request, res: Response, next: NextFunction) {
 
 export async function getYearlySummary(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await reportsService.getYearlySummary(req.user!.id);
+    const channel = z.enum(['all', 'ebay', 'card_show', 'other']).optional().parse(req.query.channel) ?? 'all';
+    const cardType = z.enum(['all', 'graded', 'ungraded']).optional().parse(req.query.cardType) ?? 'all';
+    const result = await reportsService.getYearlySummary(req.user!.id, channel, cardType);
     res.json(result);
   } catch (err) { next(err); }
 }
@@ -92,6 +97,14 @@ export async function getGradedDashboard(req: Request, res: Response, next: Next
   try {
     const view = z.enum(['all', 'sold', 'unsold']).optional().parse(req.query.view) ?? 'unsold';
     const result = await reportsService.getGradedDashboard(req.user!.id, view);
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
+export async function getCardShowBreakdown(req: Request, res: Response, next: NextFunction) {
+  try {
+    const showId = z.string().uuid().parse(req.params.showId);
+    const result = await reportsService.getCardShowBreakdown(req.user!.id, showId);
     res.json(result);
   } catch (err) { next(err); }
 }

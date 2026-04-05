@@ -4,16 +4,33 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { api } from '../lib/api';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, cn } from '../lib/utils';
+
+type Channel = 'all' | 'ebay' | 'card_show' | 'other';
+type CardType = 'all' | 'graded' | 'ungraded';
 
 interface PnlRow {
   label: string;
+  show_id?: string | null;
   num_sales: number;
   total_revenue: number;
   total_fees: number;
   total_net: number;
   total_cost_basis: number;
   total_profit: number;
+}
+
+interface CardShowBreakdown {
+  slab_count: number;
+  slab_revenue: number;
+  slab_fees: number;
+  slab_net: number;
+  slab_cost: number;
+  raw_count: number;
+  raw_revenue: number;
+  raw_fees: number;
+  raw_net: number;
+  raw_cost: number;
 }
 
 interface YearRow {
@@ -35,6 +52,11 @@ function roi(profit: number, cost: number) {
   return ((profit / cost) * 100).toFixed(1) + '%';
 }
 
+function profitPct(profit: number, revenue: number) {
+  if (!revenue) return '—';
+  return ((profit / revenue) * 100).toFixed(1) + '%';
+}
+
 function ProfitCell({ value }: { value: number }) {
   return (
     <span className={value >= 0 ? 'text-green-400' : 'text-red-400'}>
@@ -43,18 +65,103 @@ function ProfitCell({ value }: { value: number }) {
   );
 }
 
+function pct(a: number, b: number) {
+  if (!b) return '—';
+  return ((a / b) * 100).toFixed(1) + '%';
+}
+
+function CardShowBreakdownRow({ showId, colSpan }: { showId: string; colSpan: number }) {
+  const { data, isLoading } = useQuery<CardShowBreakdown>({
+    queryKey: ['card-show-breakdown', showId],
+    queryFn: () => api.get(`/reports/card-show-breakdown/${showId}`).then((r) => r.data),
+  });
+
+  if (isLoading) {
+    return (
+      <tr><td colSpan={colSpan} className="py-3 pl-6 text-xs text-zinc-600">Loading breakdown…</td></tr>
+    );
+  }
+  if (!data) return null;
+
+  const slabCount  = Number(data.slab_count);
+  const rawCount   = Number(data.raw_count);
+  const slabRev    = Number(data.slab_revenue);
+  const slabCost   = Number(data.slab_cost);
+  const slabNet    = Number(data.slab_net);
+  const rawRev     = Number(data.raw_revenue);
+  const rawCost    = Number(data.raw_cost);
+  const rawNet     = Number(data.raw_net);
+  const slabProfit = slabNet - slabCost;
+  const rawProfit  = rawNet  - rawCost;
+  const totalCount = slabCount + rawCount;
+  const hasBoth    = slabCount > 0 && rawCount > 0;
+
+  const stat = (label: string, value: string) => (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] text-zinc-600 uppercase tracking-wide">{label}</span>
+      <span className="text-xs font-medium text-zinc-300">{value}</span>
+    </div>
+  );
+
+  return (
+    <tr className="bg-zinc-900/60">
+      <td colSpan={colSpan} className="pb-4 pt-2 pl-8 pr-4">
+        <div className="space-y-3">
+          {/* Graded | Ungraded | Percentages all in one row */}
+          <div className="flex">
+            <div className="flex-1 space-y-1.5">
+              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Graded</p>
+              <div className="flex gap-6">
+                {stat('# Slabs Sold', String(slabCount))}
+                {stat('Gross', formatCurrency(slabRev))}
+                {stat('Slab Cost', formatCurrency(slabCost))}
+                {stat('Net', formatCurrency(slabNet))}
+              </div>
+            </div>
+            <div className="w-px self-stretch bg-zinc-800 mx-6" />
+            <div className="flex-1 space-y-1.5">
+              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Ungraded</p>
+              <div className="flex gap-6">
+                {stat('# Cards Sold', String(rawCount))}
+                {stat('Gross Raw', formatCurrency(rawRev))}
+                {stat('Raw Cost', formatCurrency(rawCost))}
+                {stat('Net Raw', formatCurrency(rawNet))}
+              </div>
+            </div>
+            <div className="w-px self-stretch bg-zinc-800 mx-6" />
+            <div className="flex-1 space-y-1.5">
+              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Stats</p>
+              <div className="flex gap-6">
+                {stat('Slab ROI %', pct(slabProfit, slabCost))}
+                {stat('Raw ROI %', pct(rawProfit, rawCost))}
+                {stat('Slab % Profit', pct(slabProfit, slabProfit + rawProfit))}
+                {stat('Raw % Profit', pct(rawProfit, slabProfit + rawProfit))}
+                {stat('% Slabs', pct(slabCount, totalCount))}
+                {stat('% Raw', pct(rawCount, totalCount))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 export function Reports() {
   const [groupBy, setGroupBy] = useState<'month' | 'platform' | 'game'>('month');
+  const [channel, setChannel] = useState<Channel>('all');
+  const [cardType, setCardType] = useState<CardType>('all');
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
+  const [expandedShows, setExpandedShows] = useState<Set<string>>(new Set());
 
   const { data: yearlyData, isLoading: yearlyLoading } = useQuery<{ rows: YearRow[]; totals: YearRow }>({
-    queryKey: ['yearly-summary'],
-    queryFn: () => api.get('/reports/yearly').then((r) => r.data),
+    queryKey: ['yearly-summary', channel, cardType],
+    queryFn: () => api.get('/reports/yearly', { params: { channel, cardType } }).then((r) => r.data),
   });
 
   const { data: monthlyData, isLoading: monthlyLoading } = useQuery<{ rows: PnlRow[]; totals: PnlRow }>({
-    queryKey: ['pnl', groupBy],
-    queryFn: () => api.get('/reports/pnl', { params: { groupBy } }).then((r) => r.data),
+    queryKey: ['pnl', groupBy, channel, cardType],
+    queryFn: () => api.get('/reports/pnl', { params: { groupBy, channel, cardType } }).then((r) => r.data),
   });
 
   const toggleYear = (year: string) => {
@@ -62,6 +169,15 @@ export function Reports() {
       const next = new Set(prev);
       if (next.has(year)) next.delete(year);
       else next.add(year);
+      return next;
+    });
+  };
+
+  const toggleShow = (id: string) => {
+    setExpandedShows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -85,6 +201,7 @@ export function Reports() {
       <th className="py-2 font-medium text-right">Net</th>
       <th className="py-2 font-medium text-right">Cost Basis</th>
       <th className="py-2 font-medium text-right">Profit</th>
+      <th className="py-2 font-medium text-right">Profit %</th>
       <th className="py-2 font-medium text-right">ROI</th>
     </tr>
   );
@@ -93,6 +210,7 @@ export function Reports() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-zinc-100">Reports</h1>
+        {/* groupBy selector — hidden for now, keep for future use
         <Select
           value={groupBy}
           onChange={(e) => setGroupBy(e.target.value as typeof groupBy)}
@@ -102,13 +220,65 @@ export function Reports() {
           <option value="platform">By Platform</option>
           <option value="game">By Game</option>
         </Select>
+        */}
       </div>
+
+      {/* Channel filter */}
+      <div className="border-b border-zinc-800 pb-3">
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Channel</p>
+          <div className="flex gap-1">
+            {([
+              { value: 'all',       label: 'All' },
+              { value: 'ebay',      label: 'eBay' },
+              { value: 'card_show', label: 'Card Shows' },
+              { value: 'other',     label: 'Other' },
+            ] as { value: Channel; label: string }[]).map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setChannel(value)}
+                className={cn(
+                  'px-3 py-0.5 rounded text-xs font-medium transition-colors',
+                  channel === value ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Card type filter — below the hr, hidden for card show channel */}
+      {channel !== 'card_show' && (
+        <div className="flex items-center justify-between -mt-3">
+          <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Card Type</p>
+          <div className="flex gap-1">
+            {([
+              { value: 'all',      label: 'All' },
+              { value: 'graded',   label: 'Graded' },
+              { value: 'ungraded', label: 'Ungraded' },
+            ] as { value: CardType; label: string }[]).map(({ value, label }) => (
+              <button
+                key={value}
+                onClick={() => setCardType(value)}
+                className={cn(
+                  'px-3 py-0.5 rounded text-xs font-medium transition-colors',
+                  cardType === value ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* All-time summary cards */}
       {yearlyData?.totals && (
         <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           {[
-            { label: 'All-Time Sales', value: String(yearlyData.totals.num_sales) },
+            { label: 'Sales', value: String(yearlyData.totals.num_sales) },
             { label: 'Revenue', value: formatCurrency(yearlyData.totals.total_revenue) },
             { label: 'Fees', value: formatCurrency(yearlyData.totals.total_fees) },
             { label: 'Net', value: formatCurrency(yearlyData.totals.total_net) },
@@ -143,6 +313,7 @@ export function Reports() {
                 <th className="py-2 font-medium text-right">Net</th>
                 <th className="py-2 font-medium text-right">Cost Basis</th>
                 <th className="py-2 font-medium text-right">Profit</th>
+                <th className="py-2 font-medium text-right">Profit %</th>
                 <th className="py-2 font-medium text-right">ROI</th>
               </tr>
             </thead>
@@ -156,6 +327,7 @@ export function Reports() {
                   <td className="py-2 text-right text-zinc-300">{formatCurrency(row.total_net)}</td>
                   <td className="py-2 text-right text-zinc-500">{formatCurrency(row.total_cost_basis)}</td>
                   <td className="py-2 text-right"><ProfitCell value={row.total_profit} /></td>
+                  <td className="py-2 text-right text-zinc-400">{profitPct(row.total_profit, row.total_revenue)}</td>
                   <td className="py-2 text-right text-zinc-400">{roi(row.total_profit, row.total_cost_basis) ?? '—'}</td>
                 </tr>
               ))}
@@ -168,6 +340,7 @@ export function Reports() {
                 <td className="py-2 text-right text-zinc-100">{formatCurrency(yearlyData.totals.total_net)}</td>
                 <td className="py-2 text-right text-zinc-400">{formatCurrency(yearlyData.totals.total_cost_basis)}</td>
                 <td className="py-2 text-right"><ProfitCell value={yearlyData.totals.total_profit} /></td>
+                <td className="py-2 text-right text-zinc-300">{profitPct(yearlyData.totals.total_profit, yearlyData.totals.total_revenue)}</td>
                 <td className="py-2 text-right text-zinc-300">{roi(yearlyData.totals.total_profit, yearlyData.totals.total_cost_basis) ?? '—'}</td>
               </tr>
             </tbody>
@@ -179,13 +352,47 @@ export function Reports() {
       <Card>
         <CardHeader>
           <CardTitle>
-            {groupBy === 'month' ? 'Monthly Breakdown' : groupBy === 'platform' ? 'By Platform' : 'By Game'}
+            {channel === 'card_show' ? 'By Card Show' : groupBy === 'month' ? 'Monthly Breakdown' : groupBy === 'platform' ? 'By Platform' : 'By Game'}
           </CardTitle>
         </CardHeader>
         {monthlyLoading ? (
           <div className="text-center py-8 text-zinc-600 text-sm">Loading…</div>
         ) : !monthlyData?.rows.length ? (
           <div className="text-center py-8 text-zinc-600 text-sm">No sales data.</div>
+        ) : channel === 'card_show' ? (
+          <table className="w-full text-sm">
+            <thead>{tableHeaders}</thead>
+            <tbody className="divide-y divide-zinc-800/60">
+              {monthlyData.rows.map((row) => {
+                const isExpanded = row.show_id ? expandedShows.has(row.show_id) : false;
+                return [
+                  <tr
+                    key={row.label}
+                    className={cn('cursor-pointer transition-colors', row.show_id ? 'hover:bg-zinc-800/40' : '')}
+                    onClick={() => row.show_id && toggleShow(row.show_id)}
+                  >
+                    <td className="py-2 text-zinc-200 font-medium">
+                      <span className="inline-flex items-center gap-1">
+                        {row.show_id ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <span className="w-[14px]" />}
+                        {row.label}
+                      </span>
+                    </td>
+                    <td className="py-2 text-right text-zinc-400">{row.num_sales}</td>
+                    <td className="py-2 text-right text-zinc-300">{formatCurrency(row.total_revenue)}</td>
+                    <td className="py-2 text-right text-zinc-500">{formatCurrency(row.total_fees)}</td>
+                    <td className="py-2 text-right text-zinc-300">{formatCurrency(row.total_net)}</td>
+                    <td className="py-2 text-right text-zinc-500">{formatCurrency(row.total_cost_basis)}</td>
+                    <td className="py-2 text-right"><ProfitCell value={row.total_profit} /></td>
+                    <td className="py-2 text-right text-zinc-400">{profitPct(row.total_profit, row.total_revenue)}</td>
+                    <td className="py-2 text-right text-zinc-400">{roi(row.total_profit, row.total_cost_basis) ?? '—'}</td>
+                  </tr>,
+                  ...(isExpanded && row.show_id
+                    ? [<CardShowBreakdownRow key={`bd-${row.show_id}`} showId={row.show_id} colSpan={9} />]
+                    : []),
+                ];
+              })}
+            </tbody>
+          </table>
         ) : groupBy === 'month' ? (
           <table className="w-full text-sm">
             <thead>{tableHeaders}</thead>
@@ -224,6 +431,7 @@ export function Reports() {
                       <td className="py-2 text-right text-zinc-200 font-medium">{formatCurrency(yTotals.total_net)}</td>
                       <td className="py-2 text-right text-zinc-400">{formatCurrency(yTotals.total_cost_basis)}</td>
                       <td className="py-2 text-right font-semibold"><ProfitCell value={yTotals.total_profit} /></td>
+                      <td className="py-2 text-right text-zinc-400">{profitPct(yTotals.total_profit, yTotals.total_revenue)}</td>
                       <td className="py-2 text-right text-zinc-400">{roi(yTotals.total_profit, yTotals.total_cost_basis) ?? '—'}</td>
                     </tr>,
                     // Month rows (only when expanded)
@@ -240,6 +448,7 @@ export function Reports() {
                               <td className="py-1.5 text-right text-zinc-300">{formatCurrency(row.total_net)}</td>
                               <td className="py-1.5 text-right text-zinc-500">{formatCurrency(row.total_cost_basis)}</td>
                               <td className="py-1.5 text-right"><ProfitCell value={row.total_profit} /></td>
+                              <td className="py-1.5 text-right text-zinc-500">{profitPct(row.total_profit, row.total_revenue)}</td>
                               <td className="py-1.5 text-right text-zinc-500">{roi(row.total_profit, row.total_cost_basis) ?? '—'}</td>
                             </tr>
                           ))
@@ -259,6 +468,7 @@ export function Reports() {
                 <th className="py-2 font-medium text-right">Net</th>
                 <th className="py-2 font-medium text-right">Cost Basis</th>
                 <th className="py-2 font-medium text-right">Profit</th>
+                <th className="py-2 font-medium text-right">Profit %</th>
                 <th className="py-2 font-medium text-right">ROI</th>
               </tr>
             </thead>
@@ -272,6 +482,7 @@ export function Reports() {
                   <td className="py-2 text-right text-zinc-300">{formatCurrency(row.total_net)}</td>
                   <td className="py-2 text-right text-zinc-500">{formatCurrency(row.total_cost_basis)}</td>
                   <td className="py-2 text-right"><ProfitCell value={row.total_profit} /></td>
+                  <td className="py-2 text-right text-zinc-400">{profitPct(row.total_profit, row.total_revenue)}</td>
                   <td className="py-2 text-right text-zinc-400">{roi(row.total_profit, row.total_cost_basis) ?? '—'}</td>
                 </tr>
               ))}
@@ -285,6 +496,7 @@ export function Reports() {
                   <td className="py-2 text-right text-zinc-100">{formatCurrency(monthlyData.totals.total_net)}</td>
                   <td className="py-2 text-right text-zinc-400">{formatCurrency(monthlyData.totals.total_cost_basis)}</td>
                   <td className="py-2 text-right"><ProfitCell value={monthlyData.totals.total_profit} /></td>
+                  <td className="py-2 text-right text-zinc-300">{profitPct(monthlyData.totals.total_profit, monthlyData.totals.total_revenue)}</td>
                   <td className="py-2 text-right text-zinc-300">{roi(monthlyData.totals.total_profit, monthlyData.totals.total_cost_basis) ?? '—'}</td>
                 </tr>
               )}
