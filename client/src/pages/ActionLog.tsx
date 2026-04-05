@@ -40,6 +40,7 @@ const ENTITY_LABELS: Record<string, string> = {
   grading_batches: 'Grading Batch',
   listings: 'Listing',
   trades: 'Trade',
+  card_shows: 'Card Show',
 };
 
 function actionColor(action: string) {
@@ -54,7 +55,8 @@ function EntityName({ entry }: { entry: AuditEntry }) {
   const data = (entry.old_data ?? entry.new_data) as Record<string, unknown> | null;
   // Try various display name fields depending on entity type
   const name = data?.card_name_override ?? data?.card_name ?? data?.description
-    ?? data?.expense_id ?? data?.purchase_id ?? data?.batch_id ?? data?.trade_label ?? null;
+    ?? data?.expense_id ?? data?.purchase_id ?? data?.batch_id ?? data?.trade_label
+    ?? data?.name ?? null;
   if (name) return <span className="text-zinc-200 font-medium">{name as string}</span>;
   return <span className="text-zinc-500 font-mono text-xs">{entry.entity_id.slice(0, 8)}…</span>;
 }

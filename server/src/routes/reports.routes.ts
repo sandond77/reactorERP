@@ -14,3 +14,4 @@ reportsRouter.get('/grading-roi', reportsController.getGradingRoi);
 reportsRouter.get('/platform-breakdown', reportsController.getPlatformBreakdown);
 reportsRouter.get('/raw-dashboard', reportsController.getRawDashboard);
 reportsRouter.get('/graded-dashboard', reportsController.getGradedDashboard);
+reportsRouter.get('/card-show-breakdown/:showId', reportsController.getCardShowBreakdown);

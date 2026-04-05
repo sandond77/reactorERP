@@ -51,6 +51,7 @@ export async function getSale(req: Request, res: Response, next: NextFunction) {
 const recordSaleSchema = z.object({
   card_instance_id: z.string().uuid(),
   listing_id: z.string().uuid().optional(),
+  card_show_id: z.string().uuid().optional(),
   platform: z.enum(['ebay', 'card_show', 'tcgplayer', 'facebook', 'instagram', 'local', 'other']),
   sale_price: z.union([z.string(), z.number()]).transform((v) => toCents(v)),
   platform_fees: z.union([z.string(), z.number()]).transform((v) => toCents(v)).optional(),

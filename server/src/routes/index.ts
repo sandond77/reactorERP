@@ -16,6 +16,7 @@ import { tradesRouter } from './trades.routes';
 import { locationsRouter } from './locations.routes';
 import { expensesRouter } from './expenses.routes';
 import { auditRouter } from './audit.routes';
+import { cardShowsRouter } from './card-shows.routes';
 
 export const apiRouter = Router();
 
@@ -55,3 +56,4 @@ apiRouter.use('/trades', tradesRouter);
 apiRouter.use('/locations', locationsRouter);
 apiRouter.use('/expenses', expensesRouter);
 apiRouter.use('/audit', auditRouter);
+apiRouter.use('/card-shows', cardShowsRouter);
