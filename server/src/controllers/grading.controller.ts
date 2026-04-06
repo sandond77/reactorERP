@@ -1,45 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import * as gradingService from '../services/grading.service';
 import { z } from 'zod';
-import { toCents } from '../utils/cents';
-
-const paginationSchema = z.object({
-  page: z.coerce.number().default(1),
-  limit: z.coerce.number().min(1).max(100).default(25),
-  search: z.string().optional(),
-  sort_by: z.string().optional(),
-  sort_dir: z.enum(['asc', 'desc']).default('desc'),
-  companies: z.string().optional(),
-  statuses: z.string().optional(),
-});
-
-function splitCSVLocal(val?: string): string[] | undefined {
-  if (val === undefined) return undefined;
-  return val.split(',').map((s) => s.trim()).filter(Boolean);
-}
-
-export async function listSubmissions(req: Request, res: Response, next: NextFunction) {
-  try {
-    const { page, limit, search, sort_by, sort_dir, companies, statuses } = paginationSchema.parse(req.query);
-    const result = await gradingService.listSubmissions(
-      req.user!.id,
-      { page, limit },
-      sort_by,
-      sort_dir,
-      splitCSVLocal(companies),
-      splitCSVLocal(statuses),
-      search
-    );
-    res.json(result);
-  } catch (err) { next(err); }
-}
-
-export async function getSubmissionFilters(req: Request, res: Response, next: NextFunction) {
-  try {
-    const options = await gradingService.getSubmissionFilterOptions(req.user!.id);
-    res.json(options);
-  } catch (err) { next(err); }
-}
 
 const slabsQuerySchema = z.object({
   page: z.coerce.number().default(1),
@@ -102,41 +63,4 @@ export async function getSlabFilters(req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 }
 
-const submitSchema = z.object({
-  card_instance_id: z.string().uuid(),
-  company: z.enum(['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'OTHER']),
-  submission_number: z.string().optional(),
-  service_level: z.string().optional(),
-  grading_fee: z.union([z.string(), z.number()]).transform((v) => toCents(v)).optional(),
-  shipping_cost: z.union([z.string(), z.number()]).transform((v) => toCents(v)).optional(),
-  currency: z.enum(['USD', 'JPY']).default('USD'),
-  submitted_at: z.string().optional().transform((v) => v ? new Date(v) : undefined),
-  estimated_return: z.string().optional().transform((v) => v ? new Date(v) : undefined),
-});
 
-export async function submitForGrading(req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = submitSchema.parse(req.body);
-    const submission = await gradingService.submitForGrading(req.user!.id, data as any);
-    res.status(201).json({ data: submission });
-  } catch (err) { next(err); }
-}
-
-const returnSchema = z.object({
-  grade: z.coerce.number().min(1).max(10),
-  grade_label: z.string().optional(),
-  cert_number: z.string().optional(),
-  subgrades: z.record(z.number()).optional(),
-  returned_at: z.string().optional().transform((v) => v ? new Date(v) : undefined),
-});
-
-export async function recordReturn(req: Request, res: Response, next: NextFunction) {
-  try {
-    const data = returnSchema.parse(req.body);
-    const slab = await gradingService.recordGradeReturn(req.user!.id, {
-      submission_id: req.params['id'] as string,
-      ...data,
-    });
-    res.json({ data: slab });
-  } catch (err) { next(err); }
-}

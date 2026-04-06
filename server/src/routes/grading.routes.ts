@@ -8,7 +8,3 @@ gradingRouter.use(requireAuth);
 
 gradingRouter.get('/slabs/filters', gradingController.getSlabFilters);
 gradingRouter.get('/slabs', gradingController.listSlabs);
-gradingRouter.get('/filters', gradingController.getSubmissionFilters);
-gradingRouter.get('/', gradingController.listSubmissions);
-gradingRouter.post('/', gradingController.submitForGrading);
-gradingRouter.post('/:id/return', gradingController.recordReturn);

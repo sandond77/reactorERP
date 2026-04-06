@@ -326,7 +326,6 @@ export async function getCardById(userId: string, cardId: string) {
     .selectFrom('card_instances as ci')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
-    .leftJoin('grading_submissions as gs', 'gs.id', 'sd.grading_submission_id')
     .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
     .leftJoin('locations as loc', 'loc.id', 'ci.location_id')
     .selectAll('ci')
@@ -341,9 +340,6 @@ export async function getCardById(userId: string, cardId: string) {
       'sd.grade_label',
       'sd.company as grading_company',
       'sd.cert_number',
-      'gs.service_level',
-      'gs.submitted_at',
-      'gs.estimated_return',
       'rp.purchase_id as raw_purchase_label',
       'loc.name as location_name',
     ])
@@ -545,15 +541,6 @@ export async function computeCostBasis(cardId: string): Promise<number> {
 
   if (!card) return 0;
   let basis = card.purchase_cost;
-
-  const submission = await db
-    .selectFrom('grading_submissions')
-    .select(['grading_fee', 'shipping_cost'])
-    .where('card_instance_id', '=', cardId)
-    .where('status', '=', 'returned')
-    .executeTakeFirst();
-
-  if (submission) basis += submission.grading_fee + submission.shipping_cost;
 
   const slab = await db
     .selectFrom('slab_details')

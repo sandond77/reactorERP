@@ -4,7 +4,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
   Tooltip, Legend, ResponsiveContainer, LabelList,
 } from 'recharts';
-import { Package, TrendingUp, Star, DollarSign } from 'lucide-react';
+import { Package, TrendingUp, Star, DollarSign, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
 import { formatCurrency, cn } from '../lib/utils';
@@ -22,7 +22,35 @@ const C = {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface InventoryRow { status: string; count: number; total_cost: number }
-interface SalesRow { count: number; total_net: number; total_profit: number }
+interface SalesRow { count: number; total_gross: number; total_net: number; total_cost: number; total_profit: number }
+interface ChannelRow { count: number; total_profit: number }
+interface ChannelBreakdown { ebay: ChannelRow; card_show: ChannelRow; other: ChannelRow }
+interface SalesSummary {
+  last_30_days: SalesRow;
+  last_60_days: SalesRow;
+  last_90_days: SalesRow;
+  lifetime: SalesRow;
+  by_channel: { last_30_days: ChannelBreakdown; last_60_days: ChannelBreakdown; last_90_days: ChannelBreakdown; lifetime: ChannelBreakdown };
+  grading: { sub_count: number; card_count: number };
+  cards: {
+    total:     { all: number; graded: number; raw: number };
+    unsold:    { all: number; graded: number; raw: number };
+    sold:      { all: number; graded: number; raw: number };
+    listed:    { all: number; graded: number; raw: number };
+    card_show: { all: number; unsold: number };
+  };
+  pipeline: {
+    needs_inspection:    number;
+    inspected:           number;
+    pending_grading_sub: number;
+    grading_submitted:   number;
+  };
+  performance: {
+    avg_hold_days:  number | null;
+    listings_value: number;
+    pending_orders: number;
+  };
+}
 
 interface RawInventory {
   total: number;
@@ -108,59 +136,217 @@ function MiniDonutChart({ pieData, formatter }: { pieData: PieEntry[]; formatter
 }
 
 // ── Tab: Overview ─────────────────────────────────────────────────────────────
+type SalesWindow = '30d' | '60d' | '90d' | 'lifetime';
+const SALES_WINDOWS: { key: SalesWindow; label: string }[] = [
+  { key: '30d',      label: '30D' },
+  { key: '60d',      label: '60D' },
+  { key: '90d',      label: '90D' },
+  { key: 'lifetime', label: 'Lifetime' },
+];
+
+interface PendingGradingSubItem {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  condition: string | null;
+  quantity: number;
+  purchase_cost: number;
+  raw_purchase_label: string | null;
+}
+
+function PendingGradingSubCard() {
+  const { data, isLoading } = useQuery<{ data: PendingGradingSubItem[] }>({
+    queryKey: ['pending-grading-sub'],
+    queryFn: () => api.get('/reports/pending-grading-sub').then((r) => r.data),
+  });
+
+  const items = data?.data ?? [];
+  const hasItems = items.length > 0;
+
+  return (
+    <div className={cn(
+      'rounded-lg border p-4 transition-colors',
+      hasItems
+        ? 'border-orange-500/40 bg-orange-500/5'
+        : 'border-zinc-800 bg-zinc-900'
+    )}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={15} className={hasItems ? 'text-orange-400' : 'text-zinc-600'} />
+          <p className={cn('text-xs font-semibold uppercase tracking-wider', hasItems ? 'text-orange-300' : 'text-zinc-500')}>
+            Attention
+          </p>
+        </div>
+        {hasItems && (
+          <span className="text-[10px] font-semibold text-orange-300 bg-orange-500/20 border border-orange-500/30 px-2 py-0.5 rounded-full">
+            {items.length} card{items.length !== 1 ? 's' : ''} need grading submission
+          </span>
+        )}
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-zinc-500 py-2">Loading…</p>
+      ) : !hasItems ? (
+        <p className="text-xs text-zinc-600 py-1">No cards pending grading submission.</p>
+      ) : (
+        <div>
+          {/* Column headers */}
+          <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-x-4 pb-2 mb-1 border-b border-orange-500/20">
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">ID</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Qty</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Cost</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Cond.</span>
+          </div>
+          {items.map((item) => (
+            <div key={item.id} className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-x-4 py-2 border-b border-orange-500/10 last:border-0 items-center">
+              <span className="text-xs font-mono text-orange-400/70">{item.raw_purchase_label ?? '—'}</span>
+              <div className="min-w-0">
+                <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
+                {item.set_name && <p className="text-xs text-zinc-500 truncate">{item.set_name}</p>}
+              </div>
+              <span className="text-sm text-zinc-300 text-right">{item.quantity}</span>
+              <span className="text-sm text-zinc-300 text-right">{formatCurrency(item.purchase_cost)}</span>
+              <span className="text-xs text-zinc-500 text-right">{item.condition ?? '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OverviewTab() {
   const { data: inventory } = useQuery<InventoryRow[]>({
     queryKey: ['inventory-value'],
     queryFn: () => api.get('/reports/inventory-value').then((r) => r.data),
   });
-  const { data: sales } = useQuery<{ last_30_days: SalesRow }>({
+  const { data: summary } = useQuery<SalesSummary>({
     queryKey: ['sales-summary'],
     queryFn: () => api.get('/reports/summary').then((r) => r.data),
   });
 
-  const totalCards   = inventory?.reduce((s, r) => s + (r.count ?? 0), 0) ?? 0;
+  const [salesWindow, setSalesWindow] = useState<SalesWindow>('30d');
+
   const totalCost    = inventory?.reduce((s, r) => s + (r.total_cost ?? 0), 0) ?? 0;
-  const gradingCount = inventory?.find((r) => r.status === 'grading_submitted')?.count ?? 0;
-  const salesProfit  = sales?.last_30_days?.total_profit ?? 0;
+  const grading      = summary?.grading     ?? { sub_count: 0, card_count: 0 };
+  const cards        = summary?.cards       ?? { total: { all: 0, graded: 0, raw: 0 }, unsold: { all: 0, graded: 0, raw: 0 }, sold: { all: 0, graded: 0, raw: 0 }, listed: { all: 0, graded: 0, raw: 0 }, card_show: { all: 0, unsold: 0 } };
+  const pipeline     = summary?.pipeline    ?? { needs_inspection: 0, inspected: 0, pending_grading_sub: 0, grading_submitted: 0 };
+  const performance  = summary?.performance ?? { avg_hold_days: null, listings_value: 0, pending_orders: 0 };
+  const lifetimeSales = summary?.lifetime   ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0 };
+
+  const sellThrough   = (cards.sold.all + cards.unsold.all) > 0
+    ? ((cards.sold.all / (cards.sold.all + cards.unsold.all)) * 100).toFixed(1)
+    : null;
+  const avgProfitSale = lifetimeSales.count > 0
+    ? lifetimeSales.total_profit / lifetimeSales.count
+    : null;
+
+  const windowData: SalesRow = salesWindow === '30d' ? (summary?.last_30_days ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0 })
+    : salesWindow === '60d' ? (summary?.last_60_days ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0 })
+    : salesWindow === '90d' ? (summary?.last_90_days ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0 })
+    : lifetimeSales;
+
+  const wk = salesWindow === '30d' ? 'last_30_days' : salesWindow === '60d' ? 'last_60_days' : salesWindow === '90d' ? 'last_90_days' : 'lifetime';
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { icon: Package,    label: 'Total Cards',  value: String(totalCards),          sub: 'in inventory' },
-          { icon: DollarSign, label: 'Cost Basis',   value: formatCurrency(totalCost),   sub: 'total invested' },
-          { icon: Star,       label: 'At Graders',   value: String(gradingCount),        sub: 'cards submitted' },
-          { icon: TrendingUp, label: '30-Day Profit', value: formatCurrency(salesProfit), sub: 'net of fees & cost' },
-        ].map(({ icon: Icon, label, value, sub }) => (
-          <Card key={label} className="flex items-start gap-4">
-            <div className="p-2 rounded-lg bg-indigo-600/20"><Icon size={18} className="text-indigo-400" /></div>
-            <div>
-              <p className="text-xs text-zinc-500 uppercase tracking-wide">{label}</p>
-              <p className="text-xl font-semibold text-zinc-100 mt-0.5">{value}</p>
-              <p className="text-xs text-zinc-500 mt-0.5">{sub}</p>
-            </div>
-          </Card>
-        ))}
-      </div>
+    <div className="space-y-5">
 
+      {/* Row 1: Revenue */}
       <Card>
-        <h2 className="text-sm font-semibold text-zinc-100 mb-3">Inventory by Status</h2>
-        {inventory?.length ? (
-          <div className="space-y-2">
-            {inventory.map((row) => (
-              <div key={row.status} className="flex items-center justify-between text-sm">
-                <span className="text-zinc-400 capitalize">{row.status.replace(/_/g, ' ')}</span>
-                <div className="flex gap-4 text-right">
-                  <span className="text-zinc-300">{row.count} cards</span>
-                  <span className="text-zinc-500 w-24">{formatCurrency(row.total_cost ?? 0)}</span>
-                </div>
-              </div>
+        <div className="flex items-center justify-between mb-5">
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Revenue</p>
+          <div className="flex gap-1">
+            {SALES_WINDOWS.map(({ key, label }) => (
+              <button key={key} onClick={() => setSalesWindow(key)}
+                className={cn('px-2.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                  salesWindow === key ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-300')}>
+                {label}
+              </button>
             ))}
           </div>
-        ) : (
-          <p className="text-sm text-zinc-600">No inventory yet.</p>
-        )}
+        </div>
+        <div className="grid grid-cols-4 divide-x divide-zinc-800">
+          {([
+            { label: 'Gross',      value: formatCurrency(windowData.total_gross ?? 0),                                              cls: 'text-zinc-100' },
+            { label: 'Cost',       value: formatCurrency(windowData.total_cost ?? 0),                                               cls: 'text-zinc-100' },
+            { label: 'Profit',     value: (windowData.total_profit >= 0 ? '+' : '') + formatCurrency(windowData.total_profit),     cls: windowData.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400' },
+            { label: '# of Sales', value: String(windowData.count),                                                                 cls: 'text-zinc-100' },
+          ]).map(({ label, value, cls }, i) => (
+            <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
+              <p className={cn('text-2xl font-bold', cls)}>{value}</p>
+            </div>
+          ))}
+        </div>
       </Card>
+
+      {/* Row 2: Inventory */}
+      <Card>
+        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4">Inventory</p>
+        <div className="grid grid-cols-5 divide-x divide-zinc-800">
+          {([
+            { label: 'Total Cards',  value: cards.total.all,     sub: `Graded ${cards.total.graded}  ·  Raw ${cards.total.raw}` },
+            { label: 'Unsold Cards', value: cards.unsold.all,    sub: `Graded ${cards.unsold.graded}  ·  Raw ${cards.unsold.raw}` },
+            { label: 'Sold Cards',   value: cards.sold.all,      sub: `Graded ${cards.sold.graded}  ·  Raw ${cards.sold.raw}` },
+            { label: 'Listed Cards', value: cards.listed.all,    sub: `Graded ${cards.listed.graded}  ·  Raw ${cards.listed.raw}` },
+            { label: 'Card Show',    value: cards.card_show.all, sub: `${cards.card_show.unsold} unsold` },
+          ]).map(({ label, value, sub }, i) => (
+            <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
+              <p className="text-2xl font-bold text-zinc-100">{value}</p>
+              <p className="text-xs text-zinc-600 mt-1">{sub}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {/* Row 3: Sales by channel */}
+      <div className="grid grid-cols-3 gap-4">
+        {([
+          { key: 'ebay',      label: 'eBay' },
+          { key: 'card_show', label: 'Card Shows' },
+          { key: 'other',     label: 'Other' },
+        ] as { key: keyof ChannelBreakdown; label: string }[]).map(({ key, label }) => {
+          const ch = summary?.by_channel?.[wk]?.[key] ?? { count: 0, total_profit: 0 };
+          return (
+            <Card key={key}>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-3">{label}</p>
+              <p className="text-2xl font-bold text-zinc-100">{ch.count} <span className="text-sm font-normal text-zinc-500">sales</span></p>
+              <p className={cn('text-base font-semibold mt-1', ch.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                {(ch.total_profit >= 0 ? '+' : '') + formatCurrency(ch.total_profit)}
+              </p>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Row 4: Pipeline */}
+      <Card>
+        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4">Pipeline</p>
+        <div className="grid grid-cols-3 divide-x divide-zinc-800">
+          <div className="pr-6">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
+            <p className="text-2xl font-bold text-zinc-100">{sellThrough != null ? `${sellThrough}%` : '—'}</p>
+            <p className="text-xs text-zinc-600 mt-1">sold / (sold + unsold)</p>
+          </div>
+          <div className="px-6">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">At Graders</p>
+            <p className="text-2xl font-bold text-zinc-100">{grading.card_count}</p>
+            <p className="text-xs text-zinc-600 mt-1">{grading.sub_count} {grading.sub_count === 1 ? 'submission' : 'submissions'}</p>
+          </div>
+          <div className="pl-6">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Needs Inspection</p>
+            <p className={cn('text-2xl font-bold', pipeline.needs_inspection > 0 ? 'text-amber-400' : 'text-zinc-100')}>{pipeline.needs_inspection}</p>
+            <p className="text-xs text-zinc-600 mt-1">purchased, not yet inspected</p>
+          </div>
+        </div>
+      </Card>
+
+      {/* Row 5: Attention — Pending Grading Submissions */}
+      <PendingGradingSubCard />
+
     </div>
   );
 }

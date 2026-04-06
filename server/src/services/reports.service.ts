@@ -714,3 +714,26 @@ export async function getCardShowBreakdown(userId: string, showId: string) {
 
   return result;
 }
+
+export async function getPendingGradingSub(userId: string) {
+  return db
+    .selectFrom('card_instances as ci')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .innerJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
+    .select([
+      'ci.id',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
+      'ci.condition',
+      'ci.quantity',
+      'ci.purchase_cost',
+      'rp.purchase_id as raw_purchase_label',
+    ])
+    .where('ci.user_id', '=', userId)
+    .where('ci.status', '=', 'inspected')
+    .where('ci.decision', '=', 'grade')
+    .where('rp.type', '=', 'raw')
+    .orderBy('ci.created_at', 'asc')
+    .execute();
+}
+
