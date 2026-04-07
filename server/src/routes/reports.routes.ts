@@ -16,3 +16,5 @@ reportsRouter.get('/raw-dashboard', reportsController.getRawDashboard);
 reportsRouter.get('/graded-dashboard', reportsController.getGradedDashboard);
 reportsRouter.get('/card-show-breakdown/:showId', reportsController.getCardShowBreakdown);
 reportsRouter.get('/pending-grading-sub', reportsController.getPendingGradingSub);
+reportsRouter.get('/card-trend', reportsController.getCardTrend);
+reportsRouter.get('/card-trend-search', reportsController.getCardTrendSearch);

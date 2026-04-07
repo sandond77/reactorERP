@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, TrendingUp } from 'lucide-react';
 import { api } from '../lib/api';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Select } from '../components/ui/Select';
 import { formatCurrency, cn } from '../lib/utils';
+import { CardTrendModal } from '../components/CardTrendPanel';
 
 type Channel = 'all' | 'ebay' | 'card_show' | 'other';
 type CardType = 'all' | 'graded' | 'ungraded';
@@ -153,6 +154,7 @@ export function Reports() {
   const [cardType, setCardType] = useState<CardType>('all');
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());
   const [expandedShows, setExpandedShows] = useState<Set<string>>(new Set());
+  const [showTrend, setShowTrend] = useState(false);
 
   const { data: yearlyData, isLoading: yearlyLoading } = useQuery<{ rows: YearRow[]; totals: YearRow }>({
     queryKey: ['yearly-summary', channel, cardType],
@@ -210,6 +212,16 @@ export function Reports() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-zinc-100">Reports</h1>
+        <button
+          onClick={() => setShowTrend((v) => !v)}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+            showTrend ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+          )}
+        >
+          <TrendingUp size={14} />
+          Card Trend
+        </button>
         {/* groupBy selector — hidden for now, keep for future use
         <Select
           value={groupBy}
@@ -222,6 +234,8 @@ export function Reports() {
         </Select>
         */}
       </div>
+
+      <CardTrendModal open={showTrend} onClose={() => setShowTrend(false)} />
 
       {/* Channel filter */}
       <div className="border-b border-zinc-800 pb-3">

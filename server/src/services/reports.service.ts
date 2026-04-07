@@ -715,6 +715,77 @@ export async function getCardShowBreakdown(userId: string, showId: string) {
   return result;
 }
 
+export async function cardTrendSearch(userId: string, q: string) {
+  // Only return catalog entries that exist in this user's inventory
+  return db
+    .selectFrom('card_catalog as cc')
+    .innerJoin('card_instances as ci', 'ci.catalog_id', 'cc.id')
+    .select([
+      'cc.id as catalog_id',
+      'cc.card_name',
+      'cc.set_name',
+      'cc.card_number',
+      'cc.sku',
+    ])
+    .where('ci.user_id', '=', userId)
+    .where((eb) => eb.or([
+      eb('cc.sku', 'ilike', `%${q}%`),
+      eb('cc.card_name', 'ilike', `%${q}%`),
+    ]))
+    .groupBy(['cc.id', 'cc.card_name', 'cc.set_name', 'cc.card_number', 'cc.sku'])
+    .orderBy('cc.sku', 'asc')
+    .limit(15)
+    .execute();
+}
+
+export async function getCardTrend(userId: string, catalogId: string) {
+  // Sales history — one row per sale
+  const sales = await db
+    .selectFrom('sales as s')
+    .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .select([
+      's.id',
+      's.sold_at',
+      's.sale_price',
+      's.net_proceeds',
+      sql<number>`COALESCE(s.total_cost_basis, 0)`.as('total_cost_basis'),
+      's.platform',
+      sql<boolean>`(sd.id IS NOT NULL)`.as('is_graded'),
+      sql<number | null>`sd.grade`.as('grade'),
+      sql<string | null>`sd.grade_label`.as('grade_label'),
+      sql<string | null>`sd.company`.as('company'),
+      sql<string | null>`ci.condition`.as('condition'),
+    ])
+    .where('s.user_id', '=', userId)
+    .where('ci.catalog_id', '=', catalogId)
+    .orderBy('s.sold_at', 'asc')
+    .execute();
+
+  // Cost/purchase history — one row per card instance
+  const costs = await db
+    .selectFrom('card_instances as ci')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .select([
+      'ci.id',
+      'ci.purchased_at',
+      'ci.purchase_cost',
+      'ci.quantity',
+      sql<boolean>`(sd.id IS NOT NULL)`.as('is_graded'),
+      sql<number | null>`sd.grade`.as('grade'),
+      sql<string | null>`sd.grade_label`.as('grade_label'),
+      sql<string | null>`sd.company`.as('company'),
+      sql<string | null>`ci.condition`.as('condition'),
+    ])
+    .where('ci.user_id', '=', userId)
+    .where('ci.catalog_id', '=', catalogId)
+    .where('ci.purchased_at', 'is not', null)
+    .orderBy('ci.purchased_at', 'asc')
+    .execute();
+
+  return { sales, costs };
+}
+
 export async function getPendingGradingSub(userId: string) {
   return db
     .selectFrom('card_instances as ci')

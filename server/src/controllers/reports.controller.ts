@@ -291,6 +291,22 @@ export async function getCardShowBreakdown(req: Request, res: Response, next: Ne
   } catch (err) { next(err); }
 }
 
+export async function getCardTrendSearch(req: Request, res: Response, next: NextFunction) {
+  try {
+    const q = z.string().min(1).parse(req.query.q);
+    const results = await reportsService.cardTrendSearch(req.user!.id, q);
+    res.json({ data: results });
+  } catch (err) { next(err); }
+}
+
+export async function getCardTrend(req: Request, res: Response, next: NextFunction) {
+  try {
+    const catalogId = z.string().uuid().parse(req.query.catalog_id);
+    const result = await reportsService.getCardTrend(req.user!.id, catalogId);
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
 export async function getPendingGradingSub(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await reportsService.getPendingGradingSub(req.user!.id);
