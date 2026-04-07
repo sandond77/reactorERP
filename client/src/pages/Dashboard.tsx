@@ -216,8 +216,8 @@ function OrderMoreSection() {
         <div>
           <div className="grid grid-cols-[1fr_4rem_4rem_4rem_2rem_2rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
-            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">To Grade</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Inbound</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">To Grade</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Need</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
@@ -228,11 +228,11 @@ function OrderMoreSection() {
                 <p className="text-sm text-zinc-200 truncate">{alert.card_name}</p>
                 <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
               </div>
-              <span className={cn('text-sm font-semibold text-right tabular-nums', alert.to_grade_quantity === 0 ? 'text-red-400' : 'text-amber-400')}>
-                {alert.to_grade_quantity}
-              </span>
               <span className="text-sm text-right tabular-nums text-blue-400">
                 {alert.inbound_quantity > 0 ? `+${alert.inbound_quantity}` : '—'}
+              </span>
+              <span className={cn('text-sm font-semibold text-right tabular-nums', alert.to_grade_quantity === 0 ? 'text-red-400' : 'text-amber-400')}>
+                {alert.to_grade_quantity}
               </span>
               <span className="text-sm text-zinc-400 text-right tabular-nums">{alert.min_quantity}</span>
               <button onClick={() => muteMutation.mutate(alert.threshold_id)} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">

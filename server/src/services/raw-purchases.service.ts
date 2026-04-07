@@ -267,6 +267,15 @@ export async function updateRawPurchase(
   const existing = await db.selectFrom('raw_purchases').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
 
   const update: Record<string, unknown> = {};
+
+  // If type is changing, regenerate the purchase_id for the new type
+  if (input.type !== undefined && existing && input.type !== existing.type) {
+    const year = existing.purchased_at
+      ? new Date(existing.purchased_at).getFullYear()
+      : new Date().getFullYear();
+    update.purchase_id = await nextPurchaseId(userId, input.type as RawPurchaseType, year);
+  }
+
   if (input.type !== undefined)          update.type = input.type;
   if (input.source !== undefined)        update.source = input.source;
   if (input.order_number !== undefined)  update.order_number = input.order_number;

@@ -159,7 +159,7 @@ export function ReorderThresholds() {
       <div className="mb-6">
         <h1 className="text-lg font-semibold text-zinc-100">Reorder Alerts</h1>
         <p className="text-xs text-zinc-500 mt-0.5">
-          Set minimum stock levels for bulk cards. Alerts trigger when the combined "to grade" + inbound quantity falls below the threshold. Click any Min Qty cell to edit.
+          Set minimum stock levels for bulk cards. Alerts trigger when combined in-hand and inbound quantity falls below the threshold. Click any Min Qty cell to edit.
         </p>
       </div>
 
