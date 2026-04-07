@@ -360,7 +360,19 @@ export interface ExpenseSequencesTable {
   next_seq: number;
 }
 
+export interface ReorderThresholdsTable {
+  id: Generated<string>;
+  user_id: string;
+  catalog_id: string;
+  min_quantity: number;
+  is_ignored: Generated<boolean>;
+  muted_until: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface Database {
+  reorder_thresholds: ReorderThresholdsTable;
   expenses: ExpensesTable;
   expense_sequences: ExpenseSequencesTable;
   locations: LocationsTable;

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
   ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties, Receipt,
-  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut, CalendarDays,
+  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut, CalendarDays, Bell,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -27,10 +27,11 @@ const SELLING_NAV = [
   { to: '/trades',   icon: ArrowRightLeft, label: 'Trades' },
 ];
 
-const MANAGE_ROUTES = ['/parts', '/locations'];
+const MANAGE_ROUTES = ['/parts', '/locations', '/reorder-thresholds'];
 const MANAGE_NAV = [
-  { to: '/parts',     icon: Layers, label: 'Parts' },
-  { to: '/locations', icon: MapPin, label: 'Locations' },
+  { to: '/parts',                icon: Layers, label: 'Parts' },
+  { to: '/locations',            icon: MapPin,  label: 'Locations' },
+  { to: '/reorder-thresholds',   icon: Bell,    label: 'Reorder Alerts' },
 ];
 
 

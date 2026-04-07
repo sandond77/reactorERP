@@ -26,6 +26,7 @@ import { Expenses } from './pages/Expenses';
 import { ActionLog } from './pages/ActionLog';
 import { Auditing } from './pages/Auditing';
 import { ShowSchedule } from './pages/ShowSchedule';
+import { ReorderThresholds } from './pages/ReorderThresholds';
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
 
@@ -66,6 +67,7 @@ export default function App() {
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/audit/log" element={<ActionLog />} />
               <Route path="/audit/auditing" element={<Auditing />} />
+              <Route path="/reorder-thresholds" element={<ReorderThresholds />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

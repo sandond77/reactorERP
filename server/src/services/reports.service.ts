@@ -727,7 +727,7 @@ export async function getPendingGradingSub(userId: string) {
       'ci.condition',
       'ci.quantity',
       'ci.purchase_cost',
-      'rp.purchase_id as raw_purchase_label',
+      sql<string>`rp.purchase_id`.as('raw_purchase_label'),
     ])
     .where('ci.user_id', '=', userId)
     .where('ci.status', '=', 'inspected')

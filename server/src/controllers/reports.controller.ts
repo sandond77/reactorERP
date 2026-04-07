@@ -131,6 +131,41 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       return (q as any).groupBy('platform').execute();
     };
 
+    const yearStart = new Date(new Date().getFullYear(), 0, 1);
+
+    const queryYear = () => db
+      .selectFrom('sales')
+      .select([
+        sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(sale_price)::int`.as('total_gross'),
+        sql<number>`SUM(net_proceeds)::int`.as('total_net'),
+        sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
+        sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
+      ])
+      .where('user_id', '=', req.user!.id)
+      .where('sold_at', '>=', yearStart)
+      .executeTakeFirst();
+
+    const channelQueryYear = () => (db
+      .selectFrom('sales')
+      .select([
+        sql<string>`platform`.as('platform'),
+        sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
+      ])
+      .where('user_id', '=', req.user!.id)
+      .where('sold_at', '>=', yearStart) as any)
+      .groupBy('platform').execute();
+
+    const expensesQuery = (days: number | null, from?: Date) => {
+      let q = db.selectFrom('expenses')
+        .select(sql<number>`COALESCE(SUM(amount), 0)::int`.as('total'))
+        .where('user_id', '=', req.user!.id);
+      if (from) q = q.where('date', '>=', from);
+      else if (days !== null) q = q.where('date', '>=', new Date(now - days * MS));
+      return q.executeTakeFirst();
+    };
+
     const pipelineQuery = db
       .selectFrom('card_instances')
       .select([
@@ -160,9 +195,10 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
          WHERE user_id = ${req.user!.id} AND status = 'ordered') AS pending_orders
     `.execute(db);
 
-    const [d30, d60, d90, lifetime, ch30, ch60, ch90, chLifetime, pipeline, perfResult] = await Promise.all([
-      query(30), query(60), query(90), query(null),
-      channelQuery(30), channelQuery(60), channelQuery(90), channelQuery(null),
+    const [d30, d60, d90, dYear, lifetime, ch30, ch60, ch90, chYear, chLifetime, exp30, exp60, exp90, expYear, expLifetime, pipeline, perfResult] = await Promise.all([
+      query(30), query(60), query(90), queryYear(), query(null),
+      channelQuery(30), channelQuery(60), channelQuery(90), channelQueryYear(), channelQuery(null),
+      expensesQuery(30), expensesQuery(60), expensesQuery(90), expensesQuery(null, yearStart), expensesQuery(null),
       pipelineQuery, performanceQuery,
     ]);
     const perf = perfResult.rows[0] ?? { avg_hold_days: null, avg_listed_days: null, listings_value: 0 };
@@ -178,16 +214,21 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       };
     };
 
-    const snap = (r: typeof d30) => r ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0 };
+    const snap = (r: typeof d30, exp: typeof exp30) => ({
+      ...(r ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0 }),
+      total_expenses: Number(exp?.total ?? 0),
+    });
     res.json({
-      last_30_days: snap(d30),
-      last_60_days: snap(d60),
-      last_90_days: snap(d90),
-      lifetime: snap(lifetime),
+      last_30_days: snap(d30, exp30),
+      last_60_days: snap(d60, exp60),
+      last_90_days: snap(d90, exp90),
+      this_year:    snap(dYear, expYear),
+      lifetime:     snap(lifetime, expLifetime),
       by_channel: {
         last_30_days: channelGroup(ch30 as CRow[]),
         last_60_days: channelGroup(ch60 as CRow[]),
         last_90_days: channelGroup(ch90 as CRow[]),
+        this_year:    channelGroup(chYear as CRow[]),
         lifetime:     channelGroup(chLifetime as CRow[]),
       },
       grading: { sub_count: Number(gradingStats?.sub_count ?? 0), card_count: Number(gradingStats?.card_count ?? 0) },
