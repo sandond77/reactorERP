@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-// useMutation + useQueryClient used by OrderMoreSection
 import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
   Tooltip, Legend, ResponsiveContainer, LabelList,
 } from 'recharts';
-import { Package, TrendingUp, Star, DollarSign, AlertTriangle, BellOff, EyeOff } from 'lucide-react';
+import { Package, TrendingUp, Star, DollarSign, AlertTriangle, BellOff, EyeOff, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
 import { formatCurrency, cn } from '../lib/utils';
@@ -172,6 +172,34 @@ interface ReorderAlert {
   muted_until: string | null;
 }
 
+interface StaleEbayListing {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  sku: string | null;
+  card_number: string | null;
+  list_price: number;
+  listed_at: string | null;
+  ebay_listing_url: string | null;
+  days_listed: number;
+  is_ignored: boolean;
+  muted_until: string | null;
+}
+
+interface StaleCardShowItem {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  sku: string | null;
+  card_number: string | null;
+  quantity: number;
+  purchase_cost: number;
+  card_show_added_at: string | null;
+  days_held: number;
+  is_ignored: boolean;
+  muted_until: string | null;
+}
+
 // ── Order More section ────────────────────────────────────────────────────────
 
 function OrderMoreSection() {
@@ -198,9 +226,6 @@ function OrderMoreSection() {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <p className={cn('text-[10px] uppercase tracking-widest', alerts.length > 0 ? 'text-orange-400/80' : 'text-zinc-500')}>
-          Order More
-        </p>
         {alerts.length > 0 && (
           <span className="text-[10px] font-semibold text-orange-300 bg-orange-500/20 border border-orange-500/30 px-2 py-0.5 rounded-full">
             {alerts.length} item{alerts.length !== 1 ? 's' : ''}
@@ -211,19 +236,19 @@ function OrderMoreSection() {
       {isLoading ? (
         <p className="text-xs text-zinc-500">Loading…</p>
       ) : alerts.length === 0 ? (
-        <p className="text-xs text-zinc-600">No reorder alerts. Manage thresholds under <span className="text-zinc-500">Manage → Reorder Alerts</span>.</p>
+        <p className="text-xs text-zinc-600">No reorder alerts. Manage thresholds under <span className="text-zinc-500">Manage → Alerts</span>.</p>
       ) : (
         <div>
-          <div className="grid grid-cols-[1fr_4rem_4rem_4rem_2rem_2rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
+          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Inbound</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">To Grade</span>
-            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Need</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Min</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
           </div>
           {alerts.map((alert) => (
-            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_4rem_2rem_2rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
               <div className="min-w-0">
                 <p className="text-sm text-zinc-200 truncate">{alert.card_name}</p>
                 <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
@@ -249,10 +274,46 @@ function OrderMoreSection() {
   );
 }
 
-// ── Attention box (Order More + Grading Submission) ───────────────────────────
+// ── Attention box (2×2 grid) ──────────────────────────────────────────────────
+
+const STALE_DAYS = 30;
+
+function AttentionBox({
+  title, count, hasAlert, linkTo, children,
+}: { title: string; count: number; hasAlert: boolean; linkTo?: string; children: React.ReactNode }) {
+  return (
+    <div className={cn(
+      'rounded-lg border p-4 flex flex-col',
+      hasAlert ? 'border-orange-500/30 bg-orange-500/5' : 'border-zinc-800 bg-zinc-900'
+    )}>
+      <div className="flex items-center justify-between mb-3 shrink-0">
+        <p className={cn('text-[10px] font-semibold uppercase tracking-wider', hasAlert ? 'text-orange-400' : 'text-zinc-500')}>
+          {title}
+        </p>
+        <div className="flex items-center gap-2">
+          {hasAlert && (
+            <span className="text-[10px] font-semibold text-orange-300 bg-orange-500/20 border border-orange-500/30 px-2 py-0.5 rounded-full">
+              {count}
+            </span>
+          )}
+          {linkTo && (
+            <Link to={linkTo} className="flex items-center gap-0.5 text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors">
+              View All <ArrowRight size={10} />
+            </Link>
+          )}
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto min-h-0 pr-1">
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function AttentionCard() {
-  const { data, isLoading } = useQuery<{ data: PendingGradingSubItem[] }>({
+  const qc = useQueryClient();
+
+  const { data: gradingData, isLoading: gradingLoading } = useQuery<{ data: PendingGradingSubItem[] }>({
     queryKey: ['pending-grading-sub'],
     queryFn: () => api.get('/reports/pending-grading-sub').then((r) => r.data),
   });
@@ -260,50 +321,63 @@ function AttentionCard() {
     queryKey: ['reorder-alerts'],
     queryFn: () => api.get('/reorder/alerts').then((r) => r.data),
   });
+  const { data: staleEbayData } = useQuery<{ data: StaleEbayListing[] }>({
+    queryKey: ['stale-ebay-listings'],
+    queryFn: () => api.get('/alerts/stale-ebay', { params: { days: STALE_DAYS } }).then((r) => r.data),
+  });
+  const { data: staleCardShowData } = useQuery<{ data: StaleCardShowItem[] }>({
+    queryKey: ['stale-card-show'],
+    queryFn: () => api.get('/alerts/stale-card-show', { params: { days: STALE_DAYS } }).then((r) => r.data),
+  });
 
-  const gradingItems = data?.data ?? [];
+  const muteEbay = useMutation({
+    mutationFn: (id: string) => api.post('/alerts/mute', { entity_type: 'ebay_listing', entity_id: id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['stale-ebay-listings'] }),
+  });
+  const ignoreEbay = useMutation({
+    mutationFn: (id: string) => api.post('/alerts/ignore', { entity_type: 'ebay_listing', entity_id: id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['stale-ebay-listings'] }),
+  });
+  const muteCardShow = useMutation({
+    mutationFn: (id: string) => api.post('/alerts/mute', { entity_type: 'card_show', entity_id: id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['stale-card-show'] }),
+  });
+  const ignoreCardShow = useMutation({
+    mutationFn: (id: string) => api.post('/alerts/ignore', { entity_type: 'card_show', entity_id: id }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['stale-card-show'] }),
+  });
+
+  const gradingItems = gradingData?.data ?? [];
   const reorderAlerts = alertsData?.data ?? [];
-  const hasAlert = gradingItems.length > 0 || reorderAlerts.length > 0;
+  const staleEbay = staleEbayData?.data ?? [];
+  const staleCardShow = staleCardShowData?.data ?? [];
+
+  const hasAny = gradingItems.length > 0 || reorderAlerts.length > 0 || staleEbay.length > 0 || staleCardShow.length > 0;
 
   return (
-    <div className={cn(
-      'rounded-lg border p-4 transition-colors',
-      hasAlert ? 'border-orange-500/40 bg-orange-500/5' : 'border-zinc-800 bg-zinc-900'
-    )}>
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-4">
-        <AlertTriangle size={15} className={hasAlert ? 'text-orange-400' : 'text-zinc-600'} />
-        <p className={cn('text-xs font-semibold uppercase tracking-wider', hasAlert ? 'text-orange-300' : 'text-zinc-500')}>
-          Attention
+    <div className="flex-1 min-h-0 flex flex-col">
+      <div className="flex items-center gap-2 mb-3 shrink-0">
+        <AlertTriangle size={13} className={hasAny ? 'text-orange-400' : 'text-zinc-600'} />
+        <p className={cn('text-xs font-semibold uppercase tracking-wider', hasAny ? 'text-orange-300' : 'text-zinc-500')}>
+          Alerts
         </p>
       </div>
 
-      {/* Two-column body */}
-      <div className="grid grid-cols-2 gap-6 divide-x divide-zinc-800/60">
+      <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-3">
+        {/* Box 1: Order More */}
+        <AttentionBox title="Order More" count={reorderAlerts.length} hasAlert={reorderAlerts.length > 0} linkTo="/reorder-thresholds?tab=reorder">
+          <OrderMoreSection />
+        </AttentionBox>
 
-        {/* Left: Order More */}
-        <OrderMoreSection />
-
-        {/* Right: Grading Submission */}
-        <div className="pl-6">
-          <div className="flex items-center justify-between mb-3">
-            <p className={cn('text-[10px] uppercase tracking-widest', gradingItems.length > 0 ? 'text-orange-400/80' : 'text-zinc-500')}>
-              Needs to be Submitted for Grading
-            </p>
-            {gradingItems.length > 0 && (
-              <span className="text-[10px] font-semibold text-orange-300 bg-orange-500/20 border border-orange-500/30 px-2 py-0.5 rounded-full">
-                {gradingItems.length} card{gradingItems.length !== 1 ? 's' : ''}
-              </span>
-            )}
-          </div>
-
-          {isLoading ? (
-            <p className="text-xs text-zinc-500 py-2">Loading…</p>
+        {/* Box 2: Grading Submission */}
+        <AttentionBox title="Needs Grading Submission" count={gradingItems.length} hasAlert={gradingItems.length > 0}>
+          {gradingLoading ? (
+            <p className="text-xs text-zinc-600">Loading…</p>
           ) : gradingItems.length === 0 ? (
-            <p className="text-xs text-zinc-600">No cards pending grading submission.</p>
+            <p className="text-xs text-zinc-600">No cards pending submission.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-x-4 pb-2 mb-1 border-b border-orange-500/20">
+              <div className="grid grid-cols-[5rem_1fr_2.5rem_4.5rem_3rem] gap-x-3 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-orange-500/5">
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">ID</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Qty</span>
@@ -311,20 +385,94 @@ function AttentionCard() {
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Cond.</span>
               </div>
               {gradingItems.map((item) => (
-                <div key={item.id} className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-x-4 py-2 border-b border-orange-500/10 last:border-0 items-center">
-                  <span className="text-xs font-mono text-orange-400/70">{item.raw_purchase_label ?? '—'}</span>
+                <div key={item.id} className="grid grid-cols-[5rem_1fr_2.5rem_4.5rem_3rem] gap-x-3 py-2 border-b border-orange-500/10 last:border-0 items-center">
+                  <span className="text-xs font-mono text-orange-400/70 truncate">{item.raw_purchase_label ?? '—'}</span>
                   <div className="min-w-0">
                     <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
                     {item.set_name && <p className="text-xs text-zinc-500 truncate">{item.set_name}</p>}
                   </div>
-                  <span className="text-sm text-zinc-300 text-right">{item.quantity}</span>
-                  <span className="text-sm text-zinc-300 text-right">{formatCurrency(item.purchase_cost)}</span>
+                  <span className="text-sm text-zinc-300 text-right tabular-nums">{item.quantity}</span>
+                  <span className="text-sm text-zinc-300 text-right tabular-nums">{formatCurrency(item.purchase_cost)}</span>
                   <span className="text-xs text-zinc-500 text-right">{item.condition ?? '—'}</span>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </AttentionBox>
+
+        {/* Box 3: Stale eBay Listings */}
+        <AttentionBox title={`eBay Listings Unsold 30+ Days`} count={staleEbay.length} hasAlert={staleEbay.length > 0} linkTo="/reorder-thresholds?tab=ebay">
+          {staleEbay.length === 0 ? (
+            <p className="text-xs text-zinc-600">No stale listings.</p>
+          ) : (
+            <div>
+              <div className="grid grid-cols-[0.8fr_0.8fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-orange-500/5">
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card Name</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Set</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Card #</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Days</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
+              </div>
+              {staleEbay.map((item) => (
+                <div key={item.id} className="grid grid-cols-[0.8fr_0.8fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+                  <div className="min-w-0">
+                    {item.ebay_listing_url ? (
+                      <a href={item.ebay_listing_url} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-400 hover:text-indigo-300 truncate block transition-colors">
+                        {item.card_name ?? '—'}
+                      </a>
+                    ) : (
+                      <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
+                    )}
+                  </div>
+                  <span className="text-xs text-zinc-500 truncate">{item.set_name ?? '—'}</span>
+                  <span className="text-xs text-zinc-400 text-right tabular-nums">{item.card_number ?? '—'}</span>
+                  <span className="text-sm text-orange-400 text-right font-medium tabular-nums">{item.days_listed}d</span>
+                  <button onClick={() => muteEbay.mutate(item.id)} title="Snooze 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
+                    <BellOff size={13} />
+                  </button>
+                  <button onClick={() => ignoreEbay.mutate(item.id)} title="Ignore" className="text-zinc-500 hover:text-red-400 transition-colors flex justify-center">
+                    <EyeOff size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </AttentionBox>
+
+        {/* Box 4: Stale Card Show Inventory */}
+        <AttentionBox title={`Card Show Inventory Unsold 30+ Days`} count={staleCardShow.length} hasAlert={staleCardShow.length > 0} linkTo="/reorder-thresholds?tab=card_show">
+          {staleCardShow.length === 0 ? (
+            <p className="text-xs text-zinc-600">No stale card show inventory.</p>
+          ) : (
+            <div>
+              <div className="grid grid-cols-[0.8fr_0.8fr_3rem_2.5rem_3.5rem_3rem_3.5rem] gap-x-2 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-orange-500/5">
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card Name</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Set</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Card #</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Qty</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Days</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
+                <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
+              </div>
+              {staleCardShow.map((item) => (
+                <div key={item.id} className="grid grid-cols-[0.8fr_0.8fr_3rem_2.5rem_3.5rem_3rem_3.5rem] gap-x-2 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+                  <span className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</span>
+                  <span className="text-xs text-zinc-500 truncate">{item.set_name ?? '—'}</span>
+                  <span className="text-xs text-zinc-400 text-right tabular-nums">{item.card_number ?? '—'}</span>
+                  <span className="text-sm text-zinc-300 text-right tabular-nums">{item.quantity}</span>
+                  <span className="text-sm text-orange-400 text-right font-medium tabular-nums">{item.days_held}d</span>
+                  <button onClick={() => muteCardShow.mutate(item.id)} title="Snooze 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
+                    <BellOff size={13} />
+                  </button>
+                  <button onClick={() => ignoreCardShow.mutate(item.id)} title="Ignore" className="text-zinc-500 hover:text-red-400 transition-colors flex justify-center">
+                    <EyeOff size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </AttentionBox>
       </div>
     </div>
   );
@@ -366,7 +514,7 @@ function OverviewTab() {
   const wk = salesWindow === '30d' ? 'last_30_days' : salesWindow === '60d' ? 'last_60_days' : salesWindow === '90d' ? 'last_90_days' : salesWindow === 'this_year' ? 'this_year' : 'lifetime';
 
   return (
-    <div className="space-y-5">
+    <div className="h-full flex flex-col gap-5 overflow-hidden">
 
       {/* Row 1: Revenue */}
       <Card>
@@ -1213,8 +1361,8 @@ export function Dashboard() {
   const [tab, setTab] = useState<Tab>('Overview');
 
   return (
-    <div className="p-6 space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="p-6 h-full flex flex-col overflow-hidden">
+      <div className="flex items-center justify-between mb-5 shrink-0">
         <h1 className="text-xl font-bold text-zinc-100">Dashboard</h1>
         <div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
           {TABS.map((t) => (
@@ -1234,9 +1382,21 @@ export function Dashboard() {
         </div>
       </div>
 
-      {tab === 'Overview'   && <OverviewTab />}
-      {tab === 'Raw Cards'  && <RawCardsTab />}
-      {tab === 'Graded'     && <GradedTab />}
+      {tab === 'Overview' && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <OverviewTab />
+        </div>
+      )}
+      {tab === 'Raw Cards' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <RawCardsTab />
+        </div>
+      )}
+      {tab === 'Graded' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <GradedTab />
+        </div>
+      )}
     </div>
   );
 }

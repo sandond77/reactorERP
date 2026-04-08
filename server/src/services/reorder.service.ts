@@ -228,7 +228,7 @@ export async function listBulkCardsWithThresholds(userId: string) {
       sql<number>`COALESCE((
         SELECT SUM(rp2.card_count)
         FROM raw_purchases rp2
-        WHERE rp2.user_id = ci.user_id
+        WHERE rp2.user_id = ${userId}
           AND rp2.catalog_id = ci.catalog_id
           AND rp2.type = 'bulk'
           AND rp2.status = 'ordered'

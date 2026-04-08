@@ -1,11 +1,26 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, BellOff, EyeOff, RotateCcw } from 'lucide-react';
+import { Check, X, BellOff, EyeOff, RotateCcw, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api';
-import { cn } from '../lib/utils';
+import { cn, formatCurrency } from '../lib/utils';
 import toast from 'react-hot-toast';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+function isMuted(muted_until: string | null) {
+  return !!muted_until && new Date(muted_until) > new Date();
+}
+
+function AlertStatusBadge({ is_ignored, muted_until }: { is_ignored: boolean | null; muted_until: string | null }) {
+  if (is_ignored) return <span className="text-[10px] text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">Ignored</span>;
+  if (isMuted(muted_until)) {
+    const d = new Date(muted_until!).toLocaleDateString();
+    return <span className="text-[10px] text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">Muted until {d}</span>;
+  }
+  return <span className="text-[10px] text-emerald-600 bg-emerald-900/20 px-2 py-0.5 rounded-full">Active</span>;
+}
+
+// ── Reorder tab ───────────────────────────────────────────────────────────────
 
 interface BulkCardRow {
   catalog_id: string;
@@ -21,8 +36,6 @@ interface BulkCardRow {
   inbound_quantity: number;
 }
 
-// ── Inline min qty cell ───────────────────────────────────────────────────────
-
 function MinQtyCell({ row }: { row: BulkCardRow }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -34,8 +47,7 @@ function MinQtyCell({ row }: { row: BulkCardRow }) {
   };
 
   const saveMutation = useMutation({
-    mutationFn: (min_quantity: number) =>
-      api.post('/reorder/thresholds', { catalog_id: row.catalog_id, min_quantity }),
+    mutationFn: (min_quantity: number) => api.post('/reorder/thresholds', { catalog_id: row.catalog_id, min_quantity }),
     onSuccess: () => { invalidate(); setEditing(false); },
     onError: () => toast.error('Failed to save'),
   });
@@ -50,10 +62,7 @@ function MinQtyCell({ row }: { row: BulkCardRow }) {
 
   if (!editing) {
     return (
-      <button
-        onClick={() => { setVal(row.min_quantity != null ? String(row.min_quantity) : ''); setEditing(true); }}
-        className="text-sm text-left w-full"
-      >
+      <button onClick={() => { setVal(row.min_quantity != null ? String(row.min_quantity) : ''); setEditing(true); }} className="text-sm text-left w-full">
         {row.min_quantity != null
           ? <span className="text-zinc-300 tabular-nums">{row.min_quantity}</span>
           : <span className="text-zinc-600 italic">—</span>}
@@ -64,10 +73,7 @@ function MinQtyCell({ row }: { row: BulkCardRow }) {
   return (
     <div className="flex items-center gap-1">
       <input
-        autoFocus
-        type="number"
-        min={1}
-        value={val}
+        autoFocus type="number" min={1} value={val}
         onChange={(e) => setVal(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' && parsed >= 1) saveMutation.mutate(parsed);
@@ -75,128 +81,365 @@ function MinQtyCell({ row }: { row: BulkCardRow }) {
         }}
         className="w-14 text-xs bg-zinc-800 border border-zinc-600 rounded px-1.5 py-0.5 text-zinc-200 focus:outline-none"
       />
-      <button onClick={() => { if (parsed >= 1) saveMutation.mutate(parsed); }} disabled={!val || parsed < 1} className="text-emerald-400 hover:text-emerald-300 disabled:opacity-30">
-        <Check size={12} />
-      </button>
+      <button onClick={() => { if (parsed >= 1) saveMutation.mutate(parsed); }} disabled={!val || parsed < 1} className="text-emerald-400 hover:text-emerald-300 disabled:opacity-30"><Check size={12} /></button>
       {row.threshold_id
-        ? <button onClick={() => clearMutation.mutate()} className="text-zinc-600 hover:text-red-400" title="Clear threshold"><X size={12} /></button>
+        ? <button onClick={() => clearMutation.mutate()} className="text-zinc-600 hover:text-red-400" title="Clear"><X size={12} /></button>
         : <button onClick={() => setEditing(false)} className="text-zinc-600 hover:text-zinc-400"><X size={12} /></button>}
     </div>
   );
 }
 
-// ── Status badge ──────────────────────────────────────────────────────────────
-
-function StatusBadge({ row }: { row: BulkCardRow }) {
-  if (!row.threshold_id) return <span className="text-zinc-700 text-xs">—</span>;
-  if (row.is_ignored) return <span className="text-[10px] text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">Ignored</span>;
-  if (row.muted_until && new Date(row.muted_until) > new Date()) {
-    const d = new Date(row.muted_until).toLocaleDateString();
-    return <span className="text-[10px] text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">Muted until {d}</span>;
-  }
-  return <span className="text-[10px] text-emerald-600 bg-emerald-900/20 px-2 py-0.5 rounded-full">Active</span>;
-}
-
-// ── Action buttons ────────────────────────────────────────────────────────────
-
-function ActionButtons({ row }: { row: BulkCardRow }) {
+function ReorderActionButtons({ row }: { row: BulkCardRow }) {
   const qc = useQueryClient();
   if (!row.threshold_id) return null;
-
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['bulk-cards-thresholds'] });
     qc.invalidateQueries({ queryKey: ['reorder-alerts'] });
   };
-
-  const mute = useMutation({
-    mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/mute`),
-    onSuccess: () => { invalidate(); toast.success('Muted for 30 days'); },
-  });
-  const ignore = useMutation({
-    mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/ignore`),
-    onSuccess: () => { invalidate(); toast.success('Ignored permanently'); },
-  });
-  const reset = useMutation({
-    mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/reset`),
-    onSuccess: () => { invalidate(); toast.success('Alert reset'); },
-  });
-
-  const isMuted = !!row.muted_until && new Date(row.muted_until) > new Date();
-  const isSilenced = row.is_ignored || isMuted;
-
+  const mute   = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/mute`),   onSuccess: () => { invalidate(); toast.success('Muted 30 days'); } });
+  const ignore = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/ignore`), onSuccess: () => { invalidate(); toast.success('Ignored'); } });
+  const reset  = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/reset`),  onSuccess: () => { invalidate(); toast.success('Reset'); } });
+  const silenced = row.is_ignored || isMuted(row.muted_until);
   return (
     <div className="flex items-center gap-2">
-      {isSilenced ? (
-        <button onClick={() => reset.mutate()} title="Re-enable alert" className="text-zinc-500 hover:text-zinc-300 transition-colors">
-          <RotateCcw size={13} />
-        </button>
+      {silenced ? (
+        <button onClick={() => reset.mutate()} title="Re-enable" className="text-zinc-500 hover:text-zinc-300"><RotateCcw size={13} /></button>
       ) : (
         <>
-          <button onClick={() => mute.mutate()} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors">
-            <BellOff size={13} />
-          </button>
-          <button onClick={() => ignore.mutate()} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400 transition-colors">
-            <EyeOff size={13} />
-          </button>
+          <button onClick={() => mute.mutate()}   title="Mute 30 days"       className="text-zinc-500 hover:text-zinc-300"><BellOff size={13} /></button>
+          <button onClick={() => ignore.mutate()} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400"><EyeOff size={13} /></button>
         </>
       )}
     </div>
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
-
-export function ReorderThresholds() {
+function ReorderTab() {
   const { data, isLoading } = useQuery<{ data: BulkCardRow[] }>({
     queryKey: ['bulk-cards-thresholds'],
     queryFn: () => api.get('/reorder/bulk-cards-with-thresholds').then((r) => r.data),
   });
-
   const rows = data?.data ?? [];
 
   return (
-    <div className="p-6 max-w-4xl">
-      <div className="mb-6">
-        <h1 className="text-lg font-semibold text-zinc-100">Reorder Alerts</h1>
-        <p className="text-xs text-zinc-500 mt-0.5">
-          Set minimum stock levels for bulk cards. Alerts trigger when combined in-hand and inbound quantity falls below the threshold. Click any Min Qty cell to edit.
-        </p>
-      </div>
-
-      <div className="rounded-lg border border-zinc-800 overflow-x-auto">
+    <div>
+      <p className="text-xs text-zinc-500 mb-4">
+        Set minimum stock levels for bulk cards. Alerts trigger when combined in-hand (to grade) + inbound quantity falls below the threshold. Click any Min Qty cell to edit.
+      </p>
+      <div className="rounded-lg border border-zinc-800">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-zinc-800 bg-zinc-900">
-              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[120px]">Part Number</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[120px]">Part #</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[160px]">Card Name</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[140px]">Set</th>
-              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[80px]">Card #</th>
-              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[90px]">Min Qty</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[70px]">Card #</th>
+              <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[70px]">Inbound</th>
+              <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[70px]">To Grade</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[80px]">Min Qty</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[120px]">Status</th>
-              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[80px]">Actions</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium whitespace-nowrap min-w-[70px]">Actions</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-600 text-xs">No bulk cards in inventory.</td></tr>
-            ) : (
-              rows.map((row) => (
-                <tr key={row.catalog_id} className={cn('border-t border-zinc-800/60 hover:bg-zinc-900/40 transition-colors', row.is_ignored && 'opacity-50')}>
-                  <td className="px-4 py-2.5 text-xs font-mono text-zinc-400 whitespace-nowrap">{row.sku ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-zinc-200 whitespace-nowrap">{row.card_name}</td>
-                  <td className="px-4 py-2.5 text-xs text-zinc-500 whitespace-nowrap">{row.set_name ?? '—'}</td>
-                  <td className="px-4 py-2.5 text-xs text-zinc-500 whitespace-nowrap">{row.card_number ?? '—'}</td>
-                  <td className="px-4 py-2.5"><MinQtyCell row={row} /></td>
-                  <td className="px-4 py-2.5 whitespace-nowrap"><StatusBadge row={row} /></td>
-                  <td className="px-4 py-2.5"><ActionButtons row={row} /></td>
-                </tr>
-              ))
-            )}
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-600 text-xs">No bulk cards in inventory.</td></tr>
+            ) : rows.map((row) => (
+              <tr key={row.catalog_id} className={cn('border-t border-zinc-800/60 hover:bg-zinc-900/40 transition-colors', row.is_ignored && 'opacity-50')}>
+                <td className="px-4 py-2.5 text-xs font-mono text-zinc-400 whitespace-nowrap">{row.sku ?? '—'}</td>
+                <td className="px-4 py-2.5 text-zinc-200 whitespace-nowrap">{row.card_name}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500 whitespace-nowrap">{row.set_name ?? '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500 whitespace-nowrap">{row.card_number ?? '—'}</td>
+                <td className="px-4 py-2.5 text-sm text-zinc-400 text-right tabular-nums">{row.inbound_quantity}</td>
+                <td className="px-4 py-2.5 text-sm text-zinc-400 text-right tabular-nums">{row.to_grade_quantity}</td>
+                <td className="px-4 py-2.5"><MinQtyCell row={row} /></td>
+                <td className="px-4 py-2.5 whitespace-nowrap"><AlertStatusBadge is_ignored={row.is_ignored} muted_until={row.muted_until} /></td>
+                <td className="px-4 py-2.5"><ReorderActionButtons row={row} /></td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+// ── eBay stale listings tab ───────────────────────────────────────────────────
+
+interface StaleEbayRow {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  sku: string | null;
+  card_number: string | null;
+  list_price: number;
+  listed_at: string | null;
+  ebay_listing_url: string | null;
+  days_listed: number;
+  is_ignored: boolean;
+  muted_until: string | null;
+}
+
+function EbayActionButtons({ row }: { row: StaleEbayRow }) {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['alerts-stale-ebay'] });
+    qc.invalidateQueries({ queryKey: ['stale-ebay-listings'] });
+  };
+  const mute   = useMutation({ mutationFn: () => api.post('/alerts/mute',   { entity_type: 'ebay_listing', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Muted 30 days'); } });
+  const ignore = useMutation({ mutationFn: () => api.post('/alerts/ignore', { entity_type: 'ebay_listing', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Ignored'); } });
+  const reset  = useMutation({ mutationFn: () => api.post('/alerts/reset',  { entity_type: 'ebay_listing', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Reset'); } });
+  const silenced = row.is_ignored || isMuted(row.muted_until);
+  return (
+    <div className="flex items-center gap-2">
+      {silenced ? (
+        <button onClick={() => reset.mutate()} title="Re-enable" className="text-zinc-500 hover:text-zinc-300"><RotateCcw size={13} /></button>
+      ) : (
+        <>
+          <button onClick={() => mute.mutate()}   title="Mute 30 days"       className="text-zinc-500 hover:text-zinc-300"><BellOff size={13} /></button>
+          <button onClick={() => ignore.mutate()} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400"><EyeOff size={13} /></button>
+        </>
+      )}
+    </div>
+  );
+}
+
+const PAGE_SIZE = 15;
+
+function Pagination({ page, totalPages, total, onChange }: { page: number; totalPages: number; total: number; onChange: (p: number) => void }) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between px-4 py-2.5 border-t border-zinc-800 text-xs text-zinc-500">
+      <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}</span>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onChange(page - 1)} disabled={page === 1} className="px-2 py-1 rounded disabled:opacity-30 hover:text-zinc-300 transition-colors">←</button>
+        <span className="px-2">{page} / {totalPages}</span>
+        <button onClick={() => onChange(page + 1)} disabled={page === totalPages} className="px-2 py-1 rounded disabled:opacity-30 hover:text-zinc-300 transition-colors">→</button>
+      </div>
+    </div>
+  );
+}
+
+function EbayListingsTab() {
+  const [days, setDays] = useState(30);
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useQuery<{ data: StaleEbayRow[] }>({
+    queryKey: ['alerts-stale-ebay', days],
+    queryFn: () => api.get('/alerts/stale-ebay', { params: { days } }).then((r) => r.data),
+  });
+  const allRows = data?.data ?? [];
+  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const rows = allRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-zinc-500">eBay listings that have been active for longer than the selected threshold. Mute or ignore to suppress dashboard alerts.</p>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-zinc-500">Unsold for</span>
+          {[14, 30, 60, 90].map((d) => (
+            <button key={d} onClick={() => { setDays(d); setPage(1); }} className={cn('px-2.5 py-1 rounded text-xs font-medium transition-colors', days === d ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-300')}>
+              {d}d
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-lg border border-zinc-800">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col className="w-[30%]" />
+            <col className="w-[35%]" />
+            <col className="w-[12%]" />
+            <col className="w-[10%]" />
+            <col className="w-[13%]" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-zinc-800 bg-zinc-900">
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card Name</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Set</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card #</th>
+              <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Days</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
+            ) : allRows.length === 0 ? (
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600 text-xs">No stale listings for this threshold.</td></tr>
+            ) : rows.map((row) => (
+              <tr key={row.id} className={cn('border-t border-zinc-800/60 hover:bg-zinc-900/40 transition-colors', row.is_ignored && 'opacity-40')}>
+                <td className="px-4 py-2.5">
+                  {row.ebay_listing_url ? (
+                    <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-indigo-400 hover:text-indigo-300 transition-colors">
+                      {row.card_name ?? '—'} <ExternalLink size={11} className="shrink-0 opacity-60" />
+                    </a>
+                  ) : (
+                    <span className="text-zinc-200">{row.card_name ?? '—'}</span>
+                  )}
+                </td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500">{row.set_name ?? '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500">{row.card_number ?? '—'}</td>
+                <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium', row.days_listed >= 90 ? 'text-red-400' : row.days_listed >= 60 ? 'text-orange-400' : 'text-yellow-500')}>{row.days_listed}d</td>
+                <td className="px-4 py-2.5"><EbayActionButtons row={row} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pagination page={page} totalPages={totalPages} total={allRows.length} onChange={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// ── Card Show stale inventory tab ─────────────────────────────────────────────
+
+interface StaleCardShowRow {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  sku: string | null;
+  card_number: string | null;
+  quantity: number;
+  purchase_cost: number;
+  card_show_added_at: string | null;
+  days_held: number;
+  is_ignored: boolean;
+  muted_until: string | null;
+}
+
+function CardShowActionButtons({ row }: { row: StaleCardShowRow }) {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['alerts-stale-card-show'] });
+    qc.invalidateQueries({ queryKey: ['stale-card-show'] });
+  };
+  const mute   = useMutation({ mutationFn: () => api.post('/alerts/mute',   { entity_type: 'card_show', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Muted 30 days'); } });
+  const ignore = useMutation({ mutationFn: () => api.post('/alerts/ignore', { entity_type: 'card_show', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Ignored'); } });
+  const reset  = useMutation({ mutationFn: () => api.post('/alerts/reset',  { entity_type: 'card_show', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Reset'); } });
+  const silenced = row.is_ignored || isMuted(row.muted_until);
+  return (
+    <div className="flex items-center gap-2">
+      {silenced ? (
+        <button onClick={() => reset.mutate()} title="Re-enable" className="text-zinc-500 hover:text-zinc-300"><RotateCcw size={13} /></button>
+      ) : (
+        <>
+          <button onClick={() => mute.mutate()}   title="Mute 30 days"       className="text-zinc-500 hover:text-zinc-300"><BellOff size={13} /></button>
+          <button onClick={() => ignore.mutate()} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400"><EyeOff size={13} /></button>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CardShowTab() {
+  const [days, setDays] = useState(30);
+  const [page, setPage] = useState(1);
+  const { data, isLoading } = useQuery<{ data: StaleCardShowRow[] }>({
+    queryKey: ['alerts-stale-card-show', days],
+    queryFn: () => api.get('/alerts/stale-card-show', { params: { days } }).then((r) => r.data),
+  });
+  const allRows = data?.data ?? [];
+  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const rows = allRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-zinc-500">Card show inventory that has been unsold past the selected threshold. Mute or ignore to suppress dashboard alerts.</p>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-zinc-500">Unsold for</span>
+          {[14, 30, 60, 90].map((d) => (
+            <button key={d} onClick={() => { setDays(d); setPage(1); }} className={cn('px-2.5 py-1 rounded text-xs font-medium transition-colors', days === d ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-300')}>
+              {d}d
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="rounded-lg border border-zinc-800">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col className="w-[28%]" />
+            <col className="w-[32%]" />
+            <col className="w-[12%]" />
+            <col className="w-[8%]" />
+            <col className="w-[9%]" />
+            <col className="w-[11%]" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-zinc-800 bg-zinc-900">
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card Name</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Set</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card #</th>
+              <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Qty</th>
+              <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Days</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
+            ) : allRows.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-600 text-xs">No stale card show inventory for this threshold.</td></tr>
+            ) : rows.map((row) => (
+              <tr key={row.id} className={cn('border-t border-zinc-800/60 hover:bg-zinc-900/40 transition-colors', row.is_ignored && 'opacity-40')}>
+                <td className="px-4 py-2.5 text-zinc-200">{row.card_name ?? '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500">{row.set_name ?? '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500">{row.card_number ?? '—'}</td>
+                <td className="px-4 py-2.5 text-zinc-400 text-right tabular-nums">{row.quantity}</td>
+                <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium', row.days_held >= 90 ? 'text-red-400' : row.days_held >= 60 ? 'text-orange-400' : 'text-yellow-500')}>{row.days_held}d</td>
+                <td className="px-4 py-2.5"><CardShowActionButtons row={row} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <Pagination page={page} totalPages={totalPages} total={allRows.length} onChange={setPage} />
+      </div>
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
+
+type Tab = 'reorder' | 'ebay' | 'card_show';
+
+export function ReorderThresholds() {
+  const urlTab = (new URLSearchParams(window.location.search).get('tab') as Tab) || 'reorder';
+  const [tab, setTab] = useState<Tab>(urlTab);
+
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'reorder',   label: 'Reorder Alerts' },
+    { key: 'ebay',      label: 'eBay Listings Review' },
+    { key: 'card_show', label: 'Card Show Review' },
+  ];
+
+  return (
+    <div className="p-6 max-w-6xl">
+      <div className="mb-6">
+        <h1 className="text-lg font-semibold text-zinc-100">Alerts</h1>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 bg-zinc-800/50 rounded-lg p-1 mb-6 w-fit">
+        {tabs.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            className={cn(
+              'px-4 py-1.5 rounded-md text-sm font-medium transition-colors',
+              tab === key ? 'bg-zinc-700 text-zinc-100 shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'reorder'   && <ReorderTab />}
+      {tab === 'ebay'      && <EbayListingsTab />}
+      {tab === 'card_show' && <CardShowTab />}
     </div>
   );
 }

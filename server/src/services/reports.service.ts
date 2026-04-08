@@ -808,3 +808,48 @@ export async function getPendingGradingSub(userId: string) {
     .execute();
 }
 
+
+export async function getStaleEbayListings(userId: string, days: number) {
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return db
+    .selectFrom('listings as l')
+    .innerJoin('card_instances as ci', 'ci.id', 'l.card_instance_id')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .select([
+      'l.id',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
+      'l.list_price',
+      'l.listed_at',
+      'l.ebay_listing_url',
+      sql<number>`EXTRACT(DAY FROM NOW() - l.listed_at)::int`.as('days_listed'),
+    ])
+    .where('l.user_id', '=', userId)
+    .where('l.listing_status', '=', 'active')
+    .where('l.platform', '=', 'ebay')
+    .where('l.listed_at', '<', cutoff)
+    .orderBy('l.listed_at', 'asc')
+    .execute();
+}
+
+export async function getStaleCardShowInventory(userId: string, days: number) {
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return db
+    .selectFrom('card_instances as ci')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .select([
+      'ci.id',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
+      'ci.quantity',
+      'ci.purchase_cost',
+      'ci.card_show_added_at',
+      sql<number>`EXTRACT(DAY FROM NOW() - ci.card_show_added_at)::int`.as('days_held'),
+    ])
+    .where('ci.user_id', '=', userId)
+    .where('ci.is_card_show', '=', true)
+    .where('ci.status', 'not in', ['sold', 'lost_damaged'])
+    .where('ci.card_show_added_at', '<', cutoff)
+    .orderBy('ci.card_show_added_at', 'asc')
+    .execute();
+}

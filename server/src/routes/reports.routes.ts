@@ -18,3 +18,5 @@ reportsRouter.get('/card-show-breakdown/:showId', reportsController.getCardShowB
 reportsRouter.get('/pending-grading-sub', reportsController.getPendingGradingSub);
 reportsRouter.get('/card-trend', reportsController.getCardTrend);
 reportsRouter.get('/card-trend-search', reportsController.getCardTrendSearch);
+reportsRouter.get('/stale-ebay-listings', reportsController.getStaleEbayListings);
+reportsRouter.get('/stale-card-show', reportsController.getStaleCardShowInventory);

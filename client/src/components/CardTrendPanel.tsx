@@ -145,6 +145,7 @@ function CatalogSearch({ onSelect }: { onSelect: (card: CatalogResult) => void }
 
 function TrendChart({ data, view, showTrendLine }: { data: TrendData; view: PriceView; showTrendLine: boolean }) {
   const { sales, costs } = data;
+  const [hiddenSeries, setHiddenSeries] = useState<Set<string>>(new Set());
 
   const allSeries = new Set<string>();
   sales.forEach((s) => allSeries.add(seriesKey(s)));
@@ -182,14 +183,51 @@ function TrendChart({ data, view, showTrendLine }: { data: TrendData; view: Pric
     bySeries[s].push({ x: p.date as number, y: p.value as number });
   });
 
-  // Compute overall trend line across all sale points (excluding cost series)
-  const allSalePoints = chartPoints.map((p) => ({ x: p.date as number, y: p.value as number }));
-  const trendData = showTrendLine ? linearRegression(allSalePoints) : [];
+  // Trend line uses only visible sale points
+  const visibleSalePoints = chartPoints
+    .filter((p) => !hiddenSeries.has(p.series as string))
+    .map((p) => ({ x: p.date as number, y: p.value as number }));
+  const trendData = showTrendLine ? linearRegression(visibleSalePoints) : [];
 
   const allSeriesKeys = Object.keys(bySeries);
 
+  const toggleSeries = (s: string) => {
+    setHiddenSeries((prev) => {
+      const next = new Set(prev);
+      next.has(s) ? next.delete(s) : next.add(s);
+      return next;
+    });
+  };
+
   return (
-    <ResponsiveContainer width="100%" height={320}>
+    <div>
+      {/* Custom legend */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        {allSeriesKeys.map((s, i) => {
+          const color = s.startsWith('Cost:') ? '#52525b' : (colorMap[s] ?? SERIES_COLORS[i % SERIES_COLORS.length]);
+          const hidden = hiddenSeries.has(s);
+          return (
+            <button
+              key={s}
+              onClick={() => toggleSeries(s)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] border transition-all',
+                hidden
+                  ? 'border-zinc-700 text-zinc-600 bg-transparent'
+                  : 'border-zinc-700 text-zinc-300 bg-zinc-800/60'
+              )}
+            >
+              <span
+                className="w-2 h-2 rounded-full shrink-0 transition-opacity"
+                style={{ backgroundColor: color, opacity: hidden ? 0.3 : 1 }}
+              />
+              <span className={hidden ? 'line-through' : ''}>{s}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <ResponsiveContainer width="100%" height={300}>
       <ComposedChart margin={{ top: 10, right: 20, bottom: 10, left: 10 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
         <XAxis
@@ -216,16 +254,11 @@ function TrendChart({ data, view, showTrendLine }: { data: TrendData; view: Pric
           formatter={(value: number) => [formatCurrency(Math.round(value * 100)), '']}
           labelFormatter={(label) => formatDate(new Date(label).toISOString())}
         />
-        <Legend
-          iconType="circle"
-          iconSize={7}
-          formatter={(v) => <span className="text-zinc-400 text-[11px]">{v}</span>}
-        />
         {allSeriesKeys.map((s, i) => (
           <Scatter
             key={s}
             name={s}
-            data={bySeries[s]}
+            data={hiddenSeries.has(s) ? [] : bySeries[s]}
             fill={s.startsWith('Cost:') ? '#52525b' : (colorMap[s] ?? SERIES_COLORS[i % SERIES_COLORS.length])}
           />
         ))}
@@ -244,6 +277,7 @@ function TrendChart({ data, view, showTrendLine }: { data: TrendData; view: Pric
         )}
       </ComposedChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
@@ -299,25 +333,21 @@ function TrendStats({ data, view }: { data: TrendData; view: PriceView }) {
   const values = sales.map(valueOf);
 
   return (
-    <div className="mt-4 pt-4 border-t border-zinc-800 space-y-4">
-      {/* Row 1: channel + summary stats */}
-      <div className="flex items-start gap-0 divide-x divide-zinc-800">
-        {/* By channel */}
-        <div className="pr-6">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">By Channel</p>
-          <div className="flex gap-5">
-            {CHANNEL_ORDER.filter((ch) => channels[ch]).map((ch) => (
-              <div key={ch}>
-                <p className="text-[10px] text-zinc-500">{ch}</p>
-                <p className="text-sm font-semibold text-zinc-200">{channels[ch].count} <span className="text-zinc-500 font-normal text-xs">sales</span></p>
-                <p className="text-xs text-zinc-400">avg {formatCurrency(Math.round(channels[ch].total / channels[ch].count))}</p>
-              </div>
-            ))}
-          </div>
+    <div className="mt-4 pt-4 border-t border-zinc-800 flex gap-0">
+      {/* Left: channel + summary stats */}
+      <div className="flex-1 flex flex-col gap-5 pr-6">
+        {/* Channel row */}
+        <div className="flex items-start gap-6">
+          {CHANNEL_ORDER.filter((ch) => channels[ch]).map((ch) => (
+            <StatBlock key={ch} label={ch}>
+              <p className="text-sm font-semibold text-zinc-200">{channels[ch].count} <span className="text-zinc-500 font-normal text-xs">sales</span></p>
+              <p className="text-xs text-zinc-400">avg {formatCurrency(Math.round(channels[ch].total / channels[ch].count))}</p>
+            </StatBlock>
+          ))}
         </div>
 
-        {/* Summary */}
-        <div className="pl-6 flex gap-6">
+        {/* Summary row */}
+        <div className="flex items-start gap-6 pt-3 border-t border-zinc-800/60">
           <StatBlock label="Overall Avg">
             <p className="text-sm font-semibold text-zinc-200">{formatCurrency(Math.round(avg))}</p>
             <p className="text-xs text-zinc-500">{sales.length} total sales</p>
@@ -343,19 +373,35 @@ function TrendStats({ data, view }: { data: TrendData; view: PriceView }) {
         </div>
       </div>
 
-      {/* Row 2: by grade/condition */}
+      {/* Right: grade/condition breakdown table */}
       {gradeEntries.length > 1 && (
-        <div className="pt-3 border-t border-zinc-800/60">
-          <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">By Grade / Condition</p>
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            {gradeEntries.map(([key, { count, total }]) => (
-              <div key={key} className="flex items-baseline gap-2">
-                <span className="text-xs text-zinc-300 font-medium">{key}</span>
-                <span className="text-xs text-zinc-500">{count} sales</span>
-                <span className="text-xs text-zinc-400">avg {formatCurrency(Math.round(total / count))}</span>
-              </div>
-            ))}
-          </div>
+        <div className="w-72 shrink-0 pl-6 border-l border-zinc-800">
+          <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-3">By Grade / Condition</p>
+          <table className="w-full text-xs">
+            <colgroup>
+              <col />
+              <col className="w-10" />
+              <col className="w-24" />
+            </colgroup>
+            <thead>
+              <tr className="text-zinc-600">
+                <th className="text-left font-normal pb-1.5">Grade</th>
+                <th className="text-right font-normal pb-1.5 pr-3">#</th>
+                <th className="text-right font-normal pb-1.5">
+                  {view === 'sale_price' ? 'Avg Price' : view === 'net_proceeds' ? 'Avg Net' : 'Avg Cost'}
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800/60">
+              {gradeEntries.map(([key, { count, total }]) => (
+                <tr key={key}>
+                  <td className="py-1.5 text-zinc-300 font-medium">{key}</td>
+                  <td className="py-1.5 text-zinc-500 text-right pr-3">{count}</td>
+                  <td className="py-1.5 text-zinc-400 text-right">{formatCurrency(Math.round(total / count))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

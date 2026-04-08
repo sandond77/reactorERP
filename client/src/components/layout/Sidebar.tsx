@@ -31,7 +31,7 @@ const MANAGE_ROUTES = ['/parts', '/locations', '/reorder-thresholds'];
 const MANAGE_NAV = [
   { to: '/parts',                icon: Layers, label: 'Parts' },
   { to: '/locations',            icon: MapPin,  label: 'Locations' },
-  { to: '/reorder-thresholds',   icon: Bell,    label: 'Reorder Alerts' },
+  { to: '/reorder-thresholds',   icon: Bell,    label: 'Alerts' },
 ];
 
 

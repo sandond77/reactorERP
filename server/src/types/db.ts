@@ -136,6 +136,7 @@ export interface CardInstancesTable {
   location_id: string | null;
   decision: string | null;
   is_card_show: Generated<boolean>;
+  card_show_added_at: Date | null;
   is_personal_collection: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
@@ -394,6 +395,18 @@ export interface Database {
   grading_batch_items: GradingBatchItemsTable;
   grading_batch_sequences: GradingBatchSequencesTable;
   card_shows: CardShowsTable;
+  alert_overrides: AlertOverridesTable;
+}
+
+export interface AlertOverridesTable {
+  id: Generated<string>;
+  user_id: string;
+  entity_type: 'ebay_listing' | 'card_show';
+  entity_id: string;
+  muted_until: Date | null;
+  is_ignored: Generated<boolean>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 // ============================================================

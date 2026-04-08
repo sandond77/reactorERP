@@ -183,14 +183,17 @@ export async function assignLocation(userId: string, cardInstanceId: string, loc
     if (loc.card_type === 'graded' && !isGraded) throw new Error('This location is for graded cards only');
     if (loc.card_type === 'raw' && isGraded) throw new Error('This location is for raw cards only');
 
-    // Sync is_card_show flag
+    // Sync is_card_show flag; stamp card_show_added_at when transitioning to card show
+    const existing = await db.selectFrom('card_instances').select(['is_card_show', 'card_show_added_at']).where('id', '=', cardInstanceId).executeTakeFirst();
+    const wasCardShow = existing?.is_card_show ?? false;
+    const addedAt = loc.is_card_show && !wasCardShow ? new Date() : (loc.is_card_show ? (existing?.card_show_added_at ?? new Date()) : null);
     await db.updateTable('card_instances')
-      .set({ location_id: locationId, is_card_show: loc.is_card_show })
+      .set({ location_id: locationId, is_card_show: loc.is_card_show, card_show_added_at: addedAt })
       .where('id', '=', cardInstanceId)
       .execute();
   } else {
     await db.updateTable('card_instances')
-      .set({ location_id: null, is_card_show: false })
+      .set({ location_id: null, is_card_show: false, card_show_added_at: null })
       .where('id', '=', cardInstanceId)
       .execute();
   }

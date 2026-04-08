@@ -18,6 +18,7 @@ import { expensesRouter } from './expenses.routes';
 import { auditRouter } from './audit.routes';
 import { cardShowsRouter } from './card-shows.routes';
 import { reorderRouter } from './reorder.routes';
+import { alertOverridesRouter } from './alert-overrides.routes';
 
 export const apiRouter = Router();
 
@@ -59,3 +60,4 @@ apiRouter.use('/expenses', expensesRouter);
 apiRouter.use('/audit', auditRouter);
 apiRouter.use('/card-shows', cardShowsRouter);
 apiRouter.use('/reorder', reorderRouter);
+apiRouter.use('/alerts', alertOverridesRouter);

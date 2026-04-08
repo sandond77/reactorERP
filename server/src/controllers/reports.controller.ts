@@ -313,3 +313,19 @@ export async function getPendingGradingSub(req: Request, res: Response, next: Ne
     res.json({ data: result });
   } catch (err) { next(err); }
 }
+
+export async function getStaleEbayListings(req: Request, res: Response, next: NextFunction) {
+  try {
+    const days = z.coerce.number().int().min(1).default(30).parse(req.query.days);
+    const result = await reportsService.getStaleEbayListings(req.user!.id, days);
+    res.json({ data: result });
+  } catch (err) { next(err); }
+}
+
+export async function getStaleCardShowInventory(req: Request, res: Response, next: NextFunction) {
+  try {
+    const days = z.coerce.number().int().min(1).default(30).parse(req.query.days);
+    const result = await reportsService.getStaleCardShowInventory(req.user!.id, days);
+    res.json({ data: result });
+  } catch (err) { next(err); }
+}

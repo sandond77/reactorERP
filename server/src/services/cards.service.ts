@@ -390,7 +390,7 @@ export async function createCard(
 
   const card = await db
     .insertInto('card_instances')
-    .values({ ...data, user_id: userId, status, purchase_type: purchaseType, raw_purchase_id: rawPurchaseId, is_card_show: isCardShow })
+    .values({ ...data, user_id: userId, status, purchase_type: purchaseType, raw_purchase_id: rawPurchaseId, is_card_show: isCardShow, card_show_added_at: isCardShow ? new Date() : null })
     .returningAll()
     .executeTakeFirstOrThrow();
 
