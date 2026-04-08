@@ -8,6 +8,7 @@ import { formatCurrency } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { SlabDetailModal } from '../components/inventory/SlabDetailModal';
 import { AddSlabForm } from '../components/inventory/AddSlabForm';
+import { AddToCardShowModal } from '../components/inventory/AddToCardShowModal';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 
 interface SlabRow {
@@ -35,6 +36,7 @@ interface SlabRow {
   location_name: string | null;
   location_id: string | null;
   is_card_show: boolean;
+  card_show_price: number | null;
   is_personal_collection: boolean;
 }
 
@@ -112,6 +114,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
   const saved = loadFilters(filterKey, OVERALL_FILTER_DEFAULTS);
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
+  const [addToCardShowOpen, setAddToCardShowOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
@@ -139,8 +142,9 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     notes:              colMinWidth('Notes',     false, false),
     location:           colMinWidth('Location',  false, false),
     card_show:          colMinWidth('Card Show?', false, true),
+    card_show_price:    colMinWidth('CS Price',   true,  false),
   };
-  const { rz, totalWidth } = useColWidths({ part_number: Math.max(MINS.part_number, 110), cert_number: Math.max(MINS.cert_number, 120), grade: Math.max(MINS.grade, 160), card_name: Math.max(MINS.card_name, 560), company: Math.max(MINS.company, 115), is_listed: Math.max(MINS.is_listed, 80), listed_price: Math.max(MINS.listed_price, 75), listing: Math.max(MINS.listing, 55), location: Math.max(MINS.location, 130), card_show: Math.max(MINS.card_show, 60), raw_cost: Math.max(MINS.raw_cost, 75), grading_cost: Math.max(MINS.grading_cost, 75), strike_price: Math.max(MINS.strike_price, 75), after_ebay: Math.max(MINS.after_ebay, 75), net: Math.max(MINS.net, 75), raw_purchase_date: Math.max(MINS.raw_purchase_date, 80), date_listed: Math.max(MINS.date_listed, 75), date_sold: Math.max(MINS.date_sold, 75), roi_pct: Math.max(MINS.roi_pct, 65), notes: Math.max(MINS.notes, 500) });
+  const { rz, totalWidth } = useColWidths({ part_number: Math.max(MINS.part_number, 110), cert_number: Math.max(MINS.cert_number, 120), grade: Math.max(MINS.grade, 160), card_name: Math.max(MINS.card_name, 560), company: Math.max(MINS.company, 115), is_listed: Math.max(MINS.is_listed, 80), listed_price: Math.max(MINS.listed_price, 75), listing: Math.max(MINS.listing, 55), location: Math.max(MINS.location, 130), card_show: Math.max(MINS.card_show, 60), card_show_price: Math.max(MINS.card_show_price, 80), raw_cost: Math.max(MINS.raw_cost, 75), grading_cost: Math.max(MINS.grading_cost, 75), strike_price: Math.max(MINS.strike_price, 75), after_ebay: Math.max(MINS.after_ebay, 75), net: Math.max(MINS.net, 75), raw_purchase_date: Math.max(MINS.raw_purchase_date, 80), date_listed: Math.max(MINS.date_listed, 75), date_sold: Math.max(MINS.date_sold, 75), roi_pct: Math.max(MINS.roi_pct, 65), notes: Math.max(MINS.notes, 500) });
 
   // Per-column filters
   const [selectedSlab, setSelectedSlab] = useState<SlabRow | null>(null);
@@ -263,7 +267,11 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
             onChange={(e) => handleSearchChange(e.target.value)}
             className="w-64 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           />
-          {!cardShowMode && (
+          {cardShowMode ? (
+            <Button size="sm" onClick={() => setAddToCardShowOpen(true)}>
+              <Plus size={14} /> Add to Card Show
+            </Button>
+          ) : (
             <Button size="sm" onClick={() => setAddOpen(true)}>
               <Plus size={14} /> Add Slab
             </Button>
@@ -288,6 +296,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                 <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('is_listed')} align="center" minWidth={MINS.is_listed}
                   filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
                 <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" minWidth={MINS.listed_price} wrap />
+                {cardShowMode && <ColHeader label="CS Price" col="card_show_price" {...sh} {...rz('card_show_price')} align="right" minWidth={MINS.card_show_price} wrap />}
                 <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" minWidth={MINS.listing} />
                 {!cardShowMode && <ColHeader label="Location"               {...sh} {...rz('location')} minWidth={MINS.location} />}
                 {!cardShowMode && (
@@ -332,6 +341,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                       {row.is_listed ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}
                     </td>
                     <td className="px-3 py-1 text-right text-zinc-300">{fmt(row.listed_price)}</td>
+                    {cardShowMode && <td className="px-3 py-1 text-right text-emerald-400 font-medium">{fmt(row.card_show_price)}</td>}
                     <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
                       {row.order_details_link ? (
                         <a href={row.order_details_link} target="_blank" rel="noopener noreferrer"
@@ -374,6 +384,9 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
       )}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Slab">
         <AddSlabForm onSuccess={() => { setAddOpen(false); qc.invalidateQueries({ queryKey: ['overall'] }); }} />
+      </Modal>
+      <Modal open={addToCardShowOpen} onClose={() => setAddToCardShowOpen(false)} title="Add to Card Show" className="max-w-5xl">
+        <AddToCardShowModal onSuccess={() => setAddToCardShowOpen(false)} />
       </Modal>
 
       {data && (

@@ -78,6 +78,26 @@ export async function updateCardShow(userId: string, id: string, data: {
   return updated;
 }
 
+export async function addCardsToCardShow(userId: string, cards: { id: string; card_show_price: number }[]) {
+  const now = new Date();
+  for (const { id, card_show_price } of cards) {
+    const existing = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!existing) continue;
+    await db
+      .updateTable('card_instances')
+      .set({ is_card_show: true, card_show_added_at: now, card_show_price })
+      .where('id', '=', id)
+      .where('user_id', '=', userId)
+      .execute();
+    await logAudit(userId, 'card_instances', id, 'updated', existing, { ...existing, is_card_show: true, card_show_price });
+  }
+}
+
 export async function deleteCardShow(userId: string, id: string) {
   const existing = await db
     .selectFrom('card_shows')

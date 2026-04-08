@@ -37,6 +37,19 @@ export async function update(req: Request, res: Response, next: NextFunction) {
   } catch (err) { next(err); }
 }
 
+export async function addInventory(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { cards } = z.object({
+      cards: z.array(z.object({
+        id: z.string().uuid(),
+        card_show_price: z.number().int().min(0),
+      })).min(1),
+    }).parse(req.body);
+    await service.addCardsToCardShow(req.user!.id, cards);
+    res.json({ ok: true, count: cards.length });
+  } catch (err) { next(err); }
+}
+
 export async function remove(req: Request, res: Response, next: NextFunction) {
   try {
     await service.deleteCardShow(req.user!.id, req.params.id);

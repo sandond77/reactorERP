@@ -6,7 +6,8 @@ export const cardShowsRouter = Router();
 
 cardShowsRouter.use(requireAuth);
 
-cardShowsRouter.get('/',         ctrl.list);
-cardShowsRouter.post('/',        ctrl.create);
-cardShowsRouter.patch('/:id',    ctrl.update);
-cardShowsRouter.delete('/:id',   ctrl.remove);
+cardShowsRouter.get('/',                ctrl.list);
+cardShowsRouter.post('/',               ctrl.create);
+cardShowsRouter.post('/add-inventory',  ctrl.addInventory);
+cardShowsRouter.patch('/:id',           ctrl.update);
+cardShowsRouter.delete('/:id',          ctrl.remove);

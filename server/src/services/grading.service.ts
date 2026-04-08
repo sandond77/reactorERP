@@ -178,6 +178,7 @@ export async function listSlabs(
     roi_pct: number | null;
     notes: string | null;
     is_card_show: boolean;
+    card_show_price: number | null;
     is_personal_collection: boolean;
     order_details_link: string | null;
     location_name: string | null;
@@ -223,6 +224,7 @@ export async function listSlabs(
       END                                             AS roi_pct,
       ci.notes,
       ci.is_card_show,
+      ci.card_show_price,
       ci.is_personal_collection,
       s.order_details_link,
       loc.name AS location_name,
