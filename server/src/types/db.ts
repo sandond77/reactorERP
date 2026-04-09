@@ -373,7 +373,22 @@ export interface ReorderThresholdsTable {
   updated_at: Generated<Date>;
 }
 
+export interface GradeMoreThresholdsTable {
+  id: Generated<string>;
+  user_id: string;
+  catalog_id: string;
+  company: string;
+  grade: number | null;
+  grade_label: string | null;
+  min_quantity: number;
+  is_ignored: Generated<boolean>;
+  muted_until: Date | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface Database {
+  grade_more_thresholds: GradeMoreThresholdsTable;
   reorder_thresholds: ReorderThresholdsTable;
   expenses: ExpensesTable;
   expense_sequences: ExpenseSequencesTable;

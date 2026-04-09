@@ -527,19 +527,24 @@ export async function getEmptyCatalogEntries(userId: string) {
 }
 
 export async function searchCatalog(params: {
+  q?: string;
   card_name?: string;
   set_name?: string;
   card_number?: string;
   language?: string;
   limit?: number;
 }): Promise<Array<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }>> {
-  const { card_name, set_name, card_number, language, limit = 10 } = params;
-  if (!card_name && !set_name && !card_number) return [];
+  const { q, card_name, set_name, card_number, language, limit = 20 } = params;
+  if (!q && !card_name && !set_name && !card_number) return [];
+
+  // Convert "1996 charizard" → "%1996%charizard%" so multi-word queries work
+  const qPattern = q ? '%' + q.trim().split(/\s+/).join('%') + '%' : null;
 
   const rows = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }>`
     SELECT id, sku, card_name, set_name, card_number, language
     FROM card_catalog
     WHERE game = 'pokemon'
+      ${qPattern ? sql`AND (card_name ILIKE ${qPattern} OR sku ILIKE ${qPattern})` : sql``}
       ${card_name ? sql`AND card_name ILIKE ${'%' + card_name + '%'}` : sql``}
       ${set_name  ? sql`AND set_name  ILIKE ${'%' + set_name  + '%'}` : sql``}
       ${card_number ? sql`AND card_number = ${card_number.split('/')[0].trim().replace(/^0+/, '').padStart(3, '0')}` : sql``}

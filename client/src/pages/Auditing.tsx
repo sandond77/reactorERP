@@ -2,7 +2,7 @@ import { ShieldCheck } from 'lucide-react';
 
 export function Auditing() {
   return (
-    <div className="p-6 max-w-3xl mx-auto">
+    <div className="p-6 max-w-3xl mx-auto h-full overflow-y-auto">
       <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
         <div className="w-12 h-12 rounded-xl bg-zinc-800 flex items-center justify-center">
           <ShieldCheck size={22} className="text-zinc-500" />

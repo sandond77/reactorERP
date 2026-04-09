@@ -210,7 +210,7 @@ export function ShowSchedule() {
   const archivedPast = past.slice(5);
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 h-full overflow-y-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-zinc-100">Show Schedule</h1>
         <Button onClick={() => setShowAdd(true)}><Plus size={14} /> Add Show</Button>

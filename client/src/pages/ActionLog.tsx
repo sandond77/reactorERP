@@ -173,7 +173,7 @@ export function ActionLog() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-5">
+    <div className="p-6 max-w-5xl mx-auto space-y-5 h-full overflow-y-auto">
       <div>
         <h1 className="text-xl font-semibold text-zinc-100">Action Log</h1>
         <p className="text-sm text-zinc-500 mt-0.5">All actions performed by you or the AI agent. Deleted records can be restored.</p>

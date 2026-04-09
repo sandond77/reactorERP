@@ -209,7 +209,7 @@ export function Reports() {
   );
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-6 space-y-6 h-full overflow-y-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-zinc-100">Reports</h1>
         <button

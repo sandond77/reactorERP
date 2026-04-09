@@ -186,6 +186,19 @@ interface StaleEbayListing {
   muted_until: string | null;
 }
 
+interface GradeMoreAlert {
+  threshold_id: string;
+  catalog_id: string;
+  card_name: string;
+  set_name: string | null;
+  sku: string | null;
+  unsold_graded: number;
+  in_grading: number;
+  min_quantity: number;
+  is_ignored: boolean;
+  muted_until: string | null;
+}
+
 interface StaleCardShowItem {
   id: string;
   card_name: string | null;
@@ -274,6 +287,72 @@ function OrderMoreSection() {
   );
 }
 
+// ── Grade More section ────────────────────────────────────────────────────────
+
+function GradeMoreSection() {
+  const qc = useQueryClient();
+
+  const { data: alertsData, isLoading } = useQuery<{ data: GradeMoreAlert[] }>({
+    queryKey: ['grade-more-alerts'],
+    queryFn: () => api.get('/grade-more/alerts').then((r) => r.data),
+  });
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['grade-more-alerts'] });
+
+  const muteMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/grade-more/${id}/mute`),
+    onSuccess: invalidate,
+  });
+  const ignoreMutation = useMutation({
+    mutationFn: (id: string) => api.post(`/grade-more/${id}/ignore`),
+    onSuccess: invalidate,
+  });
+
+  const alerts = alertsData?.data ?? [];
+
+  return (
+    <div>
+      {isLoading ? (
+        <p className="text-xs text-zinc-500">Loading…</p>
+      ) : alerts.length === 0 ? (
+        <p className="text-xs text-zinc-600">No grade more alerts. Manage thresholds under <span className="text-zinc-500">Manage → Alerts</span>.</p>
+      ) : (
+        <div>
+          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Unsold</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Grading</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Min</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
+          </div>
+          {alerts.map((alert) => (
+            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+              <div className="min-w-0">
+                <p className="text-sm text-zinc-200 truncate">{alert.card_name}</p>
+                <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
+              </div>
+              <span className={cn('text-sm font-semibold text-right tabular-nums', alert.unsold_graded === 0 ? 'text-red-400' : 'text-amber-400')}>
+                {alert.unsold_graded}
+              </span>
+              <span className="text-sm text-blue-400 text-right tabular-nums">
+                {alert.in_grading > 0 ? `+${alert.in_grading}` : '—'}
+              </span>
+              <span className="text-sm text-zinc-400 text-right tabular-nums">{alert.min_quantity}</span>
+              <button onClick={() => muteMutation.mutate(alert.threshold_id)} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
+                <BellOff size={13} />
+              </button>
+              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-red-400 transition-colors flex justify-center">
+                <EyeOff size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Attention box (2×2 grid) ──────────────────────────────────────────────────
 
 const STALE_DAYS = 30;
@@ -283,7 +362,7 @@ function AttentionBox({
 }: { title: string; count: number; hasAlert: boolean; linkTo?: string; children: React.ReactNode }) {
   return (
     <div className={cn(
-      'rounded-lg border p-4 flex flex-col',
+      'rounded-lg border p-4 flex flex-col min-h-0',
       hasAlert ? 'border-orange-500/30 bg-orange-500/5' : 'border-zinc-800 bg-zinc-900'
     )}>
       <div className="flex items-center justify-between mb-3 shrink-0">
@@ -321,6 +400,10 @@ function AttentionCard() {
     queryKey: ['reorder-alerts'],
     queryFn: () => api.get('/reorder/alerts').then((r) => r.data),
   });
+  const { data: gradeMoreData } = useQuery<{ data: GradeMoreAlert[] }>({
+    queryKey: ['grade-more-alerts'],
+    queryFn: () => api.get('/grade-more/alerts').then((r) => r.data),
+  });
   const { data: staleEbayData } = useQuery<{ data: StaleEbayListing[] }>({
     queryKey: ['stale-ebay-listings'],
     queryFn: () => api.get('/alerts/stale-ebay', { params: { days: STALE_DAYS } }).then((r) => r.data),
@@ -349,27 +432,31 @@ function AttentionCard() {
 
   const gradingItems = gradingData?.data ?? [];
   const reorderAlerts = alertsData?.data ?? [];
+  const gradeMoreAlerts = gradeMoreData?.data ?? [];
   const staleEbay = staleEbayData?.data ?? [];
   const staleCardShow = staleCardShowData?.data ?? [];
 
-  const hasAny = gradingItems.length > 0 || reorderAlerts.length > 0 || staleEbay.length > 0 || staleCardShow.length > 0;
+  const hasAny = gradingItems.length > 0 || reorderAlerts.length > 0 || gradeMoreAlerts.length > 0 || staleEbay.length > 0 || staleCardShow.length > 0;
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <div className="flex items-center gap-2 mb-3 shrink-0">
+    <div className="flex flex-col flex-1 min-h-[500px]">
+      <div className="flex items-center gap-2 mb-2 shrink-0">
         <AlertTriangle size={13} className={hasAny ? 'text-orange-400' : 'text-zinc-600'} />
         <p className={cn('text-xs font-semibold uppercase tracking-wider', hasAny ? 'text-orange-300' : 'text-zinc-500')}>
           Alerts
         </p>
       </div>
 
-      <div className="flex-1 min-h-0 grid grid-cols-2 grid-rows-2 gap-3">
-        {/* Box 1: Order More */}
+      {/* Row 1: 3 equal boxes */}
+      <div className="grid grid-cols-3 gap-3 flex-1 min-h-[180px]">
         <AttentionBox title="Order More" count={reorderAlerts.length} hasAlert={reorderAlerts.length > 0} linkTo="/reorder-thresholds?tab=reorder">
           <OrderMoreSection />
         </AttentionBox>
 
-        {/* Box 2: Grading Submission */}
+        <AttentionBox title="Grade More" count={gradeMoreAlerts.length} hasAlert={gradeMoreAlerts.length > 0} linkTo="/reorder-thresholds?tab=grade_more">
+          <GradeMoreSection />
+        </AttentionBox>
+
         <AttentionBox title="Needs Grading Submission" count={gradingItems.length} hasAlert={gradingItems.length > 0}>
           {gradingLoading ? (
             <p className="text-xs text-zinc-600">Loading…</p>
@@ -377,7 +464,7 @@ function AttentionCard() {
             <p className="text-xs text-zinc-600">No cards pending submission.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[5rem_1fr_2.5rem_4.5rem_3rem] gap-x-3 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-orange-500/5">
+              <div className="grid grid-cols-[5rem_1fr_2.5rem_4.5rem_3rem] gap-x-3 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-zinc-950">
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">ID</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Qty</span>
@@ -399,14 +486,16 @@ function AttentionCard() {
             </div>
           )}
         </AttentionBox>
+      </div>
 
-        {/* Box 3: Stale eBay Listings */}
+      {/* Row 2: 2 equal boxes */}
+      <div className="grid grid-cols-2 gap-3 flex-[1.5] min-h-[220px] mt-3">
         <AttentionBox title={`eBay Listings Unsold 30+ Days`} count={staleEbay.length} hasAlert={staleEbay.length > 0} linkTo="/reorder-thresholds?tab=ebay">
           {staleEbay.length === 0 ? (
             <p className="text-xs text-zinc-600">No stale listings.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[0.8fr_0.8fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-orange-500/5">
+              <div className="grid grid-cols-[0.8fr_0.8fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-zinc-950">
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card Name</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Set</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Card #</span>
@@ -446,7 +535,7 @@ function AttentionCard() {
             <p className="text-xs text-zinc-600">No stale card show inventory.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[0.8fr_0.8fr_3rem_2.5rem_3.5rem_3rem_3.5rem] gap-x-2 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-orange-500/5">
+              <div className="grid grid-cols-[0.8fr_0.8fr_3rem_2.5rem_3.5rem_3rem_3.5rem] gap-x-2 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-zinc-950">
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card Name</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Set</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Card #</span>
@@ -514,116 +603,120 @@ function OverviewTab() {
   const wk = salesWindow === '30d' ? 'last_30_days' : salesWindow === '60d' ? 'last_60_days' : salesWindow === '90d' ? 'last_90_days' : salesWindow === 'this_year' ? 'this_year' : 'lifetime';
 
   return (
-    <div className="h-full flex flex-col gap-5 overflow-hidden">
+    <div className="flex flex-col gap-4 h-full min-h-0">
 
-      {/* Row 1: Revenue */}
-      <Card>
-        <div className="flex items-center justify-between mb-5">
-          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Revenue</p>
-          <div className="flex gap-1">
-            {SALES_WINDOWS.map(({ key, label }) => (
-              <button key={key} onClick={() => setSalesWindow(key)}
-                className={cn('px-2.5 py-0.5 rounded text-[10px] font-medium transition-colors',
-                  salesWindow === key ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-300')}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
-        {(() => {
-          const netProfit = (windowData.total_profit ?? 0) - (windowData.total_expenses ?? 0);
-          return (
-            <div className="grid grid-cols-6 divide-x divide-zinc-800">
-              {([
-                { label: 'Gross',                  value: formatCurrency(windowData.total_gross ?? 0),                              cls: 'text-zinc-100' },
-                { label: 'Cost',                   value: formatCurrency(windowData.total_cost ?? 0),                               cls: 'text-zinc-100' },
-                { label: 'Expenses',               value: formatCurrency(windowData.total_expenses ?? 0),                           cls: 'text-zinc-100' },
-                { label: 'Profit',                 value: (windowData.total_profit >= 0 ? '+' : '') + formatCurrency(windowData.total_profit), cls: windowData.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400' },
-                { label: 'Net Profit (After Exp)', value: (netProfit >= 0 ? '+' : '') + formatCurrency(netProfit),                  cls: netProfit >= 0 ? 'text-emerald-400' : 'text-red-400' },
-                { label: '# of Sales',             value: String(windowData.count),                                                 cls: 'text-zinc-100' },
-              ]).map(({ label, value, cls }, i) => (
-                <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
-                  <p className={cn('text-2xl font-bold', cls)}>{value}</p>
-                </div>
+      <div className="flex flex-col gap-4 shrink-0">
+
+        {/* Row 1: Revenue */}
+        <Card>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Revenue</p>
+            <div className="flex gap-1">
+              {SALES_WINDOWS.map(({ key, label }) => (
+                <button key={key} onClick={() => setSalesWindow(key)}
+                  className={cn('px-2.5 py-0.5 rounded text-[10px] font-medium transition-colors',
+                    salesWindow === key ? 'bg-indigo-600 text-white' : 'text-zinc-500 hover:text-zinc-300')}>
+                  {label}
+                </button>
               ))}
             </div>
-          );
-        })()}
-      </Card>
+          </div>
+          {(() => {
+            const netProfit = (windowData.total_profit ?? 0) - (windowData.total_expenses ?? 0);
+            return (
+              <div className="grid grid-cols-6 divide-x divide-zinc-800">
+                {([
+                  { label: 'Gross',                  value: formatCurrency(windowData.total_gross ?? 0),                              cls: 'text-zinc-100' },
+                  { label: 'Cost',                   value: formatCurrency(windowData.total_cost ?? 0),                               cls: 'text-zinc-100' },
+                  { label: 'Expenses',               value: formatCurrency(windowData.total_expenses ?? 0),                           cls: 'text-zinc-100' },
+                  { label: 'Profit',                 value: (windowData.total_profit >= 0 ? '+' : '') + formatCurrency(windowData.total_profit), cls: windowData.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400' },
+                  { label: 'Net Profit (After Exp)', value: (netProfit >= 0 ? '+' : '') + formatCurrency(netProfit),                  cls: netProfit >= 0 ? 'text-emerald-400' : 'text-red-400' },
+                  { label: '# of Sales',             value: String(windowData.count),                                                 cls: 'text-zinc-100' },
+                ]).map(({ label, value, cls }, i) => (
+                  <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
+                    <p className={cn('text-xl font-bold', cls)}>{value}</p>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </Card>
 
-      {/* Row 2: Inventory */}
-      <Card>
-        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4">Inventory</p>
-        <div className="grid grid-cols-3 divide-x divide-zinc-800">
+        {/* Row 2: Inventory */}
+        <Card>
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Inventory</p>
+          <div className="grid grid-cols-3 divide-x divide-zinc-800">
+            {([
+              { label: 'Total Cards',  value: cards.total.all,  sub: `Graded ${cards.total.graded}  ·  Raw ${cards.total.raw}` },
+              { label: 'Unsold Cards', value: cards.unsold.all, sub: `Graded ${cards.unsold.graded}  ·  Raw ${cards.unsold.raw}` },
+              { label: 'Sold Cards',   value: cards.sold.all,   sub: `Graded ${cards.sold.graded}  ·  Raw ${cards.sold.raw}` },
+            ]).map(({ label, value, sub }, i) => (
+              <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
+                <p className="text-xl font-bold text-zinc-100">{value}</p>
+                <p className="text-xs text-zinc-600 mt-0.5">{sub}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
+        {/* Row 3: Sales by channel */}
+        <div className="grid grid-cols-3 gap-4">
           {([
-            { label: 'Total Cards',  value: cards.total.all,  sub: `Graded ${cards.total.graded}  ·  Raw ${cards.total.raw}` },
-            { label: 'Unsold Cards', value: cards.unsold.all, sub: `Graded ${cards.unsold.graded}  ·  Raw ${cards.unsold.raw}` },
-            { label: 'Sold Cards',   value: cards.sold.all,   sub: `Graded ${cards.sold.graded}  ·  Raw ${cards.sold.raw}` },
-          ]).map(({ label, value, sub }, i) => (
-            <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
-              <p className="text-2xl font-bold text-zinc-100">{value}</p>
-              <p className="text-xs text-zinc-600 mt-1">{sub}</p>
+            { key: 'ebay',      label: 'eBay' },
+            { key: 'card_show', label: 'Card Shows' },
+            { key: 'other',     label: 'Other' },
+          ] as { key: keyof ChannelBreakdown; label: string }[]).map(({ key, label }) => {
+            const ch = summary?.by_channel?.[wk]?.[key] ?? { count: 0, total_profit: 0 };
+            return (
+              <Card key={key}>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
+                <p className="text-xl font-bold text-zinc-100">{ch.count} <span className="text-sm font-normal text-zinc-500">sales</span></p>
+                <p className={cn('text-sm font-semibold', ch.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                  {(ch.total_profit >= 0 ? '+' : '') + formatCurrency(ch.total_profit)}
+                </p>
+                {key === 'ebay' && (
+                  <p className="text-xs text-zinc-500 mt-0.5">{cards.listed.all} listed &nbsp;·&nbsp; {cards.listed.graded} Graded / {cards.listed.raw} Raw</p>
+                )}
+                {key === 'card_show' && (
+                  <p className="text-xs text-zinc-500 mt-0.5">{cards.card_show.unsold} unsold &nbsp;·&nbsp; {cards.card_show.all} total inventory</p>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+
+        {/* Row 4: Pipeline */}
+        <Card>
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Pipeline</p>
+          <div className="grid grid-cols-4 divide-x divide-zinc-800">
+            <div className="pr-6">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
+              <p className="text-xl font-bold text-zinc-100">{sellThrough != null ? `${sellThrough}%` : '—'}</p>
+              <p className="text-xs text-zinc-600 mt-0.5">sold / (sold + unsold)</p>
             </div>
-          ))}
-        </div>
-      </Card>
+            <div className="px-6">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Pending Orders</p>
+              <p className={cn('text-xl font-bold', performance.pending_orders > 0 ? 'text-amber-400' : 'text-zinc-100')}>{performance.pending_orders}</p>
+              <p className="text-xs text-zinc-600 mt-0.5">purchases ordered, not received</p>
+            </div>
+            <div className="px-6">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Needs Inspection</p>
+              <p className={cn('text-xl font-bold', pipeline.needs_inspection > 0 ? 'text-amber-400' : 'text-zinc-100')}>{pipeline.needs_inspection}</p>
+              <p className="text-xs text-zinc-600 mt-0.5">purchased, not yet inspected</p>
+            </div>
+            <div className="pl-6">
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">At Graders</p>
+              <p className="text-xl font-bold text-zinc-100">{grading.card_count}</p>
+              <p className="text-xs text-zinc-600 mt-0.5">{grading.sub_count} {grading.sub_count === 1 ? 'submission' : 'submissions'}</p>
+            </div>
+          </div>
+        </Card>
 
-      {/* Row 3: Sales by channel */}
-      <div className="grid grid-cols-3 gap-4">
-        {([
-          { key: 'ebay',      label: 'eBay' },
-          { key: 'card_show', label: 'Card Shows' },
-          { key: 'other',     label: 'Other' },
-        ] as { key: keyof ChannelBreakdown; label: string }[]).map(({ key, label }) => {
-          const ch = summary?.by_channel?.[wk]?.[key] ?? { count: 0, total_profit: 0 };
-          return (
-            <Card key={key}>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-3">{label}</p>
-              <p className="text-2xl font-bold text-zinc-100">{ch.count} <span className="text-sm font-normal text-zinc-500">sales</span></p>
-              <p className={cn('text-base font-semibold mt-1', ch.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                {(ch.total_profit >= 0 ? '+' : '') + formatCurrency(ch.total_profit)}
-              </p>
-              {key === 'ebay' && (
-                <p className="text-xs text-zinc-500 mt-2">{cards.listed.all} listed &nbsp;·&nbsp; {cards.listed.graded} Graded / {cards.listed.raw} Raw</p>
-              )}
-              {key === 'card_show' && (
-                <p className="text-xs text-zinc-500 mt-2">{cards.card_show.unsold} unsold &nbsp;·&nbsp; {cards.card_show.all} total inventory</p>
-              )}
-            </Card>
-          );
-        })}
-      </div>
+      </div>{/* end shrink-0 stats block */}
 
-      {/* Row 4: Pipeline */}
-      <Card>
-        <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-4">Pipeline</p>
-        <div className="grid grid-cols-4 divide-x divide-zinc-800">
-          <div className="pr-6">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
-            <p className="text-2xl font-bold text-zinc-100">{sellThrough != null ? `${sellThrough}%` : '—'}</p>
-            <p className="text-xs text-zinc-600 mt-1">sold / (sold + unsold)</p>
-          </div>
-          <div className="px-6">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Pending Orders</p>
-            <p className={cn('text-2xl font-bold', performance.pending_orders > 0 ? 'text-amber-400' : 'text-zinc-100')}>{performance.pending_orders}</p>
-            <p className="text-xs text-zinc-600 mt-1">purchases ordered, not received</p>
-          </div>
-          <div className="px-6">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Needs Inspection</p>
-            <p className={cn('text-2xl font-bold', pipeline.needs_inspection > 0 ? 'text-amber-400' : 'text-zinc-100')}>{pipeline.needs_inspection}</p>
-            <p className="text-xs text-zinc-600 mt-1">purchased, not yet inspected</p>
-          </div>
-          <div className="pl-6">
-            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">At Graders</p>
-            <p className="text-2xl font-bold text-zinc-100">{grading.card_count}</p>
-            <p className="text-xs text-zinc-600 mt-1">{grading.sub_count} {grading.sub_count === 1 ? 'submission' : 'submissions'}</p>
-          </div>
-        </div>
-      </Card>
-
-      {/* Row 5: Attention — Order More + Grading Submissions */}
+      {/* Alerts — flex-1 min-h-0 always fills remaining space */}
       <AttentionCard />
 
     </div>
@@ -1361,8 +1454,8 @@ export function Dashboard() {
   const [tab, setTab] = useState<Tab>('Overview');
 
   return (
-    <div className="p-6 h-full flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between mb-5 shrink-0">
+    <div className="p-6 h-full overflow-y-auto flex flex-col">
+      <div className="flex items-center justify-between mb-5">
         <h1 className="text-xl font-bold text-zinc-100">Dashboard</h1>
         <div className="flex gap-1 bg-zinc-900 border border-zinc-800 rounded-lg p-1">
           {TABS.map((t) => (
@@ -1382,21 +1475,11 @@ export function Dashboard() {
         </div>
       </div>
 
-      {tab === 'Overview' && (
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <OverviewTab />
-        </div>
-      )}
-      {tab === 'Raw Cards' && (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <RawCardsTab />
-        </div>
-      )}
-      {tab === 'Graded' && (
-        <div className="flex-1 min-h-0 overflow-y-auto">
-          <GradedTab />
-        </div>
-      )}
+      <div className="flex-1 min-h-0">
+        {tab === 'Overview' && <OverviewTab />}
+        {tab === 'Raw Cards' && <RawCardsTab />}
+        {tab === 'Graded' && <GradedTab />}
+      </div>
     </div>
   );
 }

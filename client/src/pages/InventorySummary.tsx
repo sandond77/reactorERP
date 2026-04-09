@@ -247,10 +247,27 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
   );
 }
 
+const PAGE_SIZE = 25;
+
+function Pagination({ page, totalPages, total, onChange }: { page: number; totalPages: number; total: number; onChange: (p: number) => void }) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between px-6 py-2.5 border-t border-zinc-800 text-xs text-zinc-500 shrink-0">
+      <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}</span>
+      <div className="flex items-center gap-1">
+        <button onClick={() => onChange(page - 1)} disabled={page === 1} className="px-2 py-1 rounded disabled:opacity-30 hover:text-zinc-300 transition-colors">←</button>
+        <span className="px-2">{page} / {totalPages}</span>
+        <button onClick={() => onChange(page + 1)} disabled={page === totalPages} className="px-2 py-1 rounded disabled:opacity-30 hover:text-zinc-300 transition-colors">→</button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function InventorySummary() {
   const [search, setSearch] = useState('');
+  const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -355,7 +372,11 @@ export function InventorySummary() {
       return col;
     });
     setSortDir((prev) => sortCol === col ? (prev === 'asc' ? 'desc' : 'asc') : 'asc');
+    setPage(1);
   };
+
+  const totalPages = Math.max(1, Math.ceil(sortedKeys.length / PAGE_SIZE));
+  const pagedKeys = sortedKeys.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const sh = { sortCol, sortDir, onSort: handleSort };
 
@@ -376,7 +397,7 @@ export function InventorySummary() {
         <div className="flex items-center gap-2">
           {(fLanguage !== null || fRarity !== null || fCompany !== null || search) && (
             <button
-              onClick={() => { setFLanguage(null); setFRarity(null); setFCompany(null); setSearch(''); }}
+              onClick={() => { setFLanguage(null); setFRarity(null); setFCompany(null); setSearch(''); setPage(1); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"
             >
               <X size={12} /> Clear filters
@@ -389,7 +410,7 @@ export function InventorySummary() {
             type="text"
             placeholder="Search SKU, card, set…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-64"
           />
           <Button size="sm" onClick={() => setShowAddModal(true)}>
@@ -412,11 +433,11 @@ export function InventorySummary() {
                 <ColHeader label="Set"        col="set_name"   {...sh} {...rz('set')} minWidth={MINS.set} />
                 <ColHeader label="Card"       col="card_name"  {...sh} {...rz('card')} minWidth={MINS.card} />
                 <ColHeader label="Lang"       col="language"   {...sh} {...rz('lang')} minWidth={MINS.lang}
-                  filterOptions={languageOptions} filterSelected={fLanguage} onFilterChange={setFLanguage} />
+                  filterOptions={languageOptions} filterSelected={fLanguage} onFilterChange={(v) => { setFLanguage(v); setPage(1); }} />
                 <ColHeader label="Rarity"     col="rarity"     {...sh} {...rz('rarity')} minWidth={MINS.rarity}
-                  filterOptions={rarityOptions} filterSelected={fRarity} onFilterChange={setFRarity} />
+                  filterOptions={rarityOptions} filterSelected={fRarity} onFilterChange={(v) => { setFRarity(v); setPage(1); }} />
                 <ColHeader label="Grader"     col="company"    {...sh} {...rz('grader')} minWidth={MINS.grader}
-                  filterOptions={companyOptions} filterSelected={fCompany} onFilterChange={setFCompany} />
+                  filterOptions={companyOptions} filterSelected={fCompany} onFilterChange={(v) => { setFCompany(v); setPage(1); }} />
                 <ColHeader label="Grade"      col="grade"      {...sh} {...rz('grade')} minWidth={MINS.grade} />
                 <ColHeader label="Total"   col="qty_total"  {...sh} {...rz('qty_total')}  align="right" minWidth={MINS.qty_total} />
                 <ColHeader label="Unsold"  col="qty_unsold" {...sh} {...rz('qty_unsold')} align="right" minWidth={MINS.qty_unsold} />
@@ -424,7 +445,7 @@ export function InventorySummary() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {sortedKeys.map((key) => {
+              {pagedKeys.map((key) => {
                 const groupRows = groups.get(key)!;
                 const isNoSku = key.startsWith('__nosku__');
                 const sku = isNoSku ? null : key;
@@ -522,6 +543,8 @@ export function InventorySummary() {
           </table>
         )}
       </div>
+
+      <Pagination page={page} totalPages={totalPages} total={sortedKeys.length} onChange={setPage} />
 
       {/* Add Set Alias Modal */}
       {showAddModal && <AddPartModal onClose={() => setShowAddModal(false)} />}

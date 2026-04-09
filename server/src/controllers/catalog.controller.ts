@@ -73,8 +73,8 @@ export async function deleteCard(req: Request, res: Response, next: NextFunction
 
 export async function search(req: Request, res: Response, next: NextFunction) {
   try {
-    const { card_name, set_name, card_number, language } = req.query as Record<string, string | undefined>;
-    const results = await searchCatalog({ card_name, set_name, card_number, language });
+    const { q, card_name, set_name, card_number, language, limit } = req.query as Record<string, string | undefined>;
+    const results = await searchCatalog({ q, card_name, set_name, card_number, language, limit: limit ? parseInt(limit, 10) : undefined });
     res.json({ data: results });
   } catch (err) { next(err); }
 }

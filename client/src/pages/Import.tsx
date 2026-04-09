@@ -336,7 +336,7 @@ export function Import() {
   const [activeType, setActiveType] = useState<ImportType>('graded');
 
   return (
-    <div className="p-6 space-y-6 max-w-3xl">
+    <div className="p-6 space-y-6 max-w-3xl h-full overflow-y-auto">
       <h1 className="text-xl font-bold text-zinc-100">Import</h1>
 
       {/* Type tabs */}

@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, X, BellOff, EyeOff, RotateCcw, ExternalLink } from 'lucide-react';
+import { Check, X, BellOff, EyeOff, RotateCcw, ExternalLink, Plus, Trash2, Loader2 } from 'lucide-react';
+import { Modal } from '../components/ui/Modal';
+import { Input } from '../components/ui/Input';
 import { api } from '../lib/api';
 import { cn, formatCurrency } from '../lib/utils';
 import toast from 'react-hot-toast';
@@ -401,22 +403,326 @@ function CardShowTab() {
   );
 }
 
+// ── Grade More tab ────────────────────────────────────────────────────────────
+
+interface WatchlistRow {
+  threshold_id: string;
+  catalog_id: string;
+  card_name: string;
+  set_name: string | null;
+  card_number: string | null;
+  sku: string | null;
+  company: string;
+  grade: number | null;
+  grade_label: string | null;
+  min_quantity: number;
+  is_ignored: boolean;
+  muted_until: string | null;
+  unsold_graded: number;
+  in_grading: number;
+}
+
+interface CatalogResult {
+  id: string;
+  sku: string | null;
+  card_name: string;
+  set_name: string;
+  card_number: string | null;
+}
+
+const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'] as const;
+
+function formatGrade(grade: number | null, gradeLabel: string | null): string {
+  if (grade != null) {
+    const g = parseFloat(String(grade));
+    return g % 1 === 0 ? String(Math.floor(g)) : String(g);
+  }
+  return gradeLabel ?? '—';
+}
+
+function AddGradeMoreModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selected, setSelected] = useState<CatalogResult | null>(null);
+  const [company, setCompany] = useState('PSA');
+  const [grade, setGrade] = useState('');
+  const [minQty, setMinQty] = useState('1');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: searchData, isFetching } = useQuery<{ data: CatalogResult[] }>({
+    queryKey: ['catalog-search-grademore', debouncedSearch],
+    queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 20 } }).then(r => r.data),
+    enabled: debouncedSearch.length >= 1,
+  });
+  const results = searchData?.data ?? [];
+
+  const saveMutation = useMutation({
+    mutationFn: () => api.post('/grade-more/thresholds', {
+      catalog_id: selected!.id,
+      company,
+      grade: grade ? parseFloat(grade) : null,
+      grade_label: null,
+      min_quantity: parseInt(minQty, 10),
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['grade-more-thresholds'] });
+      qc.invalidateQueries({ queryKey: ['grade-more-alerts'] });
+      toast.success('Added to watchlist');
+      onClose();
+      setSearch(''); setSelected(null); setGrade(''); setMinQty('1'); setCompany('PSA');
+    },
+    onError: () => toast.error('Failed to add'),
+  });
+
+  const canSave = selected && grade && parseInt(minQty, 10) >= 1;
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add Card to Watch" className="max-w-xl">
+      {!selected ? (
+        <>
+          <div className="relative">
+            <Input
+              label="Card Name or Part Number"
+              placeholder="Search…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              autoFocus
+              autoComplete="off"
+            />
+            {isFetching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
+          </div>
+          {debouncedSearch.length >= 1 && (
+            results.length > 0 ? (
+              <div className="rounded-lg border border-zinc-700 overflow-hidden mt-3 max-h-72 overflow-y-auto">
+                {results.map(r => (
+                  <button key={r.id} type="button"
+                    onClick={() => setSelected(r)}
+                    className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors">
+                    <span className="text-sm text-zinc-200 truncate">{r.card_name}</span>
+                    <span className="shrink-0 text-xs text-zinc-500 tabular-nums text-right">
+                      {r.sku && <span className="font-mono mr-2">{r.sku}</span>}
+                      {r.set_name}
+                      {r.card_number && <span className="ml-1 text-zinc-600">#{r.card_number}</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : !isFetching ? (
+              <p className="text-xs text-zinc-500 px-1 mt-3">No cards found.</p>
+            ) : null
+          )}
+        </>
+      ) : (
+        <>
+          <button type="button" onClick={() => { setSelected(null); setGrade(''); }}
+            className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-300 mb-4 transition-colors">
+            <span>←</span> Back
+          </button>
+          <p className="text-sm text-zinc-200 font-medium mb-1">{selected.card_name}</p>
+          <p className="text-xs text-zinc-500 mb-5">
+            {selected.sku && <span className="font-mono mr-2">{selected.sku}</span>}
+            {selected.set_name}
+            {selected.card_number && <span className="ml-1">#{selected.card_number}</span>}
+          </p>
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            <div>
+              <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">Grader</label>
+              <select value={company} onChange={e => setCompany(e.target.value)}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors">
+                {GRADING_COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <Input label="Grade" type="number" min={1} max={10} step={0.5} value={grade}
+              onChange={e => setGrade(e.target.value)} placeholder="e.g. 10" autoFocus />
+            <Input label="Min Qty" type="number" min={1} value={minQty}
+              onChange={e => setMinQty(e.target.value)} />
+          </div>
+          <div className="flex justify-end">
+            <button onClick={() => saveMutation.mutate()} disabled={!canSave || saveMutation.isPending}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
+              Add to Watchlist
+            </button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function WatchlistMinQtyCell({ row }: { row: WatchlistRow }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState(String(row.min_quantity));
+
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['grade-more-thresholds'] });
+    qc.invalidateQueries({ queryKey: ['grade-more-alerts'] });
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: (min_quantity: number) => api.post('/grade-more/thresholds', {
+      catalog_id: row.catalog_id,
+      company: row.company,
+      grade: row.grade != null ? parseFloat(String(row.grade)) : null,
+      grade_label: row.grade_label,
+      min_quantity,
+    }),
+    onSuccess: () => { invalidate(); setEditing(false); },
+    onError: () => toast.error('Failed to save'),
+  });
+
+  const parsed = parseInt(val, 10);
+
+  if (!editing) {
+    return (
+      <button onClick={() => { setVal(String(row.min_quantity)); setEditing(true); }} className="text-sm text-left w-full">
+        <span className="text-zinc-300 tabular-nums">{row.min_quantity}</span>
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        autoFocus type="number" min={1} value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && parsed >= 1) saveMutation.mutate(parsed);
+          if (e.key === 'Escape') setEditing(false);
+        }}
+        className="w-14 text-xs bg-zinc-800 border border-zinc-600 rounded px-1.5 py-0.5 text-zinc-200 focus:outline-none"
+      />
+      <button onClick={() => { if (parsed >= 1) saveMutation.mutate(parsed); }} disabled={!val || parsed < 1} className="text-emerald-400 hover:text-emerald-300 disabled:opacity-30"><Check size={12} /></button>
+      <button onClick={() => setEditing(false)} className="text-zinc-600 hover:text-zinc-400"><X size={12} /></button>
+    </div>
+  );
+}
+
+function WatchlistActionButtons({ row }: { row: WatchlistRow }) {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['grade-more-thresholds'] });
+    qc.invalidateQueries({ queryKey: ['grade-more-alerts'] });
+  };
+  const mute   = useMutation({ mutationFn: () => api.post(`/grade-more/${row.threshold_id}/mute`),   onSuccess: () => { invalidate(); toast.success('Muted 30 days'); } });
+  const ignore = useMutation({ mutationFn: () => api.post(`/grade-more/${row.threshold_id}/ignore`), onSuccess: () => { invalidate(); toast.success('Ignored'); } });
+  const reset  = useMutation({ mutationFn: () => api.post(`/grade-more/${row.threshold_id}/reset`),  onSuccess: () => { invalidate(); toast.success('Reset'); } });
+  const remove = useMutation({ mutationFn: () => api.delete(`/grade-more/${row.threshold_id}`),      onSuccess: () => { invalidate(); toast.success('Removed'); } });
+  const silenced = row.is_ignored || isMuted(row.muted_until);
+  return (
+    <div className="flex items-center gap-2">
+      {silenced ? (
+        <button onClick={() => reset.mutate()} title="Re-enable" className="text-zinc-500 hover:text-zinc-300"><RotateCcw size={13} /></button>
+      ) : (
+        <>
+          <button onClick={() => mute.mutate()}   title="Mute 30 days"       className="text-zinc-500 hover:text-zinc-300"><BellOff size={13} /></button>
+          <button onClick={() => ignore.mutate()} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400"><EyeOff size={13} /></button>
+        </>
+      )}
+      <button onClick={() => remove.mutate()} title="Remove from watchlist" className="text-zinc-600 hover:text-red-400"><Trash2 size={13} /></button>
+    </div>
+  );
+}
+
+function GradeMoreTab() {
+  const [showAdd, setShowAdd] = useState(false);
+  const { data, isLoading } = useQuery<{ data: WatchlistRow[] }>({
+    queryKey: ['grade-more-thresholds'],
+    queryFn: () => api.get('/grade-more/thresholds').then((r) => r.data),
+  });
+  const rows = data?.data ?? [];
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-zinc-500">
+          Cards you're monitoring for grading stock. Alerts trigger when unsold graded + in grading falls below the threshold.
+        </p>
+        <button onClick={() => setShowAdd(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors shrink-0 ml-4">
+          <Plus size={13} /> Add Card
+        </button>
+      </div>
+      <div className="rounded-lg border border-zinc-800 overflow-hidden">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col className="w-[10%]" />
+            <col className="w-[26%]" />
+            <col className="w-[13%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[5%]" />
+            <col className="w-[6%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[9%]" />
+            <col className="w-[7%]" />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-zinc-800 bg-zinc-900">
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Part #</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card Name</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Set</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card #</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Grader</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Grade</th>
+              <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Unsold</th>
+              <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">In Grading</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Min Qty</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Status</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {isLoading ? (
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
+            ) : rows.length === 0 ? (
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-zinc-600 text-xs">No cards on watchlist. Click Add Card to start monitoring.</td></tr>
+            ) : rows.map((row) => (
+              <tr key={row.threshold_id} className={cn('border-t border-zinc-800/60 hover:bg-zinc-900/40 transition-colors', row.is_ignored && 'opacity-50')}>
+                <td className="px-4 py-2.5 text-xs font-mono text-zinc-400">{row.sku ?? '—'}</td>
+                <td className="px-4 py-2.5 text-zinc-200">{row.card_name}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500 truncate">{row.set_name ?? '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500">{row.card_number ?? '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-400 font-medium">{row.company}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-300 tabular-nums">{formatGrade(row.grade, row.grade_label)}</td>
+                <td className={cn('px-4 py-2.5 text-sm text-right tabular-nums font-medium', row.unsold_graded === 0 ? 'text-red-400' : 'text-amber-400')}>{row.unsold_graded}</td>
+                <td className="px-4 py-2.5 text-sm text-blue-400 text-right tabular-nums">{row.in_grading}</td>
+                <td className="px-4 py-2.5"><WatchlistMinQtyCell row={row} /></td>
+                <td className="px-4 py-2.5"><AlertStatusBadge is_ignored={row.is_ignored} muted_until={row.muted_until} /></td>
+                <td className="px-4 py-2.5"><WatchlistActionButtons row={row} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <AddGradeMoreModal open={showAdd} onClose={() => setShowAdd(false)} />
+    </div>
+  );
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'reorder' | 'ebay' | 'card_show';
+type Tab = 'reorder' | 'grade_more' | 'ebay' | 'card_show';
 
 export function ReorderThresholds() {
   const urlTab = (new URLSearchParams(window.location.search).get('tab') as Tab) || 'reorder';
   const [tab, setTab] = useState<Tab>(urlTab);
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'reorder',   label: 'Reorder Alerts' },
-    { key: 'ebay',      label: 'eBay Listings Review' },
-    { key: 'card_show', label: 'Card Show Review' },
+    { key: 'reorder',    label: 'Reorder Alerts' },
+    { key: 'grade_more', label: 'Grade More' },
+    { key: 'ebay',       label: 'eBay Listings Review' },
+    { key: 'card_show',  label: 'Card Show Review' },
   ];
 
   return (
-    <div className="p-6 max-w-6xl">
+    <div className="p-6 h-full overflow-y-auto">
       <div className="mb-6">
         <h1 className="text-lg font-semibold text-zinc-100">Alerts</h1>
       </div>
@@ -437,9 +743,10 @@ export function ReorderThresholds() {
         ))}
       </div>
 
-      {tab === 'reorder'   && <ReorderTab />}
-      {tab === 'ebay'      && <EbayListingsTab />}
-      {tab === 'card_show' && <CardShowTab />}
+      {tab === 'reorder'    && <ReorderTab />}
+      {tab === 'grade_more' && <GradeMoreTab />}
+      {tab === 'ebay'       && <EbayListingsTab />}
+      {tab === 'card_show'  && <CardShowTab />}
     </div>
   );
 }
