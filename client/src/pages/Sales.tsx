@@ -6,7 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
-import { formatCurrency, formatDate } from '../lib/utils';
+import { formatCurrency, formatDate, cn } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import toast from 'react-hot-toast';
@@ -56,6 +56,8 @@ interface SlabResult {
   is_listed: boolean;
   is_personal_collection: boolean;
   location_name: string | null;
+  card_show_price: number | null;
+  is_card_show: boolean;
 }
 
 type SortDir = 'asc' | 'desc';
@@ -85,11 +87,32 @@ interface RawCardResult {
   location_name: string | null;
 }
 
+interface BulkCartItem {
+  id: string;             // card_instance_id
+  listing_id?: string;
+  card_name: string | null;
+  set_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  company: string | null;
+  sticker_price: number;  // cents, editable
+  card_type: 'graded' | 'raw';
+}
+
+interface RawCardShowResult {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  condition: string | null;
+  card_show_price: number | null;
+  raw_purchase_label: string | null;
+}
+
 // ── Record Sale Modal ─────────────────────────────────────────────────────────
 
 function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState<'platform-type' | 'type' | 'search' | 'copies' | 'raw-search' | 'raw-select' | 'other-lookup' | 'details'>('platform-type');
+  const [step, setStep] = useState<'platform-type' | 'type' | 'search' | 'copies' | 'raw-search' | 'raw-select' | 'other-lookup' | 'details' | 'bulk-search' | 'bulk-review' | 'bulk-confirm'>('platform-type');
   const [saleMode, setSaleMode] = useState<'graded' | 'raw'>('graded');
 
   // Step 1a — card name search (graded)
@@ -112,6 +135,17 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [selectedRawCard, setSelectedRawCard] = useState<RawCardResult | null>(null);
   const [rawListingUrl, setRawListingUrl] = useState('');
   const [rawUrlLookupLoading, setRawUrlLookupLoading] = useState(false);
+
+  // Bulk sale state
+  const [bulkCart, setBulkCart] = useState<BulkCartItem[]>([]);
+  const [bulkSearch, setBulkSearch] = useState('');
+  const [debouncedBulkSearch, setDebouncedBulkSearch] = useState('');
+  const [bulkDiscount, setBulkDiscount] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedBulkSearch(bulkSearch), 300);
+    return () => clearTimeout(t);
+  }, [bulkSearch]);
 
   // Step 2 — sale details
   const [platform, setPlatform] = useState<string>('');
@@ -172,6 +206,25 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     }).then(r => r.data),
     enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select' || (step === 'other-lookup' && saleMode === 'raw')),
   });
+
+  // Bulk search: card show graded inventory
+  const { data: bulkSearchResults, isFetching: isBulkSearching } = useQuery<PaginatedResult<SlabResult>>({
+    queryKey: ['bulk-sale-search', debouncedBulkSearch],
+    queryFn: () => api.get('/grading/slabs', {
+      params: { search: debouncedBulkSearch, limit: 50, status: 'unsold', card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
+    }).then(r => r.data),
+    enabled: step === 'bulk-search',
+  });
+  // Bulk search: card show raw inventory
+  const { data: bulkRawResults, isFetching: isBulkRawSearching } = useQuery<PaginatedResult<RawCardShowResult>>({
+    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch],
+    queryFn: () => api.get('/cards', {
+      params: { search: debouncedBulkSearch || undefined, limit: 50, is_card_show: 'yes', status: 'purchased_raw,inspected,raw_for_sale' },
+    }).then(r => r.data),
+    enabled: step === 'bulk-search',
+  });
+  const bulkSearchRows = bulkSearchResults?.data ?? [];
+  const bulkRawRows = bulkRawResults?.data ?? [];
 
   const uniqueRawCardNames = rawResults
     ? Array.from(
@@ -278,7 +331,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         <span className="text-xs text-zinc-600">{platform === 'ebay' ? 'eBay' : 'Other'}</span>
       </div>
       <p className="text-xs text-zinc-500">What type of card are you selling?</p>
-      <div className="grid grid-cols-2 gap-3">
+      <div className={cn('grid gap-3', platform === 'card_show' ? 'grid-cols-3' : 'grid-cols-2')}>
         <button type="button"
           onClick={() => { setSaleMode('graded'); setStep(platform === 'ebay' ? 'search' : 'other-lookup'); }}
           className="rounded-xl border-2 border-indigo-500 bg-indigo-500/10 px-4 py-5 text-left hover:bg-indigo-500/20 transition-colors">
@@ -291,6 +344,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <p className="text-sm font-semibold text-zinc-200">Raw</p>
           <p className="text-xs text-zinc-500 mt-0.5">Ungraded cards</p>
         </button>
+        {platform === 'card_show' && (
+          <button type="button"
+            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setStep('bulk-search'); }}
+            className="rounded-xl border-2 border-teal-600/60 bg-teal-500/10 px-4 py-5 text-left hover:bg-teal-500/20 transition-colors">
+            <p className="text-sm font-semibold text-teal-300">Bulk Sale</p>
+            <p className="text-xs text-zinc-500 mt-0.5">Multiple cards, one transaction</p>
+          </button>
+        )}
       </div>
       <div className="flex justify-end pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
@@ -694,7 +755,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   // ── Step 2: Sale details ──────────────────────────────────────────────────
 
-  return (
+  if (step === 'details') return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Selected card summary */}
       {saleMode === 'raw' && selectedRawCard ? (
@@ -852,6 +913,343 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       </div>
     </form>
   );
+
+  // ── Step: bulk-search ────────────────────────────────────────────────────────
+
+  if (step === 'bulk-search') {
+    const alreadyAdded = new Set(bulkCart.map(c => c.id));
+    const isSearching = isBulkSearching || isBulkRawSearching;
+    const hasResults = bulkSearchRows.length > 0 || bulkRawRows.length > 0;
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2 mb-1">
+          <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+          <span className="text-xs text-zinc-600">Card Show · Bulk Sale</span>
+        </div>
+        <div className="relative">
+          <Input label="Search Card Show Inventory" placeholder="Card name or cert #…"
+            value={bulkSearch} onChange={(e) => setBulkSearch(e.target.value)}
+            autoFocus autoComplete="off" />
+          {isSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
+        </div>
+        {hasResults ? (
+          <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-52 overflow-y-auto">
+            {bulkSearchRows.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 bg-zinc-800/60 border-b border-zinc-700/40">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Graded</span>
+                </div>
+                {bulkSearchRows.map((r) => {
+                  const added = alreadyAdded.has(r.id);
+                  return (
+                    <button key={r.id} type="button" disabled={added}
+                      onClick={() => {
+                        if (added) return;
+                        setBulkCart(prev => [...prev, {
+                          id: r.id,
+                          listing_id: r.listing_id ?? undefined,
+                          card_name: r.card_name,
+                          set_name: r.set_name,
+                          cert_number: r.cert_number,
+                          grade_label: r.grade_label,
+                          company: r.company,
+                          sticker_price: r.card_show_price ?? 0,
+                          card_type: 'graded',
+                        }]);
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
+                      <div className="min-w-0">
+                        <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
+                        <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.cert_number ? ` · #${r.cert_number}` : ''}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-xs text-zinc-400 font-medium">{r.company} {r.grade_label}</p>
+                        <p className="text-xs text-zinc-500">{r.card_show_price ? `$${(r.card_show_price / 100).toFixed(2)}` : 'No price'}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+            {bulkRawRows.length > 0 && (
+              <>
+                <div className="px-3 py-1.5 bg-zinc-800/60 border-b border-zinc-700/40">
+                  <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Raw</span>
+                </div>
+                {bulkRawRows.map((r) => {
+                  const added = alreadyAdded.has(r.id);
+                  return (
+                    <button key={r.id} type="button" disabled={added}
+                      onClick={() => {
+                        if (added) return;
+                        setBulkCart(prev => [...prev, {
+                          id: r.id,
+                          card_name: r.card_name,
+                          set_name: r.set_name,
+                          cert_number: null,
+                          grade_label: r.condition,
+                          company: null,
+                          sticker_price: r.card_show_price ?? 0,
+                          card_type: 'raw',
+                        }]);
+                      }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
+                      <div className="min-w-0">
+                        <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
+                        <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.raw_purchase_label ? ` · ${r.raw_purchase_label}` : ''}</p>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-xs text-zinc-400 font-medium">{r.condition ?? 'Raw'}</p>
+                        <p className="text-xs text-zinc-500">{r.card_show_price ? `$${(r.card_show_price / 100).toFixed(2)}` : 'No price'}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        ) : !isSearching && bulkSearch.length >= 1 ? (
+          <p className="text-xs text-zinc-500 px-1">No card show inventory found.</p>
+        ) : null}
+
+        {bulkCart.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Cart ({bulkCart.length})</p>
+            <div className="rounded-lg border border-zinc-700 overflow-hidden">
+              {bulkCart.map((item, i) => (
+                <div key={item.id} className="flex items-center gap-3 px-3 py-2 border-b border-zinc-700/40 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
+                    <p className="text-xs text-zinc-500">
+                      {item.card_type === 'raw'
+                        ? (item.grade_label ?? 'Raw')
+                        : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-zinc-500 text-xs">$</span>
+                    <input
+                      type="number" step="0.01" min="0"
+                      value={item.sticker_price > 0 ? (item.sticker_price / 100).toFixed(2) : ''}
+                      placeholder="0.00"
+                      onChange={(e) => {
+                        const cents = Math.round(parseFloat(e.target.value || '0') * 100);
+                        setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, sticker_price: cents } : c));
+                      }}
+                      className="w-20 text-xs bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-indigo-500 [appearance:textfield]"
+                    />
+                  </div>
+                  <button type="button" onClick={() => setBulkCart(prev => prev.filter((_, idx) => idx !== i))}
+                    className="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <Button type="button" onClick={() => setStep('bulk-review')}>
+                Review Sale →
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Step: bulk-review ────────────────────────────────────────────────────────
+
+  if (step === 'bulk-review') {
+    const discountPct = parseFloat(bulkDiscount || '0');
+    const multiplier = 1 - discountPct / 100;
+    const itemsWithFinal = bulkCart.map(item => ({
+      ...item,
+      final_price: Math.round(item.sticker_price * multiplier),
+    }));
+    const total = itemsWithFinal.reduce((s, i) => s + i.final_price, 0);
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <button type="button" onClick={() => setStep('bulk-search')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+          <span className="text-xs text-zinc-600">Card Show · Bulk Sale · Review</span>
+        </div>
+
+        <div className="flex items-end gap-3">
+          <div className="w-36">
+            <Input label="Discount %" type="number" min="0" max="100" step="1"
+              placeholder="0" value={bulkDiscount} onChange={(e) => setBulkDiscount(e.target.value)} />
+          </div>
+          {discountPct > 0 && (
+            <p className="text-xs text-zinc-500 pb-2">{discountPct}% off each card</p>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-zinc-700 overflow-hidden">
+          <div className="grid grid-cols-[1fr_5rem_5rem] gap-x-3 px-3 py-2 bg-zinc-900 border-b border-zinc-700">
+            <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Card</span>
+            <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Sticker</span>
+            <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Final</span>
+          </div>
+          {itemsWithFinal.map((item) => (
+            <div key={item.id} className="grid grid-cols-[1fr_5rem_5rem] gap-x-3 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-center">
+              <div className="min-w-0">
+                <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
+                <p className="text-xs text-zinc-500">{item.company} {item.grade_label}{item.cert_number ? ` · #${item.cert_number}` : ''}</p>
+              </div>
+              <p className={cn('text-sm text-right tabular-nums', discountPct > 0 ? 'text-zinc-500 line-through' : 'text-zinc-300')}>
+                ${(item.sticker_price / 100).toFixed(2)}
+              </p>
+              <p className="text-sm text-zinc-200 text-right tabular-nums font-medium">
+                ${(item.final_price / 100).toFixed(2)}
+              </p>
+            </div>
+          ))}
+          <div className="grid grid-cols-[1fr_5rem_5rem] gap-x-3 px-3 py-2.5 bg-zinc-900/50 border-t border-zinc-700">
+            <p className="text-xs font-semibold text-zinc-400">{bulkCart.length} card{bulkCart.length !== 1 ? 's' : ''}</p>
+            <span />
+            <p className="text-sm font-bold text-zinc-100 text-right tabular-nums">${(total / 100).toFixed(2)}</p>
+          </div>
+        </div>
+
+        {/* Card show + date + notes */}
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Card Show</label>
+          <select value={cardShowId} onChange={(e) => {
+            const val = e.target.value;
+            if (val === '__archived__') { setShowArchived(true); return; }
+            setCardShowId(val);
+            const show = (cardShowsData?.data ?? []).find((s) => s.id === val);
+            if (show) setSoldAt(show.show_date.slice(0, 10));
+          }} className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors">
+            <option value="">— Select show (optional) —</option>
+            {(() => {
+              const all = cardShowsData?.data ?? [];
+              const visibleShows = showArchived ? all : all.slice(0, 3);
+              const archived = all.slice(3);
+              return (
+                <>
+                  {visibleShows.map((s) => {
+                    const fmt = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+                    const dateLabel = s.num_days > 1 && s.end_date ? `${fmt(s.show_date)} – ${fmt(s.end_date)}` : fmt(s.show_date);
+                    return <option key={s.id} value={s.id}>{s.name} · {dateLabel}{s.location ? ` · ${s.location}` : ''}</option>;
+                  })}
+                  {!showArchived && archived.length > 0 && <option value="__archived__">— Show {archived.length} more —</option>}
+                </>
+              );
+            })()}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
+          <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
+            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
+        </div>
+        <Input label="Notes" placeholder="Person, location, etc." value={notes} onChange={(e) => setNotes(e.target.value)} />
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={() => setStep('bulk-search')}>Back</Button>
+          <Button type="button" disabled={itemsWithFinal.some(i => i.final_price <= 0)}
+            onClick={() => setStep('bulk-confirm')}>
+            Review &amp; Confirm →
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Step: bulk-confirm ───────────────────────────────────────────────────────
+
+  if (step === 'bulk-confirm') {
+    const discountPct = parseFloat(bulkDiscount || '0');
+    const multiplier = 1 - discountPct / 100;
+    const itemsWithFinal = bulkCart.map(item => ({
+      ...item,
+      final_price: Math.round(item.sticker_price * multiplier),
+    }));
+    const total = itemsWithFinal.reduce((s, i) => s + i.final_price, 0);
+    const selectedShow = (cardShowsData?.data ?? []).find(s => s.id === cardShowId);
+
+    async function handleBulkSubmit() {
+      setSubmitting(true);
+      try {
+        await api.post('/sales/batch', {
+          items: itemsWithFinal.map(item => ({
+            card_instance_id: item.id,
+            listing_id: item.listing_id,
+            sale_price: item.final_price,
+          })),
+          platform: 'card_show',
+          card_show_id: cardShowId || undefined,
+          currency,
+          sold_at: soldAt || undefined,
+          unique_id_2: notes || undefined,
+        });
+        toast.success(`${itemsWithFinal.length} sales recorded!`);
+        queryClient.invalidateQueries({ queryKey: ['sales'] });
+        onClose();
+      } catch (err: any) {
+        toast.error(err?.response?.data?.error ?? 'Failed to record sales');
+      } finally {
+        setSubmitting(false);
+      }
+    }
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 mb-1">
+          <button type="button" onClick={() => setStep('bulk-review')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+          <span className="text-xs text-zinc-600">Card Show · Bulk Sale · Confirm</span>
+        </div>
+
+        <div className="rounded-lg border border-zinc-700 bg-zinc-900/40 p-4 space-y-2">
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">Sale Summary</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
+            <span className="text-zinc-500">Cards</span>
+            <span className="text-zinc-200 font-medium">{bulkCart.length}</span>
+            {discountPct > 0 && <>
+              <span className="text-zinc-500">Discount</span>
+              <span className="text-zinc-200">{discountPct}%</span>
+            </>}
+            <span className="text-zinc-500">Total</span>
+            <span className="text-zinc-100 font-bold">${(total / 100).toFixed(2)}</span>
+            {selectedShow && <>
+              <span className="text-zinc-500">Card Show</span>
+              <span className="text-zinc-200 truncate">{selectedShow.name}</span>
+            </>}
+            {soldAt && <>
+              <span className="text-zinc-500">Date</span>
+              <span className="text-zinc-200">{new Date(soldAt + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            </>}
+            {notes && <>
+              <span className="text-zinc-500">Notes</span>
+              <span className="text-zinc-200 truncate">{notes}</span>
+            </>}
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-56 overflow-y-auto">
+          {itemsWithFinal.map((item) => (
+            <div key={item.id} className="flex items-center justify-between gap-3 px-3 py-2.5 border-b border-zinc-700/40 last:border-0">
+              <div className="min-w-0">
+                <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
+                <p className="text-xs text-zinc-500">{item.company} {item.grade_label}{item.cert_number ? ` · #${item.cert_number}` : ''}</p>
+              </div>
+              <p className="text-sm font-medium text-zinc-100 tabular-nums shrink-0">${(item.final_price / 100).toFixed(2)}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button type="button" variant="ghost" onClick={() => setStep('bulk-review')}>Back</Button>
+          <Button type="button" disabled={submitting} onClick={handleBulkSubmit}>
+            {submitting && <Loader2 size={14} className="animate-spin" />}
+            Confirm &amp; Record {bulkCart.length} Sales
+          </Button>
+        </div>
+      </div>
+    );
+  }
 }
 // ── Sale Action Modal (Edit / Delete) ─────────────────────────────────────────
 
@@ -1085,7 +1483,7 @@ export function Sales() {
           <div className="flex items-center gap-1">
             {(['all', 'graded', 'raw'] as CardTypeFilter[]).map((t) => (
               <button key={t} onClick={() => { setCardType(t); setPage(1); }}
-                className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${cardType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${cardType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 {t.charAt(0).toUpperCase() + t.slice(1)}
               </button>
             ))}

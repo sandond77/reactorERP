@@ -8,6 +8,7 @@ salesRouter.use(requireAuth);
 
 salesRouter.get('/filters', salesController.getSaleFilters);
 salesRouter.get('/', salesController.listSales);
+salesRouter.post('/batch', salesController.recordBulkSale);
 salesRouter.post('/', salesController.recordSale);
 salesRouter.get('/:id', salesController.getSale);
 salesRouter.put('/:id', salesController.updateSale);

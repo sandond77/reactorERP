@@ -51,8 +51,22 @@ interface FilterOptions {
   sold_years: string[];
 }
 
+interface RawCardShowRow {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  condition: string | null;
+  quantity: number;
+  purchase_cost: number | null;
+  currency: string;
+  card_show_price: number | null;
+  raw_purchase_label: string | null;
+}
+
 type SortDir = 'asc' | 'desc';
 type StatusFilter = 'all' | 'unsold' | 'sold' | 'graded';
+type CardTypeFilter = 'graded' | 'raw';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -119,6 +133,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(cardShowMode ? 'unsold' : saved.statusFilter);
+  const [cardType, setCardType] = useState<CardTypeFilter>('graded');
   const [sortCol, setSortCol] = useState<string | null>(saved.sortCol);
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
   const MINS = {
@@ -217,6 +232,21 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
   const { data, isLoading } = useQuery<PaginatedResult<SlabRow>>({
     queryKey: ['overall', params],
     queryFn: () => api.get('/grading/slabs', { params }).then((r) => r.data),
+    enabled: !cardShowMode || cardType === 'graded',
+  });
+
+  const { data: rawData, isLoading: isRawLoading } = useQuery<PaginatedResult<RawCardShowRow>>({
+    queryKey: ['card-show-raw', debouncedSearch, page],
+    queryFn: () => api.get('/cards', {
+      params: {
+        is_card_show: 'yes',
+        status: 'purchased_raw,inspected,raw_for_sale',
+        search: debouncedSearch || undefined,
+        limit: 100,
+        page,
+      },
+    }).then((r) => r.data),
+    enabled: cardShowMode && cardType === 'raw',
   });
 
   const hasActiveFilters = fPersonal || fPurchDate || fListDate || fSoldDate ||
@@ -241,6 +271,16 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
               <X size={12} /> Clear filters
             </button>
           )}
+          {cardShowMode && (
+            <div className="flex gap-1">
+              {(['graded', 'raw'] as CardTypeFilter[]).map((t) => (
+                <button key={t} onClick={() => { setCardType(t); setPage(1); }}
+                  className={`px-3 py-1 text-xs rounded-md font-medium transition-colors capitalize ${cardType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                  {t}
+                </button>
+              ))}
+            </div>
+          )}
           {!cardShowMode && (
             <div className="flex gap-1">
               {([
@@ -250,12 +290,12 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                 { value: 'graded', label: 'Graded' },
               ] as { value: StatusFilter; label: string }[]).map(({ value, label }) => (
                 <button key={value} onClick={() => { setStatusFilter(value); setPage(1); }}
-                  className={`px-3 py-1 text-xs rounded font-medium transition-colors ${statusFilter === value ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                  className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${statusFilter === value ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                   {label}
                 </button>
               ))}
               <button onClick={() => { setFPersonal(v => !v); setPage(1); }}
-                className={`px-3 py-1 text-xs rounded font-medium transition-colors ${fPersonal ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${fPersonal ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 Personal
               </button>
             </div>
@@ -280,7 +320,40 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
       </div>
 
       <div className="flex-1 overflow-auto">
-        {isLoading ? (
+        {cardShowMode && cardType === 'raw' ? (
+          isRawLoading ? (
+            <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
+          ) : (
+            <table className="text-xs whitespace-nowrap border-collapse w-full">
+              <thead className="sticky top-0 bg-zinc-950 z-10">
+                <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
+                  <th className="px-3 py-2 text-left font-medium">Part #</th>
+                  <th className="px-3 py-2 text-left font-medium">Card</th>
+                  <th className="px-3 py-2 text-left font-medium">Set</th>
+                  <th className="px-3 py-2 text-left font-medium">Condition</th>
+                  <th className="px-3 py-2 text-right font-medium">Qty</th>
+                  <th className="px-3 py-2 text-right font-medium">Cost</th>
+                  <th className="px-3 py-2 text-right font-medium">CS Price</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!rawData?.data.length ? (
+                  <tr><td colSpan={7} className="px-3 py-10 text-center text-zinc-500">No raw cards in card show inventory.</td></tr>
+                ) : rawData.data.map((row) => (
+                  <tr key={row.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
+                    <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-200 max-w-[340px] truncate">{row.card_name ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-400 truncate">{row.set_name ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-400">{row.condition ?? ''}</td>
+                    <td className="px-3 py-1 text-right text-zinc-400">{row.quantity}</td>
+                    <td className="px-3 py-1 text-right text-zinc-400">{row.purchase_cost ? fmt(row.purchase_cost) : ''}</td>
+                    <td className="px-3 py-1 text-right text-emerald-400 font-medium">{fmt(row.card_show_price)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+        ) : isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
         ) : (
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>

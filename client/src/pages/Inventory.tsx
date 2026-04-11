@@ -213,7 +213,7 @@ export function Inventory() {
           <div className="flex gap-1">
             {(['all', 'graded'] as StatusFilter[]).map((s) => (
               <button key={s} onClick={() => { setStatusFilter(s); setPage(1); }}
-                className={`px-3 py-1 text-xs rounded font-medium capitalize transition-colors ${statusFilter === s ? 'bg-zinc-600 text-zinc-100' : 'text-zinc-400 hover:text-zinc-200'}`}>
+                className={`px-3 py-1 text-xs rounded-md font-medium capitalize transition-colors ${statusFilter === s ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 {s}
               </button>
             ))}

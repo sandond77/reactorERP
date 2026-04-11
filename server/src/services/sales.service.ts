@@ -74,6 +74,34 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
   return sale;
 }
 
+export async function recordBulkSale(
+  userId: string,
+  items: Array<{ card_instance_id: string; listing_id?: string; sale_price: number }>,
+  shared: {
+    platform: ListingPlatform;
+    card_show_id?: string;
+    currency?: string;
+    sold_at?: Date;
+    unique_id_2?: string;
+  }
+) {
+  const sales = [];
+  for (const item of items) {
+    const sale = await recordSale(userId, {
+      card_instance_id: item.card_instance_id,
+      listing_id: item.listing_id,
+      sale_price: item.sale_price,
+      platform: shared.platform,
+      card_show_id: shared.card_show_id,
+      currency: shared.currency,
+      sold_at: shared.sold_at,
+      unique_id_2: shared.unique_id_2,
+    });
+    sales.push(sale);
+  }
+  return sales;
+}
+
 const SALES_SORT_COLS: Record<string, string> = {
   card_name: `COALESCE(ci.card_name_override, cc.card_name)`,
   platform: 's.platform',

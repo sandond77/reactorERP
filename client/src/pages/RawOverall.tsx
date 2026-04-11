@@ -284,7 +284,7 @@ export function RawOverall() {
               <React.Fragment key={value}>
                 {i === 1 && <div className="w-px h-4 bg-zinc-700 mx-1" />}
                 <button onClick={() => { setStatusFilter(value); setPage(1); }}
-                  className={`px-3 py-1 text-xs rounded-full font-medium transition-colors ${statusFilter === value ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                  className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${statusFilter === value ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                   {label}
                 </button>
               </React.Fragment>

@@ -27,6 +27,7 @@ export interface CardFilters {
   purchase_type?: string;
   decision?: string;
   exclude_decision?: string;
+  is_card_show?: string;  // 'yes' | 'no'
 }
 
 export async function listCards(
@@ -72,6 +73,8 @@ export async function listCards(
       'rp.purchase_id as raw_purchase_label',
       sql<boolean>`(al.card_instance_id IS NOT NULL)`.as('is_listed'),
       'loc.name as location_name',
+      'ci.is_card_show',
+      'ci.card_show_price',
     ])
     .where('ci.user_id', '=', userId);
 
@@ -101,6 +104,8 @@ export async function listCards(
     eb('ci.decision', 'is', null),
     eb('ci.decision', '!=', filters.exclude_decision as any),
   ]));
+  if (filters.is_card_show === 'yes') query = query.where('ci.is_card_show', '=', true);
+  if (filters.is_card_show === 'no') query = query.where('ci.is_card_show', '=', false);
   if (filters.search) {
     const words = filters.search.trim().split(/\s+/).filter(Boolean);
     for (const word of words) {

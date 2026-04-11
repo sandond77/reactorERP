@@ -71,6 +71,25 @@ export async function recordSale(req: Request, res: Response, next: NextFunction
   } catch (err) { next(err); }
 }
 
+export async function recordBulkSale(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { items, platform, card_show_id, currency, sold_at, unique_id_2 } = z.object({
+      items: z.array(z.object({
+        card_instance_id: z.string().uuid(),
+        listing_id: z.string().uuid().optional(),
+        sale_price: z.number().int().positive(),
+      })).min(1),
+      platform: z.enum(['ebay', 'card_show', 'tcgplayer', 'facebook', 'instagram', 'local', 'other']),
+      card_show_id: z.string().uuid().optional(),
+      currency: z.enum(['USD', 'JPY']).default('USD'),
+      sold_at: z.string().optional().transform((v) => v ? new Date(v) : undefined),
+      unique_id_2: z.string().optional(),
+    }).parse(req.body);
+    const sales = await salesService.recordBulkSale(req.user!.id, items, { platform, card_show_id, currency, sold_at, unique_id_2 });
+    res.status(201).json({ data: sales, count: sales.length });
+  } catch (err) { next(err); }
+}
+
 const updateSaleSchema = recordSaleSchema.omit({ card_instance_id: true }).partial();
 
 export async function updateSale(req: Request, res: Response, next: NextFunction) {
