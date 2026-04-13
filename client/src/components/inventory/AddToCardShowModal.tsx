@@ -70,8 +70,7 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
     queryFn: () => api.get('/cards', {
       params: {
         is_card_show: 'no',
-        decision: 'sell_raw',
-        status: 'purchased_raw,inspected,raw_for_sale',
+        status: 'raw_for_sale',
         search: debouncedSearch || undefined,
         limit: 50,
         page: 1,

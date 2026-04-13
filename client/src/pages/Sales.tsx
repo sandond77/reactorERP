@@ -95,7 +95,9 @@ interface BulkCartItem {
   cert_number: string | null;
   grade_label: string | null;
   company: string | null;
-  sticker_price: number;  // cents, editable
+  raw_purchase_label: string | null;
+  sticker_price_input: string;  // raw string
+  final_price_input: string;    // raw string, used at submit
   card_type: 'graded' | 'raw';
 }
 
@@ -141,6 +143,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [bulkSearch, setBulkSearch] = useState('');
   const [debouncedBulkSearch, setDebouncedBulkSearch] = useState('');
   const [bulkDiscount, setBulkDiscount] = useState('');
+  const [bulkTab, setBulkTab] = useState<'graded' | 'raw'>('graded');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedBulkSearch(bulkSearch), 300);
@@ -211,17 +214,17 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const { data: bulkSearchResults, isFetching: isBulkSearching } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['bulk-sale-search', debouncedBulkSearch],
     queryFn: () => api.get('/grading/slabs', {
-      params: { search: debouncedBulkSearch, limit: 50, status: 'unsold', card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
+      params: { search: debouncedBulkSearch, limit: 50, status: 'unsold', is_card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
     }).then(r => r.data),
-    enabled: step === 'bulk-search',
+    enabled: step === 'bulk-search' && bulkTab === 'graded',
   });
   // Bulk search: card show raw inventory
   const { data: bulkRawResults, isFetching: isBulkRawSearching } = useQuery<PaginatedResult<RawCardShowResult>>({
     queryKey: ['bulk-sale-raw-search', debouncedBulkSearch],
     queryFn: () => api.get('/cards', {
-      params: { search: debouncedBulkSearch || undefined, limit: 50, is_card_show: 'yes', status: 'purchased_raw,inspected,raw_for_sale' },
+      params: { search: debouncedBulkSearch || undefined, limit: 50, is_card_show: 'yes', status: 'raw_for_sale' },
     }).then(r => r.data),
-    enabled: step === 'bulk-search',
+    enabled: step === 'bulk-search' && bulkTab === 'raw',
   });
   const bulkSearchRows = bulkSearchResults?.data ?? [];
   const bulkRawRows = bulkRawResults?.data ?? [];
@@ -918,138 +921,158 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   if (step === 'bulk-search') {
     const alreadyAdded = new Set(bulkCart.map(c => c.id));
-    const isSearching = isBulkSearching || isBulkRawSearching;
-    const hasResults = bulkSearchRows.length > 0 || bulkRawRows.length > 0;
+    const isSearching = bulkTab === 'graded' ? isBulkSearching : isBulkRawSearching;
+    const activeRows = bulkTab === 'graded' ? bulkSearchRows : bulkRawRows;
     return (
       <div className="space-y-3">
         <div className="flex items-center gap-2 mb-1">
           <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
           <span className="text-xs text-zinc-600">Card Show · Bulk Sale</span>
         </div>
+        <div className="flex gap-1">
+          {(['graded', 'raw'] as const).map((t) => (
+            <button key={t} type="button" onClick={() => { setBulkTab(t); setBulkSearch(''); }}
+              className={`px-3 py-1 text-xs rounded-md font-medium capitalize transition-colors ${bulkTab === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+              {t}
+            </button>
+          ))}
+        </div>
         <div className="relative">
-          <Input label="Search Card Show Inventory" placeholder="Card name or cert #…"
+          <Input label={`Search ${bulkTab === 'graded' ? 'Graded' : 'Raw'} Card Show Inventory`}
+            placeholder={bulkTab === 'graded' ? 'Card name or cert #…' : 'Card name…'}
             value={bulkSearch} onChange={(e) => setBulkSearch(e.target.value)}
             autoFocus autoComplete="off" />
           {isSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
         </div>
-        {hasResults ? (
+        {activeRows.length > 0 ? (
           <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-52 overflow-y-auto">
-            {bulkSearchRows.length > 0 && (
-              <>
-                <div className="px-3 py-1.5 bg-zinc-800/60 border-b border-zinc-700/40">
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Graded</span>
-                </div>
-                {bulkSearchRows.map((r) => {
-                  const added = alreadyAdded.has(r.id);
-                  return (
-                    <button key={r.id} type="button" disabled={added}
-                      onClick={() => {
-                        if (added) return;
-                        setBulkCart(prev => [...prev, {
-                          id: r.id,
-                          listing_id: r.listing_id ?? undefined,
-                          card_name: r.card_name,
-                          set_name: r.set_name,
-                          cert_number: r.cert_number,
-                          grade_label: r.grade_label,
-                          company: r.company,
-                          sticker_price: r.card_show_price ?? 0,
-                          card_type: 'graded',
-                        }]);
-                      }}
-                      className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
-                      <div className="min-w-0">
-                        <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
-                        <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.cert_number ? ` · #${r.cert_number}` : ''}</p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-xs text-zinc-400 font-medium">{r.company} {r.grade_label}</p>
-                        <p className="text-xs text-zinc-500">{r.card_show_price ? `$${(r.card_show_price / 100).toFixed(2)}` : 'No price'}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </>
-            )}
-            {bulkRawRows.length > 0 && (
-              <>
-                <div className="px-3 py-1.5 bg-zinc-800/60 border-b border-zinc-700/40">
-                  <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Raw</span>
-                </div>
-                {bulkRawRows.map((r) => {
-                  const added = alreadyAdded.has(r.id);
-                  return (
-                    <button key={r.id} type="button" disabled={added}
-                      onClick={() => {
-                        if (added) return;
-                        setBulkCart(prev => [...prev, {
-                          id: r.id,
-                          card_name: r.card_name,
-                          set_name: r.set_name,
-                          cert_number: null,
-                          grade_label: r.condition,
-                          company: null,
-                          sticker_price: r.card_show_price ?? 0,
-                          card_type: 'raw',
-                        }]);
-                      }}
-                      className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
-                      <div className="min-w-0">
-                        <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
-                        <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.raw_purchase_label ? ` · ${r.raw_purchase_label}` : ''}</p>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-xs text-zinc-400 font-medium">{r.condition ?? 'Raw'}</p>
-                        <p className="text-xs text-zinc-500">{r.card_show_price ? `$${(r.card_show_price / 100).toFixed(2)}` : 'No price'}</p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </>
-            )}
+            {bulkTab === 'graded' ? bulkSearchRows.map((r) => {
+              const added = alreadyAdded.has(r.id);
+              return (
+                <button key={r.id} type="button" disabled={added}
+                  onClick={() => {
+                    if (added) return;
+                    const stickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
+                    const discPct = parseFloat(bulkDiscount || '0');
+                    const finalStr = stickerStr && discPct > 0
+                      ? (parseFloat(stickerStr) * (1 - discPct / 100)).toFixed(2)
+                      : stickerStr;
+                    setBulkCart(prev => [...prev, {
+                      id: r.id,
+                      listing_id: r.listing_id ?? undefined,
+                      card_name: r.card_name,
+                      set_name: r.set_name,
+                      cert_number: r.cert_number,
+                      grade_label: r.grade_label,
+                      company: r.company,
+                      raw_purchase_label: null,
+                      sticker_price_input: stickerStr,
+                      final_price_input: finalStr,
+                      card_type: 'graded',
+                    }]);
+                  }}
+                  className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
+                  <div className="min-w-0">
+                    <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
+                    <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.cert_number ? ` · #${r.cert_number}` : ''}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-xs text-zinc-400 font-medium">{r.company} {r.grade_label}</p>
+                    <p className="text-xs text-zinc-500">{r.card_show_price ? `$${(r.card_show_price / 100).toFixed(2)}` : 'No price'}</p>
+                  </div>
+                </button>
+              );
+            }) : bulkRawRows.map((r) => {
+              const added = alreadyAdded.has(r.id);
+              return (
+                <button key={r.id} type="button" disabled={added}
+                  onClick={() => {
+                    if (added) return;
+                    const rawStickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
+                    const rawDiscPct = parseFloat(bulkDiscount || '0');
+                    const rawFinalStr = rawStickerStr && rawDiscPct > 0
+                      ? (parseFloat(rawStickerStr) * (1 - rawDiscPct / 100)).toFixed(2)
+                      : rawStickerStr;
+                    setBulkCart(prev => [...prev, {
+                      id: r.id,
+                      card_name: r.card_name,
+                      set_name: r.set_name,
+                      cert_number: null,
+                      grade_label: r.condition,
+                      company: null,
+                      raw_purchase_label: r.raw_purchase_label ?? null,
+                      sticker_price_input: rawStickerStr,
+                      final_price_input: rawFinalStr,
+                      card_type: 'raw',
+                    }]);
+                  }}
+                  className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
+                  <div className="min-w-0">
+                    <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
+                    <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.raw_purchase_label ? ` · ${r.raw_purchase_label}` : ''}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-xs text-zinc-400 font-medium">{r.condition ?? 'Raw'}</p>
+                    <p className="text-xs text-zinc-500">{r.card_show_price ? `$${(r.card_show_price / 100).toFixed(2)}` : 'No price'}</p>
+                  </div>
+                </button>
+              );
+            })}
           </div>
         ) : !isSearching && bulkSearch.length >= 1 ? (
-          <p className="text-xs text-zinc-500 px-1">No card show inventory found.</p>
+          <p className="text-xs text-zinc-500 px-1">No {bulkTab} card show inventory found.</p>
         ) : null}
 
         {bulkCart.length > 0 && (
           <div className="space-y-2">
             <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Cart ({bulkCart.length})</p>
             <div className="rounded-lg border border-zinc-700 overflow-hidden">
-              {bulkCart.map((item, i) => (
-                <div key={item.id} className="flex items-center gap-3 px-3 py-2 border-b border-zinc-700/40 last:border-0">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
-                    <p className="text-xs text-zinc-500">
-                      {item.card_type === 'raw'
-                        ? (item.grade_label ?? 'Raw')
-                        : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
-                    </p>
+              <div className="max-h-[360px] overflow-y-auto">
+              {bulkCart.map((item, i) => {
+                const missingPrice = !item.sticker_price_input || parseFloat(item.sticker_price_input) <= 0;
+                return (
+                  <div key={item.id} className="flex items-start gap-3 px-3 py-2 border-b border-zinc-700/40 last:border-0">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-zinc-200 leading-snug">{item.card_name ?? '—'}</p>
+                      <p className="text-xs text-zinc-500 mt-0.5">
+                        {item.card_type === 'raw'
+                          ? `${item.grade_label ?? 'Raw'}${item.raw_purchase_label ? ` · ${item.raw_purchase_label}` : ''}`
+                          : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className={cn('text-xs', missingPrice ? 'text-amber-500' : 'text-zinc-500')}>$</span>
+                      <input
+                        type="number" step="0.01" min="0"
+                        value={item.sticker_price_input}
+                        placeholder="Required"
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, sticker_price_input: val, final_price_input: val } : c));
+                        }}
+                        className={cn('w-20 text-xs bg-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none [appearance:textfield]', missingPrice ? 'border border-amber-600/60 placeholder:text-amber-700' : 'border border-zinc-600 focus:border-indigo-500')}
+                      />
+                    </div>
+                    <button type="button" onClick={() => setBulkCart(prev => prev.filter((_, idx) => idx !== i))}
+                      className="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
+                      <X size={14} />
+                    </button>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <span className="text-zinc-500 text-xs">$</span>
-                    <input
-                      type="number" step="0.01" min="0"
-                      value={item.sticker_price > 0 ? (item.sticker_price / 100).toFixed(2) : ''}
-                      placeholder="0.00"
-                      onChange={(e) => {
-                        const cents = Math.round(parseFloat(e.target.value || '0') * 100);
-                        setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, sticker_price: cents } : c));
-                      }}
-                      className="w-20 text-xs bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-zinc-200 focus:outline-none focus:border-indigo-500 [appearance:textfield]"
-                    />
-                  </div>
-                  <button type="button" onClick={() => setBulkCart(prev => prev.filter((_, idx) => idx !== i))}
-                    className="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
+                );
+              })}
+              </div>
             </div>
-            <div className="flex justify-end">
-              <Button type="button" onClick={() => setStep('bulk-review')}>
-                Review Sale →
-              </Button>
+            <div className="flex items-center justify-between">
+              {bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0) && (
+                <p className="text-xs text-amber-500">Enter a sticker price for each card</p>
+              )}
+              <div className="ml-auto">
+                <Button type="button"
+                  disabled={bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0)}
+                  onClick={() => setStep('bulk-review')}>
+                  Review Sale →
+                </Button>
+              </div>
             </div>
           </div>
         )}
@@ -1060,13 +1083,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // ── Step: bulk-review ────────────────────────────────────────────────────────
 
   if (step === 'bulk-review') {
-    const discountPct = parseFloat(bulkDiscount || '0');
-    const multiplier = 1 - discountPct / 100;
-    const itemsWithFinal = bulkCart.map(item => ({
-      ...item,
-      final_price: Math.round(item.sticker_price * multiplier),
-    }));
-    const total = itemsWithFinal.reduce((s, i) => s + i.final_price, 0);
+    const total = bulkCart.reduce((s, item) => {
+      const final = Math.round(parseFloat(item.final_price_input || '0') * 100);
+      return s + final;
+    }, 0);
+
+    function updateReviewField(id: string, field: 'sticker_price_input' | 'final_price_input', val: string) {
+      setBulkCart(prev => prev.map(c => c.id === id ? { ...c, [field]: val } : c));
+    }
 
     return (
       <div className="space-y-4">
@@ -1077,38 +1101,74 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-end gap-3">
           <div className="w-36">
-            <Input label="Discount %" type="number" min="0" max="100" step="1"
-              placeholder="0" value={bulkDiscount} onChange={(e) => setBulkDiscount(e.target.value)} />
+            <Input label="Discount % (all)" type="number" min="0" max="100" step="1"
+              placeholder="0" value={bulkDiscount} onChange={(e) => {
+                const pct = parseFloat(e.target.value || '0');
+                setBulkDiscount(e.target.value);
+                const multiplier = 1 - pct / 100;
+                setBulkCart(prev => prev.map(c => ({
+                  ...c,
+                  final_price_input: c.sticker_price_input
+                    ? (parseFloat(c.sticker_price_input) * multiplier).toFixed(2)
+                    : c.final_price_input,
+                })));
+              }} />
           </div>
-          {discountPct > 0 && (
-            <p className="text-xs text-zinc-500 pb-2">{discountPct}% off each card</p>
+          {parseFloat(bulkDiscount || '0') > 0 && (
+            <p className="text-xs text-zinc-500 pb-2">{parseFloat(bulkDiscount)}% off each card</p>
           )}
         </div>
 
+
         <div className="rounded-lg border border-zinc-700 overflow-hidden">
-          <div className="grid grid-cols-[1fr_5rem_5rem] gap-x-3 px-3 py-2 bg-zinc-900 border-b border-zinc-700">
+          <div className="grid grid-cols-[1fr_6rem_6rem_4rem] gap-x-2 px-3 py-2 bg-zinc-900 border-b border-zinc-700">
             <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Card</span>
             <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Sticker</span>
             <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Final</span>
+            <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Disc.</span>
           </div>
-          {itemsWithFinal.map((item) => (
-            <div key={item.id} className="grid grid-cols-[1fr_5rem_5rem] gap-x-3 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-center">
-              <div className="min-w-0">
-                <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
-                <p className="text-xs text-zinc-500">{item.company} {item.grade_label}{item.cert_number ? ` · #${item.cert_number}` : ''}</p>
+          <div className="max-h-[360px] overflow-y-auto">
+          {bulkCart.map((item) => {
+            const sticker = parseFloat(item.sticker_price_input || '0');
+            const final = parseFloat(item.final_price_input || '0');
+            const discountPct = sticker > 0 ? Math.round((1 - final / sticker) * 100) : 0;
+            return (
+              <div key={item.id} className="grid grid-cols-[1fr_6rem_6rem_4rem] gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start">
+                <div className="min-w-0">
+                  <p className="text-sm text-zinc-200 leading-snug">{item.card_name ?? '—'}</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {item.card_type === 'raw'
+                      ? `${item.grade_label ?? 'Raw'}${item.raw_purchase_label ? ` · ${item.raw_purchase_label}` : ''}`
+                      : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
+                  </p>
+                </div>
+                <div className="flex items-center justify-end gap-0.5">
+                  <span className="text-zinc-600 text-xs">$</span>
+                  <input type="number" step="0.01" min="0"
+                    value={item.sticker_price_input}
+                    onChange={(e) => updateReviewField(item.id, 'sticker_price_input', e.target.value)}
+                    className="w-16 text-xs bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300 text-right focus:outline-none focus:border-indigo-500 [appearance:textfield]"
+                  />
+                </div>
+                <div className="flex items-center justify-end gap-0.5">
+                  <span className="text-zinc-600 text-xs">$</span>
+                  <input type="number" step="0.01" min="0"
+                    value={item.final_price_input}
+                    onChange={(e) => updateReviewField(item.id, 'final_price_input', e.target.value)}
+                    className="w-16 text-xs bg-zinc-800 border border-indigo-600/60 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500 [appearance:textfield]"
+                  />
+                </div>
+                <p className={cn('text-xs text-right tabular-nums', discountPct > 0 ? 'text-amber-400' : 'text-zinc-600')}>
+                  {discountPct > 0 ? `-${discountPct}%` : '—'}
+                </p>
               </div>
-              <p className={cn('text-sm text-right tabular-nums', discountPct > 0 ? 'text-zinc-500 line-through' : 'text-zinc-300')}>
-                ${(item.sticker_price / 100).toFixed(2)}
-              </p>
-              <p className="text-sm text-zinc-200 text-right tabular-nums font-medium">
-                ${(item.final_price / 100).toFixed(2)}
-              </p>
-            </div>
-          ))}
-          <div className="grid grid-cols-[1fr_5rem_5rem] gap-x-3 px-3 py-2.5 bg-zinc-900/50 border-t border-zinc-700">
+            );
+          })}
+          </div>
+          <div className="grid grid-cols-[1fr_6rem_6rem_4rem] gap-x-2 px-3 py-2.5 bg-zinc-900/50 border-t border-zinc-700">
             <p className="text-xs font-semibold text-zinc-400">{bulkCart.length} card{bulkCart.length !== 1 ? 's' : ''}</p>
-            <span />
-            <p className="text-sm font-bold text-zinc-100 text-right tabular-nums">${(total / 100).toFixed(2)}</p>
+            <span /><span />
+            <p className="text-sm font-bold text-zinc-100 text-right tabular-nums col-start-3">${(total / 100).toFixed(2)}</p>
           </div>
         </div>
 
@@ -1143,14 +1203,17 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
           <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
+            min={showDateMin} max={showDateMax}
             className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
         </div>
         <Input label="Notes" placeholder="Person, location, etc." value={notes} onChange={(e) => setNotes(e.target.value)} />
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" onClick={() => setStep('bulk-search')}>Back</Button>
-          <Button type="button" disabled={itemsWithFinal.some(i => i.final_price <= 0)}
-            onClick={() => setStep('bulk-confirm')}>
+          <Button type="button" disabled={bulkCart.some(i => {
+            const n = parseFloat(i.final_price_input || '0');
+            return isNaN(n) || n <= 0;
+          })} onClick={() => setStep('bulk-confirm')}>
             Review &amp; Confirm →
           </Button>
         </div>
@@ -1161,11 +1224,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // ── Step: bulk-confirm ───────────────────────────────────────────────────────
 
   if (step === 'bulk-confirm') {
-    const discountPct = parseFloat(bulkDiscount || '0');
-    const multiplier = 1 - discountPct / 100;
     const itemsWithFinal = bulkCart.map(item => ({
       ...item,
-      final_price: Math.round(item.sticker_price * multiplier),
+      final_price: Math.round(parseFloat(item.final_price_input || '0') * 100),
     }));
     const total = itemsWithFinal.reduce((s, i) => s + i.final_price, 0);
     const selectedShow = (cardShowsData?.data ?? []).find(s => s.id === cardShowId);
@@ -1207,10 +1268,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
             <span className="text-zinc-500">Cards</span>
             <span className="text-zinc-200 font-medium">{bulkCart.length}</span>
-            {discountPct > 0 && <>
-              <span className="text-zinc-500">Discount</span>
-              <span className="text-zinc-200">{discountPct}%</span>
-            </>}
             <span className="text-zinc-500">Total</span>
             <span className="text-zinc-100 font-bold">${(total / 100).toFixed(2)}</span>
             {selectedShow && <>
@@ -1228,12 +1285,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-56 overflow-y-auto">
+        <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-[360px] overflow-y-auto">
           {itemsWithFinal.map((item) => (
-            <div key={item.id} className="flex items-center justify-between gap-3 px-3 py-2.5 border-b border-zinc-700/40 last:border-0">
+            <div key={item.id} className="flex items-start justify-between gap-3 px-3 py-2.5 border-b border-zinc-700/40 last:border-0">
               <div className="min-w-0">
-                <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
-                <p className="text-xs text-zinc-500">{item.company} {item.grade_label}{item.cert_number ? ` · #${item.cert_number}` : ''}</p>
+                <p className="text-sm text-zinc-200 leading-snug">{item.card_name ?? '—'}</p>
+                <p className="text-xs text-zinc-500 mt-0.5">
+                  {item.card_type === 'raw'
+                    ? `${item.grade_label ?? 'Raw'}${item.raw_purchase_label ? ` · ${item.raw_purchase_label}` : ''}`
+                    : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
+                </p>
               </div>
               <p className="text-sm font-medium text-zinc-100 tabular-nums shrink-0">${(item.final_price / 100).toFixed(2)}</p>
             </div>
@@ -1579,7 +1640,7 @@ export function Sales() {
         </div>
       )}
 
-      <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="Record Sale" className="max-w-2xl">
+      <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="Record Sale" className="max-w-3xl">
         <RecordSaleModal onClose={() => setShowAddModal(false)} />
       </Modal>
 

@@ -240,7 +240,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     queryFn: () => api.get('/cards', {
       params: {
         is_card_show: 'yes',
-        status: 'purchased_raw,inspected,raw_for_sale',
+        status: 'raw_for_sale',
         search: debouncedSearch || undefined,
         limit: 100,
         page,
