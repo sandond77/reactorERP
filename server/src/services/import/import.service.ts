@@ -177,8 +177,10 @@ async function executeGradedImport(
       if (!gradeRaw) throw new Error('grade is required');
 
       const { company: parsedCompany, grade } = parseGradeString(gradeRaw);
-      const companyRaw = normalizeCompany(row['company']?.trim()) ?? parsedCompany;
-      if (!companyRaw) throw new Error('company is required — set a default value in the mapping step');
+      const companyRaw = normalizeCompany(row['company']?.trim())
+        ?? parsedCompany
+        ?? inferCompanyFromCert(certRaw)
+        ?? 'OTHER';
 
       const certNumber = parseInt(certRaw.replace(/\D/g, ''), 10);
       const gradeLabel = makeGradeLabel(grade, companyRaw);
@@ -542,17 +544,8 @@ async function executeLegacyCardsImport(
 
 function applyMapping(row: Record<string, string>, mapping: Record<string, string>): Record<string, string> {
   const result: Record<string, string> = {};
-  // Apply column-to-field mappings
   for (const [csvCol, field] of Object.entries(mapping)) {
-    if (csvCol.startsWith('__default_')) continue; // handled below
     if (row[csvCol] !== undefined) result[field] = row[csvCol];
-  }
-  // Apply defaults for fields not populated from the row
-  for (const [key, value] of Object.entries(mapping)) {
-    if (key.startsWith('__default_')) {
-      const field = key.slice('__default_'.length);
-      if (!result[field] && value) result[field] = value;
-    }
   }
   return result;
 }
@@ -626,6 +619,14 @@ function extractGradeNumber(s: string): number {
   return m ? parseFloat(m[1]) : NaN;
 }
 
+// Infer company from cert number digit length
+function inferCompanyFromCert(cert?: string): GradingCompany | null {
+  if (!cert) return null;
+  const digits = cert.replace(/\D/g, '');
+  if (digits.length === 8 || digits.length === 9) return 'PSA'; // PSA: legacy 8-digit + current 9-digit
+  if (digits.length === 10) return 'CGC';                        // CGC: 10-digit certs
+  return null;
+}
 
 function normalizeCompany(value?: string): GradingCompany | null {
   if (!value) return null;
