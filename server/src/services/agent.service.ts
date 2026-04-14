@@ -8,10 +8,11 @@ import { db } from '../config/database';
 import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
 import { auditContext } from '../utils/audit-context';
 import { normalizeGradeLabel } from '../utils/grade-labels';
-import { createRawPurchase } from './raw-purchases.service';
+import { createRawPurchase, saveReceiptUrl as saveRawPurchaseReceiptUrl } from './raw-purchases.service';
 import { createCard, updateCard, transitionCardStatus, softDeleteCard } from './cards.service';
 import { recordSale, listSales } from './sales.service';
-import { createExpense } from './expenses.service';
+import { createExpense, saveReceiptUrl as saveExpenseReceiptUrl } from './expenses.service';
+import { saveReceiptFromBase64 } from '../utils/save-receipt';
 import * as gradingService from './grading-submissions.service';
 import * as listingsService from './listings.service';
 import * as tradesService from './trades.service';
@@ -889,6 +890,14 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   if (toolName === 'create_raw_purchase') {
     const input = toolInput as unknown as Parameters<typeof createRawPurchase>[1];
     const result = await createRawPurchase(userId, input);
+    // Save pending receipt image if one was uploaded
+    const imgs = pendingImages.get(userId);
+    if (imgs?.length) {
+      try {
+        const url = await saveReceiptFromBase64(userId, result.id, imgs[0].base64);
+        await saveRawPurchaseReceiptUrl(userId, result.id, url);
+      } catch { /* non-fatal */ }
+    }
     return { success: true, id: result.id, purchase_id: result.purchase_id };
   }
 
@@ -1187,6 +1196,14 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       date: date ? new Date(date) : new Date(),
       order_number: order_number ?? undefined,
     });
+    // Save pending receipt image if one was uploaded
+    const imgs = pendingImages.get(userId);
+    if (imgs?.length) {
+      try {
+        const url = await saveReceiptFromBase64(userId, expense.id, imgs[0].base64);
+        await saveExpenseReceiptUrl(userId, expense.id, url);
+      } catch { /* non-fatal */ }
+    }
     return { success: true, expense_id: expense.expense_id };
   }
 

@@ -25,6 +25,7 @@ export interface ExpenseInput {
   currency?: string;
   link?: string;
   order_number?: string;
+  receipt_url?: string;
 }
 
 const SORT_COLS: Record<string, string> = {
@@ -91,6 +92,7 @@ export async function createExpense(userId: string, input: ExpenseInput) {
       currency:     input.currency ?? 'USD',
       link:         input.link ?? null,
       order_number: input.order_number ?? null,
+      receipt_url:  input.receipt_url ?? null,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -112,6 +114,7 @@ export async function updateExpense(userId: string, id: string, input: Partial<E
       ...(input.currency    !== undefined && { currency: input.currency }),
       ...(input.link        !== undefined && { link: input.link }),
       ...(input.order_number !== undefined && { order_number: input.order_number }),
+      ...(input.receipt_url !== undefined && { receipt_url: input.receipt_url }),
       updated_at: new Date(),
     })
     .where('id', '=', id)
@@ -119,6 +122,18 @@ export async function updateExpense(userId: string, id: string, input: Partial<E
     .returningAll()
     .executeTakeFirstOrThrow();
   await logAudit(userId, 'expenses', id, 'updated', existing, updated);
+  return updated;
+}
+
+export async function saveReceiptUrl(userId: string, id: string, receiptUrl: string) {
+  const updated = await db
+    .updateTable('expenses')
+    .set({ receipt_url: receiptUrl, updated_at: new Date() })
+    .where('id', '=', id)
+    .where('user_id', '=', userId)
+    .returningAll()
+    .executeTakeFirst();
+  if (!updated) throw new AppError(404, 'Expense not found');
   return updated;
 }
 

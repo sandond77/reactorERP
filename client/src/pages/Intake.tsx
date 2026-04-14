@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, X, PackageCheck, Ban, ChevronDown } from 'lucide-react';
+import { Plus, X, PackageCheck, Ban, ChevronDown, ImagePlus } from 'lucide-react';
 import { api } from '../lib/api';
 import { AddPartModal } from '../components/catalog/AddPartModal';
 import { Button } from '../components/ui/Button';
@@ -139,7 +139,7 @@ function PurchaseForm({
   onDelete,
 }: {
   initial?: Partial<PurchaseRow>;
-  onSave: (data: Record<string, unknown>) => void;
+  onSave: (data: Record<string, unknown>, receiptFile?: File) => void;
   onClose: () => void;
   onDelete?: () => void;
 }) {
@@ -161,6 +161,8 @@ function PurchaseForm({
 
   const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(null);
   const [catalogId, setCatalogId] = useState<string | null>(initial?.catalog_id ?? null);
+  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(initial?.receipt_url ?? null);
 
   useEffect(() => {
     const yen  = parseFloat(form.total_cost_yen);
@@ -208,7 +210,7 @@ function PurchaseForm({
       card_count:     parseInt(form.card_count) || 1,
       purchased_at:   form.purchased_at || undefined,
       notes:          form.notes || undefined,
-    });
+    }, receiptFile ?? undefined);
   }
 
   const inp   = 'w-full px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [color-scheme:dark]';
@@ -329,6 +331,24 @@ function PurchaseForm({
         <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} rows={2} className={inp} />
       </div>
 
+      {/* Receipt image */}
+      <label className="flex items-center gap-3 w-full rounded-xl border-2 border-dashed border-zinc-700 hover:border-zinc-500 px-4 py-3 cursor-pointer transition-colors hover:bg-zinc-800/40">
+        <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) { setReceiptFile(f); setReceiptPreview(URL.createObjectURL(f)); } }} />
+        {receiptPreview ? (
+          <div className="flex items-center gap-3 w-full">
+            <img src={receiptPreview} alt="receipt" className="h-10 w-10 object-cover rounded-lg border border-zinc-700 shrink-0" />
+            <span className="text-xs text-green-300">Receipt attached</span>
+            <span className="ml-auto text-xs text-zinc-500 hover:text-zinc-300">Change</span>
+          </div>
+        ) : (
+          <>
+            <ImagePlus size={16} className="text-zinc-500 shrink-0" />
+            <span className="text-xs text-zinc-400">Attach receipt image <span className="text-zinc-500">(optional)</span></span>
+          </>
+        )}
+      </label>
+
       <div className="flex items-center justify-between pt-2">
         {onDelete && (
           <Button type="button" variant="ghost" size="sm" onClick={onDelete}
@@ -441,6 +461,7 @@ export function Intake() {
     status:  colMinWidth('Status',     true, false),
     bought:  colMinWidth('Purchased',  true, false),
     inspect:   colMinWidth('Inspected', true, false),
+    receipt: 44,
     actions: 80,
   };
   const { rz, totalWidth } = useColWidths({
@@ -456,7 +477,8 @@ export function Intake() {
     status:    Math.max(MINS.status,    100),
     bought:    Math.max(MINS.bought,    120),
     inspect:   Math.max(MINS.inspect,    90),
-    actions: MINS.actions,
+    receipt:   MINS.receipt,
+    actions:   MINS.actions,
   });
 
   useEffect(() => {
@@ -484,14 +506,29 @@ export function Intake() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['raw-purchases'] });
 
   const createMut = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api.post('/raw-purchases', body).then((r) => r.data),
+    mutationFn: async ({ body, receiptFile }: { body: Record<string, unknown>; receiptFile?: File }) => {
+      const res = await api.post('/raw-purchases', body);
+      if (receiptFile) {
+        const fd = new FormData();
+        fd.append('image', receiptFile);
+        await api.post(`/raw-purchases/${res.data.id}/receipt`, fd).catch(() => {});
+      }
+      return res.data;
+    },
     onSuccess: () => { invalidate(); setAddOpen(false); toast.success('Purchase added'); },
     onError: () => toast.error('Failed to add purchase'),
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: Record<string, unknown> }) =>
-      api.patch(`/raw-purchases/${id}`, body).then((r) => r.data),
+    mutationFn: async ({ id, body, receiptFile }: { id: string; body: Record<string, unknown>; receiptFile?: File }) => {
+      const res = await api.patch(`/raw-purchases/${id}`, body);
+      if (receiptFile) {
+        const fd = new FormData();
+        fd.append('image', receiptFile);
+        await api.post(`/raw-purchases/${id}/receipt`, fd).catch(() => {});
+      }
+      return res.data;
+    },
     onSuccess: () => { invalidate(); setEditRow(null); setReceiveRow(null); toast.success('Updated'); },
     onError: () => toast.error('Failed to update'),
   });
@@ -569,12 +606,13 @@ export function Intake() {
                 <ColHeader label="Status"     col="status"          {...sh} {...rz('status')}  minWidth={MINS.status} />
                 <ColHeader label="Purchased"  col="purchased_at"    {...sh} {...rz('bought')}  minWidth={MINS.bought} />
                 <ColHeader label="Inspected"  col="inspected_count"  {...sh} {...rz('inspect')}   minWidth={MINS.inspect}   align="right" />
+                <th style={{ width: MINS.receipt + 'px', minWidth: MINS.receipt + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide text-xs">Rcpt</th>
                 <th style={{ width: MINS.actions }} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
               {!data?.data.length ? (
-                <tr><td colSpan={13} className="px-4 py-10 text-center text-zinc-500">No purchases yet.</td></tr>
+                <tr><td colSpan={14} className="px-4 py-10 text-center text-zinc-500">No purchases yet.</td></tr>
               ) : data.data.map((row) => (
                 <tr key={row.id}
                   className="hover:bg-zinc-800/25 transition-colors group cursor-pointer"
@@ -601,6 +639,14 @@ export function Intake() {
                     <span className={row.inspected_count > 0 ? 'text-emerald-400' : 'text-zinc-600'}>
                       {row.inspected_count}/{row.card_count}
                     </span>
+                  </td>
+                  <td className="px-2 py-2 text-center">
+                    {row.receipt_url && (
+                      <a href={row.receipt_url} target="_blank" rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()} title="View receipt">
+                        <img src={row.receipt_url} alt="receipt" className="h-7 w-7 object-cover rounded border border-zinc-700 hover:border-indigo-500 transition-colors mx-auto" />
+                      </a>
+                    )}
                   </td>
                   {/* Row actions */}
                   <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
@@ -644,7 +690,7 @@ export function Intake() {
 
       {/* Add */}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Purchase">
-        <PurchaseForm onSave={(body) => createMut.mutate(body)} onClose={() => setAddOpen(false)} />
+        <PurchaseForm onSave={(body, receiptFile) => createMut.mutate({ body, receiptFile })} onClose={() => setAddOpen(false)} />
       </Modal>
 
       {/* Edit */}
@@ -652,7 +698,7 @@ export function Intake() {
         {editRow && (
           <PurchaseForm
             initial={editRow}
-            onSave={(body) => updateMut.mutate({ id: editRow.id, body })}
+            onSave={(body, receiptFile) => updateMut.mutate({ id: editRow.id, body, receiptFile })}
             onClose={() => setEditRow(null)}
             onDelete={() => { setEditRow(null); setDeleteRow(editRow); }}
           />

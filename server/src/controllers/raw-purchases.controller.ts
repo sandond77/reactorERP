@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import * as svc from '../services/raw-purchases.service';
+import { saveReceiptImage } from '../utils/save-receipt';
 
 export async function list(req: Request, res: Response) {
   try {
@@ -79,6 +80,17 @@ export async function deleteLine(req: Request, res: Response) {
   try {
     await svc.deleteInspectionLine(req.user!.id, req.params['cardId'] as string);
     res.status(204).send();
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+}
+
+export async function uploadReceipt(req: Request, res: Response) {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No image file provided' });
+    const receiptUrl = await saveReceiptImage(req.user!.id, req.params['id'] as string, req.file.buffer);
+    const purchase = await svc.saveReceiptUrl(req.user!.id, req.params['id'] as string, receiptUrl);
+    res.json(purchase);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

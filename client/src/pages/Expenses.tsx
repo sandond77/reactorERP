@@ -21,6 +21,7 @@ interface Expense {
   currency: string;
   link: string | null;
   order_number: string | null;
+  receipt_url: string | null;
   created_at: string;
 }
 
@@ -62,11 +63,14 @@ function ExpenseModal({
   const [orderNumber, setOrderNumber] = useState(expense?.order_number ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [parsing, setParsing] = useState(false);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(expense?.receipt_url ?? null);
 
   async function handleImageUpload(file: File) {
     if (!file) return;
+    setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
+    if (isEdit) return; // on edit, just queue the file — no auto-parse
     setParsing(true);
     try {
       const formData = new FormData();
@@ -104,12 +108,21 @@ function ExpenseModal({
         link: link.trim() || undefined,
         order_number: orderNumber.trim() || undefined,
       };
+      let savedId: string;
       if (isEdit) {
         await api.put(`/expenses/${expense.id}`, body);
+        savedId = expense.id;
         toast.success('Expense updated');
       } else {
-        await api.post('/expenses', body);
+        const res = await api.post('/expenses', body);
+        savedId = res.data.data.id;
         toast.success('Expense added');
+      }
+      // Upload receipt image if one was selected
+      if (imageFile) {
+        const fd = new FormData();
+        fd.append('image', imageFile);
+        await api.post(`/expenses/${savedId}/receipt`, fd).catch(() => {});
       }
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-filters'] });
@@ -124,31 +137,31 @@ function ExpenseModal({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       {/* Receipt image upload */}
-      {!isEdit && (
-        <label className={`flex items-center gap-3 w-full rounded-xl border-2 border-dashed px-4 py-3 cursor-pointer transition-colors ${
-          parsing ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800/40'
-        }`}>
-          <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); }} />
-          {parsing ? (
-            <>
-              <Loader2 size={16} className="animate-spin text-indigo-400 shrink-0" />
-              <span className="text-xs text-indigo-300">Parsing receipt…</span>
-            </>
-          ) : imagePreview ? (
-            <>
-              <Sparkles size={16} className="text-green-400 shrink-0" />
-              <span className="text-xs text-green-300">Receipt parsed — fields pre-filled below</span>
-              <span className="ml-auto text-xs text-zinc-500 hover:text-zinc-300">Change</span>
-            </>
-          ) : (
-            <>
-              <ImagePlus size={16} className="text-zinc-500 shrink-0" />
-              <span className="text-xs text-zinc-400">Upload receipt to auto-fill <span className="text-zinc-500">(optional)</span></span>
-            </>
-          )}
-        </label>
-      )}
+      <label className={`flex items-center gap-3 w-full rounded-xl border-2 border-dashed px-4 py-3 cursor-pointer transition-colors ${
+        parsing ? 'border-indigo-500/50 bg-indigo-500/5' : 'border-zinc-700 hover:border-zinc-500 hover:bg-zinc-800/40'
+      }`}>
+        <input type="file" accept="image/jpeg,image/png,image/webp" className="hidden"
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); }} />
+        {parsing ? (
+          <>
+            <Loader2 size={16} className="animate-spin text-indigo-400 shrink-0" />
+            <span className="text-xs text-indigo-300">Parsing receipt…</span>
+          </>
+        ) : imagePreview ? (
+          <div className="flex items-center gap-3 w-full">
+            <img src={imagePreview} alt="receipt" className="h-10 w-10 object-cover rounded-lg border border-zinc-700 shrink-0" />
+            <span className="text-xs text-green-300">{isEdit ? 'Receipt attached' : 'Receipt parsed — fields pre-filled below'}</span>
+            <span className="ml-auto text-xs text-zinc-500 hover:text-zinc-300">Change</span>
+          </div>
+        ) : (
+          <>
+            <ImagePlus size={16} className="text-zinc-500 shrink-0" />
+            <span className="text-xs text-zinc-400">
+              {isEdit ? 'Upload receipt image' : 'Upload receipt to auto-fill'} <span className="text-zinc-500">(optional)</span>
+            </span>
+          </>
+        )}
+      </label>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1">
@@ -434,6 +447,7 @@ export function Expenses() {
     description:  colMinWidth('Description', true, false),
     amount:       colMinWidth('Amount',      true, false),
     order_number: colMinWidth('Order #',     true, false),
+    receipt:      50,
     link:         50,
   };
 
@@ -444,6 +458,7 @@ export function Expenses() {
     description:  Math.max(MINS.description, 420),
     amount:       Math.max(MINS.amount, 120),
     order_number: Math.max(MINS.order_number, 150),
+    receipt:      MINS.receipt,
     link:         MINS.link,
   });
 
@@ -534,13 +549,15 @@ export function Expenses() {
                 <ColHeader label="Description" col="description" {...sh} {...rz('description')}  minWidth={MINS.description} />
                 <ColHeader label="Amount"      col="amount"      {...sh} {...rz('amount')}       minWidth={MINS.amount} align="center" />
                 <ColHeader label="Order #"     col="order_number" {...sh} {...rz('order_number')} minWidth={MINS.order_number} />
+                <th style={{ width: MINS.receipt + 'px', minWidth: MINS.receipt + 'px' }}
+                  className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide">Rcpt</th>
                 <th style={{ width: MINS.link + 'px', minWidth: MINS.link + 'px' }}
                   className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide">Link</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {!data?.data.length ? (
-                <tr><td colSpan={7} className="px-3 py-10 text-center text-zinc-500">No expenses found.</td></tr>
+                <tr><td colSpan={8} className="px-3 py-10 text-center text-zinc-500">No expenses found.</td></tr>
               ) : data.data.map((expense) => (
                 <tr key={expense.id} className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
                   onClick={() => setSelected(expense)}>
@@ -552,6 +569,15 @@ export function Expenses() {
                   <td className="px-3 py-2 text-zinc-200 truncate" title={expense.description}>{expense.description}</td>
                   <td className="px-3 py-2 text-center font-medium text-zinc-200">{formatCurrency(expense.amount, expense.currency)}</td>
                   <td className="px-3 py-2 text-zinc-500 font-mono text-[11px]">{expense.order_number ?? '—'}</td>
+                  <td className="px-2 py-2 text-center">
+                    {expense.receipt_url && (
+                      <a href={expense.receipt_url} target="_blank" rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        title="View receipt">
+                        <img src={expense.receipt_url} alt="receipt" className="h-7 w-7 object-cover rounded border border-zinc-700 hover:border-indigo-500 transition-colors mx-auto" />
+                      </a>
+                    )}
+                  </td>
                   <td className="px-2 py-2 text-center">
                     {expense.link && (
                       <a href={expense.link} target="_blank" rel="noopener noreferrer"

@@ -285,6 +285,7 @@ export interface RawPurchasesTable {
   received_at: Date | null;
   reserved: Generated<boolean>;
   notes: string | null;
+  receipt_url: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -353,6 +354,7 @@ export interface ExpensesTable {
   currency: string;
   link: string | null;
   order_number: string | null;
+  receipt_url: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

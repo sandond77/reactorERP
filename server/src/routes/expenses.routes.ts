@@ -22,3 +22,4 @@ expensesRouter.get('/', ctrl.listExpenses);
 expensesRouter.post('/', ctrl.createExpense);
 expensesRouter.put('/:id', ctrl.updateExpense);
 expensesRouter.delete('/:id', ctrl.deleteExpense);
+expensesRouter.post('/:id/receipt', upload.single('image'), ctrl.uploadExpenseReceipt);

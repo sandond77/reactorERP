@@ -26,6 +26,7 @@ export interface RawPurchaseRow {
   received_at: string | null;
   reserved: boolean;
   notes: string | null;
+  receipt_url: string | null;
   // aggregated
   inspected_count: number;
   sell_raw_count: number;
@@ -113,6 +114,7 @@ export async function listRawPurchases(
       'rp.received_at',
       'rp.reserved',
       'rp.notes',
+      'rp.receipt_url',
       sql<number>`COALESCE(SUM(ci.quantity), 0)`.as('inspected_count'),
       sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'sell_raw' THEN ci.quantity END), 0)`.as('sell_raw_count'),
       sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'grade' THEN ci.quantity END), 0)`.as('grade_count'),
@@ -302,6 +304,18 @@ export async function updateRawPurchase(
     .returningAll()
     .executeTakeFirst();
   if (updated) await logAudit(userId, 'raw_purchases', id, 'updated', existing, updated);
+  return updated;
+}
+
+export async function saveReceiptUrl(userId: string, id: string, receiptUrl: string) {
+  const updated = await db
+    .updateTable('raw_purchases')
+    .set({ receipt_url: receiptUrl } as any)
+    .where('id', '=', id)
+    .where('user_id', '=', userId)
+    .returningAll()
+    .executeTakeFirst();
+  if (!updated) throw new Error('Raw purchase not found');
   return updated;
 }
 
