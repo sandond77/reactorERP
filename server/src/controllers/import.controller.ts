@@ -36,9 +36,9 @@ export async function getTemplate(req: Request, res: Response, next: NextFunctio
 
 export async function uploadCsv(req: Request, res: Response, next: NextFunction) {
   try {
-    if (!req.file) throw new AppError(400, 'No CSV file provided');
+    if (!req.file) throw new AppError(400, 'No file provided');
 
-    const importType = (req.body.import_type as string) ?? 'cards';
+    const importType = req.body.import_type as string | undefined;
     const result = await importService.uploadCsv(
       req.dataUserId,
       req.file.originalname,
@@ -51,12 +51,13 @@ export async function uploadCsv(req: Request, res: Response, next: NextFunction)
 
 const mappingSchema = z.object({
   mapping: z.record(z.string()),
+  import_type: z.string().optional(),
 });
 
 export async function saveMapping(req: Request, res: Response, next: NextFunction) {
   try {
-    const { mapping } = mappingSchema.parse(req.body);
-    const result = await importService.saveColumnMapping(req.dataUserId, req.params['id'] as string, mapping);
+    const { mapping, import_type } = mappingSchema.parse(req.body);
+    const result = await importService.saveColumnMapping(req.dataUserId, req.params['id'] as string, mapping, import_type);
     res.json({ data: result });
   } catch (err) { next(err); }
 }

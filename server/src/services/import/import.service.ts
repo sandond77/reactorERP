@@ -1,8 +1,9 @@
 import { db } from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
-import { parseCsvBuffer, autoDetectMapping } from './csvParser';
+import { parseCsvBuffer, aiDetectImport } from './csvParser';
 import { toCents } from '../../utils/cents';
 import { createRawPurchase } from '../raw-purchases.service';
+import { createExpense } from '../expenses.service';
 import { recordSale } from '../sales.service';
 import type { GradingCompany, ListingPlatform } from '../../types/db';
 
@@ -12,33 +13,45 @@ export async function uploadCsv(
   userId: string,
   filename: string,
   buffer: Buffer,
-  importType: string = 'cards'
+  importType?: string
 ) {
   const { headers, rows, rowCount, errors } = parseCsvBuffer(buffer, filename);
-  const autoMapping = autoDetectMapping(headers);
+
+  if (errors.length > 0 && rowCount === 0) {
+    throw new Error(`Could not parse file: ${errors[0]}`);
+  }
+
+  // Use AI to detect type + mapping unless type was explicitly provided
+  const detection = await aiDetectImport(headers, rows.slice(0, 5));
+  const resolvedType = importType ?? detection.import_type;
 
   const record = await db
     .insertInto('csv_imports')
     .values({
       user_id: userId,
       filename,
-      import_type: importType,
+      import_type: resolvedType,
       row_count: rowCount,
       status: 'pending',
       raw_headers: headers as any,
       preview_rows: rows.slice(0, 5) as any,
-      mapping: autoMapping as any,
+      mapping: detection.mapping as any,
       error_log: errors.length > 0 ? (errors as any) : null,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
 
   return {
-    import_id: record.id,
-    headers,
-    row_count: rowCount,
+    id: record.id,
+    original_filename: filename,
+    columns: headers,
+    total_rows: rowCount,
     preview_rows: rows.slice(0, 5),
-    auto_mapping: autoMapping,
+    detected_mapping: detection.mapping,
+    detected_type: detection.import_type,
+    detected_confidence: detection.confidence,
+    detected_reasoning: detection.reasoning,
+    import_type: resolvedType,
     parse_errors: errors,
   };
 }
@@ -46,13 +59,17 @@ export async function uploadCsv(
 export async function saveColumnMapping(
   userId: string,
   importId: string,
-  mapping: Record<string, string>
+  mapping: Record<string, string>,
+  importType?: string
 ) {
   const record = await db.selectFrom('csv_imports').selectAll()
     .where('id', '=', importId).where('user_id', '=', userId).executeTakeFirst();
   if (!record) throw new AppError(404, 'Import not found');
 
-  return db.updateTable('csv_imports').set({ mapping: mapping as any })
+  const update: Record<string, any> = { mapping: mapping as any };
+  if (importType) update.import_type = importType;
+
+  return db.updateTable('csv_imports').set(update)
     .where('id', '=', importId).returningAll().executeTakeFirstOrThrow();
 }
 
@@ -102,6 +119,9 @@ export async function executeImport(userId: string, importId: string, buffer: Bu
       break;
     case 'bulk_sale':
       result = await executeBulkSaleImport(userId, rows, mapping);
+      break;
+    case 'expenses':
+      result = await executeExpensesImport(userId, rows, mapping);
       break;
     default:
       result = await executeLegacyCardsImport(userId, rows, mapping);
@@ -249,12 +269,12 @@ async function executeRawPurchaseImport(
 
       const rp = await createRawPurchase(userId, {
         type: purchaseType,
-        source,
-        order_number: orderNumber,
+        source: source ?? undefined,
+        order_number: orderNumber ?? undefined,
         language,
-        card_name:   group.rows.length === 1 ? (firstRow['card_name']?.trim() || null) : null,
-        set_name:    group.rows.length === 1 ? (firstRow['set_name']?.trim()  || null) : null,
-        card_number: group.rows.length === 1 ? (firstRow['card_number']?.trim() || null) : null,
+        card_name:   group.rows.length === 1 ? (firstRow['card_name']?.trim() || undefined) : undefined,
+        set_name:    group.rows.length === 1 ? (firstRow['set_name']?.trim()  || undefined) : undefined,
+        card_number: group.rows.length === 1 ? (firstRow['card_number']?.trim() || undefined) : undefined,
         total_cost_usd: Math.round(totalCostUsd * 100),
         card_count:  group.rows.length,
         status:      'received',
@@ -392,6 +412,54 @@ async function executeBulkSaleImport(
         currency,
         sold_at:       soldAt,
         unique_id:     row['unique_id']?.trim() || undefined,
+      });
+
+      importedCount++;
+    } catch (err) {
+      errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return { importedCount, errorLog };
+}
+
+// ── Expenses Import ───────────────────────────────────────────────────────────
+
+async function executeExpensesImport(
+  userId: string,
+  rows: Record<string, string>[],
+  mapping: Record<string, string>
+) {
+  const errorLog: Array<{ row: number; message: string }> = [];
+  let importedCount = 0;
+
+  for (let i = 0; i < rows.length; i++) {
+    const rowIndex = i + 2;
+    const row = applyMapping(rows[i], mapping);
+    try {
+      const description = row['description']?.trim();
+      if (!description) throw new Error('description is required');
+
+      const amountRaw = row['amount']?.trim();
+      if (!amountRaw) throw new Error('amount is required');
+
+      const amount = parseFloat(amountRaw.replace(/[^0-9.]/g, ''));
+      if (isNaN(amount)) throw new Error(`Invalid amount: ${amountRaw}`);
+
+      const type = row['type']?.trim() || 'Other';
+      const currency = normalizeCurrency(row['currency']);
+      const date = row['date'] ? new Date(row['date']) : new Date();
+      const order_number = row['order_number']?.trim() || undefined;
+      const link = row['link']?.trim() || undefined;
+
+      await createExpense(userId, {
+        description,
+        type,
+        amount: Math.round(amount * 100),
+        currency,
+        date,
+        order_number,
+        link,
       });
 
       importedCount++;
