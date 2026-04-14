@@ -576,34 +576,56 @@ function normalizePlatform(value?: string): ListingPlatform {
   return map[lower] ?? 'other';
 }
 
-// Parse a grade string that may contain the company prefix.
-// Handles: "PSA 10", "PSA10", "BGS 9.5", "CGC 10", "SGC 98", "HGA 10", "ACE AP10", "ARS 10", plain "10"
+// Parse a grade string that may contain an explicit company prefix OR PSA/CGC label formats.
+// PSA format: "GEM MINT 10", "MINT 9", "NEAR MINT-MINT 8", "EXCELLENT-MINT 6"  (label first, number last)
+// CGC format: "10 Gem Mint", "9.5", "8.5"  (number first, optional label after)
+// Explicit prefix: "PSA 10", "BGS 9.5", "CGC 10", "ACE AP10"
 function parseGradeString(raw: string): { company: GradingCompany | null; grade: number } {
   const s = raw.trim().toUpperCase();
+
+  // Explicit company prefixes first
   const PREFIXES: [RegExp, GradingCompany][] = [
-    [/^PSA\s*/, 'PSA'],
-    [/^BGS\s*|^BECKETT\s*/, 'BGS'],
-    [/^CGC\s*/, 'CGC'],
-    [/^SGC\s*/, 'SGC'],
-    [/^HGA\s*/, 'HGA'],
-    [/^ACE\s*(AP\s*)?/, 'ACE'],   // "ACE 10", "ACE AP10"
-    [/^ARS\s*/, 'ARS'],
+    [/^PSA[\s-]*/,          'PSA'],
+    [/^BGS[\s-]*|^BECKETT[\s-]*/, 'BGS'],
+    [/^CGC[\s-]*/,          'CGC'],
+    [/^SGC[\s-]*/,          'SGC'],
+    [/^HGA[\s-]*/,          'HGA'],
+    [/^ACE[\s-]*(AP[\s-]*)*/,  'ACE'],
+    [/^ARS[\s-]*/,          'ARS'],
   ];
   for (const [re, co] of PREFIXES) {
-    const stripped = s.replace(re, '');
-    const num = parseFloat(stripped.replace(/[^\d.]/g, ''));
-    if (re.test(s)) return { company: co, grade: num };
+    if (re.test(s)) {
+      const num = extractGradeNumber(s);
+      return { company: co, grade: num };
+    }
   }
-  // No prefix — just a number
-  return { company: null, grade: parseFloat(s.replace(/[^\d.]/g, '')) };
+
+  // PSA label patterns (label comes first, number at end)
+  // e.g. "GEM MINT 10", "MINT 9", "NEAR MINT 7", "NEAR MINT-MINT 8", "EXCELLENT-MINT 6"
+  if (/^(GEM\s*MINT|NEAR\s*MINT|EXCELLENT|VERY\s*GOOD|POOR|FAIR|GOOD|MINT)\b/.test(s)) {
+    const num = extractGradeNumber(s);
+    return { company: 'PSA', grade: num };
+  }
+
+  // CGC / plain numeric (number at start, optional label after): "10 Gem Mint", "9.5", "8.5"
+  const num = extractGradeNumber(s);
+  return { company: null, grade: num };
 }
 
-// Infer company from cert number length (last resort)
+// Extract the numeric grade from anywhere in the string
+function extractGradeNumber(s: string): number {
+  // Try to grab a decimal number (e.g. "9.5", "8.5") first, then integer
+  const m = s.match(/(\d+\.?\d*)/);
+  return m ? parseFloat(m[1]) : NaN;
+}
+
+// Infer company from cert number digit length
 function inferCompanyFromCert(cert?: string): GradingCompany | null {
   if (!cert) return null;
   const digits = cert.replace(/\D/g, '');
-  if (digits.length === 8) return 'PSA';
-  if (digits.length === 9) return 'BGS';
+  if (digits.length === 8) return 'PSA';   // PSA: 8-digit certs
+  if (digits.length === 10) return 'CGC';  // CGC: 10-digit certs
+  if (digits.length === 9) return 'BGS';   // BGS: 9-digit certs
   return null;
 }
 
