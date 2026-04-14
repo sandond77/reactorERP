@@ -27,13 +27,17 @@ interface Message {
   timestamp?: string;
 }
 
-const SUGGESTIONS = [
-  'What is my inventory summary?',
-  'Add a raw card purchase',
-  'Record a sale',
-  'Submit cards to grading',
-  'Log an expense',
-  'Show cards ready for sale',
+const SUGGESTIONS: { label: string; prompt: string }[] = [
+  { label: '📦  Add a raw card purchase',      prompt: 'I want to log a new raw card purchase' },
+  { label: '🏅  Add a graded card / slab',      prompt: 'I want to add a pre-graded card to inventory' },
+  { label: '💰  Record a single sale',          prompt: 'I want to record a sale' },
+  { label: '🎪  Record a card show bulk sale',  prompt: 'I want to record multiple card show sales at once' },
+  { label: '📬  Submit cards to grading',       prompt: 'I want to submit cards to grading' },
+  { label: '📬  Process a grading return',      prompt: 'I want to process cards returned from grading' },
+  { label: '💸  Log an expense',                prompt: 'I want to log an expense' },
+  { label: '📋  Show inventory summary',        prompt: 'Show me a summary of my current inventory' },
+  { label: '🎪  Show card show inventory',      prompt: 'Show me my card show inventory' },
+  { label: '🔍  What\'s ready to sell?',        prompt: 'What cards are ready to sell?' },
 ];
 
 const MAX_ATTACHMENTS = 5;
@@ -214,12 +218,12 @@ export function AgentPanel() {
                   <div className="flex flex-col gap-1.5">
                     {SUGGESTIONS.map((s) => (
                       <button
-                        key={s}
-                        onClick={() => sendText(s)}
+                        key={s.label}
+                        onClick={() => sendText(s.prompt)}
                         disabled={loading}
                         className="w-full text-left px-4 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 hover:border-zinc-600 text-sm text-zinc-300 transition-colors"
                       >
-                        {s}
+                        {s.label}
                       </button>
                     ))}
                   </div>

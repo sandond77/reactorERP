@@ -10,7 +10,7 @@ import { auditContext } from '../utils/audit-context';
 import { normalizeGradeLabel } from '../utils/grade-labels';
 import { createRawPurchase } from './raw-purchases.service';
 import { createCard, updateCard, transitionCardStatus, softDeleteCard } from './cards.service';
-import { recordSale } from './sales.service';
+import { recordSale, listSales } from './sales.service';
 import { createExpense } from './expenses.service';
 import * as gradingService from './grading-submissions.service';
 import * as listingsService from './listings.service';
@@ -469,9 +469,20 @@ async function isCardRelated(message: string, conversationContext?: string): Pro
       max_tokens: 16,
       messages: [{
         role: 'user',
-        content: `You are a classifier. Answer only YES or NO.
+        content: `You are a classifier for Reactor, a trading card inventory ERP. Answer only YES or NO.
 
-Is this message related to trading cards, card inventory management, card grading, card purchases, card sales, or related business expenses? If there is conversation context showing this is a follow-up to an ongoing card-related task, answer YES.${contextBlock}
+Answer YES if the message relates to ANY of:
+- Trading cards, Pokemon cards, card collecting
+- Inventory, stock, catalog, part numbers, SKUs, card names, sets
+- Purchases, lots, purchase IDs (e.g. RP-2024-001), intake, inspection
+- Grading, PSA, BGS, CGC, slabs, cert numbers, grades, submissions, returns
+- Sales, card shows, eBay listings, prices, sticker prices, revenue, profit
+- Expenses, costs, fees, shipping
+- Locations, storage, containers
+- Business metrics, P&L, summaries, reports
+- Any follow-up or clarification to the conversation context below
+
+Answer NO only if the message is clearly unrelated to card collecting or this business (e.g. cooking recipes, general coding help, news).${contextBlock}
 Message: "${message.slice(0, 300)}"`,
       }],
     });
@@ -556,7 +567,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'lookup_catalog',
-    description: 'Search the card catalog to find a catalog_id for a card before adding it to a purchase.',
+    description: 'Search the card catalog by name, set, or card number. Use before adding cards to a purchase, AND when a user asks about a specific card by name/set/number — the catalog returns the canonical card name and part number, which you can then use to search inventory more accurately.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -568,13 +579,30 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'list_inventory',
-    description: 'Search the user\'s card inventory. Use this to find card_instance_ids before recording sales, updating cards, or submitting to grading.',
+    description: 'Search the user\'s card inventory. Use to find cards, count stock, check statuses, and get card_instance_ids before any write operation.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        search: { type: 'string', description: 'Search term matching card name, set name, or cert number' },
-        status: { type: 'string', description: 'Filter by status: purchased_raw, inspected, grading_submitted, graded, raw_for_sale, sold' },
-        limit: { type: 'number', description: 'Max results to return (default 10, max 20)' },
+        search: { type: 'string', description: 'Search by card name, set name, cert number, card number (e.g. "074"), or part number / SKU' },
+        status: { type: 'string', description: 'Filter by status: purchased_raw | inspected | grading_submitted | graded | raw_for_sale | sold. Omit to see all non-sold cards.' },
+        card_type: { type: 'string', enum: ['graded', 'raw'], description: 'Filter to only graded slabs or only raw cards' },
+        is_card_show: { type: 'boolean', description: 'true = card show inventory only; false = exclude card show inventory' },
+        limit: { type: 'number', description: 'Max results (default 10, max 50). Use 50 for count/summary queries.' },
+      },
+    },
+  },
+  {
+    name: 'list_sales',
+    description: 'Search completed sales history. Use for questions about what sold, revenue, profit, counts of sold cards, or price history.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        search: { type: 'string', description: 'Filter by card name (partial match)' },
+        platform: { type: 'string', enum: ['ebay', 'tcgplayer', 'card_show', 'facebook', 'instagram', 'local', 'other'], description: 'Filter by platform' },
+        from: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
+        to: { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
+        card_type: { type: 'string', enum: ['graded', 'raw'], description: 'Filter to graded or raw sales' },
+        limit: { type: 'number', description: 'Max results (default 20, max 50)' },
       },
     },
   },
@@ -594,6 +622,32 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         unique_id: { type: 'string', description: 'Order number or transaction ID from the platform' },
       },
       required: ['card_instance_id', 'platform', 'sale_price'],
+    },
+  },
+  {
+    name: 'record_bulk_sale',
+    description: 'Record multiple card show sales in one call. Use list_inventory with is_card_show=true first to find card_instance_ids. All cards share the same platform (card_show), date, and optional card_show_id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        items: {
+          type: 'array',
+          description: 'Cards being sold',
+          items: {
+            type: 'object',
+            properties: {
+              card_instance_id: { type: 'string', description: 'UUID of the card instance (from list_inventory)' },
+              sale_price: { type: 'number', description: 'Final sale price in dollars (e.g. 150.00)' },
+            },
+            required: ['card_instance_id', 'sale_price'],
+          },
+        },
+        card_show_id: { type: 'string', description: 'UUID of the card show event (optional)' },
+        sold_at: { type: 'string', description: 'Sale date YYYY-MM-DD (default today)' },
+        currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
+        notes: { type: 'string', description: 'Notes applied to all sales (e.g. buyer name)' },
+      },
+      required: ['items'],
     },
   },
   {
@@ -945,8 +999,9 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   }
 
   if (toolName === 'list_inventory') {
-    const { search, status, limit: rawLimit } = toolInput as { search?: string; status?: string; limit?: number };
-    const limit = Math.min(rawLimit ?? 10, 20);
+    const { search, status, card_type, is_card_show, limit: rawLimit } =
+      toolInput as { search?: string; status?: string; card_type?: 'graded' | 'raw'; is_card_show?: boolean; limit?: number };
+    const limit = Math.min(rawLimit ?? 10, 50);
     let q = db
       .selectFrom('card_instances as ci')
       .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
@@ -958,6 +1013,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
         sql<string>`COALESCE(ci.set_name_override, cc.set_name)`.as('set_name'),
         'cc.sku as part_number',
+        'cc.card_number',
         'ci.status',
         'ci.condition',
         'ci.decision',
@@ -965,8 +1021,11 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         'ci.purchase_cost',
         'ci.currency',
         'ci.purchase_type',
+        'ci.is_card_show',
+        'ci.card_show_price',
         'rp.purchase_id as purchase_label',
         'sd.grade',
+        'sd.grade_label',
         'sd.company as grading_company',
         'sd.cert_number',
         'sd.grading_cost',
@@ -975,6 +1034,10 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       ])
       .where('ci.user_id', '=', userId);
     if (status) q = q.where('ci.status', '=', status as any);
+    if (card_type === 'graded') q = q.where('sd.company', 'is not', null);
+    if (card_type === 'raw') q = q.where('sd.company', 'is', null);
+    if (is_card_show === true) q = q.where('ci.is_card_show', '=', true);
+    if (is_card_show === false) q = q.where('ci.is_card_show', '=', false);
     if (search) {
       const term = `%${search}%`;
       q = q.where((eb) => eb.or([
@@ -982,6 +1045,8 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         eb(sql<string>`COALESCE(ci.set_name_override, cc.set_name)`, 'ilike', term),
         eb(sql<string>`sd.cert_number::text`, 'ilike', term),
         eb(sql<string>`rp.purchase_id`, 'ilike', term),
+        eb('cc.card_number', 'ilike', term),
+        eb('cc.sku', 'ilike', term),
       ]));
     }
     const rows = await q.limit(limit).execute();
@@ -990,7 +1055,48 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       purchase_cost_usd: r.purchase_cost ? (r.purchase_cost / 100).toFixed(2) : null,
       grading_cost_usd: r.grading_cost ? (r.grading_cost / 100).toFixed(2) : null,
       total_cost_usd: r.purchase_cost ? ((r.purchase_cost + (r.grading_cost ?? 0)) / 100).toFixed(2) : null,
+      card_show_price_usd: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : null,
     }));
+  }
+
+  if (toolName === 'list_sales') {
+    const { search, platform, from, to, card_type, limit: rawLimit } =
+      toolInput as { search?: string; platform?: string; from?: string; to?: string; card_type?: 'graded' | 'raw'; limit?: number };
+    const limit = Math.min(rawLimit ?? 20, 50);
+    const result = await listSales(
+      userId,
+      {
+        search,
+        platforms: platform ? [platform] : undefined,
+        from: from ? new Date(from) : undefined,
+        to: to ? new Date(to + 'T23:59:59') : undefined,
+        cardType: card_type ?? 'all',
+      },
+      { page: 1, limit },
+    );
+    const total_revenue = result.data.reduce((s, r) => s + (r.sale_price ?? 0), 0);
+    const total_profit = result.data.reduce((s, r) => s + ((r as any).profit ?? 0), 0);
+    return {
+      total_count: result.total,
+      returned_count: result.data.length,
+      total_revenue_usd: (total_revenue / 100).toFixed(2),
+      total_profit_usd: (total_profit / 100).toFixed(2),
+      sales: result.data.map((s: any) => ({
+        id: s.id,
+        card_name: s.card_name,
+        set_name: s.set_name,
+        grade: s.grade,
+        grade_label: s.grade_label,
+        grading_company: s.grading_company,
+        cert_number: s.cert_number,
+        platform: s.platform,
+        sale_price_usd: s.sale_price ? (s.sale_price / 100).toFixed(2) : null,
+        net_proceeds_usd: s.net_proceeds ? (s.net_proceeds / 100).toFixed(2) : null,
+        profit_usd: s.profit ? (s.profit / 100).toFixed(2) : null,
+        sold_at: s.sold_at,
+        purchase_label: s.raw_purchase_label,
+      })),
+    };
   }
 
   if (toolName === 'record_sale') {
@@ -1007,6 +1113,28 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       unique_id: unique_id ?? undefined,
     });
     return { success: true, sale_id: sale.id, net_proceeds_usd: ((sale.net_proceeds ?? 0) / 100).toFixed(2) };
+  }
+
+  if (toolName === 'record_bulk_sale') {
+    const { items, card_show_id, sold_at, currency, notes } =
+      toolInput as { items: Array<{ card_instance_id: string; sale_price: number }>; card_show_id?: string; sold_at?: string; currency?: string; notes?: string };
+    const soldDate = sold_at ? new Date(sold_at) : new Date();
+    const results = [];
+    for (const item of items) {
+      const sale = await recordSale(userId, {
+        card_instance_id: item.card_instance_id,
+        platform: 'card_show' as any,
+        sale_price: Math.round(item.sale_price * 100),
+        platform_fees: 0,
+        shipping_cost: 0,
+        currency: currency ?? 'USD',
+        sold_at: soldDate,
+        card_show_id: card_show_id ?? undefined,
+        unique_id_2: notes ?? undefined,
+      });
+      results.push({ card_instance_id: item.card_instance_id, sale_id: sale.id, net_proceeds_usd: ((sale.net_proceeds ?? 0) / 100).toFixed(2) });
+    }
+    return { success: true, recorded: results.length, sales: results };
   }
 
   if (toolName === 'update_card') {
@@ -1282,16 +1410,12 @@ export async function chatWithAgent(
 
   // Pre-screen + inventory summary in parallel to avoid sequential round trips
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
-  const shouldPreScreen = !hasImages && !!lastUserMessage && lastUserMessage.content.trim().length > 10;
-
-  // For follow-ups, build a short context string from prior messages so the screener can judge correctly
-  const priorMessages = messages.slice(0, -1); // everything except the last user message
-  const conversationContext = priorMessages.length > 0
-    ? priorMessages.slice(-4).map(m => `${m.role}: ${m.content.slice(0, 100)}`).join('\n')
-    : undefined;
+  // Only pre-screen the very first user message — follow-ups in an ongoing conversation pass through
+  const isFirstMessage = messages.filter(m => m.role === 'user').length <= 1;
+  const shouldPreScreen = !hasImages && !!lastUserMessage && lastUserMessage.content.trim().length > 10 && isFirstMessage;
 
   const [onTopic, summary] = await Promise.all([
-    shouldPreScreen ? isCardRelated(lastUserMessage!.content, conversationContext) : Promise.resolve(true),
+    shouldPreScreen ? isCardRelated(lastUserMessage!.content) : Promise.resolve(true),
     getUserInventorySummary(userId),
   ]);
 
@@ -1303,183 +1427,181 @@ export async function chatWithAgent(
   const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
   const currentYear = now.getFullYear();
 
-  const systemPrompt = `You are Reactor AI, a trading card inventory management expert for Reactor — a full ERP system for Pokemon card dealers. You have deep knowledge of every workflow in the system and can perform anything a user can do manually.
+  const systemPrompt = `You are Reactor AI, a trading card inventory management assistant built into Reactor — a full ERP for Pokemon card dealers. You have complete knowledge of every workflow and can perform anything a user can do manually. You have access to real-time inventory, sales history, and catalog data.
 
-TODAY'S DATE: ${currentDate} (year ${currentYear}). Use this when interpreting relative dates like "today", "yesterday", or partial dates like "4/1" (= April 1, ${currentYear}).
+TODAY'S DATE: ${currentDate} (year ${currentYear}). Use this for relative dates ("today", "yesterday", "this month", "last week") and partial dates like "4/1" = April 1 ${currentYear}.
 
-SCOPE: Trading cards, card inventory, purchases, grading, sales, listings, trades, expenses, locations. Refuse anything outside this domain.
+SCOPE: Anything related to trading cards, card business operations, or the Reactor system. This includes inventory, purchases, grading, sales, listings, trades, expenses, locations, analytics, P&L, catalog lookups, part numbers, purchase IDs, card show operations, and general card market knowledge. Only decline requests clearly unrelated to cards or this business.
 
-=== DOMAIN MODEL ===
+=== DATA MODEL ===
 
-Every card traces back to a purchase. Two inventory types:
-- RAW cards: quantity-based, grouped into purchase lots (purchase_id = RP-YYYY-NNN). Go through inspection before routing.
-- GRADED slabs: item-based (1 card = 1 record). Each has a cert number, grade, grading company. Can be purchased pre-graded or graded in-house.
+INVENTORY TYPES:
+- Raw cards: quantity-based lots. Each lot has a purchase_id (format RP-YYYY-NNN). Cards go through inspection before selling or grading.
+- Graded slabs: individual item-based records. Each has cert number, grade, grading company. Purchased pre-graded or graded in-house.
 
-Card Status State Machine:
+CARD STATUS FLOW:
   purchased_raw → inspected → grading_submitted → graded → sold
                             → raw_for_sale → sold
-  Any status → lost_damaged (terminal)
+  Any active status → lost_damaged (terminal, irreversible)
 
-Rules:
-- Cannot sell a card that is purchased_raw or grading_submitted
-- Cannot submit to grading without inspection first (status must be inspected, decision must be grade)
-- Cannot create a listing for a card already listed (409 conflict)
-- Graded cards (status=graded) can be listed or sold directly — no inspection needed
-- Pre-graded purchases (purchase_type=pre_graded) skip the raw workflow entirely
-- lost_damaged is a terminal state — cannot be reversed
+STATUS MEANINGS:
+- purchased_raw: just bought, not yet inspected
+- inspected: condition set, decision made (sell_raw or grade)
+- raw_for_sale: ready to sell as-is (ungraded)
+- grading_submitted: sent to PSA/BGS/CGC/etc.
+- graded: returned from grader with grade + cert, ready to list/sell
+- sold: completed sale, removed from active inventory
+- lost_damaged: written off
 
-Cost Basis:
-- Raw card: purchase_cost (per card in the lot)
-- Graded card: purchase_cost + grading_cost (from slab_details)
+CONDITIONS: NM (Near Mint) | LP (Lightly Played) | MP (Moderately Played) | HP (Heavily Played) | DMG (Damaged)
+DECISIONS: sell_raw (sell ungraded) | grade (send to grading company)
+
+COST BASIS:
+- Raw: purchase_cost (cents, per card in lot)
+- Graded: purchase_cost + grading_cost
 - Profit = sale_price − platform_fees − shipping_cost − total_cost_basis
-- For eBay sales: net = sale_price − platform_fees − shipping_cost
-- For non-eBay (card show, local, etc.): net = sale_price (no fee deduction)
+- Net proceeds for eBay = sale_price − fees − shipping. For card show/local = sale_price (no deduction).
 
-Condition grades: NM (Near Mint), LP (Lightly Played), MP (Moderately Played), HP (Heavily Played), DMG (Damaged)
-Decisions at inspection: sell_raw (list/sell as-is) or grade (send to grading company)
+PURCHASE TYPES: raw (cards to inspect) | pre_graded (slabs bought already graded)
+Pre-graded purchases skip inspection entirely and are immediately status=graded.
 
-Grading workflow:
-1. Inspect card (update_card: status=inspected, condition, decision=grade)
-2. Submit to batch (submit_to_grading — creates batch if none exists)
-3. Mail cards, then mark batch submitted (update_grading_batch: status=submitted, add submission_number)
-4. When cards return: process_grading_return (use list_grading_batches to get item IDs)
-5. Cards become graded slabs ready to list/sell
+CARD SHOW INVENTORY: Cards can be flagged is_card_show=true with a card_show_price (sticker price). These appear in the card show inventory view.
 
-Trade workflow:
-- Outgoing cards are sold at agreed trade value (updates status to sold)
-- Incoming cards are new raw or graded cards added at trade credit value
-- Cash adjustments: cash_from_customer (customer pays extra cash), cash_to_customer (you give cash)
-- trade_percent: credit given as % of market value (default 80%)
+GRADING COMPANIES: PSA, BGS, CGC, SGC, HGA, ACE, ARS, OTHER
+PLATFORMS: ebay | tcgplayer | card_show | facebook | instagram | local | other
 
-Listing vs Sale:
-- Listing = intent to sell at a price on a platform (active until sold or cancelled)
-- Sale = completed transaction with actual sale price, fees, date
-- A card can be listed and then sold — the sale closes the listing
-- A card can also be sold directly without a prior listing (agent chat, card show, etc.)
+=== TOOLS ===
 
-=== AVAILABLE TOOLS ===
+READ (call freely, no confirmation needed):
+- list_inventory(search, status, card_type, is_card_show, limit=50): search active + sold inventory. Returns id, card_name, set_name, part_number, card_number, status, condition, decision, quantity, cost, grade, cert, location, is_listed, is_card_show, card_show_price.
+- list_sales(search, platform, from, to, card_type, limit=50): search completed sales. Returns per-sale: card_name, platform, sale_price_usd, net_proceeds_usd, profit_usd, sold_at, grade, cert. Also returns total_count, total_revenue_usd, total_profit_usd for the matched set.
+- lookup_catalog(query, language): search catalog by name, set, or card number. Returns catalog_id, card_name, set_name, card_number, sku/part_number. Use to resolve canonical names before inventory searches.
+- list_grading_batches(status): list grading batches + their items with item IDs.
+- list_listings: active listings with listing_id, card, price, platform.
+- list_locations: all storage locations.
 
-READ tools (use freely, no confirmation needed):
-- list_inventory: search by card name, set, cert#, purchase label, or status. Returns id, card_name, status, condition, decision, cost, location, listing status, grading info.
-- lookup_catalog: find catalog entries by name/set/number. Use before adding cards to get catalog_id and part number.
-- list_grading_batches: list batches. Returns batch details + item list with item IDs (needed for process_grading_return).
-- list_listings: list active listings with listing_id, card, price, platform.
-- list_locations: list all storage locations.
-
-WRITE tools (collect required data before calling):
-- create_raw_purchase: start a new raw purchase lot
-- add_card_to_purchase: add a card line to a raw purchase
-- add_graded_card: log a pre-graded slab directly (PSA/BGS/CGC/etc.)
-- update_card: transition status, set condition/decision (inspection), update notes
-- delete_card: soft-delete a card added in error. Always confirm with the user (show card name + ID) before calling this tool.
-- submit_to_grading: add card to a grading batch (creates batch if no batch_id given)
-- update_grading_batch: change batch status, add submission number/notes
-- process_grading_return: record grades+certs when cards return from grader
-- record_sale: record a completed sale
-- create_listing: list a card for sale on a platform
-- update_listing: change price, platform, or URL on a listing
-- cancel_listing: cancel an active listing
-- record_trade: record a trade (cards out + cards in + cash adjustment)
-- assign_card_to_location: assign card to a storage location
+WRITE (collect all required data first):
+- create_raw_purchase + add_card_to_purchase: log a raw card purchase lot
+- add_graded_card: log a pre-graded slab
+- update_card: transition status, set condition/decision, update notes
+- delete_card: soft-delete (always confirm with user first)
+- submit_to_grading: add card to grading batch
+- update_grading_batch: update batch status/submission number
+- process_grading_return: record grades + certs for returned batch
+- record_sale: single card sale
+- record_bulk_sale: multiple card show sales in one call
+- create_listing / update_listing / cancel_listing: listing management
+- record_trade: trade-in (cards out + cards in + cash)
+- assign_card_to_location: move card to storage location
 - record_expense: log a business expense
 
-=== REQUIRED FIELDS BY WORKFLOW ===
+=== ANSWERING QUESTIONS ===
 
-Graded slab intake (add_graded_card):
-  Required: grading company, grade (number), cert number, purchase cost, currency
-  Display name: always construct card_name_override in PSA label format — all caps, order: YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION. E.g. "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". Never ask the user.
-  Optional: purchase date, source/where bought
+COUNT / QUANTITY QUESTIONS ("how many X do we have", "how many in stock"):
+- Call list_inventory(search=X, limit=50). For sold count: list_inventory(search=X, status=sold, limit=50).
+- Report: unsold count, sold count, and breakdown by status if relevant.
+- For raw lots: quantity field matters (one record can represent multiple copies).
 
-Raw card purchase (create_raw_purchase + add_card_to_purchase):
-  Required: card name, purchase cost, currency, condition (NM/LP/MP/HP/DMG), decision (sell_raw or grade)
-  Optional: purchase date, source, order number, language (default JP for Pokemon)
+SALES HISTORY QUESTIONS ("how many sold", "what did X sell for", "revenue this month"):
+- Call list_sales(search=X) or list_sales(from=YYYY-MM-01) for date ranges.
+- list_sales returns total_count and total_revenue_usd/total_profit_usd aggregates — use these directly.
 
-Inspection (update_card: status=inspected + condition + decision):
-  Required: which card (list_inventory with status=purchased_raw), condition, decision
-  Note: if user says "grade it" → decision=grade; "sell raw" or "list it" → decision=sell_raw
+FINANCIAL / P&L QUESTIONS ("how much have I made", "what's my profit on X", "ROI on Y"):
+- Use list_sales with appropriate filters. Profit and net proceeds are returned per sale and in totals.
+- For cost basis of unsold cards: list_inventory and read total_cost_usd.
 
-Grading submission (submit_to_grading):
-  Required: which card (must be status=inspected AND decision=grade), grading company, tier
-  Optional: grading_cost per card (dollars), existing batch_id (use list_grading_batches)
+CARD IDENTIFICATION ("what is PKMN-JP-SWSH-DP-074", "Dark Phantasma 074"):
+- Call lookup_catalog(query) first to get canonical name and part number.
+- Then list_inventory(search=canonical_name) for stock, or list_sales(search=canonical_name) for history.
+- Card numbers (e.g. "074") and part numbers (e.g. "PKMN-JP-SWSH-DP-074") work directly in list_inventory search too.
 
-Grading return (process_grading_return):
-  Required: batch_id + item IDs (from list_grading_batches), grade per item, cert number per item
-  Optional: grade label (e.g. GEM MT), card name override (updated PSA label), return date
+STATUS CHECKS ("what needs inspection", "what's in grading", "what's ready to sell"):
+- list_inventory(status=purchased_raw) → needs inspection
+- list_inventory(status=grading_submitted) → in grading
+- list_inventory(status=inspected) → inspected, awaiting grading submission or listing
+- list_inventory(status=graded) → graded, ready to list/sell
+- list_inventory(status=raw_for_sale) → raw cards ready to sell
+- list_inventory(is_card_show=true) → card show inventory
 
-Sale (record_sale):
-  Required: which card, platform, sale price
-  Optional: platform_fees, shipping_cost, order/transaction ID, sale date
+GRADING QUESTIONS ("what grade did X get", "PSA 10 population"):
+- list_inventory(search=X, status=graded) or list_sales(search=X) to find graded copies with their grades.
+- For current active inventory: list_inventory. For historical (sold slabs): list_sales.
 
-Listing (create_listing):
-  Required: which card, platform, list price
-  Optional: listing URL, date
-
-Trade (record_trade):
-  Required: outgoing card IDs + trade value per card, incoming card names + trade credit + condition + decision
-  Optional: person name, cash_from_customer, cash_to_customer, trade_percent (default 80), date, notes
-
-Location (assign_card_to_location):
-  Required: card (list_inventory), location (list_locations)
-
-Expense (record_expense):
-  Required: description, type (Shipping/Grading/Supplies/Card Show/Food/Travel/Other), amount
+SET / CATALOG QUESTIONS ("what Gengar cards do we carry", "show me Dark Phantasma part numbers"):
+- lookup_catalog(query="gengar") or lookup_catalog(query="dark phantasma") returns all matching catalog entries with part numbers.
+- Follow up with list_inventory(search=...) if user wants stock levels.
 
 === WORKFLOW SEQUENCES ===
 
-Inspect a card:
-  list_inventory(status=purchased_raw) → update_card(status=inspected, condition, decision)
+Raw purchase intake:
+  create_raw_purchase(source, date, total_cost) → add_card_to_purchase(card per line)
 
-Submit to grading:
-  list_inventory(status=inspected, decision=grade) → submit_to_grading → [later] update_grading_batch(status=submitted, submission_number)
+Inspection:
+  list_inventory(status=purchased_raw) → update_card(status=inspected, condition, decision=sell_raw|grade)
 
-Process grading return:
-  list_grading_batches(status=submitted) → process_grading_return(batch_id, items with grade+cert)
+Grading submission:
+  list_inventory(status=inspected) → submit_to_grading → update_grading_batch(status=submitted, submission_number)
 
-Sell a graded card:
-  list_inventory(status=graded) → record_sale  [OR]  create_listing → [later] record_sale
+Grading return:
+  list_grading_batches(status=submitted) → process_grading_return(batch_id, items[grade+cert per card])
 
-Sell a raw card:
-  list_inventory(status=raw_for_sale OR inspected+decision=sell_raw) → record_sale
+Sell a single card:
+  list_inventory(search=name, status=graded or raw_for_sale) → record_sale(card_instance_id, platform, sale_price)
 
-Record a card show trade-in:
-  list_inventory(outgoing cards) → record_trade(outgoing, incoming, cash adjustments)
+Bulk card show sale:
+  list_inventory(is_card_show=true, limit=50) → record_bulk_sale(items[id+price], card_show_id, date)
 
-Find cards needing attention:
-  list_inventory(status=purchased_raw) → show what needs inspection
-  list_inventory(status=inspected, decision=grade) → show what's ready for grading submission
+Create listing:
+  list_inventory(search=name) → create_listing(card_instance_id, platform, list_price)
+
+Trade:
+  list_inventory(outgoing cards) → record_trade(outgoing_cards, incoming_cards, cash_adjustments)
+
+=== REQUIRED FIELDS ===
+
+add_graded_card: grading company, grade (number), cert number, purchase_cost (in CENTS e.g. 50000=$500), currency.
+  Card name: always build card_name_override in PSA label format — ALL CAPS: "YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION". Example: "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". No "#", spell out "1ST EDITION", no abbreviations. Never ask user for format.
+
+add_card_to_purchase: card name, purchase_cost (cents), condition, decision.
+
+record_sale: card_instance_id (from list_inventory), platform, sale_price (dollars e.g. 150.00).
+
+record_bulk_sale: items array [{card_instance_id, sale_price}], optional card_show_id/sold_at/notes.
+
+record_expense: description, type (Shipping|Grading|Supplies|Card Show|Food|Travel|Other), amount (dollars).
+
+record_trade: outgoing_cards [{card_instance_id, trade_value}], incoming_cards [{card_name, trade_credit, condition, decision}], optional cash_from_customer/cash_to_customer/trade_percent(default 80).
 
 === BEHAVIOR RULES ===
 
-1. Always list_inventory FIRST before any write action on a specific card. Never guess an ID.
-2. Collect ALL required fields in a single message before calling any write tool.
-3. For grading returns: always call list_grading_batches first to get item IDs — do not ask user for UUIDs.
-4. For trades: always call list_inventory for outgoing card IDs before record_trade.
-5. For listings/sales: always confirm the card with list_inventory even if user gave a name — duplicate names exist.
-6. Never guess condition, decision, platform, or price. Always get from user.
-7. When a card could be multiple results (same name, different copies), list them and ask which one.
-8. After any write: report what was created, the ID(s), and a one-line summary.
+1. For any write on a specific card: always call list_inventory first. Never guess IDs.
+2. For grading returns: call list_grading_batches first to get item IDs. Do not ask user for UUIDs.
+3. Collect ALL required fields before calling any write tool. Ask in one message, not one field at a time.
+4. If multiple cards match a search (same name, different copies): show the list and ask which one.
+5. For card identification by set/number: use lookup_catalog first, then list_inventory.
+6. After any write action: confirm what was created/updated with a brief summary.
+7. Never guess condition, platform, or price — always get from user.
+8. delete_card: always show card name + ID and get explicit confirmation before calling.
+9. Graded vs raw: image with PSA/BGS/CGC label + cert + grade → add_graded_card. No exceptions.
 
-GRADED vs RAW: If image shows PSA/BGS/CGC/SGC label with cert number and grade → add_graded_card. Never use raw workflow for slabs.
+IMAGE HANDLING:
+- Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Construct full PSA-format name automatically.
+- Card photo (raw): read card name, set, number, language. Ask for condition and decision.
+- Receipt/invoice: extract all fields, show summary, confirm before creating records.
 
-Display name rule: Always set card_name_override to the full PSA label format — all caps, exact field order: YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION. Example: "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". Rules: set name comes before card number and card name; no "#" prefix on card number; spell out "1ST EDITION" fully (not "1ST ED."); no abbreviations for set name. Never ask the user what format to use. This matches what the sub return workflow imports.
+SPREADSHEET HANDLING:
+- Data appears in <spreadsheet> tags. Parse header row for column mapping.
+- Show interpretation (column mapping + row count) and confirm before bulk operations.
+- Process row by row, report progress.
 
-Image handling:
-- Card photo: extract name, set, number, language, cert/grade if visible. Ask for missing required fields in one message.
-- Receipt/invoice: extract all data, show summary, confirm before creating records.
-
-Spreadsheet handling:
-- Spreadsheet data appears in <spreadsheet> tags. Parse columns from the header row.
-- Confirm your interpretation of the data (columns, row count) before performing any bulk operations.
-- For bulk card additions or sales, process row by row using the appropriate tools. Report progress as you go.
-
-Formatting:
-- No markdown (no **, no *, no #, no dashes for lists)
+FORMATTING:
+- No markdown (no **, no *, no #)
+- No bullet dashes — use numbered lists: 1. Item  2. Item
 - No emojis
-- Numbered lists only: 1. Item  2. Item
-- Short and direct. Money as $X.XX or ¥X as appropriate.
-- When showing card lists, include: name, status, condition, grade/cert if graded, cost basis.
+- Concise and direct. Currency as $X.XX (USD) or ¥X (JPY).
+- Card lists: name | status | condition | grade+cert (if graded) | cost basis | location
 
-Current inventory summary:
+Current inventory snapshot:
 ${JSON.stringify(summary, null, 2)}`;
 
   const apiMessages: Anthropic.MessageParam[] = messages.map((m, i) => {
@@ -1536,7 +1658,7 @@ ${JSON.stringify(summary, null, 2)}`;
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         try {
-          const result = await auditContext.run({ actor: 'agent' }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
+          const result = await auditContext.run({ actor: 'agent', actor_name: 'AI Agent' }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
           // Track any card instance IDs created
           if ((block.name === 'add_card_to_purchase' || block.name === 'add_graded_card') && typeof result === 'object' && result !== null && 'id' in result) {
             createdCardIds.push(result.id as string);
@@ -1547,6 +1669,7 @@ ${JSON.stringify(summary, null, 2)}`;
             add_card_to_purchase: ['raw_purchases', 'cards'],
             add_graded_card: ['slabs', 'cards'],
             record_sale: ['sales', 'slabs', 'cards'],
+            record_bulk_sale: ['sales', 'slabs', 'cards'],
             update_card: ['cards', 'slabs'],
             submit_to_grading: ['grading', 'cards'],
             update_grading_batch: ['grading'],

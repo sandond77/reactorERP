@@ -257,6 +257,7 @@ export interface AuditLogTable {
   entity_id: string;
   action: string;
   actor: string; // 'user' | 'agent'
+  actor_name: string | null;
   old_data: unknown | null;
   new_data: unknown | null;
   ip_address: string | null;

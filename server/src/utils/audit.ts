@@ -10,7 +10,9 @@ export async function logAudit(
   newData: unknown,
   actor?: 'user' | 'agent',
 ) {
-  const resolvedActor = actor ?? auditContext.getStore()?.actor ?? 'user';
+  const ctx = auditContext.getStore();
+  const resolvedActor = actor ?? ctx?.actor ?? 'user';
+  const resolvedActorName = ctx?.actor_name ?? null;
   await db
     .insertInto('audit_log')
     .values({
@@ -19,6 +21,7 @@ export async function logAudit(
       entity_id: entityId,
       action,
       actor: resolvedActor,
+      actor_name: resolvedActorName,
       old_data: oldData as any,
       new_data: newData as any,
     })

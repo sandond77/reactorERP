@@ -27,14 +27,42 @@ import { ActionLog } from './pages/ActionLog';
 import { Auditing } from './pages/Auditing';
 import { ShowSchedule } from './pages/ShowSchedule';
 import { ReorderThresholds } from './pages/ReorderThresholds';
+import { MobileAgent } from './pages/MobileAgent';
 
 const qc = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, retry: 1 } } });
+
+function isMobileDevice() {
+  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+}
 
 function ProtectedRoutes() {
   const { user, loading } = useAuth();
   if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-600 text-sm">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
+  if (isMobileDevice()) {
+    return (
+      <div className="min-h-svh bg-zinc-950 flex flex-col items-center justify-center px-6 text-center gap-5">
+        <div className="w-14 h-14 rounded-2xl bg-zinc-800 flex items-center justify-center">
+          <span className="text-2xl">📵</span>
+        </div>
+        <div>
+          <p className="text-base font-semibold text-zinc-100 mb-1">Desktop only</p>
+          <p className="text-sm text-zinc-500 leading-relaxed">This page isn't available on mobile. Use the Reactor AI agent to manage your inventory from your phone.</p>
+        </div>
+        <a href="/mobile" className="px-5 py-3 rounded-xl bg-indigo-600 text-white text-sm font-medium active:bg-indigo-500">
+          Go to Mobile Agent
+        </a>
+      </div>
+    );
+  }
   return <AppLayout />;
+}
+
+function ProtectedMobile() {
+  const { user, loading } = useAuth();
+  if (loading) return <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-zinc-600 text-sm">Loading…</div>;
+  if (!user) return <Navigate to="/login" replace />;
+  return <MobileAgent />;
 }
 
 export default function App() {
@@ -45,7 +73,7 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<ProtectedRoutes />}>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/" element={isMobileDevice() ? <Navigate to="/mobile" replace /> : <Dashboard />} />
               <Route path="/overall" element={<Overall />} />
               <Route path="/inventory" element={<Inventory />} />
               <Route path="/intake" element={<Intake />} />
@@ -69,6 +97,7 @@ export default function App() {
               <Route path="/audit/auditing" element={<Auditing />} />
               <Route path="/reorder-thresholds" element={<ReorderThresholds />} />
             </Route>
+            <Route path="/mobile" element={<ProtectedMobile />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

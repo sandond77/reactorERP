@@ -7,6 +7,7 @@ export interface AuditLogEntry {
   entity_id: string;
   action: string;
   actor: string;
+  actor_name: string | null;
   old_data: unknown;
   new_data: unknown;
   created_at: Date;
@@ -22,9 +23,14 @@ export async function listAuditLog(
 
   let q = db
     .selectFrom('audit_log')
-    .select(['id', 'entity_type', 'entity_id', 'action', 'actor', 'old_data', 'new_data', 'created_at'])
-    .where('user_id', '=', userId)
-    .orderBy('created_at', 'desc');
+    .leftJoin('users', 'users.id', 'audit_log.user_id')
+    .select([
+      'audit_log.id', 'entity_type', 'entity_id', 'action', 'actor',
+      'old_data', 'new_data', 'audit_log.created_at',
+      db.fn.coalesce('audit_log.actor_name', 'users.display_name', 'users.email').as('actor_name'),
+    ])
+    .where('audit_log.user_id', '=', userId)
+    .orderBy('audit_log.created_at', 'desc');
 
   if (opts.actor) q = q.where('actor', '=', opts.actor);
   if (opts.action) q = q.where('action', '=', opts.action);

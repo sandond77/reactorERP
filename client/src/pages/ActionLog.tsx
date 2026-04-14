@@ -11,6 +11,7 @@ interface AuditEntry {
   entity_id: string;
   action: string;
   actor: string;
+  actor_name: string | null;
   old_data: unknown;
   new_data: unknown;
   created_at: string;
@@ -239,7 +240,7 @@ export function ActionLog() {
               <tr className="border-b border-zinc-800 text-xs text-zinc-500 uppercase tracking-wide">
                 <th className="px-4 py-3 text-left w-6"></th>
                 <th className="px-4 py-3 text-left">Date/Time</th>
-                <th className="px-4 py-3 text-left">By</th>
+                <th className="px-4 py-3 text-left w-36">By</th>
                 <th className="px-4 py-3 text-left">Action</th>
                 <th className="px-4 py-3 text-left">Type</th>
                 <th className="px-4 py-3 text-left">Record</th>
@@ -268,9 +269,9 @@ export function ActionLog() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full ${entry.actor === 'agent' ? 'text-indigo-400 bg-indigo-400/10' : 'text-zinc-300 bg-zinc-700/50'}`}>
+                        <span className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${entry.actor === 'agent' ? 'text-indigo-400 bg-indigo-400/10' : 'text-zinc-300 bg-zinc-700/50'}`}>
                           {entry.actor === 'agent' ? <Bot size={11} /> : <User size={11} />}
-                          {entry.actor === 'agent' ? 'Agent' : 'User'}
+                          {entry.actor_name ?? (entry.actor === 'agent' ? 'AI Agent' : 'User')}
                         </span>
                       </td>
                       <td className="px-4 py-3">
