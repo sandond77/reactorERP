@@ -84,3 +84,10 @@ export async function listImports(req: Request, res: Response, next: NextFunctio
     res.json({ data: result });
   } catch (err) { next(err); }
 }
+
+export async function deletePendingImport(req: Request, res: Response, next: NextFunction) {
+  try {
+    await importService.deletePendingImport(req.dataUserId, req.params['id'] as string);
+    res.json({ data: { ok: true } });
+  } catch (err) { next(err); }
+}

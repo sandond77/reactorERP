@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Upload, Download, FileText, Loader2, CheckCircle, XCircle, Sparkles, AlertTriangle } from 'lucide-react';
+import { Upload, Download, FileText, Loader2, CheckCircle, XCircle, Sparkles, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
@@ -176,7 +176,11 @@ function ImportFlow() {
     uploadMut.mutate(f);
   }
 
-  function reset() {
+  function reset(deletePending = true) {
+    if (deletePending && preview?.id) {
+      api.delete(`/import/${preview.id}`).catch(() => {});
+      qc.invalidateQueries({ queryKey: ['imports'] });
+    }
     setFile(null);
     setPreview(null);
     setMapping({});
@@ -374,9 +378,16 @@ function ImportFlow() {
 // ─── Import History ───────────────────────────────────────────────────────────
 
 function ImportHistory() {
+  const qc = useQueryClient();
   const { data, isLoading } = useQuery<ImportRecord[]>({
     queryKey: ['imports'],
     queryFn: () => api.get('/import').then((r) => r.data.data ?? r.data),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/import/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['imports'] }),
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Delete failed'),
   });
 
   if (isLoading) return <div className="flex justify-center py-8"><Loader2 size={18} className="text-zinc-600 animate-spin" /></div>;
@@ -394,11 +405,12 @@ function ImportHistory() {
               <th className="py-2 px-4 text-left text-xs text-zinc-500 font-medium">Status</th>
               <th className="py-2 px-4 text-right text-xs text-zinc-500 font-medium">Rows</th>
               <th className="py-2 px-4 text-right text-xs text-zinc-500 font-medium">Date</th>
+              <th className="py-2 px-4 w-8" />
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800/60">
             {data.map((rec) => (
-              <tr key={rec.id} className="hover:bg-zinc-800/40">
+              <tr key={rec.id} className="hover:bg-zinc-800/40 group">
                 <td className="py-2 px-4 text-zinc-300 truncate max-w-[200px]">{rec.filename}</td>
                 <td className="py-2 px-4 text-zinc-500 text-xs">{rec.import_type}</td>
                 <td className="py-2 px-4">{statusBadge(rec.status)}</td>
@@ -407,6 +419,18 @@ function ImportHistory() {
                   {(rec.error_count ?? 0) > 0 && <span className="text-amber-400 ml-1">({rec.error_count} err)</span>}
                 </td>
                 <td className="py-2 px-4 text-right text-zinc-500 text-xs">{fmtDate(rec.created_at)}</td>
+                <td className="py-2 px-4">
+                  {rec.status === 'pending' && (
+                    <button
+                      onClick={() => deleteMut.mutate(rec.id)}
+                      disabled={deleteMut.isPending}
+                      className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 transition-all"
+                      title="Delete pending import"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

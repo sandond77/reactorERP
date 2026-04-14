@@ -33,10 +33,10 @@ export async function uploadCsv(
       import_type: resolvedType,
       row_count: rowCount,
       status: 'pending',
-      raw_headers: headers as any,
-      preview_rows: rows.slice(0, 5) as any,
-      mapping: detection.mapping as any,
-      error_log: errors.length > 0 ? (errors as any) : null,
+      raw_headers: JSON.stringify(headers) as any,
+      preview_rows: JSON.stringify(rows.slice(0, 5)) as any,
+      mapping: JSON.stringify(detection.mapping) as any,
+      error_log: errors.length > 0 ? JSON.stringify(errors) as any : null,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -66,7 +66,7 @@ export async function saveColumnMapping(
     .where('id', '=', importId).where('user_id', '=', userId).executeTakeFirst();
   if (!record) throw new AppError(404, 'Import not found');
 
-  const update: Record<string, any> = { mapping: mapping as any };
+  const update: Record<string, any> = { mapping: JSON.stringify(mapping) as any };
   if (importType) update.import_type = importType;
 
   return db.updateTable('csv_imports').set(update)
@@ -81,6 +81,14 @@ export async function listImports(userId: string) {
     .orderBy('created_at', 'desc')
     .limit(50)
     .execute();
+}
+
+export async function deletePendingImport(userId: string, importId: string) {
+  const record = await db.selectFrom('csv_imports').select(['id', 'status'])
+    .where('id', '=', importId).where('user_id', '=', userId).executeTakeFirst();
+  if (!record) throw new AppError(404, 'Import not found');
+  if (record.status !== 'pending') throw new AppError(400, 'Can only delete pending imports');
+  await db.deleteFrom('csv_imports').where('id', '=', importId).execute();
 }
 
 export async function getImportStatus(userId: string, importId: string) {
