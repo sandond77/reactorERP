@@ -4,7 +4,7 @@ import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, 
 
 export async function inventorySummary(req: Request, res: Response, next: NextFunction) {
   try {
-    const rows = await getInventorySummary(req.user!.id);
+    const rows = await getInventorySummary(req.dataUserId);
     res.json({ data: rows });
   } catch (err) { next(err); }
 }
@@ -49,7 +49,7 @@ export async function createCard(req: Request, res: Response, next: NextFunction
 
 export async function emptyCatalog(req: Request, res: Response, next: NextFunction) {
   try {
-    const rows = await getEmptyCatalogEntries(req.user!.id);
+    const rows = await getEmptyCatalogEntries(req.dataUserId);
     res.json({ data: rows });
   } catch (err) { next(err); }
 }

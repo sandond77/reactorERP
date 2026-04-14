@@ -15,11 +15,13 @@ export interface AuditLogEntry {
 
 export async function listAuditLog(
   userId: string,
-  opts: { page?: number; limit?: number; actor?: string; action?: string; entity_type?: string } = {}
+  opts: { page?: number; limit?: number; actor?: string; action?: string; entity_type?: string; actor_name?: string } = {}
 ) {
   const page = opts.page ?? 1;
   const limit = Math.min(opts.limit ?? 50, 200);
   const offset = (page - 1) * limit;
+
+  const resolvedName = db.fn.coalesce('audit_log.actor_name', 'users.display_name', 'users.email');
 
   let q = db
     .selectFrom('audit_log')
@@ -27,7 +29,7 @@ export async function listAuditLog(
     .select([
       'audit_log.id', 'entity_type', 'entity_id', 'action', 'actor',
       'old_data', 'new_data', 'audit_log.created_at',
-      db.fn.coalesce('audit_log.actor_name', 'users.display_name', 'users.email').as('actor_name'),
+      resolvedName.as('actor_name'),
     ])
     .where('audit_log.user_id', '=', userId)
     .orderBy('audit_log.created_at', 'desc');
@@ -35,16 +37,19 @@ export async function listAuditLog(
   if (opts.actor) q = q.where('actor', '=', opts.actor);
   if (opts.action) q = q.where('action', '=', opts.action);
   if (opts.entity_type) q = q.where('entity_type', '=', opts.entity_type);
+  if (opts.actor_name) q = q.where(resolvedName, '=', opts.actor_name);
 
   const [rows, countResult] = await Promise.all([
     q.limit(limit).offset(offset).execute(),
     db
       .selectFrom('audit_log')
+      .leftJoin('users', 'users.id', 'audit_log.user_id')
       .select((eb) => eb.fn.countAll<number>().as('total'))
-      .where('user_id', '=', userId)
+      .where('audit_log.user_id', '=', userId)
       .$if(!!opts.actor, (q) => q.where('actor', '=', opts.actor!))
       .$if(!!opts.action, (q) => q.where('action', '=', opts.action!))
       .$if(!!opts.entity_type, (q) => q.where('entity_type', '=', opts.entity_type!))
+      .$if(!!opts.actor_name, (q) => q.where(resolvedName, '=', opts.actor_name!))
       .executeTakeFirst(),
   ]);
 
@@ -56,6 +61,22 @@ export async function listAuditLog(
     limit,
     total_pages: Math.ceil(total / limit),
   };
+}
+
+export async function getAuditActors(userId: string) {
+  const rows = await db
+    .selectFrom('audit_log')
+    .leftJoin('users', 'users.id', 'audit_log.user_id')
+    .select([
+      'actor',
+      db.fn.coalesce('audit_log.actor_name', 'users.display_name', 'users.email').as('name'),
+    ])
+    .where('audit_log.user_id', '=', userId)
+    .where(db.fn.coalesce('audit_log.actor_name', 'users.display_name', 'users.email'), 'is not', null)
+    .groupBy(['actor', db.fn.coalesce('audit_log.actor_name', 'users.display_name', 'users.email')])
+    .orderBy('name', 'asc')
+    .execute();
+  return rows;
 }
 
 export async function revertDeletion(userId: string, auditLogId: string) {

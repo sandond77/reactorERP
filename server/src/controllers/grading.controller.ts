@@ -33,7 +33,7 @@ export async function listSlabs(req: Request, res: Response, next: NextFunction)
   try {
     const q = slabsQuerySchema.parse(req.query);
     const result = await gradingService.listSlabs(
-      req.user!.id,
+      req.dataUserId,
       { page: q.page, limit: q.limit },
       q.search,
       q.status,
@@ -58,7 +58,7 @@ export async function listSlabs(req: Request, res: Response, next: NextFunction)
 
 export async function getSlabFilters(req: Request, res: Response, next: NextFunction) {
   try {
-    const options = await gradingService.getSlabFilterOptions(req.user!.id);
+    const options = await gradingService.getSlabFilterOptions(req.dataUserId);
     res.json(options);
   } catch (err) { next(err); }
 }

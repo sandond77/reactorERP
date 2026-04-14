@@ -20,7 +20,7 @@ export async function getPnl(req: Request, res: Response, next: NextFunction) {
     const fromDate = req.query.from ? new Date(from) : null;
     const toDate = req.query.to ? new Date(to) : null;
     const result = await reportsService.getPnlReport(
-      req.user!.id,
+      req.dataUserId,
       fromDate,
       toDate,
       grouping,
@@ -35,21 +35,21 @@ export async function getYearlySummary(req: Request, res: Response, next: NextFu
   try {
     const channel = z.enum(['all', 'ebay', 'card_show', 'other']).optional().parse(req.query.channel) ?? 'all';
     const cardType = z.enum(['all', 'graded', 'ungraded']).optional().parse(req.query.cardType) ?? 'all';
-    const result = await reportsService.getYearlySummary(req.user!.id, channel, cardType);
+    const result = await reportsService.getYearlySummary(req.dataUserId, channel, cardType);
     res.json(result);
   } catch (err) { next(err); }
 }
 
 export async function getInventoryValue(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await reportsService.getInventoryValue(req.user!.id);
+    const result = await reportsService.getInventoryValue(req.dataUserId);
     res.json(result);
   } catch (err) { next(err); }
 }
 
 export async function getGradingRoi(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await reportsService.getGradingRoi(req.user!.id);
+    const result = await reportsService.getGradingRoi(req.dataUserId);
     res.json({ data: result });
   } catch (err) { next(err); }
 }
@@ -71,7 +71,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
           sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
           sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
         ])
-        .where('user_id', '=', req.user!.id);
+        .where('user_id', '=', req.dataUserId);
       if (days !== null) q = q.where('sold_at', '>=', new Date(now - days * MS));
       return q.executeTakeFirst();
     };
@@ -92,7 +92,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true)::int`.as('card_show_total'),
         sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true AND status != 'sold' AND status != 'lost_damaged')::int`.as('card_show_unsold'),
       ])
-      .where('user_id', '=', req.user!.id)
+      .where('user_id', '=', req.dataUserId)
       .executeTakeFirst();
 
     const listedCount = await db
@@ -103,7 +103,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         sql<number>`COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id))::int`.as('graded'),
         sql<number>`COUNT(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id))::int`.as('raw'),
       ])
-      .where('l.user_id', '=', req.user!.id)
+      .where('l.user_id', '=', req.dataUserId)
       .where('l.listing_status', '=', 'active')
       .executeTakeFirst();
 
@@ -114,7 +114,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         sql<number>`COUNT(DISTINCT gb.id)::int`.as('sub_count'),
         sql<number>`SUM(gbi.quantity)::int`.as('card_count'),
       ])
-      .where('gb.user_id', '=', req.user!.id)
+      .where('gb.user_id', '=', req.dataUserId)
       .where('gb.status', 'not in', ['returned', 'cancelled'])
       .executeTakeFirst();
 
@@ -126,7 +126,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
           sql<number>`COUNT(*)::int`.as('count'),
           sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
         ])
-        .where('user_id', '=', req.user!.id);
+        .where('user_id', '=', req.dataUserId);
       if (days !== null) q = q.where('sold_at', '>=', new Date(now - days * MS));
       return (q as any).groupBy('platform').execute();
     };
@@ -142,7 +142,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
         sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
       ])
-      .where('user_id', '=', req.user!.id)
+      .where('user_id', '=', req.dataUserId)
       .where('sold_at', '>=', yearStart)
       .executeTakeFirst();
 
@@ -153,14 +153,14 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         sql<number>`COUNT(*)::int`.as('count'),
         sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
       ])
-      .where('user_id', '=', req.user!.id)
+      .where('user_id', '=', req.dataUserId)
       .where('sold_at', '>=', yearStart) as any)
       .groupBy('platform').execute();
 
     const expensesQuery = (days: number | null, from?: Date) => {
       let q = db.selectFrom('expenses')
         .select(sql<number>`COALESCE(SUM(amount), 0)::int`.as('total'))
-        .where('user_id', '=', req.user!.id);
+        .where('user_id', '=', req.dataUserId);
       if (from) q = q.where('date', '>=', from);
       else if (days !== null) q = q.where('date', '>=', new Date(now - days * MS));
       return q.executeTakeFirst();
@@ -174,7 +174,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         sql<number>`SUM(quantity) FILTER (WHERE status = 'inspected' AND decision = 'grade')::int`.as('pending_grading_sub'),
         sql<number>`SUM(quantity) FILTER (WHERE status = 'grading_submitted')::int`.as('grading_submitted'),
       ])
-      .where('user_id', '=', req.user!.id)
+      .where('user_id', '=', req.dataUserId)
       .executeTakeFirst();
 
     const performanceQuery = sql<{
@@ -186,13 +186,13 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         (SELECT ROUND(AVG(EXTRACT(EPOCH FROM (s.sold_at - ci.purchased_at)) / 86400))::int
          FROM sales s
          INNER JOIN card_instances ci ON ci.id = s.card_instance_id
-         WHERE s.user_id = ${req.user!.id} AND ci.purchased_at IS NOT NULL) AS avg_hold_days,
+         WHERE s.user_id = ${req.dataUserId} AND ci.purchased_at IS NOT NULL) AS avg_hold_days,
         (SELECT COALESCE(SUM(list_price), 0)::int
          FROM listings
-         WHERE user_id = ${req.user!.id} AND listing_status = 'active') AS listings_value,
+         WHERE user_id = ${req.dataUserId} AND listing_status = 'active') AS listings_value,
         (SELECT COUNT(*)::int
          FROM raw_purchases
-         WHERE user_id = ${req.user!.id} AND status = 'ordered') AS pending_orders
+         WHERE user_id = ${req.dataUserId} AND status = 'ordered') AS pending_orders
     `.execute(db);
 
     const [d30, d60, d90, dYear, lifetime, ch30, ch60, ch90, chYear, chLifetime, exp30, exp60, exp90, expYear, expLifetime, pipeline, perfResult] = await Promise.all([
@@ -258,7 +258,7 @@ export async function getPlatformBreakdown(req: Request, res: Response, next: Ne
   try {
     const { from, to } = dateRangeSchema.parse(req.query);
     const result = await reportsService.getPlatformBreakdown(
-      req.user!.id,
+      req.dataUserId,
       new Date(from),
       new Date(to)
     );
@@ -270,7 +270,7 @@ export async function getRawDashboard(req: Request, res: Response, next: NextFun
   try {
     const view = z.enum(['all', 'sold', 'unsold']).optional().parse(req.query.view) ?? 'unsold';
     const type = z.enum(['both', 'raw', 'bulk']).optional().parse(req.query.type) ?? 'both';
-    const result = await reportsService.getRawDashboard(req.user!.id, view, type);
+    const result = await reportsService.getRawDashboard(req.dataUserId, view, type);
     res.json(result);
   } catch (err) { next(err); }
 }
@@ -278,7 +278,7 @@ export async function getRawDashboard(req: Request, res: Response, next: NextFun
 export async function getGradedDashboard(req: Request, res: Response, next: NextFunction) {
   try {
     const view = z.enum(['all', 'sold', 'unsold']).optional().parse(req.query.view) ?? 'unsold';
-    const result = await reportsService.getGradedDashboard(req.user!.id, view);
+    const result = await reportsService.getGradedDashboard(req.dataUserId, view);
     res.json(result);
   } catch (err) { next(err); }
 }
@@ -286,7 +286,7 @@ export async function getGradedDashboard(req: Request, res: Response, next: Next
 export async function getCardShowBreakdown(req: Request, res: Response, next: NextFunction) {
   try {
     const showId = z.string().uuid().parse(req.params.showId);
-    const result = await reportsService.getCardShowBreakdown(req.user!.id, showId);
+    const result = await reportsService.getCardShowBreakdown(req.dataUserId, showId);
     res.json(result);
   } catch (err) { next(err); }
 }
@@ -294,7 +294,7 @@ export async function getCardShowBreakdown(req: Request, res: Response, next: Ne
 export async function getCardTrendSearch(req: Request, res: Response, next: NextFunction) {
   try {
     const q = z.string().min(1).parse(req.query.q);
-    const results = await reportsService.cardTrendSearch(req.user!.id, q);
+    const results = await reportsService.cardTrendSearch(req.dataUserId, q);
     res.json({ data: results });
   } catch (err) { next(err); }
 }
@@ -302,14 +302,14 @@ export async function getCardTrendSearch(req: Request, res: Response, next: Next
 export async function getCardTrend(req: Request, res: Response, next: NextFunction) {
   try {
     const catalogId = z.string().uuid().parse(req.query.catalog_id);
-    const result = await reportsService.getCardTrend(req.user!.id, catalogId);
+    const result = await reportsService.getCardTrend(req.dataUserId, catalogId);
     res.json(result);
   } catch (err) { next(err); }
 }
 
 export async function getPendingGradingSub(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await reportsService.getPendingGradingSub(req.user!.id);
+    const result = await reportsService.getPendingGradingSub(req.dataUserId);
     res.json({ data: result });
   } catch (err) { next(err); }
 }
@@ -317,7 +317,7 @@ export async function getPendingGradingSub(req: Request, res: Response, next: Ne
 export async function getStaleEbayListings(req: Request, res: Response, next: NextFunction) {
   try {
     const days = z.coerce.number().int().min(1).default(30).parse(req.query.days);
-    const result = await reportsService.getStaleEbayListings(req.user!.id, days);
+    const result = await reportsService.getStaleEbayListings(req.dataUserId, days);
     res.json({ data: result });
   } catch (err) { next(err); }
 }
@@ -325,7 +325,7 @@ export async function getStaleEbayListings(req: Request, res: Response, next: Ne
 export async function getStaleCardShowInventory(req: Request, res: Response, next: NextFunction) {
   try {
     const days = z.coerce.number().int().min(1).default(30).parse(req.query.days);
-    const result = await reportsService.getStaleCardShowInventory(req.user!.id, days);
+    const result = await reportsService.getStaleCardShowInventory(req.dataUserId, days);
     res.json({ data: result });
   } catch (err) { next(err); }
 }

@@ -20,13 +20,14 @@ import { cardShowsRouter } from './card-shows.routes';
 import { reorderRouter } from './reorder.routes';
 import { gradeMoreRouter } from './grade-more.routes';
 import { alertOverridesRouter } from './alert-overrides.routes';
+import { orgRouter } from './org.routes';
 
 export const apiRouter = Router();
 
 // Rate limiting
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200,
+  max: 2000,
   standardHeaders: true,
   legacyHeaders: false,
   validate: { trustProxy: false },
@@ -63,3 +64,4 @@ apiRouter.use('/card-shows', cardShowsRouter);
 apiRouter.use('/reorder', reorderRouter);
 apiRouter.use('/grade-more', gradeMoreRouter);
 apiRouter.use('/alerts', alertOverridesRouter);
+apiRouter.use('/org', orgRouter);

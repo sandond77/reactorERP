@@ -132,17 +132,29 @@ function RevertButton({ entry, onReverted }: { entry: AuditEntry; onReverted: ()
   );
 }
 
+interface AuditActor {
+  actor: string;
+  name: string;
+}
+
 export function ActionLog() {
   const qc = useQueryClient();
   const [page, setPage] = useState(1);
-  const [actor, setActor] = useState('');
+  const [actorName, setActorName] = useState('');
   const [action, setAction] = useState('');
   const [entityType, setEntityType] = useState('');
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
+  const { data: actorsData } = useQuery<{ data: AuditActor[] }>({
+    queryKey: ['audit-actors'],
+    queryFn: () => api.get('/audit/actors'),
+    staleTime: 60_000,
+  });
+  const actors = actorsData?.data?.data ?? [];
+
   const { data, isLoading } = useQuery<{ data: AuditResponse }>({
-    queryKey: ['audit-log', page, actor, action, entityType],
-    queryFn: () => api.get('/audit/log', { params: { page, limit: 50, actor: actor || undefined, action: action || undefined, entity_type: entityType || undefined } }),
+    queryKey: ['audit-log', page, actorName, action, entityType],
+    queryFn: () => api.get('/audit/log', { params: { page, limit: 50, actor_name: actorName || undefined, action: action || undefined, entity_type: entityType || undefined } }),
   });
 
   const result = data?.data?.data;
@@ -183,13 +195,16 @@ export function ActionLog() {
       {/* Filters */}
       <div className="flex items-center gap-3 flex-wrap">
         <select
-          value={actor}
-          onChange={(e) => { setActor(e.target.value); setPage(1); }}
-          className="h-8 w-32 px-2 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 focus:outline-none focus:border-indigo-500"
+          value={actorName}
+          onChange={(e) => { setActorName(e.target.value); setPage(1); }}
+          className="h-8 w-40 px-2 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-300 focus:outline-none focus:border-indigo-500"
         >
           <option value="">All actors</option>
-          <option value="user">User</option>
-          <option value="agent">AI Agent</option>
+          {actors.map((a) => (
+            <option key={`${a.actor}:${a.name}`} value={a.name}>
+              {a.name}
+            </option>
+          ))}
         </select>
         <select
           value={action}
@@ -217,9 +232,9 @@ export function ActionLog() {
           <option value="listings">Listing</option>
           <option value="trades">Trade</option>
         </select>
-        {(actor || action || entityType) && (
+        {(actorName || action || entityType) && (
           <button
-            onClick={() => { setActor(''); setAction(''); setEntityType(''); setPage(1); }}
+            onClick={() => { setActorName(''); setAction(''); setEntityType(''); setPage(1); }}
             className="h-8 px-3 text-xs text-zinc-400 hover:text-zinc-100 bg-zinc-800 border border-zinc-700 rounded-lg transition-colors"
           >
             Clear Filters

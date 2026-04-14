@@ -390,7 +390,38 @@ export interface GradeMoreThresholdsTable {
   updated_at: Generated<Date>;
 }
 
+export interface OrganizationsTable {
+  id: Generated<string>;
+  name: string;
+  max_members: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+export interface OrgMembersTable {
+  id: Generated<string>;
+  org_id: string;
+  user_id: string;
+  role: 'owner' | 'member';
+  joined_at: Generated<Date>;
+}
+
+export interface OrgInvitesTable {
+  id: Generated<string>;
+  org_id: string;
+  invited_by: string;
+  token: string;
+  email: string | null;
+  expires_at: Date;
+  used_at: Date | null;
+  used_by: string | null;
+  created_at: Generated<Date>;
+}
+
 export interface Database {
+  organizations: OrganizationsTable;
+  org_members: OrgMembersTable;
+  org_invites: OrgInvitesTable;
   grade_more_thresholds: GradeMoreThresholdsTable;
   reorder_thresholds: ReorderThresholdsTable;
   expenses: ExpensesTable;

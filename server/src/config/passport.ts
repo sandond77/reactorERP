@@ -70,6 +70,18 @@ export function configurePassport() {
             .returningAll()
             .executeTakeFirstOrThrow();
 
+          // Auto-create a solo org for the new user
+          const org = await db
+            .insertInto('organizations')
+            .values({ name: displayName || email })
+            .returning('id')
+            .executeTakeFirstOrThrow();
+
+          await db
+            .insertInto('org_members')
+            .values({ org_id: org.id, user_id: created.id, role: 'owner' })
+            .execute();
+
           return done(null, created);
         } catch (err) {
           return done(err as Error);

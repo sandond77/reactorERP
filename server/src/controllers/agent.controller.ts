@@ -137,11 +137,13 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
       spreadsheetText = spreadsheetFiles.map(parseSpreadsheet).join('\n\n---\n\n');
     }
 
+    const actorName = req.user!.display_name ?? req.user!.email;
     const { reply, mutated } = await agentService.chatWithAgent(
-      req.user!.id,
+      req.dataUserId,
       messages,
       images.length > 0 ? images : undefined,
       spreadsheetText,
+      actorName,
     );
     res.json({ data: { reply, mutated } });
   } catch (err: any) {

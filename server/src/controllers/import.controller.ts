@@ -40,7 +40,7 @@ export async function uploadCsv(req: Request, res: Response, next: NextFunction)
 
     const importType = (req.body.import_type as string) ?? 'cards';
     const result = await importService.uploadCsv(
-      req.user!.id,
+      req.dataUserId,
       req.file.originalname,
       req.file.buffer,
       importType
@@ -56,7 +56,7 @@ const mappingSchema = z.object({
 export async function saveMapping(req: Request, res: Response, next: NextFunction) {
   try {
     const { mapping } = mappingSchema.parse(req.body);
-    const result = await importService.saveColumnMapping(req.user!.id, req.params['id'] as string, mapping);
+    const result = await importService.saveColumnMapping(req.dataUserId, req.params['id'] as string, mapping);
     res.json({ data: result });
   } catch (err) { next(err); }
 }
@@ -65,21 +65,21 @@ export async function executeImport(req: Request, res: Response, next: NextFunct
   try {
     // Re-upload needed for execution — client must send file again
     if (!req.file) throw new AppError(400, 'No CSV file provided for execution');
-    const result = await importService.executeImport(req.user!.id, req.params['id'] as string, req.file.buffer);
+    const result = await importService.executeImport(req.dataUserId, req.params['id'] as string, req.file.buffer);
     res.json({ data: result });
   } catch (err) { next(err); }
 }
 
 export async function getImportStatus(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await importService.getImportStatus(req.user!.id, req.params['id'] as string);
+    const result = await importService.getImportStatus(req.dataUserId, req.params['id'] as string);
     res.json({ data: result });
   } catch (err) { next(err); }
 }
 
 export async function listImports(req: Request, res: Response, next: NextFunction) {
   try {
-    const result = await importService.listImports(req.user!.id);
+    const result = await importService.listImports(req.dataUserId);
     res.json({ data: result });
   } catch (err) { next(err); }
 }

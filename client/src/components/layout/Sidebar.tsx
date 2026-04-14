@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
   ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties, Receipt,
-  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut, CalendarDays, Bell,
+  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut, CalendarDays, Bell, Users,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -140,6 +140,7 @@ export function Sidebar() {
           </NavFolder>
 
           <NavItem to="/import" icon={Upload} label="Import" />
+          <NavItem to="/team"   icon={Users}  label="Team" />
         </div>
 
         <button

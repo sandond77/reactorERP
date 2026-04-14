@@ -11,7 +11,7 @@ import { normalizeGradeLabel } from '../utils/grade-labels';
 import { createRawPurchase, saveReceiptUrl as saveRawPurchaseReceiptUrl } from './raw-purchases.service';
 import { createCard, updateCard, transitionCardStatus, softDeleteCard } from './cards.service';
 import { recordSale, listSales } from './sales.service';
-import { createExpense, saveReceiptUrl as saveExpenseReceiptUrl } from './expenses.service';
+import { createExpense, deleteExpense, saveReceiptUrl as saveExpenseReceiptUrl } from './expenses.service';
 import { saveReceiptFromBase64 } from '../utils/save-receipt';
 import * as gradingService from './grading-submissions.service';
 import * as listingsService from './listings.service';
@@ -678,6 +678,17 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'delete_expense',
+    description: 'Delete an expense added in error. Always confirm the expense ID and description with the user before deleting.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        expense_id: { type: 'string', description: 'The expense_id (e.g. 2026E10) shown in the expense list' },
+      },
+      required: ['expense_id'],
+    },
+  },
+  {
     name: 'submit_to_grading',
     description: 'Add a card to a grading batch. If no batch_id is provided, a new batch is created. Use list_inventory first to find the card_instance_id.',
     input_schema: {
@@ -1207,6 +1218,19 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     return { success: true, expense_id: expense.expense_id };
   }
 
+  if (toolName === 'delete_expense') {
+    const { expense_id } = toolInput as { expense_id: string };
+    const row = await db
+      .selectFrom('expenses')
+      .select(['id', 'description'])
+      .where('user_id', '=', userId)
+      .where('expense_id', '=', expense_id)
+      .executeTakeFirst();
+    if (!row) throw new Error(`Expense ${expense_id} not found`);
+    await deleteExpense(userId, row.id);
+    return { success: true, deleted: expense_id, description: row.description };
+  }
+
   if (toolName === 'list_grading_batches') {
     const { status } = toolInput as { status?: string };
     const batches = await gradingService.listBatches(userId);
@@ -1419,6 +1443,7 @@ export async function chatWithAgent(
   messages: AgentChatMessage[],
   images?: AgentImage[],
   spreadsheetText?: string,
+  actorName?: string,
 ): Promise<{ reply: string; mutated: string[] }> {
   // Store new images for this user; fall back to any images from a previous turn in this conversation
   if (images?.length) pendingImages.set(userId, images);
@@ -1511,6 +1536,7 @@ WRITE (collect all required data first):
 - record_trade: trade-in (cards out + cards in + cash)
 - assign_card_to_location: move card to storage location
 - record_expense: log a business expense
+- delete_expense: delete an expense by expense_id (e.g. 2026E10)
 
 === ANSWERING QUESTIONS ===
 
@@ -1586,6 +1612,7 @@ record_sale: card_instance_id (from list_inventory), platform, sale_price (dolla
 record_bulk_sale: items array [{card_instance_id, sale_price}], optional card_show_id/sold_at/notes.
 
 record_expense: description, type (Shipping|Grading|Supplies|Card Show|Food|Travel|Other), amount (dollars).
+delete_expense: expense_id (e.g. 2026E10). Always confirm description + ID with user before deleting.
 
 record_trade: outgoing_cards [{card_instance_id, trade_value}], incoming_cards [{card_name, trade_credit, condition, decision}], optional cash_from_customer/cash_to_customer/trade_percent(default 80).
 
@@ -1598,7 +1625,7 @@ record_trade: outgoing_cards [{card_instance_id, trade_value}], incoming_cards [
 5. For card identification by set/number: use lookup_catalog first, then list_inventory.
 6. After any write action: confirm what was created/updated with a brief summary.
 7. Never guess condition, platform, or price — always get from user.
-8. delete_card: always show card name + ID and get explicit confirmation before calling.
+8. delete_card / delete_expense: always show the name/description + ID and get explicit confirmation before calling.
 9. Graded vs raw: image with PSA/BGS/CGC label + cert + grade → add_graded_card. No exceptions.
 
 IMAGE HANDLING:
@@ -1675,7 +1702,7 @@ ${JSON.stringify(summary, null, 2)}`;
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         try {
-          const result = await auditContext.run({ actor: 'agent', actor_name: 'AI Agent' }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
+          const result = await auditContext.run({ actor: 'agent', actor_name: actorName ?? 'AI Agent' }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
           // Track any card instance IDs created
           if ((block.name === 'add_card_to_purchase' || block.name === 'add_graded_card') && typeof result === 'object' && result !== null && 'id' in result) {
             createdCardIds.push(result.id as string);
@@ -1697,6 +1724,7 @@ ${JSON.stringify(summary, null, 2)}`;
             record_trade: ['trades', 'cards', 'slabs', 'sales'],
             assign_card_to_location: ['cards', 'slabs'],
             record_expense: ['expenses'],
+            delete_expense: ['expenses'],
             delete_card: ['cards'],
           };
           (TOOL_RESOURCE_MAP[block.name] ?? []).forEach((r) => mutatedResources.add(r));

@@ -24,7 +24,7 @@ export async function listSales(req: Request, res: Response, next: NextFunction)
   try {
     const { page, limit, platforms, search, from, to, sort_by, sort_dir, card_type } = paginationSchema.parse(req.query);
     const result = await salesService.listSales(
-      req.user!.id,
+      req.dataUserId,
       { platforms: splitCSV(platforms), search, from, to, cardType: card_type === 'all' ? undefined : card_type },
       { page, limit },
       sort_by,
@@ -36,14 +36,14 @@ export async function listSales(req: Request, res: Response, next: NextFunction)
 
 export async function getSaleFilters(req: Request, res: Response, next: NextFunction) {
   try {
-    const options = await salesService.getSaleFilterOptions(req.user!.id);
+    const options = await salesService.getSaleFilterOptions(req.dataUserId);
     res.json(options);
   } catch (err) { next(err); }
 }
 
 export async function getSale(req: Request, res: Response, next: NextFunction) {
   try {
-    const sale = await salesService.getSaleById(req.user!.id, req.params['id'] as string);
+    const sale = await salesService.getSaleById(req.dataUserId, req.params['id'] as string);
     res.json({ data: sale });
   } catch (err) { next(err); }
 }
@@ -66,7 +66,7 @@ const recordSaleSchema = z.object({
 export async function recordSale(req: Request, res: Response, next: NextFunction) {
   try {
     const data = recordSaleSchema.parse(req.body);
-    const sale = await salesService.recordSale(req.user!.id, data as any);
+    const sale = await salesService.recordSale(req.dataUserId, data as any);
     res.status(201).json({ data: sale });
   } catch (err) { next(err); }
 }
@@ -85,7 +85,7 @@ export async function recordBulkSale(req: Request, res: Response, next: NextFunc
       sold_at: z.string().optional().transform((v) => v ? new Date(v) : undefined),
       unique_id_2: z.string().optional(),
     }).parse(req.body);
-    const sales = await salesService.recordBulkSale(req.user!.id, items, { platform, card_show_id, currency, sold_at, unique_id_2 });
+    const sales = await salesService.recordBulkSale(req.dataUserId, items, { platform, card_show_id, currency, sold_at, unique_id_2 });
     res.status(201).json({ data: sales, count: sales.length });
   } catch (err) { next(err); }
 }
@@ -95,14 +95,14 @@ const updateSaleSchema = recordSaleSchema.omit({ card_instance_id: true }).parti
 export async function updateSale(req: Request, res: Response, next: NextFunction) {
   try {
     const data = updateSaleSchema.parse(req.body);
-    const sale = await salesService.updateSale(req.user!.id, req.params['id'] as string, data as any);
+    const sale = await salesService.updateSale(req.dataUserId, req.params['id'] as string, data as any);
     res.json({ data: sale });
   } catch (err) { next(err); }
 }
 
 export async function deleteSale(req: Request, res: Response, next: NextFunction) {
   try {
-    await salesService.deleteSale(req.user!.id, req.params['id'] as string);
+    await salesService.deleteSale(req.dataUserId, req.params['id'] as string);
     res.status(204).send();
   } catch (err) { next(err); }
 }

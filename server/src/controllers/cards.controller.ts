@@ -26,7 +26,7 @@ export async function listCards(req: Request, res: Response, next: NextFunction)
   try {
     const query = cardFiltersSchema.parse(req.query);
     const { page, limit, ...filters } = query;
-    const result = await cardsService.listCards(req.user!.id, filters as any, { page, limit });
+    const result = await cardsService.listCards(req.dataUserId, filters as any, { page, limit });
     res.json(result);
   } catch (err) { next(err); }
 }
@@ -36,21 +36,21 @@ export async function listCardsGrouped(req: Request, res: Response, next: NextFu
     const search = typeof req.query.search === 'string' ? req.query.search : undefined;
     const pipeline = req.query.pipeline as 'sell' | 'grade' | undefined;
     const purchase_type = typeof req.query.purchase_type === 'string' ? req.query.purchase_type : undefined;
-    const result = await cardsService.listCardsGroupedByPart(req.user!.id, { search, pipeline, purchase_type });
+    const result = await cardsService.listCardsGroupedByPart(req.dataUserId, { search, pipeline, purchase_type });
     res.json(result);
   } catch (err) { next(err); }
 }
 
 export async function getCardFilters(req: Request, res: Response, next: NextFunction) {
   try {
-    const options = await cardsService.getCardFilterOptions(req.user!.id);
+    const options = await cardsService.getCardFilterOptions(req.dataUserId);
     res.json(options);
   } catch (err) { next(err); }
 }
 
 export async function getCard(req: Request, res: Response, next: NextFunction) {
   try {
-    const card = await cardsService.getCardById(req.user!.id, req.params['id'] as string);
+    const card = await cardsService.getCardById(req.dataUserId, req.params['id'] as string);
     res.json({ data: card });
   } catch (err) { next(err); }
 }
@@ -92,14 +92,14 @@ export async function createCard(req: Request, res: Response, next: NextFunction
     const slabInfo = slab_company && slab_grade != null
       ? { company: slab_company, grade: slab_grade, grade_label: slab_grade_label, cert_number: slab_cert_number, additional_cost: slab_additional_cost ?? 0 }
       : undefined;
-    const card = await cardsService.createCard(req.user!.id, cardData as any, slabInfo);
+    const card = await cardsService.createCard(req.dataUserId, cardData as any, slabInfo);
     res.status(201).json({ data: card });
   } catch (err) { next(err); }
 }
 
 export async function updateCard(req: Request, res: Response, next: NextFunction) {
   try {
-    const card = await cardsService.updateCard(req.user!.id, req.params['id'] as string, req.body);
+    const card = await cardsService.updateCard(req.dataUserId, req.params['id'] as string, req.body);
     res.json({ data: card });
   } catch (err) { next(err); }
 }
@@ -111,14 +111,14 @@ const transitionSchema = z.object({
 export async function transitionStatus(req: Request, res: Response, next: NextFunction) {
   try {
     const { status } = transitionSchema.parse(req.body);
-    const card = await cardsService.transitionCardStatus(req.user!.id, req.params['id'] as string, status);
+    const card = await cardsService.transitionCardStatus(req.dataUserId, req.params['id'] as string, status);
     res.json({ data: card });
   } catch (err) { next(err); }
 }
 
 export async function deleteCard(req: Request, res: Response, next: NextFunction) {
   try {
-    await cardsService.softDeleteCard(req.user!.id, req.params['id'] as string);
+    await cardsService.softDeleteCard(req.dataUserId, req.params['id'] as string);
     res.status(204).send();
   } catch (err) { next(err); }
 }
@@ -149,7 +149,7 @@ export async function listRawFlat(req: Request, res: Response, next: NextFunctio
   try {
     const q = rawFlatQuerySchema.parse(req.query);
     const result = await cardsService.listRawFlat(
-      req.user!.id,
+      req.dataUserId,
       { page: q.page, limit: q.limit },
       q.search,
       q.status,
@@ -170,7 +170,7 @@ export async function listRawFlat(req: Request, res: Response, next: NextFunctio
 
 export async function getRawFlatFilters(req: Request, res: Response, next: NextFunction) {
   try {
-    const options = await cardsService.getRawFlatFilterOptions(req.user!.id);
+    const options = await cardsService.getRawFlatFilterOptions(req.dataUserId);
     res.json(options);
   } catch (err) { next(err); }
 }
@@ -183,7 +183,7 @@ export async function uploadCardImage(req: Request, res: Response, next: NextFun
 
     // Verify card belongs to user
     const card = await db.selectFrom('card_instances').select('id')
-      .where('id', '=', cardId).where('user_id', '=', req.user!.id)
+      .where('id', '=', cardId).where('user_id', '=', req.dataUserId)
       .executeTakeFirst();
     if (!card) { res.status(404).json({ error: 'Card not found' }); return; }
 
@@ -191,12 +191,12 @@ export async function uploadCardImage(req: Request, res: Response, next: NextFun
       .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 85 })
       .toBuffer();
-    const dir = path.join(__dirname, '../../../uploads/card-images', req.user!.id);
+    const dir = path.join(__dirname, '../../../uploads/card-images', req.dataUserId);
     fs.mkdirSync(dir, { recursive: true });
     const filename = `${cardId}-${side}.jpg`;
     fs.writeFileSync(path.join(dir, filename), resized);
 
-    const url = `/uploads/card-images/${req.user!.id}/${filename}`;
+    const url = `/uploads/card-images/${req.dataUserId}/${filename}`;
     const field = side === 'back' ? 'image_back_url' : 'image_front_url';
 
     await db.updateTable('card_instances').set({ [field]: url } as any)

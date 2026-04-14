@@ -24,7 +24,7 @@ export async function listExpenses(req: Request, res: Response, next: NextFuncti
   try {
     const { page, limit, search, types, sort_by, sort_dir } = listSchema.parse(req.query);
     const result = await expensesService.listExpenses(
-      req.user!.id,
+      req.dataUserId,
       { page, limit },
       { search, types: splitCSV(types) },
       sort_by,
@@ -36,7 +36,7 @@ export async function listExpenses(req: Request, res: Response, next: NextFuncti
 
 export async function getFilterOptions(req: Request, res: Response, next: NextFunction) {
   try {
-    res.json(await expensesService.getFilterOptions(req.user!.id));
+    res.json(await expensesService.getFilterOptions(req.dataUserId));
   } catch (err) { next(err); }
 }
 
@@ -53,7 +53,7 @@ const bodySchema = z.object({
 export async function createExpense(req: Request, res: Response, next: NextFunction) {
   try {
     const data = bodySchema.parse(req.body);
-    const expense = await expensesService.createExpense(req.user!.id, {
+    const expense = await expensesService.createExpense(req.dataUserId, {
       ...data,
       date: new Date(data.date),
       link: data.link || undefined,
@@ -65,7 +65,7 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
 export async function updateExpense(req: Request, res: Response, next: NextFunction) {
   try {
     const data = bodySchema.partial().parse(req.body);
-    const expense = await expensesService.updateExpense(req.user!.id, req.params['id'] as string, {
+    const expense = await expensesService.updateExpense(req.dataUserId, req.params['id'] as string, {
       ...data,
       date: data.date ? new Date(data.date) : undefined,
       link: data.link || undefined,
@@ -76,7 +76,7 @@ export async function updateExpense(req: Request, res: Response, next: NextFunct
 
 export async function deleteExpense(req: Request, res: Response, next: NextFunction) {
   try {
-    await expensesService.deleteExpense(req.user!.id, req.params['id'] as string);
+    await expensesService.deleteExpense(req.dataUserId, req.params['id'] as string);
     res.status(204).send();
   } catch (err) { next(err); }
 }
@@ -91,8 +91,8 @@ const exportSchema = z.object({
 export async function uploadExpenseReceipt(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.file) throw new AppError(400, 'No image file provided');
-    const receiptUrl = await saveReceiptImage(req.user!.id, req.params['id'] as string, req.file.buffer);
-    const expense = await expensesService.saveReceiptUrl(req.user!.id, req.params['id'] as string, receiptUrl);
+    const receiptUrl = await saveReceiptImage(req.dataUserId, req.params['id'] as string, req.file.buffer);
+    const expense = await expensesService.saveReceiptUrl(req.dataUserId, req.params['id'] as string, receiptUrl);
     res.json({ data: expense });
   } catch (err) { next(err); }
 }
@@ -113,12 +113,12 @@ export async function exportExpenses(req: Request, res: Response, next: NextFunc
     const filters = { from, to, types: types ? types.split(',').map((s) => s.trim()).filter(Boolean) : undefined };
 
     if (format === 'pdf') {
-      const buf = await expensesService.exportPDF(req.user!.id, filters);
+      const buf = await expensesService.exportPDF(req.dataUserId, filters);
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', 'attachment; filename="expenses.pdf"');
       res.send(buf);
     } else {
-      const csv = await expensesService.exportCSV(req.user!.id, filters);
+      const csv = await expensesService.exportCSV(req.dataUserId, filters);
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', 'attachment; filename="expenses.csv"');
       res.send(csv);
