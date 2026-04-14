@@ -56,6 +56,19 @@ const TARGET_FIELDS: Record<ImportType, string[]> = {
   expenses:     ['description', 'amount', 'type', 'date', 'order_number', 'currency', 'link'],
 };
 
+// Required fields that must either be mapped or have a default value
+const REQUIRED_FIELDS: Partial<Record<ImportType, { field: string; label: string; options?: string[] }[]>> = {
+  graded: [
+    { field: 'card_name',   label: 'Card Name' },
+    { field: 'cert_number', label: 'Cert Number' },
+    { field: 'grade',       label: 'Grade' },
+    { field: 'company',     label: 'Grading Company', options: ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'] },
+  ],
+  raw_purchase: [
+    { field: 'card_name', label: 'Card Name' },
+  ],
+};
+
 const CONFIDENCE_COLORS: Record<string, string> = {
   high:   'text-green-400',
   medium: 'text-yellow-400',
@@ -127,6 +140,7 @@ function ImportFlow() {
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [defaults, setDefaults] = useState<Record<string, string>>({});
   const [importType, setImportType] = useState<ImportType>('graded');
   const [result, setResult] = useState<ImportResult | null>(null);
 
@@ -150,7 +164,12 @@ function ImportFlow() {
   const executeMut = useMutation({
     mutationFn: async () => {
       if (!preview || !file) return;
-      await api.post(`/import/${preview.id}/mapping`, { mapping, import_type: importType });
+      // Merge defaults as __default_field keys into mapping
+      const mappingWithDefaults = { ...mapping };
+      for (const [field, value] of Object.entries(defaults)) {
+        if (value) mappingWithDefaults[`__default_${field}`] = value;
+      }
+      await api.post(`/import/${preview.id}/mapping`, { mapping: mappingWithDefaults, import_type: importType });
       const fd = new FormData();
       fd.append('file', file);
       return api.post(`/import/${preview.id}/execute`, fd).then((r) => r.data.data as ImportResult);
@@ -184,6 +203,7 @@ function ImportFlow() {
     setFile(null);
     setPreview(null);
     setMapping({});
+    setDefaults({});
     setResult(null);
     uploadMut.reset();
     executeMut.reset();
@@ -308,6 +328,46 @@ function ImportFlow() {
             {Object.values(mapping).filter(Boolean).length < preview.columns.length && ' — unmapped columns will be skipped'}
           </p>
         </Card>
+
+        {/* Default values for required fields not in the file */}
+        {(() => {
+          const required = REQUIRED_FIELDS[importType] ?? [];
+          const mappedFields = new Set(Object.values(mapping).filter(Boolean));
+          const missing = required.filter((r) => !mappedFields.has(r.field));
+          if (missing.length === 0) return null;
+          return (
+            <Card>
+              <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">Default values</h3>
+              <p className="text-xs text-zinc-500 mb-3">These required fields aren't in your file — set a default to apply to every row.</p>
+              <div className="grid grid-cols-2 gap-2.5">
+                {missing.map((req) => (
+                  <div key={req.field} className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-400 w-28 shrink-0">{req.label}</span>
+                    <span className="text-zinc-700 text-xs">→</span>
+                    {req.options ? (
+                      <select
+                        value={defaults[req.field] ?? ''}
+                        onChange={(e) => setDefaults((d) => ({ ...d, [req.field]: e.target.value }))}
+                        className="flex-1 text-xs bg-zinc-800 border border-amber-500/40 rounded px-2 py-1 text-zinc-300 focus:outline-none focus:border-amber-400"
+                      >
+                        <option value="">— required —</option>
+                        {req.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={defaults[req.field] ?? ''}
+                        onChange={(e) => setDefaults((d) => ({ ...d, [req.field]: e.target.value }))}
+                        placeholder="default value"
+                        className="flex-1 text-xs bg-zinc-800 border border-amber-500/40 rounded px-2 py-1 text-zinc-300 focus:outline-none focus:border-amber-400 placeholder:text-zinc-600"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          );
+        })()}
 
         {/* Data preview */}
         <Card>
