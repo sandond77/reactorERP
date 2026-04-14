@@ -623,9 +623,8 @@ function extractGradeNumber(s: string): number {
 function inferCompanyFromCert(cert?: string): GradingCompany | null {
   if (!cert) return null;
   const digits = cert.replace(/\D/g, '');
-  if (digits.length === 8) return 'PSA';   // PSA: 8-digit certs
-  if (digits.length === 10) return 'CGC';  // CGC: 10-digit certs
-  if (digits.length === 9) return 'BGS';   // BGS: 9-digit certs
+  if (digits.length === 8 || digits.length === 9) return 'PSA'; // PSA: legacy 8-digit + current 9-digit
+  if (digits.length === 10) return 'CGC';                        // CGC: 10-digit certs
   return null;
 }
 
