@@ -176,12 +176,13 @@ async function executeGradedImport(
       const gradeRaw = row['grade']?.trim();
       if (!gradeRaw) throw new Error('grade is required');
 
+      const { company: parsedCompany, grade } = parseGradeString(gradeRaw);
       const companyRaw = normalizeCompany(row['company']?.trim())
-        ?? inferCompany(certRaw, gradeRaw)
-        ?? 'PSA';
+        ?? parsedCompany
+        ?? inferCompanyFromCert(certRaw)
+        ?? 'OTHER';
 
       const certNumber = parseInt(certRaw.replace(/\D/g, ''), 10);
-      const grade = parseFloat(gradeRaw.replace(/[^\d.]/g, ''));
       const gradeLabel = makeGradeLabel(grade, companyRaw);
 
       const purchaseCost = toCents(row['purchase_cost'] ?? '0');
@@ -575,25 +576,34 @@ function normalizePlatform(value?: string): ListingPlatform {
   return map[lower] ?? 'other';
 }
 
-// Try to infer grading company from grade string or cert number format
-function inferCompany(cert?: string, grade?: string): GradingCompany | null {
-  // Check if grade string contains company prefix (e.g. "PSA 10", "BGS 9.5", "CGC 10")
-  if (grade) {
-    const upper = grade.toUpperCase();
-    if (upper.startsWith('PSA')) return 'PSA';
-    if (upper.startsWith('BGS') || upper.startsWith('BECKETT')) return 'BGS';
-    if (upper.startsWith('CGC')) return 'CGC';
-    if (upper.startsWith('SGC')) return 'SGC';
-    if (upper.startsWith('HGA')) return 'HGA';
-    if (upper.startsWith('ACE')) return 'ACE';
-    if (upper.startsWith('ARS')) return 'ARS';
+// Parse a grade string that may contain the company prefix.
+// Handles: "PSA 10", "PSA10", "BGS 9.5", "CGC 10", "SGC 98", "HGA 10", "ACE AP10", "ARS 10", plain "10"
+function parseGradeString(raw: string): { company: GradingCompany | null; grade: number } {
+  const s = raw.trim().toUpperCase();
+  const PREFIXES: [RegExp, GradingCompany][] = [
+    [/^PSA\s*/, 'PSA'],
+    [/^BGS\s*|^BECKETT\s*/, 'BGS'],
+    [/^CGC\s*/, 'CGC'],
+    [/^SGC\s*/, 'SGC'],
+    [/^HGA\s*/, 'HGA'],
+    [/^ACE\s*(AP\s*)?/, 'ACE'],   // "ACE 10", "ACE AP10"
+    [/^ARS\s*/, 'ARS'],
+  ];
+  for (const [re, co] of PREFIXES) {
+    const stripped = s.replace(re, '');
+    const num = parseFloat(stripped.replace(/[^\d.]/g, ''));
+    if (re.test(s)) return { company: co, grade: num };
   }
-  // PSA cert numbers are 8 digits; BGS are typically 9 digits
-  if (cert) {
-    const digits = cert.replace(/\D/g, '');
-    if (digits.length === 8) return 'PSA';
-    if (digits.length === 9) return 'BGS';
-  }
+  // No prefix — just a number
+  return { company: null, grade: parseFloat(s.replace(/[^\d.]/g, '')) };
+}
+
+// Infer company from cert number length (last resort)
+function inferCompanyFromCert(cert?: string): GradingCompany | null {
+  if (!cert) return null;
+  const digits = cert.replace(/\D/g, '');
+  if (digits.length === 8) return 'PSA';
+  if (digits.length === 9) return 'BGS';
   return null;
 }
 
