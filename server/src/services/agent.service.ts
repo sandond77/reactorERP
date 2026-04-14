@@ -1767,6 +1767,8 @@ export async function parseExpenseImage(
 Known expense types (use one if it matches, otherwise suggest a short label):
 Shipping, Grading, Supplies, Card Show, Food, Travel, Other
 
+For order_number: extract ANY reference identifier on the receipt — this includes Order #, Ordr#, ORDR#, Order ID, Confirmation #, Transaction #, Receipt #, Check #, Ticket #, Invoice #, Reference #, or any similar identifier. Do NOT leave this null if any such number appears on the receipt.
+
 Return a JSON object:
 {
   "date": "YYYY-MM-DD or null",
@@ -1774,7 +1776,7 @@ Return a JSON object:
   "type": "best matching type from the list above, or a short custom label",
   "amount": number in dollars (e.g. 12.99) or null,
   "currency": "USD" or "JPY" or null,
-  "order_number": "order/reference/confirmation number or null",
+  "order_number": "any order/reference/confirmation/ticket number found on the receipt, or null if truly none",
   "link": null,
   "confidence": "high" | "medium" | "low",
   "notes": "any caveats or null"

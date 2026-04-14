@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Loader2, Pencil, Trash2, ExternalLink, Download, ImagePlus, Sparkles } from 'lucide-react';
+import { Plus, X, Loader2, Trash2, ExternalLink, Download, ImagePlus, Sparkles } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -47,9 +47,11 @@ const EXPENSE_TYPES = [
 function ExpenseModal({
   expense,
   onClose,
+  onDelete,
 }: {
   expense?: Expense;
   onClose: () => void;
+  onDelete?: () => void;
 }) {
   const queryClient = useQueryClient();
   const isEdit = !!expense;
@@ -216,12 +218,19 @@ function ExpenseModal({
         onChange={(e) => setOrderNumber(e.target.value)}
       />
 
-      <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={submitting}>
-          {submitting && <Loader2 size={14} className="animate-spin" />}
-          {isEdit ? 'Save Changes' : 'Add Expense'}
-        </Button>
+      <div className="flex items-center justify-between pt-2">
+        {onDelete ? (
+          <Button type="button" variant="ghost" size="sm" onClick={onDelete} className="text-red-500 hover:text-red-400">
+            <Trash2 size={13} /> Delete
+          </Button>
+        ) : <span />}
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="submit" disabled={submitting}>
+            {submitting && <Loader2 size={14} className="animate-spin" />}
+            {isEdit ? 'Save Changes' : 'Add Expense'}
+          </Button>
+        </div>
       </div>
     </form>
   );
@@ -231,7 +240,7 @@ function ExpenseModal({
 
 function ExpenseActionModal({ expense, onClose }: { expense: Expense; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [mode, setMode] = useState<'prompt' | 'edit' | 'delete'>('prompt');
+  const [mode, setMode] = useState<'edit' | 'delete'>('edit');
   const [submitting, setSubmitting] = useState(false);
 
   async function handleDelete() {
@@ -247,14 +256,12 @@ function ExpenseActionModal({ expense, onClose }: { expense: Expense; onClose: (
     } finally { setSubmitting(false); }
   }
 
-  if (mode === 'edit') return <ExpenseModal expense={expense} onClose={onClose} />;
-
   if (mode === 'delete') return (
     <div className="space-y-4">
       <p className="text-sm text-zinc-300">Delete this expense?</p>
       <p className="text-xs text-zinc-500 font-medium">{expense.description} — {formatCurrency(expense.amount, expense.currency)}</p>
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="button" variant="ghost" onClick={() => setMode('prompt')}>Back</Button>
+        <Button type="button" variant="ghost" onClick={() => setMode('edit')}>Back</Button>
         <Button type="button" variant="danger" disabled={submitting} onClick={handleDelete}>
           {submitting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
           Delete
@@ -264,24 +271,8 @@ function ExpenseActionModal({ expense, onClose }: { expense: Expense; onClose: (
   );
 
   return (
-    <div className="space-y-3">
-      <p className="text-xs text-zinc-500 truncate">{expense.description}</p>
-      <button onClick={() => setMode('edit')}
-        className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm text-zinc-200 transition-colors text-left">
-        <Pencil size={15} className="text-zinc-400 shrink-0" />
-        <div>
-          <p className="font-medium">Edit Expense</p>
-          <p className="text-xs text-zinc-500">Update any field</p>
-        </div>
-      </button>
-      <button onClick={() => setMode('delete')}
-        className="w-full flex items-center gap-3 px-4 py-3 rounded-lg bg-zinc-800 hover:bg-red-900/40 text-sm text-zinc-200 hover:text-red-300 transition-colors text-left">
-        <Trash2 size={15} className="text-zinc-400 shrink-0" />
-        <div>
-          <p className="font-medium">Delete Expense</p>
-          <p className="text-xs text-zinc-500">Permanently remove this record</p>
-        </div>
-      </button>
+    <div>
+      <ExpenseModal expense={expense} onClose={onClose} onDelete={() => setMode('delete')} />
     </div>
   );
 }
@@ -447,8 +438,8 @@ export function Expenses() {
     description:  colMinWidth('Description', true, false),
     amount:       colMinWidth('Amount',      true, false),
     order_number: colMinWidth('Order #',     true, false),
-    receipt:      50,
-    link:         50,
+    receipt:      colMinWidth('Receipt', false, false),
+    link:         colMinWidth('Link',    false, false),
   };
 
   const { rz, totalWidth } = useColWidths({
@@ -458,8 +449,8 @@ export function Expenses() {
     description:  Math.max(MINS.description, 420),
     amount:       Math.max(MINS.amount, 120),
     order_number: Math.max(MINS.order_number, 150),
-    receipt:      MINS.receipt,
-    link:         MINS.link,
+    receipt:      Math.max(MINS.receipt, 80),
+    link:         Math.max(MINS.link, 60),
   });
 
   useEffect(() => {
@@ -549,10 +540,8 @@ export function Expenses() {
                 <ColHeader label="Description" col="description" {...sh} {...rz('description')}  minWidth={MINS.description} />
                 <ColHeader label="Amount"      col="amount"      {...sh} {...rz('amount')}       minWidth={MINS.amount} align="center" />
                 <ColHeader label="Order #"     col="order_number" {...sh} {...rz('order_number')} minWidth={MINS.order_number} />
-                <th style={{ width: MINS.receipt + 'px', minWidth: MINS.receipt + 'px' }}
-                  className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide">Rcpt</th>
-                <th style={{ width: MINS.link + 'px', minWidth: MINS.link + 'px' }}
-                  className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide">Link</th>
+                <ColHeader label="Receipt" col="" {...sh} {...rz('receipt')} minWidth={MINS.receipt} align="center" />
+                <ColHeader label="Link"    col="" {...sh} {...rz('link')}    minWidth={MINS.link}    align="center" />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
@@ -615,7 +604,7 @@ export function Expenses() {
         <ExpenseModal onClose={() => setShowAdd(false)} />
       </Modal>
 
-      <Modal open={!!selected} onClose={() => setSelected(null)} title="Expense">
+      <Modal open={!!selected} onClose={() => setSelected(null)} title="Edit Expense">
         {selected && <ExpenseActionModal expense={selected} onClose={() => setSelected(null)} />}
       </Modal>
     </div>

@@ -606,7 +606,7 @@ export function Intake() {
                 <ColHeader label="Status"     col="status"          {...sh} {...rz('status')}  minWidth={MINS.status} />
                 <ColHeader label="Purchased"  col="purchased_at"    {...sh} {...rz('bought')}  minWidth={MINS.bought} />
                 <ColHeader label="Inspected"  col="inspected_count"  {...sh} {...rz('inspect')}   minWidth={MINS.inspect}   align="right" />
-                <th style={{ width: MINS.receipt + 'px', minWidth: MINS.receipt + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide text-xs">Rcpt</th>
+                <th style={{ width: MINS.receipt + 'px', minWidth: MINS.receipt + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide text-xs">Receipt</th>
                 <th style={{ width: MINS.actions }} />
               </tr>
             </thead>
