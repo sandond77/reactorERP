@@ -141,7 +141,7 @@ export async function executeImport(userId: string, importId: string, buffer: Bu
     status: finalStatus,
     imported_count: result.importedCount,
     error_count: result.errorLog.length,
-    error_log: result.errorLog.length > 0 ? (result.errorLog as any) : null,
+    error_log: result.errorLog.length > 0 ? JSON.stringify(result.errorLog) as any : null,
     completed_at: new Date(),
   }).where('id', '=', importId).execute();
 
@@ -176,8 +176,9 @@ async function executeGradedImport(
       const gradeRaw = row['grade']?.trim();
       if (!gradeRaw) throw new Error('grade is required');
 
-      const companyRaw = normalizeCompany(row['company']?.trim());
-      if (!companyRaw) throw new Error('company is required (PSA, BGS, CGC, SGC, HGA, ACE, ARS, OTHER)');
+      const companyRaw = normalizeCompany(row['company']?.trim())
+        ?? inferCompany(certRaw, gradeRaw)
+        ?? 'PSA';
 
       const certNumber = parseInt(certRaw.replace(/\D/g, ''), 10);
       const grade = parseFloat(gradeRaw.replace(/[^\d.]/g, ''));
@@ -572,6 +573,28 @@ function normalizePlatform(value?: string): ListingPlatform {
     facebook: 'facebook', fb: 'facebook', instagram: 'instagram', ig: 'instagram', local: 'local',
   };
   return map[lower] ?? 'other';
+}
+
+// Try to infer grading company from grade string or cert number format
+function inferCompany(cert?: string, grade?: string): GradingCompany | null {
+  // Check if grade string contains company prefix (e.g. "PSA 10", "BGS 9.5", "CGC 10")
+  if (grade) {
+    const upper = grade.toUpperCase();
+    if (upper.startsWith('PSA')) return 'PSA';
+    if (upper.startsWith('BGS') || upper.startsWith('BECKETT')) return 'BGS';
+    if (upper.startsWith('CGC')) return 'CGC';
+    if (upper.startsWith('SGC')) return 'SGC';
+    if (upper.startsWith('HGA')) return 'HGA';
+    if (upper.startsWith('ACE')) return 'ACE';
+    if (upper.startsWith('ARS')) return 'ARS';
+  }
+  // PSA cert numbers are 8 digits; BGS are typically 9 digits
+  if (cert) {
+    const digits = cert.replace(/\D/g, '');
+    if (digits.length === 8) return 'PSA';
+    if (digits.length === 9) return 'BGS';
+  }
+  return null;
 }
 
 function normalizeCompany(value?: string): GradingCompany | null {
