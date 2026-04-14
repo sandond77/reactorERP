@@ -42,8 +42,10 @@ function parseExcelBuffer(buffer: Buffer): ParseResult {
 
     if (rawRows.length === 0) return { headers: [], rows: [], rowCount: 0, errors: [] };
 
-    const headers = Object.keys(rawRows[0]).map((h) => String(h).trim());
-    const rows: Record<string, string>[] = rawRows.map((r) =>
+    const allHeaders = Object.keys(rawRows[0]).map((h) => String(h).trim());
+
+    // Build string rows first
+    const allRows: Record<string, string>[] = rawRows.map((r) =>
       Object.fromEntries(
         Object.entries(r).map(([k, v]) => {
           let str: string;
@@ -57,7 +59,21 @@ function parseExcelBuffer(buffer: Buffer): ParseResult {
       )
     );
 
-    return { headers, rows, rowCount: rows.length, errors: [] };
+    // Filter out __EMPTY_* columns and columns where every row is blank
+    const headers = allHeaders.filter((h) => {
+      if (/^__EMPTY/.test(h)) return false;
+      return allRows.some((r) => (r[h] ?? '').length > 0);
+    });
+
+    // Filter out rows where all kept-header values are empty
+    const rows = allRows.filter((r) => headers.some((h) => (r[h] ?? '').length > 0));
+
+    // Strip dropped headers from rows to keep payload small
+    const cleanRows = rows.map((r) =>
+      Object.fromEntries(headers.map((h) => [h, r[h] ?? '']))
+    );
+
+    return { headers, rows: cleanRows, rowCount: cleanRows.length, errors: [] };
   } catch (err) {
     return { headers: [], rows: [], rowCount: 0, errors: [`Failed to parse Excel file: ${err instanceof Error ? err.message : String(err)}`] };
   }
@@ -70,20 +86,20 @@ export const FIELD_ALIASES: Record<string, string[]> = {
   card_number: ['number', 'card #', 'card number', '#', 'num'],
   card_game: ['game', 'tcg', 'product type'],
   condition: ['condition', 'cond', 'grade (raw)', 'raw grade'],
-  purchase_cost: ['cost', 'price', 'purchase price', 'buy price', 'paid', 'amount paid', 'cost (usd)', 'buy'],
+  purchase_cost: ['cost', 'price', 'purchase price', 'buy price', 'paid', 'amount paid', 'cost (usd)', 'buy', 'raw', 'raw cost', 'raw price', 'base cost'],
   currency: ['currency', 'cur'],
   quantity: ['qty', 'quantity', 'count', 'amount'],
   order_number: ['order', 'order #', 'order number', 'order id'],
   source_link: ['link', 'url', 'listing url', 'source'],
-  purchased_at: ['date', 'purchase date', 'buy date', 'date purchased', 'order date'],
+  purchased_at: ['date', 'purchase date', 'buy date', 'date purchased', 'order date', 'raw purchase date', 'purchase date (raw)', 'bought date'],
   language: ['language', 'lang'],
   // Graded-specific
-  cert_number: ['cert', 'cert #', 'cert number', 'certification', 'psa #', 'bgs #', 'cgc #', 'serial'],
-  grade: ['grade', 'psa grade', 'bgs grade', 'cgc grade', 'score'],
-  grading_company: ['company', 'grader', 'grading company', 'graded by'],
-  grading_fee: ['grading fee', 'grading cost', 'submission cost'],
+  cert_number: ['cert', 'cert #', 'cert number', 'certification', 'psa #', 'bgs #', 'cgc #', 'serial', 'slab id', 'cert id'],
+  grade: ['grade', 'psa grade', 'bgs grade', 'cgc grade', 'score', 'slab grade'],
+  company: ['company', 'grader', 'grading company', 'graded by', 'grading service', 'grading co'],
+  grading_cost: ['grading fee', 'grading cost', 'submission cost', 'grading cost', 'sub cost', 'grading'],
   // Sale-specific
-  sale_price: ['sale price', 'sell price', 'sold for', 'selling price', 'final price'],
+  sale_price: ['sale price', 'sell price', 'sold for', 'selling price', 'final price', 'sold price', 'after ebay'],
   platform_fees: ['fees', 'platform fees', 'ebay fees', 'selling fees'],
   unique_id: ['item id', 'item #', 'listing id', 'ebay item', 'unique id'],
 };
@@ -124,6 +140,16 @@ Import types:
 - "bulk_sale": Recording sales of cards already in inventory. Usually has a price and some identifier (cert# or purchase ID).
 - "expenses": Business expenses (shipping, fees, supplies). Usually has description, amount, date.
 - "unknown": Cannot determine with confidence.
+
+Column name hints (common aliases users use):
+- "Cert" or "Cert #" → cert_number
+- "Card" → card_name
+- "Grade" → grade
+- "Raw" or "Raw Cost" or "Raw Price" → purchase_cost (the cost of the card before grading)
+- "Grading Cost" or "Grading" → grading_cost
+- "Raw Purchase Date" or "Bought Date" → purchased_at
+- "Notes" → notes
+- "Company" or "Grading Service" → company
 
 Target fields per type:
 ${JSON.stringify(fieldOptions, null, 2)}
