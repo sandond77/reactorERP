@@ -382,141 +382,220 @@ export function Team() {
   }
 
   return (
-    <div className="p-6 max-w-2xl mx-auto space-y-8">
+    <div className="p-6 h-full overflow-y-auto">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Team</h1>
+          <h1 className="text-xl font-bold text-zinc-100">Team</h1>
           {org && (
-            <p className="text-sm text-zinc-400 mt-0.5">
-              {org.name}
+            <div className="flex items-center gap-1.5 mt-1">
+              <p className="text-sm text-zinc-400">{org.name}</p>
               {isOwner && (
                 <button
                   onClick={openRename}
-                  className="ml-2 text-zinc-500 hover:text-zinc-300 transition-colors inline-flex items-center gap-1"
+                  className="text-zinc-600 hover:text-zinc-400 transition-colors"
                   title="Rename organization"
                 >
                   <Pencil size={12} />
                 </button>
               )}
-            </p>
+            </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setShowMigrationModal(true)}>
-            <DatabaseZap size={13} className="mr-1.5" />
-            Collection Migration
+        {isOwner && (
+          <Button size="sm" onClick={() => setShowInviteModal(true)}>
+            <Users size={14} className="mr-1.5" />
+            Invite member
           </Button>
-          {!isOwner && (
-            <Button size="sm" variant="outline" onClick={() => setShowLeaveModal(true)} className="text-red-400 border-red-400/30 hover:bg-red-400/10">
-              Leave team
-            </Button>
+        )}
+      </div>
+
+      {/* Two-column layout */}
+      <div className="grid grid-cols-3 gap-6 items-start">
+        {/* Left — Members table (2/3 width) */}
+        <div className="col-span-2 space-y-6">
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                Members {org && <span className="text-zinc-600">({members.length} / {org.max_members})</span>}
+              </h2>
+            </div>
+            <div className="rounded-lg border border-zinc-800 overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-zinc-800 bg-zinc-900/60">
+                    <th className="py-2.5 px-4 text-left text-xs text-zinc-500 font-medium">Member</th>
+                    <th className="py-2.5 px-4 text-left text-xs text-zinc-500 font-medium">Email</th>
+                    <th className="py-2.5 px-4 text-left text-xs text-zinc-500 font-medium">Role</th>
+                    <th className="py-2.5 px-4 text-left text-xs text-zinc-500 font-medium">Joined</th>
+                    <th className="py-2.5 px-4 w-10" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/60">
+                  {members.map((m) => (
+                    <tr key={m.id} className="bg-zinc-900 hover:bg-zinc-800/40 transition-colors group">
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-3">
+                          <Avatar member={m} />
+                          <span className="text-sm font-medium text-zinc-100">
+                            {m.display_name ?? m.email.split('@')[0]}
+                            {m.user_id === user?.id && <span className="ml-1.5 text-xs text-zinc-500 font-normal">(you)</span>}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-sm text-zinc-400">{m.email}</td>
+                      <td className="py-3 px-4">
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          m.role === 'owner' ? 'bg-indigo-600/20 text-indigo-400' : 'bg-zinc-800 text-zinc-400'
+                        }`}>
+                          {m.role === 'owner' ? 'Owner' : 'Member'}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-sm text-zinc-500">
+                        {new Date(m.joined_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </td>
+                      <td className="py-3 px-4">
+                        {isOwner && m.role === 'member' && (
+                          <button
+                            onClick={() => setRemovingMember(m)}
+                            className="opacity-0 group-hover:opacity-100 p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-all"
+                            title="Remove member"
+                          >
+                            <UserMinus size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {/* Pending invites */}
+          {isOwner && invites.length > 0 && (
+            <section>
+              <h2 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">Pending Invites</h2>
+              <div className="rounded-lg border border-zinc-800 overflow-hidden">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-zinc-800 bg-zinc-900/60">
+                      <th className="py-2.5 px-4 text-left text-xs text-zinc-500 font-medium">Label</th>
+                      <th className="py-2.5 px-4 text-left text-xs text-zinc-500 font-medium">Expires</th>
+                      <th className="py-2.5 px-4 w-20" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/60">
+                    {invites.map((inv) => (
+                      <tr key={inv.id} className="bg-zinc-900 hover:bg-zinc-800/40 transition-colors group">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-2">
+                            {inv.email ? <Mail size={13} className="text-zinc-500 shrink-0" /> : <Link size={13} className="text-zinc-500 shrink-0" />}
+                            <span className="text-sm text-zinc-300">{inv.email ?? 'Link invite'}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-zinc-500">
+                          {new Date(inv.expires_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <CopyButton text={inviteLink(inv.token)} />
+                            <button
+                              onClick={() => deleteInviteMut.mutate(inv.id)}
+                              className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                              title="Delete invite"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
           )}
-          {isOwner && (
-            <Button size="sm" onClick={() => setShowInviteModal(true)}>
-              <Users size={14} className="mr-1.5" />
-              Invite member
-            </Button>
+        </div>
+
+        {/* Right — Actions panel (1/3 width) */}
+        <div className="col-span-1 space-y-4">
+          {/* Org info */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Organization</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-zinc-500">Name</span>
+                <span className="text-zinc-200">{org?.name ?? '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-zinc-500">Members</span>
+                <span className="text-zinc-200">{members.length} / {org?.max_members ?? '—'}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-zinc-500">Your role</span>
+                <span className={isOwner ? 'text-indigo-400' : 'text-zinc-400'}>{isOwner ? 'Owner' : 'Member'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick actions */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-3">Actions</h3>
+            {isOwner && (
+              <button
+                onClick={() => setShowInviteModal(true)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+              >
+                <Users size={14} className="text-indigo-400 shrink-0" />
+                Invite member
+              </button>
+            )}
+            <button
+              onClick={() => setShowMigrationModal(true)}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+            >
+              <DatabaseZap size={14} className="text-indigo-400 shrink-0" />
+              Collection Migration
+            </button>
+            {isOwner && (
+              <button
+                onClick={openRename}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
+              >
+                <Pencil size={14} className="text-zinc-500 shrink-0" />
+                Rename organization
+              </button>
+            )}
+            {!isOwner && (
+              <button
+                onClick={() => setShowLeaveModal(true)}
+                className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-red-400 hover:bg-red-400/10 transition-colors"
+              >
+                <UserMinus size={14} className="shrink-0" />
+                Leave team
+              </button>
+            )}
+          </div>
+
+          {/* Join a team */}
+          {members.length <= 1 && (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 space-y-3">
+              <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Join a team</h3>
+              <p className="text-xs text-zinc-500">Have an invite link? Paste it below to join an existing team.</p>
+              <Input
+                value={joinLink}
+                onChange={(e) => setJoinLink(e.target.value)}
+                placeholder="Paste invite link or token"
+              />
+              <Button size="sm" className="w-full" onClick={handleJoin} disabled={!joinLink.trim() || joinMut.isPending}>
+                <LogIn size={13} className="mr-1.5" />
+                Join team
+              </Button>
+            </div>
           )}
         </div>
       </div>
-
-      {/* Members */}
-      <section>
-        <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">
-          Members {org && `(${members.length} / ${org.max_members})`}
-        </h2>
-        <div className="space-y-1">
-          {members.map((m) => (
-            <div
-              key={m.id}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-800"
-            >
-              <Avatar member={m} />
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-zinc-100 truncate">
-                  {m.display_name ?? m.email}
-                  {m.user_id === user?.id && (
-                    <span className="ml-1.5 text-xs text-zinc-500">(you)</span>
-                  )}
-                </p>
-                <p className="text-xs text-zinc-500 truncate">{m.email}</p>
-              </div>
-              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                m.role === 'owner'
-                  ? 'bg-indigo-600/20 text-indigo-400'
-                  : 'bg-zinc-800 text-zinc-400'
-              }`}>
-                {m.role === 'owner' ? 'Owner' : 'Member'}
-              </span>
-              {isOwner && m.role === 'member' && (
-                <button
-                  onClick={() => setRemovingMember(m)}
-                  className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
-                  title="Remove member"
-                >
-                  <UserMinus size={14} />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Join a team — hidden if already in a shared org */}
-      {members.length <= 1 && <section>
-        <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">Join a team</h2>
-        <div className="p-4 rounded-lg bg-zinc-900 border border-zinc-800 space-y-3">
-          <p className="text-sm text-zinc-400">Have an invite link? Paste it below to join an existing team.</p>
-          <div className="flex gap-2">
-            <Input
-              value={joinLink}
-              onChange={(e) => setJoinLink(e.target.value)}
-              placeholder="Paste invite link or token"
-              className="flex-1"
-            />
-            <Button size="sm" onClick={handleJoin} disabled={!joinLink.trim() || joinMut.isPending}>
-              <LogIn size={13} className="mr-1.5" />
-              Join
-            </Button>
-          </div>
-        </div>
-      </section>}
-
-      {/* Pending invites (owner only) */}
-      {isOwner && invites.length > 0 && (
-        <section>
-          <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-3">Pending Invites</h2>
-          <div className="space-y-1">
-            {invites.map((inv) => (
-              <div
-                key={inv.id}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-zinc-900 border border-zinc-800"
-              >
-                <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center">
-                  {inv.email ? <Mail size={14} className="text-zinc-400" /> : <Link size={14} className="text-zinc-400" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-zinc-300 truncate">
-                    {inv.email ?? 'Link invite'}
-                  </p>
-                  <p className="text-xs text-zinc-500">
-                    Expires {new Date(inv.expires_at).toLocaleDateString()}
-                  </p>
-                </div>
-                <CopyButton text={inviteLink(inv.token)} />
-                <button
-                  onClick={() => deleteInviteMut.mutate(inv.id)}
-                  className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
-                  title="Delete invite"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* Invite modal */}
       <Modal
