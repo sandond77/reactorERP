@@ -49,17 +49,17 @@ const IMPORT_TYPES: { key: ImportType; label: string }[] = [
   { key: 'expenses',     label: 'Expenses' },
 ];
 
-const TARGET_FIELDS: Record<ImportType, string[]> = {
-  graded: [
-    'card_name', 'set_name', 'card_number', 'cert_number', 'grade', 'company',
-    'purchase_cost', 'grading_cost', 'currency', 'purchased_at', 'order_number', 'notes',
-    'sold_at', 'sale_price', 'after_fees', 'shipping_cost', 'platform',
-    'is_listed', 'list_price', 'listing_url', 'listed_at',
-  ],
-  raw_purchase: ['card_name', 'set_name', 'card_number', 'condition', 'quantity', 'cost', 'currency', 'order_number', 'source', 'purchased_at', 'language', 'type', 'notes'],
-  bulk_sale:    ['identifier', 'sale_price', 'platform', 'platform_fees', 'shipping_cost', 'currency', 'sold_at', 'unique_id'],
-  expenses:     ['description', 'amount', 'type', 'date', 'order_number', 'currency', 'link'],
-};
+// All fields the system can accept — used to populate mapping dropdowns.
+// Organized by category for readability in the UI.
+const ALL_TARGET_FIELDS: { group: string; fields: string[] }[] = [
+  { group: 'Card',     fields: ['card_name', 'set_name', 'card_number', 'card_game', 'language', 'condition', 'notes'] },
+  { group: 'Graded',   fields: ['cert_number', 'grade', 'company', 'grading_cost'] },
+  { group: 'Purchase', fields: ['purchase_cost', 'cost', 'quantity', 'currency', 'purchased_at', 'order_number', 'source', 'type'] },
+  { group: 'Sale',     fields: ['sold_at', 'sale_price', 'after_fees', 'platform_fees', 'shipping_cost', 'platform', 'unique_id', 'listing_url'] },
+  { group: 'Listing',  fields: ['is_listed', 'list_price', 'listed_at'] },
+  { group: 'Expense',  fields: ['description', 'amount', 'date', 'link'] },
+  { group: 'Bulk Sale',fields: ['identifier'] },
+];
 
 const CONFIDENCE_COLORS: Record<string, string> = {
   high:   'text-green-400',
@@ -194,7 +194,6 @@ function ImportFlow() {
     executeMut.reset();
   }
 
-  const fields = TARGET_FIELDS[importType] ?? [];
 
   // ── Upload state
   if (uploadMut.isPending) {
@@ -303,7 +302,11 @@ function ImportFlow() {
                   }`}
                 >
                   <option value="">Skip</option>
-                  {fields.map((f) => <option key={f} value={f}>{f}</option>)}
+                  {ALL_TARGET_FIELDS.map(({ group, fields }) => (
+                    <optgroup key={group} label={group}>
+                      {fields.map((f) => <option key={f} value={f}>{f}</option>)}
+                    </optgroup>
+                  ))}
                 </select>
               </div>
             ))}
