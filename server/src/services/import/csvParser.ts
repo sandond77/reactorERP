@@ -101,6 +101,7 @@ export const FIELD_ALIASES: Record<string, string[]> = {
   // Sale-specific
   sale_price:   ['sale price', 'sell price', 'sold for', 'selling price', 'final price', 'sold price', 'strike price', 'strike'],
   after_fees:   ['after fees', 'after ebay', 'net proceeds', 'after platform fees'],
+  net:          ['net', 'net profit', 'profit', 'net roi'],
   sold_at:      ['date sold', 'sold date', 'sold at', 'sale date'],
   platform:     ['platform', 'marketplace', 'sold on', 'sold via'],
   shipping_cost:['shipping', 'shipping cost', 'postage'],

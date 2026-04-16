@@ -55,7 +55,7 @@ const ALL_TARGET_FIELDS: { group: string; fields: string[] }[] = [
   { group: 'Card',     fields: ['card_name', 'set_name', 'card_number', 'card_game', 'language', 'condition', 'notes'] },
   { group: 'Graded',   fields: ['cert_number', 'grade', 'company', 'grading_cost'] },
   { group: 'Purchase', fields: ['purchase_cost', 'cost', 'quantity', 'currency', 'purchased_at', 'order_number', 'source', 'type'] },
-  { group: 'Sale',     fields: ['sold_at', 'sale_price', 'after_fees', 'platform_fees', 'shipping_cost', 'platform', 'unique_id', 'listing_url'] },
+  { group: 'Sale',     fields: ['sold_at', 'sale_price', 'after_fees', 'net', 'platform_fees', 'shipping_cost', 'platform', 'unique_id', 'listing_url'] },
   { group: 'Listing',  fields: ['is_listed', 'list_price', 'listed_at'] },
   { group: 'Expense',  fields: ['description', 'amount', 'date', 'link'] },
   { group: 'Bulk Sale',fields: ['identifier'] },
