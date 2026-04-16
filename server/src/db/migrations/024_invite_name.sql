@@ -1,0 +1,1 @@
+ALTER TABLE org_invites ADD COLUMN IF NOT EXISTS name TEXT;

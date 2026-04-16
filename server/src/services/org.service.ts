@@ -40,7 +40,7 @@ export async function getMembers(orgId: string) {
 export async function getPendingInvites(orgId: string) {
   return db
     .selectFrom('org_invites')
-    .select(['id', 'email', 'token', 'expires_at', 'created_at'])
+    .select(['id', 'name', 'email', 'token', 'expires_at', 'created_at'])
     .where('org_id', '=', orgId)
     .where('used_at', 'is', null)
     .where('expires_at', '>', new Date())
@@ -48,15 +48,17 @@ export async function getPendingInvites(orgId: string) {
     .execute();
 }
 
-export async function createInvite(orgId: string, invitedBy: string, email?: string) {
+export async function createInvite(orgId: string, invitedBy: string, email?: string, name?: string) {
   const token = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
 
-  return db
+  const record = await db
     .insertInto('org_invites')
-    .values({ org_id: orgId, invited_by: invitedBy, token, email: email ?? null, expires_at: expiresAt })
+    .values({ org_id: orgId, invited_by: invitedBy, token, email: email ?? null, name: name ?? null, expires_at: expiresAt })
     .returningAll()
     .executeTakeFirstOrThrow();
+
+  return record;
 }
 
 export async function deleteInvite(orgId: string, inviteId: string) {

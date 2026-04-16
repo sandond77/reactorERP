@@ -26,11 +26,11 @@ export async function createInvite(req: Request, res: Response) {
   const org = await svc.getOrg(req.user!.id);
   if (!org || org.role !== 'owner') return res.status(403).json({ error: 'Only the org owner can invite members' });
 
-  const schema = z.object({ email: z.string().email().optional() });
+  const schema = z.object({ email: z.string().email().optional(), name: z.string().optional() });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message });
 
-  const invite = await svc.createInvite(org.id, req.user!.id, parsed.data.email);
+  const invite = await svc.createInvite(org.id, req.user!.id, parsed.data.email, parsed.data.name);
   res.status(201).json(invite);
 }
 

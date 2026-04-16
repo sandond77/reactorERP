@@ -411,6 +411,7 @@ export interface OrgInvitesTable {
   org_id: string;
   invited_by: string;
   token: string;
+  name: string | null;
   email: string | null;
   expires_at: Date;
   used_at: Date | null;

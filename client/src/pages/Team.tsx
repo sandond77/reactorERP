@@ -240,6 +240,7 @@ interface Member {
 
 interface Invite {
   id: string;
+  name: string | null;
   email: string | null;
   token: string;
   expires_at: string;
@@ -282,6 +283,7 @@ export function Team() {
   const { user } = useAuth();
   const qc = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [newOrgName, setNewOrgName] = useState('');
   const [showRenameModal, setShowRenameModal] = useState(false);
@@ -308,8 +310,8 @@ export function Team() {
   });
 
   const createInviteMut = useMutation({
-    mutationFn: (email?: string) =>
-      api.post('/org/invites', email ? { email } : {}).then((r) => r.data as Invite),
+    mutationFn: ({ email, name }: { email?: string; name?: string } = {}) =>
+      api.post('/org/invites', { ...(email && { email }), ...(name && { name }) }).then((r) => r.data as Invite),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['org-invites'] });
     },
@@ -383,7 +385,7 @@ export function Team() {
   }
 
   function handleCreateInvite() {
-    createInviteMut.mutate(inviteEmail.trim() || undefined);
+    createInviteMut.mutate({ email: inviteEmail.trim() || undefined, name: inviteName.trim() || undefined });
   }
 
   function openRename() {
@@ -501,7 +503,10 @@ export function Team() {
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-2">
                             {inv.email ? <Mail size={13} className="text-zinc-500 shrink-0" /> : <Link size={13} className="text-zinc-500 shrink-0" />}
-                            <span className="text-sm text-zinc-300">{inv.email ?? 'Link invite'}</span>
+                            <div>
+                              {inv.name && <p className="text-sm text-zinc-200">{inv.name}</p>}
+                              <p className={inv.name ? 'text-xs text-zinc-500' : 'text-sm text-zinc-300'}>{inv.email ?? 'Link invite'}</p>
+                            </div>
                           </div>
                         </td>
                         <td className="py-3 px-4 text-sm text-zinc-500">
@@ -610,7 +615,7 @@ export function Team() {
       {/* Invite modal */}
       <Modal
         open={showInviteModal}
-        onClose={() => { setShowInviteModal(false); setInviteEmail(''); createInviteMut.reset(); }}
+        onClose={() => { setShowInviteModal(false); setInviteEmail(''); setInviteName(''); createInviteMut.reset(); }}
         title="Invite team member"
       >
         <div className="space-y-4">
@@ -619,18 +624,27 @@ export function Team() {
               <p className="text-sm text-zinc-400">
                 This generates a shareable invite link. No email is sent — you copy and send the link yourself.
               </p>
-              <div>
-                <label className="block text-xs text-zinc-400 mb-1">Label (optional)</label>
-                <Input
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  placeholder="e.g. teammate@example.com"
-                  type="email"
-                />
-                <p className="text-xs text-zinc-500 mt-1">Just a label to identify who the invite is for. Not used to send anything.</p>
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Name <span className="text-zinc-600">(optional)</span></label>
+                  <Input
+                    value={inviteName}
+                    onChange={(e) => setInviteName(e.target.value)}
+                    placeholder="e.g. John"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Email <span className="text-zinc-600">(optional)</span></label>
+                  <Input
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="e.g. john@example.com"
+                    type="email"
+                  />
+                </div>
               </div>
               <div className="flex justify-end gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setShowInviteModal(false); setInviteEmail(''); createInviteMut.reset(); }}>
+                <Button variant="outline" size="sm" onClick={() => { setShowInviteModal(false); setInviteEmail(''); setInviteName(''); createInviteMut.reset(); }}>
                   Cancel
                 </Button>
                 <Button size="sm" onClick={handleCreateInvite} disabled={createInviteMut.isPending}>
