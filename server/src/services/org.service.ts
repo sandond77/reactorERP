@@ -2,18 +2,21 @@ import { db } from '../config/database';
 import crypto from 'crypto';
 
 export async function getOrg(userId: string) {
-  return db
+  const org = await db
     .selectFrom('org_members as m')
     .innerJoin('organizations as o', 'o.id', 'm.org_id')
-    .select([
-      'o.id',
-      'o.name',
-      'o.max_members',
-      'o.created_at',
-      'm.role',
-    ])
+    .select(['o.id', 'o.name', 'o.max_members', 'o.created_at', 'm.role'])
     .where('m.user_id', '=', userId)
     .executeTakeFirst();
+
+  if (org) return org;
+
+  // No org found — auto-create a solo org for this user (handles pre-migration accounts)
+  const user = await db.selectFrom('users').select(['display_name', 'email']).where('id', '=', userId).executeTakeFirst();
+  const orgName = user?.display_name ?? user?.email ?? 'My Organization';
+  const created = await db.insertInto('organizations').values({ name: orgName }).returning(['id', 'name', 'max_members', 'created_at']).executeTakeFirstOrThrow();
+  await db.insertInto('org_members').values({ org_id: created.id, user_id: userId, role: 'owner' }).execute();
+  return { ...created, role: 'owner' as const };
 }
 
 export async function getMembers(orgId: string) {
