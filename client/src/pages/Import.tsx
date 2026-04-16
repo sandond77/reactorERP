@@ -50,7 +50,12 @@ const IMPORT_TYPES: { key: ImportType; label: string }[] = [
 ];
 
 const TARGET_FIELDS: Record<ImportType, string[]> = {
-  graded:       ['card_name', 'set_name', 'card_number', 'cert_number', 'grade', 'company', 'purchase_cost', 'grading_cost', 'currency', 'purchased_at', 'order_number', 'notes'],
+  graded: [
+    'card_name', 'set_name', 'card_number', 'cert_number', 'grade', 'company',
+    'purchase_cost', 'grading_cost', 'currency', 'purchased_at', 'order_number', 'notes',
+    'sold_at', 'sale_price', 'after_fees', 'shipping_cost', 'platform',
+    'is_listed', 'list_price', 'listing_url', 'listed_at',
+  ],
   raw_purchase: ['card_name', 'set_name', 'card_number', 'condition', 'quantity', 'cost', 'currency', 'order_number', 'source', 'purchased_at', 'language', 'type', 'notes'],
   bulk_sale:    ['identifier', 'sale_price', 'platform', 'platform_fees', 'shipping_cost', 'currency', 'sold_at', 'unique_id'],
   expenses:     ['description', 'amount', 'type', 'date', 'order_number', 'currency', 'link'],
