@@ -190,6 +190,13 @@ async function executeGradedImport(
       const currency = normalizeCurrency(row['currency']);
       const purchasedAt = row['purchased_at'] ? new Date(row['purchased_at']) : null;
 
+      // Determine lifecycle state from sheet columns
+      const soldAtRaw  = row['sold_at']?.trim();
+      const listedRaw  = row['is_listed']?.trim().toLowerCase();
+      const isSold     = !!soldAtRaw;
+      const isListed   = !isSold && (listedRaw === 'yes' || listedRaw === 'true' || listedRaw === '1');
+      const cardStatus = isSold ? 'sold' : 'graded';
+
       const ci = await db.insertInto('card_instances').values({
         user_id:              userId,
         catalog_id:           null,
@@ -202,7 +209,7 @@ async function executeGradedImport(
         rarity:               null,
         notes:                row['notes']?.trim() ?? null,
         purchase_type:        'pre_graded',
-        status:               'graded',
+        status:               cardStatus,
         quantity:             1,
         purchase_cost:        purchaseCost,
         currency,
@@ -233,6 +240,58 @@ async function executeGradedImport(
         additional_cost:        0,
         currency,
       }).execute();
+
+      // Create sale record if card has been sold
+      if (isSold) {
+        const salePriceRaw = toCents(row['sale_price'] ?? '0');
+        const afterFeesRaw = toCents(row['after_fees']  ?? '0');
+        const platformFees = salePriceRaw > 0 && afterFeesRaw > 0
+          ? Math.max(0, salePriceRaw - afterFeesRaw)
+          : 0;
+        const soldAt = new Date(soldAtRaw);
+        const platform = normalizePlatform(row['platform']?.trim());
+
+        await db.insertInto('sales').values({
+          user_id:          userId,
+          card_instance_id: ci.id,
+          listing_id:       null,
+          platform,
+          sale_price:       salePriceRaw,
+          platform_fees:    platformFees,
+          shipping_cost:    toCents(row['shipping_cost'] ?? '0'),
+          currency,
+          total_cost_basis: purchaseCost + gradingCost,
+          order_details_link: row['listing_url']?.trim() || null,
+          unique_id:        null,
+          unique_id_2:      null,
+          sold_at:          soldAt,
+        }).execute();
+      }
+
+      // Create listing record if card is currently listed
+      if (isListed) {
+        const listPrice = toCents(row['list_price'] ?? '0');
+        const listedAt  = row['listed_at'] ? new Date(row['listed_at']) : null;
+        const listingUrl = row['listing_url']?.trim() || null;
+        const platform  = normalizePlatform(row['platform']?.trim());
+
+        await db.insertInto('listings').values({
+          user_id:          userId,
+          card_instance_id: ci.id,
+          platform,
+          listing_status:   'active',
+          ebay_listing_id:  null,
+          ebay_listing_url: listingUrl,
+          show_name:        null,
+          show_date:        null,
+          booth_cost:       null,
+          list_price:       listPrice,
+          asking_price:     listPrice,
+          currency,
+          listed_at:        listedAt,
+          sold_at:          null,
+        }).execute();
+      }
 
       importedCount++;
     } catch (err) {

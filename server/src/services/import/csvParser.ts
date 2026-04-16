@@ -99,9 +99,18 @@ export const FIELD_ALIASES: Record<string, string[]> = {
   company: ['company', 'grader', 'grading company', 'graded by', 'grading service', 'grading co'],
   grading_cost: ['grading fee', 'grading cost', 'submission cost', 'grading cost', 'sub cost', 'grading'],
   // Sale-specific
-  sale_price: ['sale price', 'sell price', 'sold for', 'selling price', 'final price', 'sold price', 'after ebay'],
-  platform_fees: ['fees', 'platform fees', 'ebay fees', 'selling fees'],
-  unique_id: ['item id', 'item #', 'listing id', 'ebay item', 'unique id'],
+  sale_price:   ['sale price', 'sell price', 'sold for', 'selling price', 'final price', 'sold price', 'strike price', 'strike'],
+  after_fees:   ['after fees', 'after ebay', 'net proceeds', 'after platform fees'],
+  sold_at:      ['date sold', 'sold date', 'sold at', 'sale date'],
+  platform:     ['platform', 'marketplace', 'sold on', 'sold via'],
+  shipping_cost:['shipping', 'shipping cost', 'postage'],
+  platform_fees:['fees', 'platform fees', 'ebay fees', 'selling fees'],
+  unique_id:    ['item id', 'item #', 'listing id', 'ebay item', 'unique id'],
+  // Listing-specific
+  is_listed:    ['listed?', 'listed', 'is listed', 'for sale'],
+  list_price:   ['listed price', 'list price', 'asking price'],
+  listing_url:  ['listing', 'listing url', 'listing link', 'ebay listing', 'url', 'link'],
+  listed_at:    ['date listed', 'listed at', 'listed date', 'listing date'],
 };
 
 export interface AIDetectionResult {
@@ -119,7 +128,7 @@ export async function aiDetectImport(headers: string[], sampleRows: Record<strin
   ).join('\n');
 
   const fieldOptions = {
-    graded:       ['card_name', 'set_name', 'card_number', 'cert_number', 'grade', 'company', 'purchase_cost', 'grading_cost', 'currency', 'purchased_at', 'order_number', 'notes'],
+    graded:       ['card_name', 'set_name', 'card_number', 'cert_number', 'grade', 'company', 'purchase_cost', 'grading_cost', 'currency', 'purchased_at', 'order_number', 'notes', 'sold_at', 'sale_price', 'after_fees', 'platform', 'is_listed', 'list_price', 'listing_url', 'listed_at', 'shipping_cost'],
     raw_purchase: ['card_name', 'set_name', 'card_number', 'condition', 'quantity', 'cost', 'currency', 'order_number', 'source', 'purchased_at', 'language', 'type', 'notes'],
     bulk_sale:    ['identifier', 'sale_price', 'platform', 'platform_fees', 'shipping_cost', 'currency', 'sold_at', 'unique_id'],
     expenses:     ['description', 'amount', 'type', 'date', 'order_number', 'currency', 'link'],
@@ -150,6 +159,13 @@ Column name hints (common aliases users use):
 - "Raw Purchase Date" or "Bought Date" → purchased_at
 - "Notes" → notes
 - "Company" or "Grading Service" → company
+- "Strike Price" or "Strike" → sale_price
+- "After Fees" or "After Ebay" → after_fees
+- "Date Sold" or "Sold Date" → sold_at
+- "Listed?" or "Listed" → is_listed
+- "Listed Price" or "List Price" → list_price
+- "Listing" or "Listing URL" → listing_url
+- "Date Listed" or "Listed Date" → listed_at
 
 Target fields per type:
 ${JSON.stringify(fieldOptions, null, 2)}
