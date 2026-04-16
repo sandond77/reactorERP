@@ -183,11 +183,7 @@ async function executeGradedImport(
         ?? 'OTHER';
 
       const certNumber = parseInt(certRaw.replace(/\D/g, ''), 10);
-      // Use the original grade string as the label if it has meaningful text beyond just a number,
-      // otherwise derive a standard label from the numeric grade.
-      const gradeLabel = /[a-zA-Z]/.test(gradeRaw)
-        ? gradeRaw.trim()
-        : makeGradeLabel(grade, companyRaw);
+      const gradeLabel = gradeRaw.trim(); // store exactly as-is
 
       const purchaseCost = toCents(row['purchase_cost'] ?? '0');
       const gradingCost  = toCents(row['grading_cost']  ?? '0');
