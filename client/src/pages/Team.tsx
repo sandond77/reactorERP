@@ -22,32 +22,33 @@ interface FieldSpec {
 
 const MIGRATION_FIELDS: Record<MigrationType, FieldSpec[]> = {
   graded: [
-    { name: 'card_name',     required: true,  description: 'Full card name',                        example: '2002 Pokemon Japanese McDonald\'s 014 Slowpoke-Holo' },
-    { name: 'cert_number',   required: true,  description: 'Grading company certificate number',    example: '64156386' },
-    { name: 'grade',         required: true,  description: 'Grade with company prefix',             example: 'GEM MINT 10 · PSA 9 · BGS 9.5 · CGC 10 Gem Mint', accepted: 'Must include company prefix (PSA, BGS, CGC, SGC, HGA, ACE, ARS) so we can identify the grader' },
-    { name: 'company',       required: false, description: 'Grading company (if not in grade)',     example: 'PSA', accepted: 'PSA, BGS, CGC, SGC, HGA, ACE, ARS, OTHER — skip if already in your grade column' },
-    { name: 'set_name',      required: false, description: 'Set or expansion name',                 example: 'Base Set' },
-    { name: 'card_number',   required: false, description: 'Card number within the set',            example: '4/102' },
-    { name: 'purchase_cost', required: false, description: 'What you paid for the card (USD)',      example: '250.00' },
-    { name: 'grading_cost',  required: false, description: 'What you paid to get it graded (USD)',  example: '25.00' },
-    { name: 'currency',      required: false, description: 'Currency code',                         example: 'USD', accepted: 'USD, CAD, EUR, GBP, JPY, AUD' },
-    { name: 'purchased_at',  required: false, description: 'Date you bought the card',             example: '2024-01-15', accepted: 'YYYY-MM-DD format' },
-    { name: 'order_number',  required: false, description: 'Order or invoice reference',            example: 'ORD-001' },
-    { name: 'notes',         required: false, description: 'Any additional notes',                  example: 'Bought at card show' },
+    { name: 'card_name',     required: true,  description: 'Full card name',                         example: '2002 Pokemon Japanese McDonald\'s 014 Slowpoke-Holo' },
+    { name: 'cert_number',   required: true,  description: 'Grading company certificate number',     example: '64156386' },
+    { name: 'grade',         required: true,  description: 'Grade — include company prefix so we can detect the grader automatically', example: 'GEM MINT 10  ·  PSA 9  ·  BGS 9.5  ·  CGC 10 Gem Mint', accepted: 'Supported prefixes: PSA, BGS, CGC, SGC, HGA, ACE, ARS. If no prefix, add a separate company column.' },
+    { name: 'company',       required: false, description: 'Grading company — only needed if not already in your grade column', example: 'PSA', accepted: 'PSA, BGS, CGC, SGC, HGA, ACE, ARS, OTHER' },
+    { name: 'set_name',      required: false, description: 'Set or expansion name',                  example: 'Base Set' },
+    { name: 'card_number',   required: false, description: 'Card number within the set',             example: '4/102' },
+    { name: 'purchase_cost', required: false, description: 'What you paid for the raw card (USD)',   example: '250.00', accepted: 'Decimal number. Defaults to 0 if omitted.' },
+    { name: 'grading_cost',  required: false, description: 'What you paid to get it graded (USD)',   example: '25.00',  accepted: 'Decimal number. Defaults to 0 if omitted.' },
+    { name: 'currency',      required: false, description: 'Currency code',                          example: 'USD', accepted: 'USD, CAD, EUR, GBP, JPY, AUD. Defaults to USD.' },
+    { name: 'purchased_at',  required: false, description: 'Date you bought the card',              example: '2024-01-15', accepted: 'YYYY-MM-DD format.' },
+    { name: 'order_number',  required: false, description: 'Order or invoice reference',             example: 'ORD-001' },
+    { name: 'notes',         required: false, description: 'Any additional notes',                   example: 'Bought at card show' },
   ],
   raw_purchase: [
-    { name: 'card_name',     required: true,  description: 'Full card name',                        example: 'Pikachu' },
-    { name: 'condition',     required: true,  description: 'Card condition',                        example: 'NM', accepted: 'NM, LP, MP, HP, DMG' },
-    { name: 'quantity',      required: true,  description: 'Number of copies',                      example: '1' },
-    { name: 'cost',          required: true,  description: 'Total cost for this lot (USD)',          example: '15.00' },
-    { name: 'set_name',      required: false, description: 'Set or expansion name',                 example: 'Base Set' },
-    { name: 'card_number',   required: false, description: 'Card number within the set',            example: '58/102' },
-    { name: 'currency',      required: false, description: 'Currency code',                         example: 'USD', accepted: 'USD, CAD, EUR, GBP, JPY, AUD' },
-    { name: 'order_number',  required: false, description: 'Order or invoice reference',            example: 'ORD-123' },
-    { name: 'source',        required: false, description: 'Where you bought it',                   example: 'eBay' },
-    { name: 'purchased_at',  required: false, description: 'Date you bought the card',             example: '2024-03-01', accepted: 'YYYY-MM-DD format' },
-    { name: 'language',      required: false, description: 'Card language',                         example: 'EN', accepted: 'EN, JP, DE, FR, IT, ES, PT, KO, ZH' },
-    { name: 'notes',         required: false, description: 'Any additional notes',                  example: 'Bought in bulk lot' },
+    { name: 'card_name',     required: true,  description: 'Full card name',                         example: 'Pikachu' },
+    { name: 'condition',     required: false, description: 'Card condition',                         example: 'NM', accepted: 'NM, LP, MP, HP, DMG. Defaults to null if omitted — set during inspection.' },
+    { name: 'quantity',      required: false, description: 'Number of copies',                       example: '1', accepted: 'Integer. Defaults to 1 if omitted.' },
+    { name: 'cost',          required: false, description: 'Cost per card (USD)',                    example: '15.00', accepted: 'Decimal number. Defaults to 0 if omitted.' },
+    { name: 'type',          required: false, description: 'Purchase type',                          example: 'raw', accepted: 'raw (default) or bulk' },
+    { name: 'set_name',      required: false, description: 'Set or expansion name',                  example: 'Base Set' },
+    { name: 'card_number',   required: false, description: 'Card number within the set',             example: '58/102' },
+    { name: 'currency',      required: false, description: 'Currency code',                          example: 'USD', accepted: 'USD, CAD, EUR, GBP, JPY, AUD. Defaults to USD.' },
+    { name: 'order_number',  required: false, description: 'Order reference — rows sharing an order number are grouped into one purchase lot', example: 'ORD-123' },
+    { name: 'source',        required: false, description: 'Where you bought it',                    example: 'eBay' },
+    { name: 'purchased_at',  required: false, description: 'Date you bought the card',              example: '2024-03-01', accepted: 'YYYY-MM-DD format.' },
+    { name: 'language',      required: false, description: 'Card language',                          example: 'EN', accepted: 'EN, JP, DE, FR, IT, ES, PT, KO, ZH. Defaults to EN.' },
+    { name: 'notes',         required: false, description: 'Any additional notes',                   example: 'Bought in bulk lot' },
   ],
 };
 
@@ -61,7 +62,7 @@ async function downloadTemplate(type: MigrationType) {
   URL.revokeObjectURL(url);
 }
 
-const MIGRATION_KEY = (type: MigrationType) => `reactor_migration_done_${type}`;
+const MIGRATION_KEY = (type: MigrationType) => `reactor_migration_guide_done_${type}`;
 
 function MigrationWizard({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState<'pick' | 'fields' | 'ready'>('pick');
@@ -556,7 +557,7 @@ export function Team() {
               className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors"
             >
               <DatabaseZap size={14} className="text-indigo-400 shrink-0" />
-              Collection Migration
+              Migration Guide
             </button>
             {isOwner && (
               <button
@@ -738,7 +739,7 @@ export function Team() {
       <Modal
         open={showMigrationModal}
         onClose={() => setShowMigrationModal(false)}
-        title="Collection Migration"
+        title="Migration Guide"
       >
         <MigrationWizard onClose={() => setShowMigrationModal(false)} />
       </Modal>
