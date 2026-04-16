@@ -333,7 +333,6 @@ export const JP_SETS: SetEntry[] = [
   { code: 'M1S',     names: ['mega symphonia'] },
   { code: 'SV-CH',   names: ['crimson haze'] },
   { code: 'SV-FF',   names: ['future flash', 'shining treasure'] },
-  { code: 'SV-500',  names: ['500 years in the future'] },
   { code: 'SV-TM',   names: ['transformation mask'] },
   { code: 'SV-US',   names: ['undone seal'] },
   { code: 'SV8a',    names: ['terastal fest', 'terastal fest ex'] },

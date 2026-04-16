@@ -287,7 +287,7 @@ export function Inventory() {
                         : <span className="text-zinc-400">{display}</span>;
                     })()}
                   </td>
-                  <td className="px-3 py-1.5 text-zinc-200 truncate" title={row.card_name ?? ''}>
+                  <td className="px-3 py-1.5 text-zinc-200 whitespace-normal break-words">
                     {row.card_name ?? '—'}
                   </td>
                   <td className="px-3 py-1.5 text-zinc-300">

@@ -184,6 +184,7 @@ export async function listSlabs(
     location_name: string | null;
     location_id: string | null;
     raw_purchase_label: string | null;
+    sku: string | null;
   }>`
     SELECT
       ci.id,
@@ -229,7 +230,8 @@ export async function listSlabs(
       s.order_details_link,
       loc.name AS location_name,
       ci.location_id,
-      rp.purchase_id AS raw_purchase_label
+      rp.purchase_id AS raw_purchase_label,
+      cc.sku
     FROM card_instances ci
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id

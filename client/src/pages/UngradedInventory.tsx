@@ -180,7 +180,7 @@ export function UngradedInventory() {
                         <ChevronRight size={12} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
                       </td>
                       <td className="px-3 py-2 font-mono text-zinc-400 text-[11px]">{group.sku ?? '—'}</td>
-                      <td className="px-3 py-2 text-zinc-100 font-medium truncate">{group.card_name}</td>
+                      <td className="px-3 py-2 text-zinc-100 font-medium whitespace-normal break-words">{group.card_name}</td>
                       <td className="px-3 py-2 text-zinc-400 text-[11px] truncate">{group.set_name ?? '—'}</td>
                       <td className="px-3 py-2 text-zinc-400 text-[11px]">{group.card_number ? `#${group.card_number}` : '—'}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-zinc-200 font-medium">{group.total}</td>

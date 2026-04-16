@@ -14,6 +14,7 @@ import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHead
 interface SlabRow {
   id: string;
   raw_purchase_label: string | null;
+  sku: string | null;
   card_name: string | null;
   cert_number: string | null;
   grade_label: string | null;
@@ -159,7 +160,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     card_show:          colMinWidth('Card Show?', false, true),
     card_show_price:    colMinWidth('CS Price',   true,  false),
   };
-  const { rz, totalWidth } = useColWidths({ part_number: Math.max(MINS.part_number, 110), cert_number: Math.max(MINS.cert_number, 120), grade: Math.max(MINS.grade, 160), card_name: Math.max(MINS.card_name, 560), company: Math.max(MINS.company, 115), is_listed: Math.max(MINS.is_listed, 80), listed_price: Math.max(MINS.listed_price, 75), listing: Math.max(MINS.listing, 55), location: Math.max(MINS.location, 130), card_show: Math.max(MINS.card_show, 60), card_show_price: Math.max(MINS.card_show_price, 80), raw_cost: Math.max(MINS.raw_cost, 75), grading_cost: Math.max(MINS.grading_cost, 75), strike_price: Math.max(MINS.strike_price, 75), after_ebay: Math.max(MINS.after_ebay, 75), net: Math.max(MINS.net, 75), raw_purchase_date: Math.max(MINS.raw_purchase_date, 80), date_listed: Math.max(MINS.date_listed, 75), date_sold: Math.max(MINS.date_sold, 75), roi_pct: Math.max(MINS.roi_pct, 65), notes: Math.max(MINS.notes, 500) });
+  const { rz, totalWidth } = useColWidths({ part_number: Math.max(MINS.part_number, 200), cert_number: Math.max(MINS.cert_number, 120), grade: Math.max(MINS.grade, 160), card_name: Math.max(MINS.card_name, 560), company: Math.max(MINS.company, 115), is_listed: Math.max(MINS.is_listed, 80), listed_price: Math.max(MINS.listed_price, 75), listing: Math.max(MINS.listing, 55), location: Math.max(MINS.location, 130), card_show: Math.max(MINS.card_show, 60), card_show_price: Math.max(MINS.card_show_price, 80), raw_cost: Math.max(MINS.raw_cost, 75), grading_cost: Math.max(MINS.grading_cost, 75), strike_price: Math.max(MINS.strike_price, 75), after_ebay: Math.max(MINS.after_ebay, 75), net: Math.max(MINS.net, 75), raw_purchase_date: Math.max(MINS.raw_purchase_date, 80), date_listed: Math.max(MINS.date_listed, 75), date_sold: Math.max(MINS.date_sold, 75), roi_pct: Math.max(MINS.roi_pct, 65), notes: Math.max(MINS.notes, 500) });
 
   // Per-column filters
   const [selectedSlab, setSelectedSlab] = useState<SlabRow | null>(null);
@@ -342,7 +343,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                 ) : rawData.data.map((row) => (
                   <tr key={row.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
                     <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
-                    <td className="px-3 py-1 text-zinc-200 max-w-[340px] truncate">{row.card_name ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
                     <td className="px-3 py-1 text-zinc-400 truncate">{row.set_name ?? ''}</td>
                     <td className="px-3 py-1 text-zinc-400">{row.condition ?? ''}</td>
                     <td className="px-3 py-1 text-right text-zinc-400">{row.quantity}</td>
@@ -401,14 +402,14 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                 const link = row.cert_number ? certLink(row.company, row.cert_number) : null;
                 return (
                   <tr key={row.id} onClick={() => setSelectedSlab(row)} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
-                    <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
+                    <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.sku ?? row.raw_purchase_label ?? ''}</td>
                     <td className="px-3 py-1 font-mono text-[11px]">
                       {link ? (
                         <a href={link} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{row.cert_number}</a>
                       ) : <span className="text-zinc-400">{row.cert_number ?? ''}</span>}
                     </td>
                     <td className="px-3 py-1 text-zinc-300">{row.grade_label ?? ''}</td>
-                    <td className="px-3 py-1 text-zinc-200 max-w-[340px] truncate" title={row.card_name ?? ''}>{row.card_name ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
                     <td className="px-3 py-1 text-center text-zinc-400 text-[11px]">{row.company}</td>
                     <td className="px-3 py-1 text-center">
                       {row.is_listed ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}

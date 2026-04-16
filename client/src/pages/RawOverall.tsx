@@ -338,7 +338,7 @@ export function RawOverall() {
                           <ChevronRight size={12} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
                         </td>
                         <td className="px-3 py-2 font-mono text-zinc-400 text-[11px]">{group.sku ?? '—'}</td>
-                        <td className="px-3 py-2 text-zinc-100 font-medium truncate">{group.card_name}</td>
+                        <td className="px-3 py-2 text-zinc-100 font-medium whitespace-normal break-words">{group.card_name}</td>
                         <td className="px-3 py-2 text-zinc-400 text-[11px] truncate">{group.set_name ?? '—'}</td>
                         <td className="px-3 py-2 text-zinc-400 text-[11px]">{group.card_number ? `#${group.card_number}` : '—'}</td>
                         <td className="px-3 py-2 text-right tabular-nums text-zinc-200 font-medium">{group.total}</td>
@@ -423,7 +423,7 @@ export function RawOverall() {
                 <tr key={row.id} onClick={() => setSelectedRow(row)} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
                   <td className="px-3 py-1 font-mono text-[11px] text-zinc-400">{row.sku ?? '—'}</td>
                   <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
-                  <td className="px-3 py-1 text-zinc-200 truncate" title={row.card_name ?? ''}>{row.card_name ?? ''}</td>
+                  <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
                   <td className="px-3 py-1 text-zinc-300">{row.condition ?? ''}</td>
                   <td className="px-3 py-1 text-center">
                     {row.is_listed ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}

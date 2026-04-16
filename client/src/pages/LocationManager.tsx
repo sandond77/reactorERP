@@ -303,7 +303,7 @@ function LocationNodeRow({ node, allLocations, onEdit, onDelete, onAddChild }: L
                   <span className="font-mono text-xs text-zinc-400">{idCol}</span>
                 </td>
                 {/* Card name */}
-                <td className="px-3 py-2 text-sm text-zinc-200 max-w-[220px] truncate">
+                <td className="px-3 py-2 text-sm text-zinc-200 whitespace-normal break-words">
                   {card.card_name ?? '—'}
                 </td>
                 {/* Set name */}

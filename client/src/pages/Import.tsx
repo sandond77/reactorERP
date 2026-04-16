@@ -342,12 +342,17 @@ function ImportFlow() {
           </div>
         </Card>
 
-        <div className="flex justify-end gap-3">
-          <Button variant="secondary" onClick={reset}>Cancel</Button>
-          <Button onClick={() => executeMut.mutate()} disabled={executeMut.isPending}>
-            {executeMut.isPending && <Loader2 size={14} className="animate-spin mr-1.5" />}
-            Import {preview.total_rows} rows
-          </Button>
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-xs text-amber-400/80 max-w-md mt-1">
+            Please verify that all column mappings are correct before importing. Auto-detected mappings may not be accurate — review each row above before proceeding.
+          </p>
+          <div className="flex gap-3 shrink-0">
+            <Button variant="secondary" onClick={reset}>Cancel</Button>
+            <Button onClick={() => executeMut.mutate()} disabled={executeMut.isPending}>
+              {executeMut.isPending && <Loader2 size={14} className="animate-spin mr-1.5" />}
+              Import {preview.total_rows} rows
+            </Button>
+          </div>
         </div>
       </div>
     );

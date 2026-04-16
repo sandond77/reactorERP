@@ -5,6 +5,7 @@ import { toCents } from '../../utils/cents';
 import { createRawPurchase } from '../raw-purchases.service';
 import { createExpense } from '../expenses.service';
 import { recordSale } from '../sales.service';
+import { lookupSetCode, generatePartNumber } from '../../utils/set-codes';
 import type { GradingCompany, ListingPlatform } from '../../types/db';
 
 // ── Upload / Preview ──────────────────────────────────────────────────────────
@@ -163,6 +164,45 @@ async function executeGradedImport(
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
 
+  // Cache catalog lookups: sku → catalog_id
+  const catalogCache = new Map<string, string>();
+
+  async function getOrCreateCatalogId(
+    cardName: string, setName: string | null, cardNumber: string | null, language: string
+  ): Promise<string | null> {
+    // Detect language from card name if not explicit
+    const langHint = /japanese/i.test(cardName) ? 'JP' : null;
+    const lang = (language.toUpperCase() === 'JP' || language.toUpperCase() === 'JPN')
+      ? 'JP' : (langHint ?? 'EN');
+
+    // Derive set code — prefer explicit setName, fall back to substring-matching the full card name
+    const setCode = lookupSetCode(lang, setName ?? cardName);
+    if (!setCode) return null;
+
+    // Derive card number — prefer explicit, fall back to parsing the card name
+    let resolvedNumber = cardNumber?.trim() || null;
+    if (!resolvedNumber) {
+      // Try promo-style "#NNN" or "SMXX" / "XYXX" patterns first, then bare 3-digit numbers
+      const promoHash  = cardName.match(/#(\d+)/);
+      const codedNum   = cardName.match(/\b([A-Z]{1,4}\d{1,3}[a-z]?)\b/);
+      const threeDigit = cardName.match(/\b(\d{3})\b/);
+      const twoDigit   = cardName.match(/\b(\d{2})\b/);
+      resolvedNumber = promoHash?.[1] ?? codedNum?.[1] ?? threeDigit?.[1] ?? twoDigit?.[1] ?? null;
+    }
+    if (!resolvedNumber) return null;
+
+    const sku = generatePartNumber(lang, setCode, resolvedNumber);
+    if (catalogCache.has(sku)) return catalogCache.get(sku)!;
+    const existing = await db.selectFrom('card_catalog').select('id').where('sku', '=', sku).executeTakeFirst();
+    if (existing) { catalogCache.set(sku, existing.id); return existing.id; }
+    const created = await db.insertInto('card_catalog').values({
+      game: 'pokemon', set_name: setName, set_code: setCode,
+      card_name: cardName, card_number: cardNumber, language: lang, sku,
+    }).returning('id').executeTakeFirstOrThrow();
+    catalogCache.set(sku, created.id);
+    return created.id;
+  }
+
   for (let i = 0; i < rows.length; i++) {
     const rowIndex = i + 2;
     const row = applyMapping(rows[i], mapping);
@@ -197,14 +237,19 @@ async function executeGradedImport(
       const isListed   = !isSold && (listedRaw === 'yes' || listedRaw === 'true' || listedRaw === '1');
       const cardStatus = isSold ? 'sold' : 'graded';
 
+      const setName    = row['set_name']?.trim()     ?? null;
+      const cardNumber = row['card_number']?.trim()  ?? null;
+      const language   = row['language']?.trim()     || 'EN';
+      const catalogId  = await getOrCreateCatalogId(cardName, setName, cardNumber, language);
+
       const ci = await db.insertInto('card_instances').values({
         user_id:              userId,
-        catalog_id:           null,
+        catalog_id:           catalogId,
         card_name_override:   cardName,
-        set_name_override:    row['set_name']?.trim()     ?? null,
-        card_number_override: row['card_number']?.trim()  ?? null,
+        set_name_override:    setName,
+        card_number_override: cardNumber,
         card_game:            'pokemon',
-        language:             'EN',
+        language,
         variant:              null,
         rarity:               null,
         notes:                row['notes']?.trim() ?? null,

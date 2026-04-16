@@ -1,10 +1,11 @@
-import { useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import React, { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { AddPartModal } from '../components/catalog/AddPartModal';
+import toast from 'react-hot-toast';
 
 interface SummaryRow {
   sku: string | null;
@@ -247,18 +248,407 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
   );
 }
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 50;
 
 function Pagination({ page, totalPages, total, onChange }: { page: number; totalPages: number; total: number; onChange: (p: number) => void }) {
   if (totalPages <= 1) return null;
   return (
-    <div className="flex items-center justify-between px-6 py-2.5 border-t border-zinc-800 text-xs text-zinc-500 shrink-0">
+    <div className="flex items-center justify-between px-6 py-2.5 pr-40 border-t border-zinc-800 text-xs text-zinc-500 shrink-0">
       <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} of {total}</span>
       <div className="flex items-center gap-1">
         <button onClick={() => onChange(page - 1)} disabled={page === 1} className="px-2 py-1 rounded disabled:opacity-30 hover:text-zinc-300 transition-colors">←</button>
         <span className="px-2">{page} / {totalPages}</span>
         <button onClick={() => onChange(page + 1)} disabled={page === totalPages} className="px-2 py-1 rounded disabled:opacity-30 hover:text-zinc-300 transition-colors">→</button>
       </div>
+    </div>
+  );
+}
+
+// ── Set Code Manager ─────────────────────────────────────────────────────────
+
+interface StaticSet { language: string; set_code: string; names: string[] }
+interface DbAlias { id: string; language: string; set_code: string; alias: string; set_name: string | null }
+
+function SetCodeModal({ set: s, allAliases, onClose }: { set: StaticSet; allAliases: DbAlias[]; onClose: () => void }) {
+  const qc = useQueryClient();
+  const aliases = allAliases.filter(a => a.language === s.language && a.set_code === s.set_code);
+  const [newAlias, setNewAlias] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [deleteSteps, setDeleteSteps] = useState<Record<string, number>>({});
+  const [deleteAllStep, setDeleteAllStep] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleAdd() {
+    if (!newAlias.trim()) return;
+    setAdding(true);
+    setError(null);
+    try {
+      await api.post('/sets/aliases', { language: s.language, set_code: s.set_code, alias: newAlias.trim() });
+      qc.invalidateQueries({ queryKey: ['set-aliases'] });
+      setNewAlias('');
+    } catch { setError('Failed to add alias.'); }
+    finally { setAdding(false); }
+  }
+
+  async function handleDeleteAlias(id: string) {
+    try {
+      await api.delete(`/sets/aliases/${id}`);
+      qc.invalidateQueries({ queryKey: ['set-aliases'] });
+      setDeleteSteps(p => { const n = { ...p }; delete n[id]; return n; });
+    } catch { setError('Delete failed.'); }
+  }
+
+  async function handleDeleteAll() {
+    try {
+      await Promise.all(aliases.map(a => api.delete(`/sets/aliases/${a.id}`)));
+      qc.invalidateQueries({ queryKey: ['set-aliases'] });
+      onClose();
+    } catch { setError('Delete failed.'); setDeleteAllStep(0); }
+  }
+
+  function stepFor(id: string) { return deleteSteps[id] ?? 0; }
+  function setStep(id: string, v: number) { setDeleteSteps(p => ({ ...p, [id]: v })); }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-1">
+          <h2 className="text-base font-semibold text-zinc-100 font-mono">{s.set_code}</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors"><X size={16} /></button>
+        </div>
+        <p className="text-xs text-zinc-500 mb-4">{s.language === 'EN' ? 'English' : 'Japanese'}</p>
+
+        <div className="mb-4">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Built-in Names</p>
+          <div className="flex flex-wrap gap-1.5">
+            {s.names.map((n, i) => (
+              <span key={i} className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs rounded">{n}</span>
+            ))}
+          </div>
+        </div>
+
+        <div className="mb-4">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Custom Aliases</p>
+          {aliases.length === 0 ? (
+            <p className="text-xs text-zinc-600 italic">None yet</p>
+          ) : (
+            <div className="space-y-1">
+              {aliases.map(a => (
+                <div key={a.id} className="flex items-center justify-between px-2 py-1 bg-zinc-800/50 rounded">
+                  <span className="text-xs text-zinc-300">{a.alias}</span>
+                  <div className="flex items-center gap-2 text-xs">
+                    {stepFor(a.id) === 0 && (
+                      <button onClick={() => setStep(a.id, 1)} className="text-zinc-600 hover:text-red-400 transition-colors">Delete</button>
+                    )}
+                    {stepFor(a.id) === 1 && (
+                      <>
+                        <span className="text-zinc-500">Remove alias?</span>
+                        <button onClick={() => setStep(a.id, 0)} className="text-zinc-400 hover:text-zinc-200">No</button>
+                        <button onClick={() => setStep(a.id, 2)} className="text-red-500 hover:text-red-400 font-medium">Yes</button>
+                      </>
+                    )}
+                    {stepFor(a.id) === 2 && (
+                      <>
+                        <span className="text-red-400 font-medium">Cannot be undone.</span>
+                        <button onClick={() => setStep(a.id, 0)} className="text-zinc-400 hover:text-zinc-200">No</button>
+                        <button onClick={() => handleDeleteAlias(a.id)} className="text-red-500 hover:text-red-400 font-medium">Confirm</button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mb-5">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Add New Set</p>
+          <div className="flex gap-2">
+            <input
+              value={newAlias} onChange={e => setNewAlias(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleAdd()}
+              placeholder="e.g. star birth"
+              className="flex-1 px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+            <Button size="sm" onClick={handleAdd} disabled={!newAlias.trim() || adding}>Add</Button>
+          </div>
+        </div>
+
+        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+
+        {aliases.length > 0 && (
+          <div className="border-t border-zinc-800 pt-4 flex items-center gap-2 text-xs">
+            {deleteAllStep === 0 && (
+              <button onClick={() => setDeleteAllStep(1)} className="text-red-500/70 hover:text-red-400 transition-colors">
+                Delete Set Code
+              </button>
+            )}
+            {deleteAllStep === 1 && (
+              <>
+                <span className="text-zinc-400">Remove all {aliases.length} alias{aliases.length !== 1 ? 'es' : ''} for {s.set_code}?</span>
+                <button onClick={() => setDeleteAllStep(0)} className="text-zinc-400 hover:text-zinc-200">No</button>
+                <button onClick={() => setDeleteAllStep(2)} className="text-red-500 hover:text-red-400 font-medium">Yes, Delete</button>
+              </>
+            )}
+            {deleteAllStep === 2 && (
+              <>
+                <span className="text-red-400 font-medium">Cannot be undone. Confirm?</span>
+                <button onClick={() => setDeleteAllStep(0)} className="text-zinc-400 hover:text-zinc-200">No</button>
+                <button onClick={handleDeleteAll} className="px-2 py-1 bg-red-700 hover:bg-red-600 text-white rounded transition-colors font-medium">
+                  Confirm Delete
+                </button>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AliasModal({ alias, onClose }: { alias: DbAlias; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({ language: alias.language, set_code: alias.set_code, alias: alias.alias, set_name: alias.set_name ?? '' });
+  const [deleteStep, setDeleteStep] = useState(0);
+  const [deleting, setDeleting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const field = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm(f => ({ ...f, [k]: e.target.value }));
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      await api.delete(`/sets/aliases/${alias.id}`);
+      qc.invalidateQueries({ queryKey: ['set-aliases'] });
+      onClose();
+    } catch { setError('Delete failed'); setDeleteStep(0); }
+    finally { setDeleting(false); }
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.put(`/sets/aliases/${alias.id}`, form);
+      qc.invalidateQueries({ queryKey: ['set-aliases'] });
+      onClose();
+    } catch { setError('Failed to save.'); setConfirm(false); }
+    finally { setSaving(false); }
+  }
+
+  const inputCls = 'w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-base font-semibold text-zinc-100">Edit Alias</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors"><X size={16} /></button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Language</label>
+            <select value={form.language} onChange={field('language')}
+              className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500">
+              <option value="EN">EN</option><option value="JP">JP</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Set Code</label>
+            <input className={inputCls} value={form.set_code} onChange={field('set_code')} />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Alias (match string)</label>
+            <input className={inputCls} value={form.alias} onChange={field('alias')} />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Set Name (optional)</label>
+            <input className={inputCls} value={form.set_name} onChange={field('set_name')} placeholder="optional" />
+          </div>
+        </div>
+
+        {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
+
+        <div className="flex items-center justify-between mt-5">
+          <div className="flex items-center gap-2">
+            {deleteStep === 0 && (
+              <button onClick={() => setDeleteStep(1)} className="px-3 py-1.5 text-sm text-red-500 hover:text-red-400 transition-colors">Delete</button>
+            )}
+            {deleteStep === 1 && (
+              <>
+                <span className="text-xs text-zinc-400">Delete this alias?</span>
+                <button onClick={() => setDeleteStep(0)} className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors">No</button>
+                <button onClick={() => setDeleteStep(2)} className="px-2 py-1 text-xs text-red-500 hover:text-red-400 transition-colors font-medium">Yes, Delete</button>
+              </>
+            )}
+            {deleteStep === 2 && (
+              <>
+                <span className="text-xs text-red-400 font-medium">Cannot be undone. Confirm?</span>
+                <button onClick={() => setDeleteStep(0)} className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors">No</button>
+                <button onClick={handleDelete} disabled={deleting}
+                  className="px-2 py-1 text-xs bg-red-700 hover:bg-red-600 text-white rounded transition-colors font-medium disabled:opacity-50">
+                  {deleting ? 'Deleting…' : 'Confirm Delete'}
+                </button>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+            {confirm ? (
+              <>
+                <span className="px-3 py-1.5 text-xs text-zinc-400 self-center">Save changes?</span>
+                <button onClick={() => setConfirm(false)} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">No</button>
+                <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Yes, Save'}</Button>
+              </>
+            ) : (
+              <Button size="sm" onClick={() => setConfirm(true)}>Save Changes</Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SetCodeManager() {
+  const qc = useQueryClient();
+  const [lang, setLang] = useState<'EN' | 'JP'>('EN');
+  const [search, setSearch] = useState('');
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [form, setForm] = useState({ language: 'EN', set_code: '', alias: '', set_name: '' });
+  const [editingAlias, setEditingAlias] = useState<DbAlias | null>(null);
+  const [editingSet, setEditingSet] = useState<StaticSet | null>(null);
+
+  const { data: staticSets = [] } = useQuery<StaticSet[]>({
+    queryKey: ['set-codes-static'],
+    queryFn: () => api.get('/sets/codes').then(r => r.data),
+  });
+  const { data: dbAliases = [] } = useQuery<DbAlias[]>({
+    queryKey: ['set-aliases'],
+    queryFn: () => api.get('/sets/aliases').then(r => r.data),
+  });
+
+  const addMut = useMutation({
+    mutationFn: (body: typeof form) => api.post('/sets/aliases', body),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['set-aliases'] }); setShowAddForm(false); setForm({ language: 'EN', set_code: '', alias: '', set_name: '' }); },
+    onError: () => toast.error('Failed to add alias'),
+  });
+
+  const filtered = staticSets
+    .filter(s => s.language === lang)
+    .filter(s => !search || s.set_code.toLowerCase().includes(search.toLowerCase()) || s.names.some(n => n.includes(search.toLowerCase())));
+
+  const customAliases = dbAliases.filter(a => a.language === lang);
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Controls */}
+      <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800">
+        <div className="flex gap-4">
+          {(['EN', 'JP'] as const).map(l => (
+            <button key={l} onClick={() => setLang(l)}
+              className={`pb-1 text-sm font-medium border-b-2 transition-colors ${lang === l ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
+              {l === 'EN' ? 'English' : 'Japanese'} <span className="text-zinc-600 text-xs ml-1">{staticSets.filter(s => s.language === l).length}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          {search && <button onClick={() => setSearch('')} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"><X size={12} /> Clear</button>}
+          <input type="text" placeholder="Search code or alias…" value={search} onChange={e => setSearch(e.target.value)}
+            className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-56" />
+          <Button size="sm" onClick={() => setShowAddForm(v => !v)}><Plus size={14} /> Add New Set</Button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto">
+        {/* Add alias form */}
+        {showAddForm && (
+          <div className="mx-6 mt-4 p-4 bg-zinc-800/50 border border-zinc-700 rounded-lg">
+            <p className="text-xs font-medium text-zinc-300 mb-3">Add Custom Alias</p>
+            <div className="grid grid-cols-4 gap-3">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Language</label>
+                <select value={form.language} onChange={e => setForm(f => ({ ...f, language: e.target.value }))}
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500">
+                  <option value="EN">EN</option><option value="JP">JP</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Set Code</label>
+                <input value={form.set_code} onChange={e => setForm(f => ({ ...f, set_code: e.target.value }))} placeholder="e.g. SWSH-SB"
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Alias (match string)</label>
+                <input value={form.alias} onChange={e => setForm(f => ({ ...f, alias: e.target.value }))} placeholder="e.g. star birth"
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Set Name (optional)</label>
+                <input value={form.set_name} onChange={e => setForm(f => ({ ...f, set_name: e.target.value }))} placeholder="e.g. Star Birth"
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-3">
+              <Button size="sm" variant="secondary" onClick={() => setShowAddForm(false)}>Cancel</Button>
+              <Button size="sm" onClick={() => addMut.mutate(form)} disabled={!form.set_code || !form.alias || addMut.isPending}>Save</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Custom aliases */}
+        {customAliases.length > 0 && (
+          <div className="mx-6 mt-4 mb-2">
+            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Custom Aliases</p>
+            <table className="w-full text-xs border border-zinc-800 rounded-lg overflow-hidden">
+              <thead>
+                <tr className="bg-zinc-800/60 text-zinc-400 uppercase tracking-wide text-[10px]">
+                  <th className="px-3 py-2 text-left">Code</th>
+                  <th className="px-3 py-2 text-left">Alias</th>
+                  <th className="px-3 py-2 text-left">Set Name</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800">
+                {customAliases.map(a => (
+                  <tr key={a.id} className="hover:bg-zinc-800/30 cursor-pointer transition-colors" onClick={() => setEditingAlias(a)}>
+                    <td className="px-3 py-1.5 font-mono text-indigo-300">{a.set_code}</td>
+                    <td className="px-3 py-1.5 text-zinc-300">{a.alias}</td>
+                    <td className="px-3 py-1.5 text-zinc-500">{a.set_name ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Static sets */}
+        <div className="mx-6 mt-4 mb-6">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Static Sets</p>
+          <table className="w-full text-xs border border-zinc-800 rounded-lg overflow-hidden">
+            <thead>
+              <tr className="bg-zinc-800/60 text-zinc-400 uppercase tracking-wide text-[10px]">
+                <th className="px-3 py-2 text-left w-32">Code</th>
+                <th className="px-3 py-2 text-left">Aliases / Match Strings</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-800">
+              {filtered.map((s, i) => (
+                <tr key={i} className="hover:bg-zinc-800/30 cursor-pointer transition-colors" onClick={() => setEditingSet(s)}>
+                  <td className="px-3 py-1.5 font-mono text-indigo-300/80 align-top">{s.set_code}</td>
+                  <td className="px-3 py-1.5 text-zinc-400 whitespace-normal">{s.names.join(' · ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {editingAlias && <AliasModal alias={editingAlias} onClose={() => setEditingAlias(null)} />}
+      {editingSet && <SetCodeModal set={editingSet} allAliases={dbAliases} onClose={() => setEditingSet(null)} />}
     </div>
   );
 }
@@ -380,8 +770,33 @@ export function InventorySummary() {
 
   const sh = { sortCol, sortDir, onSort: handleSort };
 
+  const [activeTab, setActiveTab] = useState<'parts' | 'sets'>('parts');
+
+  const tabBar = (
+    <div className="flex gap-6 px-6 pt-4 border-b border-zinc-800 shrink-0">
+      {(['parts', 'sets'] as const).map(t => (
+        <button key={t} onClick={() => setActiveTab(t)}
+          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === t ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
+          {t === 'parts' ? 'Part Numbers' : 'Set Codes'}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (activeTab === 'sets') {
+    return (
+      <div className="flex flex-col h-full">
+        {tabBar}
+        <div className="flex-1 overflow-auto">
+          <SetCodeManager />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full">
+      {tabBar}
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
         <div>
@@ -471,7 +886,7 @@ export function InventorySummary() {
                         )}
                       </td>
                       <td className="px-3 py-1.5 text-zinc-400 truncate">{setName}</td>
-                      <td className="px-3 py-1.5 text-zinc-200 truncate" title={displayName}>
+                      <td className="px-3 py-1.5 text-zinc-200 whitespace-normal break-words">
                         {displayName}
                       </td>
                       <td className="px-3 py-1.5 text-zinc-500">{lang}</td>
@@ -509,7 +924,7 @@ export function InventorySummary() {
                       </span>
                     </td>
                     <td className="px-3 py-1.5 text-zinc-400 truncate">{setName}</td>
-                    <td className="px-3 py-1.5 text-zinc-200 font-medium truncate" title={displayName}>
+                    <td className="px-3 py-1.5 text-zinc-200 font-medium whitespace-normal break-words">
                       {displayName}
                     </td>
                     <td className="px-3 py-1.5 text-zinc-500">{lang}</td>
@@ -526,7 +941,7 @@ export function InventorySummary() {
                         <tr key={`${key}-grade-${idx}`} className="hover:bg-zinc-800/15">
                           <td className="px-3 py-1 pl-8 text-zinc-700 font-mono text-[10px]">↳</td>
                           <td className="px-3 py-1 text-zinc-600">{setName}</td>
-                          <td className="px-3 py-1 text-zinc-400">{r.card_name ?? '—'}</td>
+                          <td className="px-3 py-1 text-zinc-400 whitespace-normal break-words">{r.card_name ?? '—'}</td>
                           <td className="px-3 py-1 text-zinc-600">{r.language}</td>
                           <td className="px-3 py-1 text-zinc-600">{r.rarity ?? '—'}</td>
                           <td className="px-3 py-1 text-zinc-400">{r.company}</td>

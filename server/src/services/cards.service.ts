@@ -369,7 +369,7 @@ export async function createCard(
 
   // Auto-create a raw_purchase record for raw cards added outside the intake workflow
   let rawPurchaseId = (data as any).raw_purchase_id ?? null;
-  if ((purchaseType === 'raw') && !rawPurchaseId) {
+  if (purchaseType === 'raw' && !rawPurchaseId) {
     const purchase = await createRawPurchase(userId, {
       type: rawPurchaseType,
       language: (data.language as string) ?? 'EN',
