@@ -1,4 +1,8 @@
 import React, { useState } from 'react';
+
+function toTitleCase(s: string) {
+  return s.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+}
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
 import { api } from '../lib/api';
@@ -8,6 +12,7 @@ import { AddPartModal } from '../components/catalog/AddPartModal';
 import toast from 'react-hot-toast';
 
 interface SummaryRow {
+  game: string;
   sku: string | null;
   card_name: string | null;
   set_name: string | null;
@@ -70,6 +75,7 @@ interface EditPartModalProps {
 function EditPartModal({ row, onClose }: EditPartModalProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
+    game:        row.game ?? 'pokemon',
     sku:         row.sku ?? '',
     card_name:   row.card_name ?? '',
     set_name:    row.set_name ?? '',
@@ -114,6 +120,7 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
     setError(null);
     try {
       await api.patch(`/catalog/${row.catalog_id}`, {
+        game:        form.game ? form.game.toLowerCase().trim() : undefined,
         sku:         form.sku || undefined,
         card_name:   form.card_name || undefined,
         set_name:    form.set_name || undefined,
@@ -147,7 +154,11 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <div className="col-span-2">
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Game</label>
+            <GameSelect value={form.game} onChange={v => setForm(f => ({ ...f, game: v }))} />
+          </div>
+          <div>
             <label className="block text-xs text-zinc-400 mb-1">Part #</label>
             <input className={inputCls} value={form.sku} onChange={field('sku')} />
           </div>
@@ -264,9 +275,65 @@ function Pagination({ page, totalPages, total, onChange }: { page: number; total
   );
 }
 
+// ── Game Dropdown ─────────────────────────────────────────────────────────────
+
+interface CardGame { id: string | null; name: string }
+
+function GameSelect({ value, onChange }: { value: string; onChange: (g: string) => void }) {
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [newGame, setNewGame] = useState('');
+
+  const { data: games = [] } = useQuery<CardGame[]>({
+    queryKey: ['card-games'],
+    queryFn: () => api.get('/sets/games').then(r => r.data),
+  });
+
+  const addMut = useMutation({
+    mutationFn: (name: string) => api.post('/sets/games', { name }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['card-games'] });
+      onChange(res.data.name);
+      setNewGame('');
+      setAdding(false);
+    },
+    onError: () => toast.error('Failed to add game'),
+  });
+
+  const selectCls = 'w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500';
+
+  if (adding) {
+    return (
+      <div className="flex gap-2">
+        <input autoFocus value={newGame} onChange={e => setNewGame(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && newGame.trim()) addMut.mutate(newGame.trim()); if (e.key === 'Escape') setAdding(false); }}
+          placeholder="New game name…"
+          className={selectCls} />
+        <button onClick={() => newGame.trim() && addMut.mutate(newGame.trim())}
+          disabled={!newGame.trim() || addMut.isPending}
+          className="px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg transition-colors">
+          Add
+        </button>
+        <button onClick={() => setAdding(false)} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-2">
+      <select value={value} onChange={e => { if (e.target.value === '__add__') setAdding(true); else onChange(e.target.value); }} className={selectCls}>
+        {games.map(g => (
+          <option key={g.id ?? g.name} value={g.name}>{g.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+        ))}
+        <option value="__add__">+ Add new game…</option>
+      </select>
+    </div>
+  );
+}
+
 // ── Set Code Manager ─────────────────────────────────────────────────────────
 
-interface StaticSet { language: string; set_code: string; names: string[] }
+interface StaticSet { game: string; language: string; set_code: string; names: string[] }
 interface DbAlias { id: string; language: string; set_code: string; alias: string; set_name: string | null }
 
 function SetCodeModal({ set: s, allAliases, onClose }: { set: StaticSet; allAliases: DbAlias[]; onClose: () => void }) {
@@ -516,6 +583,7 @@ function AliasModal({ alias, onClose }: { alias: DbAlias; onClose: () => void })
 
 function SetCodeManager() {
   const qc = useQueryClient();
+  const [fGame, setFGame] = useState<string | null>(null);
   const [lang, setLang] = useState<'EN' | 'JP'>('EN');
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
@@ -531,6 +599,11 @@ function SetCodeManager() {
     queryKey: ['set-aliases'],
     queryFn: () => api.get('/sets/aliases').then(r => r.data),
   });
+  const { data: games = [] } = useQuery<CardGame[]>({
+    queryKey: ['card-games'],
+    queryFn: () => api.get('/sets/games').then(r => r.data),
+  });
+  const gameOptions = games.map(g => g.name.toLowerCase());
 
   const addMut = useMutation({
     mutationFn: (body: typeof form) => api.post('/sets/aliases', body),
@@ -540,6 +613,7 @@ function SetCodeManager() {
 
   const filtered = staticSets
     .filter(s => s.language === lang)
+    .filter(s => !fGame || s.game.toLowerCase() === fGame)
     .filter(s => !search || s.set_code.toLowerCase().includes(search.toLowerCase()) || s.names.some(n => n.includes(search.toLowerCase())));
 
   const customAliases = dbAliases.filter(a => a.language === lang);
@@ -548,13 +622,27 @@ function SetCodeManager() {
     <div className="flex flex-col h-full">
       {/* Controls */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800">
-        <div className="flex gap-4">
-          {(['EN', 'JP'] as const).map(l => (
-            <button key={l} onClick={() => setLang(l)}
-              className={`pb-1 text-sm font-medium border-b-2 transition-colors ${lang === l ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
-              {l === 'EN' ? 'English' : 'Japanese'} <span className="text-zinc-600 text-xs ml-1">{staticSets.filter(s => s.language === l).length}</span>
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1">
+            <button onClick={() => setFGame(null)}
+              className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${!fGame ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+              All
             </button>
-          ))}
+            {gameOptions.map(g => (
+              <button key={g} onClick={() => setFGame(fGame === g ? null : g)}
+                className={`px-3 py-1 text-xs rounded-md font-medium transition-colors capitalize ${fGame === g ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {g.replace(/_/g, ' ')}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-4 border-l border-zinc-700 pl-3">
+            {(['EN', 'JP'] as const).map(l => (
+              <button key={l} onClick={() => setLang(l)}
+                className={`pb-1 text-sm font-medium border-b-2 transition-colors ${lang === l ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
+                {l === 'EN' ? 'English' : 'Japanese'} <span className="text-zinc-600 text-xs ml-1">{staticSets.filter(s => s.language === l && (!fGame || s.game.toLowerCase() === fGame)).length}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {search && <button onClick={() => setSearch('')} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"><X size={12} /> Clear</button>}
@@ -661,6 +749,7 @@ export function InventorySummary() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [fGame, setFGame] = useState<string | null>(null);
   const [fLanguage, setFLanguage] = useState<string[] | null>(null);
   const [fRarity, setFRarity] = useState<string[] | null>(null);
   const [fCompany, setFCompany] = useState<string[] | null>(null);
@@ -680,6 +769,12 @@ export function InventorySummary() {
     qty_sold:   colMinWidth('Sold',   true,  false),
   };
   const { rz, totalWidth } = useColWidths({ sku: Math.max(MINS.sku, 180), set: Math.max(MINS.set, 200), card: Math.max(MINS.card, 640), lang: Math.max(MINS.lang, 80), rarity: Math.max(MINS.rarity, 130), grader: Math.max(MINS.grader, 110), grade: Math.max(MINS.grade, 130), qty_total: Math.max(MINS.qty_total, 90), qty_unsold: Math.max(MINS.qty_unsold, 90), qty_sold: Math.max(MINS.qty_sold, 80) });
+
+  const { data: gamesData = [] } = useQuery<CardGame[]>({
+    queryKey: ['card-games'],
+    queryFn: () => api.get('/sets/games').then(r => r.data),
+  });
+  const gameOptions = gamesData.map(g => g.name.toLowerCase());
 
   const { data: summaryData, isLoading: summaryLoading } = useQuery<{ data: SummaryRow[] }>({
     queryKey: ['inventory-summary'],
@@ -719,11 +814,12 @@ export function InventorySummary() {
       r.card_name?.toLowerCase().includes(search.toLowerCase()) ||
       r.set_name?.toLowerCase().includes(search.toLowerCase());
 
+    const matchGame = !fGame || (r.game ?? 'pokemon').toLowerCase() === fGame;
     const matchLang = fLanguage === null || fLanguage.length === 0 || fLanguage.includes(r.language);
     const matchRarity = fRarity === null || fRarity.length === 0 || fRarity.includes(r.rarity ?? '');
     const matchCompany = fCompany === null || fCompany.length === 0 || fCompany.includes(r.company);
 
-    return matchSearch && matchLang && matchRarity && matchCompany;
+    return matchSearch && matchGame && matchLang && matchRarity && matchCompany;
   });
 
   // Client-side sort at SummaryRow level before grouping
@@ -810,14 +906,26 @@ export function InventorySummary() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {(fLanguage !== null || fRarity !== null || fCompany !== null || search) && (
+          {(fGame !== null || fLanguage !== null || fRarity !== null || fCompany !== null || search) && (
             <button
-              onClick={() => { setFLanguage(null); setFRarity(null); setFCompany(null); setSearch(''); setPage(1); }}
+              onClick={() => { setFGame(null); setFLanguage(null); setFRarity(null); setFCompany(null); setSearch(''); setPage(1); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"
             >
               <X size={12} /> Clear filters
             </button>
           )}
+          <div className="flex gap-1">
+            <button onClick={() => { setFGame(null); setPage(1); }}
+              className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${!fGame ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+              All
+            </button>
+            {gameOptions.map(g => (
+              <button key={g} onClick={() => { setFGame(fGame === g ? null : g); setPage(1); }}
+                className={`px-3 py-1 text-xs rounded-md font-medium transition-colors capitalize ${fGame === g ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {g.replace(/_/g, ' ')}
+              </button>
+            ))}
+          </div>
           <Button size="sm" variant={showEmpty ? 'primary' : 'secondary'} onClick={() => setShowEmpty(v => !v)}>
             {showEmpty ? 'In Inventory' : 'Show Empty'}
           </Button>
@@ -865,7 +973,7 @@ export function InventorySummary() {
                 const isNoSku = key.startsWith('__nosku__');
                 const sku = isNoSku ? null : key;
                 const displayName = groupRows[0].card_name ?? '—';
-                const setName = groupRows[0].set_name ?? groupRows[0].set_code ?? '—';
+                const setName = toTitleCase(groupRows[0].set_name ?? groupRows[0].set_code ?? '—');
                 const lang = groupRows[0].language;
                 const rarity = groupRows[0].rarity ?? '—';
                 const isExpanded = expanded.has(key);

@@ -1,5 +1,6 @@
 import { db } from '../config/database';
 import crypto from 'crypto';
+import { seedOrgSetAliases } from '../utils/seed-set-aliases';
 
 export async function getOrg(userId: string) {
   const org = await db
@@ -16,6 +17,7 @@ export async function getOrg(userId: string) {
   const orgName = user?.display_name ?? user?.email ?? 'My Organization';
   const created = await db.insertInto('organizations').values({ name: orgName }).returning(['id', 'name', 'max_members', 'created_at']).executeTakeFirstOrThrow();
   await db.insertInto('org_members').values({ org_id: created.id, user_id: userId, role: 'owner' }).execute();
+  await seedOrgSetAliases(userId);
   return { ...created, role: 'owner' as const };
 }
 
@@ -193,6 +195,7 @@ export async function leaveOrg(userId: string) {
     .executeTakeFirstOrThrow();
 
   await db.insertInto('org_members').values({ org_id: org.id, user_id: userId, role: 'owner' }).execute();
+  await seedOrgSetAliases(userId);
 
   return { success: true };
 }

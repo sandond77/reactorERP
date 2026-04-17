@@ -390,6 +390,7 @@ export async function findOrCreateCatalogCard(params: {
 
 export async function getInventorySummary(userId: string) {
   const rows = await sql<{
+    game: string;
     sku: string | null;
     card_name: string | null;
     set_name: string | null;
@@ -410,6 +411,7 @@ export async function getInventorySummary(userId: string) {
     catalog_id: string | null;
   }>`
     SELECT
+      COALESCE(cc.game, 'pokemon')                     AS game,
       cc.sku,
       COALESCE(ci.card_name_override, cc.card_name)   AS card_name,
       COALESCE(cc.set_name,  ci.set_name_override)    AS set_name,
@@ -439,6 +441,7 @@ export async function getInventorySummary(userId: string) {
     ) l ON true
     WHERE ci.user_id = ${userId}
     GROUP BY
+      cc.game,
       cc.sku, cc.card_name, ci.card_name_override,
       cc.set_name, ci.set_name_override,
       cc.set_code, cc.card_number, ci.card_number_override,
@@ -565,6 +568,7 @@ export async function deleteCatalogCard(id: string) {
 }
 
 export async function updateCatalogCard(id: string, fields: {
+  game?: string;
   sku?: string;
   card_name?: string;
   set_name?: string;

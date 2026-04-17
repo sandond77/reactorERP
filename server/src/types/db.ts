@@ -297,8 +297,15 @@ export interface RawPurchaseSequencesTable {
   next_seq: number;
 }
 
+export interface CardGamesTable {
+  id: Generated<string>;
+  name: string;
+  created_at: Generated<Date>;
+}
+
 export interface PokemonSetAliasesTable {
   id: Generated<string>;
+  user_id: string;
   language: string;
   alias: string;
   set_code: string;
@@ -439,6 +446,7 @@ export interface Database {
   trade_sequences: TradeSequencesTable;
   csv_imports: CsvImportsTable;
   audit_log: AuditLogTable;
+  card_games: CardGamesTable;
   pokemon_set_aliases: PokemonSetAliasesTable;
   raw_purchases: RawPurchasesTable;
   raw_purchase_sequences: RawPurchaseSequencesTable;

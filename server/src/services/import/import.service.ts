@@ -5,7 +5,7 @@ import { toCents } from '../../utils/cents';
 import { createRawPurchase } from '../raw-purchases.service';
 import { createExpense } from '../expenses.service';
 import { recordSale } from '../sales.service';
-import { lookupSetCode, generatePartNumber } from '../../utils/set-codes';
+import { lookupSetCode, lookupSetName, generatePartNumber } from '../../utils/set-codes';
 import type { GradingCompany, ListingPlatform } from '../../types/db';
 
 // ── Upload / Preview ──────────────────────────────────────────────────────────
@@ -182,12 +182,18 @@ async function executeGradedImport(
     // Derive card number — prefer explicit, fall back to parsing the card name
     let resolvedNumber = cardNumber?.trim() || null;
     if (!resolvedNumber) {
-      // Try promo-style "#NNN" or "SMXX" / "XYXX" patterns first, then bare 3-digit numbers
-      const promoHash  = cardName.match(/#(\d+)/);
-      const codedNum   = cardName.match(/\b([A-Z]{1,4}\d{1,3}[a-z]?)\b/);
-      const threeDigit = cardName.match(/\b(\d{3})\b/);
-      const twoDigit   = cardName.match(/\b(\d{2})\b/);
-      resolvedNumber = promoHash?.[1] ?? codedNum?.[1] ?? threeDigit?.[1] ?? twoDigit?.[1] ?? null;
+      // Strip the set code from the label so it doesn't get mistaken for a card number
+      // e.g. "SV10-GLORY OF TEAM ROCKET 101" → strip "SV10" before matching
+      const labelWithoutSetCode = cardName.replace(new RegExp(`\\b${setCode.replace(/[-]/g, '[-]')}\\b`, 'i'), '');
+      const promoHash  = labelWithoutSetCode.match(/#(\d+)/);
+      // codedNum: promo-style like "SM240" or "SV-P 099" — but NOT bare set shorthands
+      const codedNum   = labelWithoutSetCode.match(/\b([A-Z]{1,3}\d{1,3}[a-z]?)\b/);
+      const threeDigit = labelWithoutSetCode.match(/\b(\d{3})\b/);
+      const twoDigit   = labelWithoutSetCode.match(/\b(\d{2})\b/);
+      // Fallback: last 1-3 digit number (excludes 4-digit years via \b boundary)
+      const smallNums  = [...labelWithoutSetCode.matchAll(/\b(\d{1,3})\b/g)];
+      const lastSmall  = smallNums.length > 0 ? smallNums[smallNums.length - 1][1] : null;
+      resolvedNumber = promoHash?.[1] ?? codedNum?.[1] ?? threeDigit?.[1] ?? twoDigit?.[1] ?? lastSmall ?? null;
     }
     if (!resolvedNumber) return null;
 
@@ -195,9 +201,10 @@ async function executeGradedImport(
     if (catalogCache.has(sku)) return catalogCache.get(sku)!;
     const existing = await db.selectFrom('card_catalog').select('id').where('sku', '=', sku).executeTakeFirst();
     if (existing) { catalogCache.set(sku, existing.id); return existing.id; }
+    const resolvedSetName = setName ?? lookupSetName(lang, setCode) ?? setCode;
     const created = await db.insertInto('card_catalog').values({
-      game: 'pokemon', set_name: setName, set_code: setCode,
-      card_name: cardName, card_number: cardNumber, language: lang, sku,
+      game: 'pokemon', set_name: resolvedSetName, set_code: setCode,
+      card_name: cardName, card_number: resolvedNumber, language: lang, sku,
     }).returning('id').executeTakeFirstOrThrow();
     catalogCache.set(sku, created.id);
     return created.id;
@@ -242,17 +249,21 @@ async function executeGradedImport(
       const language   = row['language']?.trim()     || 'EN';
       const catalogId  = await getOrCreateCatalogId(cardName, setName, cardNumber, language);
 
+      // When a catalog entry was matched/created via part number, don't override
+      // the canonical name — otherwise each PSA label variation creates a separate group.
+      // Store the raw PSA label in notes for reference if no notes already provided.
+      const existingNotes = row['notes']?.trim() ?? null;
       const ci = await db.insertInto('card_instances').values({
         user_id:              userId,
         catalog_id:           catalogId,
-        card_name_override:   cardName,
-        set_name_override:    setName,
-        card_number_override: cardNumber,
+        card_name_override:   catalogId ? null : cardName,
+        set_name_override:    catalogId ? null : setName,
+        card_number_override: catalogId ? null : cardNumber,
         card_game:            'pokemon',
         language,
         variant:              null,
         rarity:               null,
-        notes:                row['notes']?.trim() ?? null,
+        notes:                existingNotes ?? (catalogId ? cardName : null),
         purchase_type:        'pre_graded',
         status:               cardStatus,
         quantity:             1,

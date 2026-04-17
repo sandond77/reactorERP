@@ -57,8 +57,8 @@ export async function emptyCatalog(req: Request, res: Response, next: NextFuncti
 export async function updateCard(req: Request, res: Response, next: NextFunction) {
   try {
     const { id } = req.params;
-    const { sku, card_name, set_name, set_code, card_number, rarity, variant, language } = req.body;
-    await updateCatalogCard(id, { sku, card_name, set_name, set_code, card_number, rarity, variant, language });
+    const { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language } = req.body;
+    await updateCatalogCard(id, { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language });
     res.json({ ok: true });
   } catch (err) { next(err); }
 }
