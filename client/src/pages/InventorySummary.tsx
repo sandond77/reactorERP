@@ -482,6 +482,26 @@ function AliasModal({ alias, onClose }: { alias: DbAlias; onClose: () => void })
   const [confirm, setConfirm] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const { data: registeredLanguages = [] } = useQuery<CardLanguage[]>({
+    queryKey: ['card-languages'],
+    queryFn: () => api.get('/sets/languages').then(r => r.data),
+  });
+  const { data: allAliases = [] } = useQuery<DbAlias[]>({
+    queryKey: ['set-aliases'],
+    queryFn: () => api.get('/sets/aliases').then(r => r.data),
+  });
+
+  // Build language options: registered languages + any language found in aliases (e.g. KR added without card_languages entry)
+  const aliasLangCodes = Array.from(new Set(allAliases.map(a => a.language)));
+  const registeredCodes = new Set(registeredLanguages.map(l => l.code));
+  const extraLangs = aliasLangCodes
+    .filter(code => !registeredCodes.has(code))
+    .map(code => ({
+      code,
+      name: KNOWN_POKEMON_LANGUAGES.find(l => l.code === code)?.name ?? code,
+    }));
+  const languageOptions = [...registeredLanguages, ...extraLangs].sort((a, b) => a.code.localeCompare(b.code));
+
   const field = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));
 
@@ -521,7 +541,9 @@ function AliasModal({ alias, onClose }: { alias: DbAlias; onClose: () => void })
             <label className="block text-xs text-zinc-400 mb-1">Language</label>
             <select value={form.language} onChange={field('language')}
               className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500">
-              <option value="EN">EN</option><option value="JP">JP</option>
+              {languageOptions.map(l => (
+                <option key={l.code} value={l.code}>{l.name} ({l.code})</option>
+              ))}
             </select>
           </div>
           <div>
@@ -581,13 +603,38 @@ function AliasModal({ alias, onClose }: { alias: DbAlias; onClose: () => void })
   );
 }
 
+interface CardLanguage { id: string | null; code: string; name: string }
+
+const NEW_LANG_VALUE = '__new__';
+
+// All known Pokémon TCG release languages
+const KNOWN_POKEMON_LANGUAGES: { code: string; name: string }[] = [
+  { code: 'EN', name: 'English' },
+  { code: 'JP', name: 'Japanese' },
+  { code: 'KR', name: 'Korean' },
+  { code: 'ZH-TW', name: 'Chinese (Traditional)' },
+  { code: 'ZH-CN', name: 'Chinese (Simplified)' },
+  { code: 'FR', name: 'French' },
+  { code: 'DE', name: 'German' },
+  { code: 'IT', name: 'Italian' },
+  { code: 'ES', name: 'Spanish' },
+  { code: 'PT', name: 'Portuguese' },
+  { code: 'PL', name: 'Polish' },
+  { code: 'NL', name: 'Dutch' },
+  { code: 'RU', name: 'Russian' },
+  { code: 'TH', name: 'Thai' },
+  { code: 'ID', name: 'Indonesian' },
+];
+
 function SetCodeManager() {
   const qc = useQueryClient();
   const [fGame, setFGame] = useState<string | null>(null);
-  const [lang, setLang] = useState<'EN' | 'JP'>('EN');
+  const [lang, setLang] = useState<string>('EN');
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [form, setForm] = useState({ language: 'EN', set_code: '', alias: '', set_name: '' });
+  const [showNewLang, setShowNewLang] = useState(false);
+  const [newLangForm, setNewLangForm] = useState({ code: '', name: '' });
   const [editingAlias, setEditingAlias] = useState<DbAlias | null>(null);
   const [editingSet, setEditingSet] = useState<StaticSet | null>(null);
 
@@ -603,12 +650,32 @@ function SetCodeManager() {
     queryKey: ['card-games'],
     queryFn: () => api.get('/sets/games').then(r => r.data),
   });
+  const { data: registeredLanguages = [] } = useQuery<CardLanguage[]>({
+    queryKey: ['card-languages'],
+    queryFn: () => api.get('/sets/languages').then(r => r.data),
+  });
   const gameOptions = games.map(g => g.name.toLowerCase());
+
+  // Languages available in dropdown = registered (EN/JP built-in + user-added) merged with known library
+  const availableLangCodes = new Set(registeredLanguages.map(l => l.code));
+  const unregisteredKnown = KNOWN_POKEMON_LANGUAGES.filter(l => !availableLangCodes.has(l.code));
 
   const addMut = useMutation({
     mutationFn: (body: typeof form) => api.post('/sets/aliases', body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['set-aliases'] }); setShowAddForm(false); setForm({ language: 'EN', set_code: '', alias: '', set_name: '' }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['set-aliases'] }); setShowAddForm(false); setForm({ language: 'EN', set_code: '', alias: '', set_name: '' }); setShowNewLang(false); },
     onError: () => toast.error('Failed to add alias'),
+  });
+
+  const addLangMut = useMutation({
+    mutationFn: (body: { code: string; name: string }) => api.post('/sets/languages', body),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['card-languages'] });
+      setForm(f => ({ ...f, language: vars.code }));
+      setShowNewLang(false);
+      setNewLangForm({ code: '', name: '' });
+      toast.success(`Language ${vars.code} registered`);
+    },
+    onError: () => toast.error('Failed to register language'),
   });
 
   const filtered = staticSets
@@ -616,14 +683,44 @@ function SetCodeManager() {
     .filter(s => !fGame || s.game.toLowerCase() === fGame)
     .filter(s => !search || s.set_code.toLowerCase().includes(search.toLowerCase()) || s.names.some(n => n.includes(search.toLowerCase())));
 
-  const customAliases = dbAliases.filter(a => a.language === lang);
+  const customAliases = dbAliases
+    .filter(a => a.language === lang)
+    .filter(a => !search || a.set_code.toLowerCase().includes(search.toLowerCase()) || a.alias.toLowerCase().includes(search.toLowerCase()) || (a.set_name ?? '').toLowerCase().includes(search.toLowerCase()));
+
+  // Build language tabs: built-in EN/JP + any languages that have custom aliases
+  const customLangCodes = Array.from(new Set(dbAliases.map(a => a.language))).filter(l => l !== 'EN' && l !== 'JP');
+  const langTabs: { code: string; label: string; count: number }[] = [
+    { code: 'EN', label: 'English (EN)', count: staticSets.filter(s => s.language === 'EN' && (!fGame || s.game.toLowerCase() === fGame)).length },
+    { code: 'JP', label: 'Japanese (JP)', count: staticSets.filter(s => s.language === 'JP' && (!fGame || s.game.toLowerCase() === fGame)).length },
+    ...customLangCodes.map(code => {
+      const name = registeredLanguages.find(l => l.code === code)?.name
+        ?? KNOWN_POKEMON_LANGUAGES.find(l => l.code === code)?.name
+        ?? code;
+      return {
+        code,
+        label: name !== code ? `${name} (${code})` : code,
+        count: dbAliases.filter(a => a.language === code).length,
+      };
+    }),
+  ];
 
   return (
     <div className="flex flex-col h-full">
       {/* Controls */}
       <div className="flex items-center justify-between px-6 py-3 border-b border-zinc-800">
-        <div className="flex items-center gap-3">
-          <div className="flex gap-1">
+        <div className="flex gap-4">
+          {langTabs.map(l => (
+            <button key={l.code} onClick={() => setLang(l.code)}
+              className={`pb-1 text-sm font-medium border-b-2 transition-colors ${lang === l.code ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
+              {l.label} <span className="text-zinc-600 text-xs ml-1">{l.count}</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          {search && <button onClick={() => setSearch('')} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"><X size={12} /> Clear</button>}
+          <input type="text" placeholder="Search code or alias…" value={search} onChange={e => setSearch(e.target.value)}
+            className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-56" />
+          <div className="flex gap-1 border-l border-zinc-700 pl-2">
             <button onClick={() => setFGame(null)}
               className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${!fGame ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
               All
@@ -635,19 +732,6 @@ function SetCodeManager() {
               </button>
             ))}
           </div>
-          <div className="flex gap-4 border-l border-zinc-700 pl-3">
-            {(['EN', 'JP'] as const).map(l => (
-              <button key={l} onClick={() => setLang(l)}
-                className={`pb-1 text-sm font-medium border-b-2 transition-colors ${lang === l ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
-                {l === 'EN' ? 'English' : 'Japanese'} <span className="text-zinc-600 text-xs ml-1">{staticSets.filter(s => s.language === l && (!fGame || s.game.toLowerCase() === fGame)).length}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {search && <button onClick={() => setSearch('')} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300"><X size={12} /> Clear</button>}
-          <input type="text" placeholder="Search code or alias…" value={search} onChange={e => setSearch(e.target.value)}
-            className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-56" />
           <Button size="sm" onClick={() => setShowAddForm(v => !v)}><Plus size={14} /> Add New Set</Button>
         </div>
       </div>
@@ -655,19 +739,40 @@ function SetCodeManager() {
       <div className="flex-1 overflow-auto">
         {/* Add alias form */}
         {showAddForm && (
-          <div className="mx-6 mt-4 p-4 bg-zinc-800/50 border border-zinc-700 rounded-lg">
-            <p className="text-xs font-medium text-zinc-300 mb-3">Add Custom Alias</p>
+          <div className="mx-6 mt-4 p-4 bg-zinc-800/50 border border-zinc-700 rounded-lg space-y-3">
+            <p className="text-xs font-medium text-zinc-300">Add Custom Alias</p>
             <div className="grid grid-cols-4 gap-3">
               <div>
                 <label className="block text-xs text-zinc-500 mb-1">Language</label>
-                <select value={form.language} onChange={e => setForm(f => ({ ...f, language: e.target.value }))}
-                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500">
-                  <option value="EN">EN</option><option value="JP">JP</option>
+                <select
+                  value={form.language === '' ? NEW_LANG_VALUE : (showNewLang ? NEW_LANG_VALUE : form.language)}
+                  onChange={e => {
+                    if (e.target.value === NEW_LANG_VALUE) {
+                      setShowNewLang(true);
+                      setForm(f => ({ ...f, language: '' }));
+                    } else {
+                      setShowNewLang(false);
+                      setForm(f => ({ ...f, language: e.target.value }));
+                    }
+                  }}
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                >
+                  {registeredLanguages.map(l => (
+                    <option key={l.code} value={l.code}>{l.code} — {l.name}</option>
+                  ))}
+                  {unregisteredKnown.length > 0 && (
+                    <optgroup label="Available Languages (No card sets added)">
+                      {unregisteredKnown.map(l => (
+                        <option key={l.code} value={l.code}>{l.code} — {l.name}</option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <option value={NEW_LANG_VALUE}>+ Add new language…</option>
                 </select>
               </div>
               <div>
                 <label className="block text-xs text-zinc-500 mb-1">Set Code</label>
-                <input value={form.set_code} onChange={e => setForm(f => ({ ...f, set_code: e.target.value }))} placeholder="e.g. SWSH-SB"
+                <input value={form.set_code} onChange={e => setForm(f => ({ ...f, set_code: e.target.value }))} placeholder="e.g. SV1"
                   className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
               </div>
               <div>
@@ -681,17 +786,44 @@ function SetCodeManager() {
                   className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
               </div>
             </div>
-            <div className="flex justify-end gap-2 mt-3">
-              <Button size="sm" variant="secondary" onClick={() => setShowAddForm(false)}>Cancel</Button>
-              <Button size="sm" onClick={() => addMut.mutate(form)} disabled={!form.set_code || !form.alias || addMut.isPending}>Save</Button>
+            {/* New language sub-form */}
+            {showNewLang && (
+              <div className="p-3 bg-zinc-900 border border-zinc-700 rounded-lg">
+                <p className="text-xs text-zinc-400 mb-2">Register new language</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Full Name</label>
+                    <input value={newLangForm.name} onChange={e => setNewLangForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. French"
+                      className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-zinc-500 mb-1">Abbreviation</label>
+                    <input value={newLangForm.code} onChange={e => setNewLangForm(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="e.g. FR" maxLength={10}
+                      className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500 uppercase" />
+                  </div>
+                </div>
+                <div className="flex justify-end mt-2">
+                  <button onClick={() => addLangMut.mutate({ code: newLangForm.code, name: newLangForm.name })}
+                    disabled={!newLangForm.code || !newLangForm.name || addLangMut.isPending}
+                    className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-1.5 rounded font-medium transition-colors">
+                    {addLangMut.isPending ? 'Saving…' : 'Register Language'}
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button size="sm" variant="secondary" onClick={() => { setShowAddForm(false); setShowNewLang(false); }}>Cancel</Button>
+              <Button size="sm" onClick={() => addMut.mutate(form)} disabled={!form.language || !form.set_code || !form.alias || addMut.isPending}>Save</Button>
             </div>
           </div>
         )}
 
-        {/* Custom aliases */}
+        {/* Custom aliases / Registered sets */}
         {customAliases.length > 0 && (
           <div className="mx-6 mt-4 mb-2">
-            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Custom Aliases</p>
+            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">
+              {filtered.length > 0 ? 'Custom Aliases' : 'Registered Sets'}
+            </p>
             <table className="w-full text-xs border border-zinc-800 rounded-lg overflow-hidden">
               <thead>
                 <tr className="bg-zinc-800/60 text-zinc-400 uppercase tracking-wide text-[10px]">
@@ -713,26 +845,35 @@ function SetCodeManager() {
           </div>
         )}
 
-        {/* Static sets */}
-        <div className="mx-6 mt-4 mb-6">
-          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Static Sets</p>
-          <table className="w-full text-xs border border-zinc-800 rounded-lg overflow-hidden">
-            <thead>
-              <tr className="bg-zinc-800/60 text-zinc-400 uppercase tracking-wide text-[10px]">
-                <th className="px-3 py-2 text-left w-32">Code</th>
-                <th className="px-3 py-2 text-left">Aliases / Match Strings</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800">
-              {filtered.map((s, i) => (
-                <tr key={i} className="hover:bg-zinc-800/30 cursor-pointer transition-colors" onClick={() => setEditingSet(s)}>
-                  <td className="px-3 py-1.5 font-mono text-indigo-300/80 align-top">{s.set_code}</td>
-                  <td className="px-3 py-1.5 text-zinc-400 whitespace-normal">{s.names.join(' · ')}</td>
+        {/* Static sets — only shown for languages that have built-in sets */}
+        {filtered.length > 0 && (
+          <div className="mx-6 mt-4 mb-6">
+            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Static Sets</p>
+            <table className="w-full text-xs border border-zinc-800 rounded-lg overflow-hidden">
+              <thead>
+                <tr className="bg-zinc-800/60 text-zinc-400 uppercase tracking-wide text-[10px]">
+                  <th className="px-3 py-2 text-left w-32">Code</th>
+                  <th className="px-3 py-2 text-left">Aliases / Match Strings</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-zinc-800">
+                {filtered.map((s, i) => (
+                  <tr key={i} className="hover:bg-zinc-800/30 cursor-pointer transition-colors" onClick={() => setEditingSet(s)}>
+                    <td className="px-3 py-1.5 font-mono text-indigo-300/80 align-top">{s.set_code}</td>
+                    <td className="px-3 py-1.5 text-zinc-400 whitespace-normal">{s.names.join(' · ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {/* Empty state for custom languages with no aliases yet */}
+        {filtered.length === 0 && customAliases.length === 0 && (
+          <div className="mx-6 mt-8 text-center text-sm text-zinc-600">
+            No sets registered for {lang} yet. Use "Add New Set" to register one.
+            <p className="text-xs text-zinc-700 mt-1">Non-EN/JP languages use registered sets instead of a built-in list.</p>
+          </div>
+        )}
       </div>
 
       {editingAlias && <AliasModal alias={editingAlias} onClose={() => setEditingAlias(null)} />}

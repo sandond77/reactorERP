@@ -62,11 +62,24 @@ export async function saveMapping(req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 }
 
+export async function preflightImport(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.file) throw new AppError(400, 'No file provided');
+    const ambiguous = await importService.preflightImport(req.dataUserId, req.params['id'] as string, req.file.buffer);
+    res.json({ data: { ambiguous } });
+  } catch (err) { next(err); }
+}
+
 export async function executeImport(req: Request, res: Response, next: NextFunction) {
   try {
     // Re-upload needed for execution — client must send file again
     if (!req.file) throw new AppError(400, 'No CSV file provided for execution');
-    const result = await importService.executeImport(req.dataUserId, req.params['id'] as string, req.file.buffer);
+    // language_overrides: { "rowIndex": "EN"|"JP" } — from resolution modal
+    const overridesRaw = req.body.language_overrides;
+    const languageOverrides: Record<number, 'EN' | 'JP'> | undefined = overridesRaw
+      ? JSON.parse(typeof overridesRaw === 'string' ? overridesRaw : JSON.stringify(overridesRaw))
+      : undefined;
+    const result = await importService.executeImport(req.dataUserId, req.params['id'] as string, req.file.buffer, languageOverrides);
     res.json({ data: result });
   } catch (err) { next(err); }
 }

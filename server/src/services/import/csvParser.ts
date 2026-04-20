@@ -65,8 +65,8 @@ function parseExcelBuffer(buffer: Buffer): ParseResult {
       return allRows.some((r) => (r[h] ?? '').length > 0);
     });
 
-    // Filter out rows where all kept-header values are empty
-    const rows = allRows.filter((r) => headers.some((h) => (r[h] ?? '').length > 0));
+    // Filter out rows where all kept-header values are empty or whitespace-only
+    const rows = allRows.filter((r) => headers.some((h) => (r[h] ?? '').replace(/\s/g, '').length > 0));
 
     // Strip dropped headers from rows to keep payload small
     const cleanRows = rows.map((r) =>

@@ -5,7 +5,7 @@ import axios from 'axios';
 import { sql } from 'kysely';
 import { env } from '../config/env';
 import { db } from '../config/database';
-import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
+import { lookupSetCode, generatePartNumber, EN_SETS, JP_SETS } from '../utils/set-codes';
 import { auditContext } from '../utils/audit-context';
 import { normalizeGradeLabel } from '../utils/grade-labels';
 import { createRawPurchase, saveReceiptUrl as saveRawPurchaseReceiptUrl } from './raw-purchases.service';
@@ -364,11 +364,18 @@ interface ImageExtractionResult extends Omit<CardInfoResult, 'source'> {
   psa_label?: string;
 }
 
+function buildSetCodeReference(): string {
+  const enLines = EN_SETS.map((s) => `${s.code}: ${s.names[0]}`).join(', ');
+  const jpLines = JP_SETS.map((s) => `${s.code}: ${s.names[0]}`).join(', ');
+  return `EN set codes — ${enLines}\nJP set codes — ${jpLines}`;
+}
+
 async function extractCardInfoFromImage(
   imageBase64: string,
   mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
   game: string
 ): Promise<ImageExtractionResult | null> {
+  const setCodeRef = buildSetCodeReference();
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 768,
@@ -389,7 +396,7 @@ Extract all visible information. Return ONLY this JSON (no markdown):
   "psa_label": "normalized card identifier in format: '{YEAR} POKEMON {LANGUAGE} {SET_CODE}-{SET_NAME} {NUMBER} {CARD NAME} {RARITY}' — e.g. '2024 POKEMON JAPANESE SV8a-TERASTAL FEST ex 093 UMBREON EX' or '1996 POKEMON JAPANESE BS1-BASIC 006 CHARIZARD HOLO'. Use POKEMON (not P.M.), spell out JAPANESE/ENGLISH, zero-pad card numbers to 3 digits. Exclude grade and cert.",
   "card_name": "card name only, e.g. 'Charizard'",
   "set_name": "set name, e.g. 'Basic'",
-  "set_code": "internal set code if known, e.g. 'BS1' or 'XY-20TH' or null",
+  "set_code": "internal set code — match the set abbreviation or symbol visible on the card to the reference list below and return the exact code, e.g. 'SV8a' or 'SM1' or 'XY4' or null",
   "card_number": "card number only, e.g. '006' or '034/087'",
   "rarity": "rarity if visible, e.g. 'Holo' or '1st Edition'",
   "language": "EN | JP | KR",
@@ -399,6 +406,9 @@ Extract all visible information. Return ONLY this JSON (no markdown):
   "grade_label": "grade label text, e.g. 'GEM MT' or 'EXCELLENT-MINT'",
   "cert_number": "cert number if visible, e.g. '26354848'"
 }
+
+Set code reference (match abbreviations visible on card or PSA label):
+${setCodeRef}
 
 If not a card image, return null.`,
           },

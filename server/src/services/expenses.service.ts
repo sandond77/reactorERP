@@ -39,7 +39,7 @@ const SORT_COLS: Record<string, string> = {
 export async function listExpenses(
   userId: string,
   pagination: PaginationParams,
-  filters: { search?: string; types?: string[] },
+  filters: { search?: string; types?: string[]; year?: number },
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
 ) {
@@ -51,6 +51,10 @@ export async function listExpenses(
       filters.types!.length === 0
         ? qb.where(db.dynamic.lit(false) as any)
         : qb.where('e.type', 'in', filters.types! as any)
+    )
+    .$if(!!filters.year, (qb) => qb
+      .where('e.date', '>=', new Date(`${filters.year}-01-01`) as any)
+      .where('e.date', '<=', new Date(`${filters.year}-12-31`) as any)
     );
 
   const total = Number(

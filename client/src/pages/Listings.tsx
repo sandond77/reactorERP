@@ -366,11 +366,15 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
         instancesToList = listingMode === 'set' ? setSlabs : selectedCopies;
         if (instancesToList.length === 0) { toast.error('No copies selected'); setSubmitting(false); return; }
       }
+      // For set listings, divide the total price evenly per card
+      const perCardPrice = listingMode === 'set' && instancesToList.length > 1
+        ? (parseFloat(price) / instancesToList.length).toFixed(2)
+        : price;
       await Promise.all(instancesToList.map(copy =>
         api.post('/listings', {
           card_instance_id: copy.id,
           platform: 'ebay',
-          list_price: price,
+          list_price: perCardPrice,
           currency: 'USD',
           listed_at: listedAt || undefined,
           ebay_listing_url: ebayUrl || undefined,

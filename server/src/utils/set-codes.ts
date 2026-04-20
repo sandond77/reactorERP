@@ -16,17 +16,22 @@ interface SetEntry {
 
 export const EN_SETS: SetEntry[] = [
   // WOTC
-  { code: 'BS',  names: ['base set', 'base'] },
-  { code: 'JU',  names: ['jungle'] },
-  { code: 'FO',  names: ['fossil'] },
-  { code: 'TR',  names: ['team rocket'] },
-  { code: 'G1',  names: ['gym heroes'] },
-  { code: 'G2',  names: ['gym challenge'] },
-  { code: 'N1',  names: ['neo genesis'] },
-  { code: 'N2',  names: ['neo discovery'] },
-  { code: 'N3',  names: ['neo revelation'] },
-  { code: 'N4',  names: ['neo destiny'] },
-  { code: 'LC',  names: ['legendary collection'] },
+  { code: 'BS',   names: ['base set', 'base'] },
+  { code: 'JU',   names: ['jungle'] },
+  { code: 'FO',   names: ['fossil'] },
+  { code: 'BS2',  names: ['base set 2'] },
+  { code: 'TR',   names: ['team rocket'] },
+  { code: 'G1',   names: ['gym heroes'] },
+  { code: 'G2',   names: ['gym challenge'] },
+  { code: 'N1',   names: ['neo genesis'] },
+  { code: 'N2',   names: ['neo discovery'] },
+  { code: 'N3',   names: ['neo revelation'] },
+  { code: 'N4',   names: ['neo destiny'] },
+  { code: 'LC',   names: ['legendary collection'] },
+  // e-Card
+  { code: 'EXP',  names: ['expedition', 'expedition base set'] },
+  { code: 'AQ',   names: ['aquapolis'] },
+  { code: 'SK',   names: ['skyridge'] },
   // EX era
   { code: 'EX1',  names: ['ruby & sapphire', 'ex ruby & sapphire', 'ex ruby and sapphire', 'ex ruby sapphire'] },
   { code: 'EX2',  names: ['sandstorm', 'ex sandstorm'] },
@@ -62,31 +67,35 @@ export const EN_SETS: SetEntry[] = [
   { code: 'HGSS2', names: ['unleashed'] },
   { code: 'HGSS3', names: ['undaunted'] },
   { code: 'HGSS4', names: ['triumphant'] },
+  { code: 'HGSS5', names: ['call of legends'] },
   // Black & White
-  { code: 'BW1',  names: ['base set', 'black & white', 'black and white', 'black white base', 'bw base'] },
-  { code: 'BW2',  names: ['emerging powers'] },
-  { code: 'BW3',  names: ['noble victories'] },
-  { code: 'BW4',  names: ['next destinies'] },
-  { code: 'BW5',  names: ['dark explorers'] },
-  { code: 'BW6',  names: ['dragons exalted', 'dragon exalted'] },
-  { code: 'BW7',  names: ['boundaries crossed'] },
-  { code: 'BW8',  names: ['plasma storm'] },
-  { code: 'BW9',  names: ['plasma freeze'] },
-  { code: 'BW10', names: ['plasma blast'] },
-  { code: 'BW11', names: ['legendary treasures'] },
+  { code: 'BW1',   names: ['base set', 'black & white', 'black and white', 'black white base', 'bw base'] },
+  { code: 'BW2',   names: ['emerging powers'] },
+  { code: 'BW3',   names: ['noble victories'] },
+  { code: 'BW4',   names: ['next destinies'] },
+  { code: 'BW5',   names: ['dark explorers'] },
+  { code: 'BW6',   names: ['dragons exalted', 'dragon exalted'] },
+  { code: 'BW7',   names: ['boundaries crossed'] },
+  { code: 'BW8',   names: ['plasma storm'] },
+  { code: 'BW9',   names: ['plasma freeze'] },
+  { code: 'BW10',  names: ['plasma blast'] },
+  { code: 'BW11',  names: ['legendary treasures'] },
+  { code: 'BW-DV', names: ['dragon vault'] },
   // XY
-  { code: 'XY1',  names: ['base set', 'xy base set', 'xy base', 'xy'] },
-  { code: 'XY2',  names: ['flashfire'] },
-  { code: 'XY3',  names: ['furious fists'] },
-  { code: 'XY4',  names: ['phantom forces'] },
-  { code: 'XY5',  names: ['primal clash'] },
-  { code: 'XY6',  names: ['roaring skies'] },
-  { code: 'XY7',  names: ['ancient origins'] },
-  { code: 'XY8',  names: ['breakthrough'] },
-  { code: 'XY9',  names: ['breakpoint'] },
-  { code: 'XY10', names: ['fates collide'] },
-  { code: 'XY11', names: ['steam siege'] },
-  { code: 'XY12', names: ['evolutions'] },
+  { code: 'XY1',   names: ['base set', 'xy base set', 'xy base', 'xy'] },
+  { code: 'XY2',   names: ['flashfire'] },
+  { code: 'XY3',   names: ['furious fists'] },
+  { code: 'XY4',   names: ['phantom forces'] },
+  { code: 'XY5',   names: ['primal clash'] },
+  { code: 'XY6',   names: ['roaring skies'] },
+  { code: 'XY7',   names: ['ancient origins'] },
+  { code: 'XY8',   names: ['breakthrough'] },
+  { code: 'XY9',   names: ['breakpoint'] },
+  { code: 'XY10',  names: ['fates collide'] },
+  { code: 'XY11',  names: ['steam siege'] },
+  { code: 'XY12',  names: ['evolutions'] },
+  { code: 'XY-DC', names: ['double crisis'] },
+  { code: 'XY-GEN', names: ['generations'] },
   // Sun & Moon
   { code: 'SM1',    names: ['base set', 'sun & moon base', 'sun and moon base', 'sun moon base'] },
   { code: 'SM2',    names: ['guardians rising'] },
@@ -103,6 +112,9 @@ export const EN_SETS: SetEntry[] = [
   { code: 'SM11',   names: ['unified minds'] },
   { code: 'SM12',   names: ['cosmic eclipse'] },
   { code: 'SM12.5', names: ['hidden fates shiny vault', 'hidden fates shiny'] },
+  // SM special sets
+  { code: 'SM-SL',  names: ['shining legends'] },
+  { code: 'SM-DP',  names: ['detective pikachu'] },
   // Sword & Shield
   { code: 'SWSH1',    names: ['base set', 'sword & shield base', 'sword and shield base', 'swsh base'] },
   { code: 'SWSH2',    names: ['rebel clash'] },
@@ -118,8 +130,9 @@ export const EN_SETS: SetEntry[] = [
   { code: 'SWSH10',   names: ['astral radiance'] },
   { code: 'SWSH10.5', names: ['pokémon go', 'pokemon go'] },
   { code: 'SWSH11',   names: ['lost origin'] },
-  { code: 'SWSH12',   names: ['silver tempest'] },
+  { code: 'SWSH12',    names: ['silver tempest'] },
   { code: 'SWSH12.5', names: ['crown zenith'] },
+  { code: 'SWSH-CEL', names: ['celebrations', 'celebrations classic collection', '25th anniversary celebrations'] },
   // Scarlet & Violet
   { code: 'SV1',   names: ['scarlet & violet base', 'scarlet and violet base', 'sv base'] },
   { code: 'SV2',   names: ['paldea evolved'] },
@@ -131,15 +144,20 @@ export const EN_SETS: SetEntry[] = [
   { code: 'SV6',   names: ['twilight masquerade'] },
   { code: 'SV6.5', names: ['shrouded fable'] },
   { code: 'SV7',   names: ['stellar crown'] },
+  { code: 'SV7.5', names: ['surging sparks'] },
+  { code: 'SV8',   names: ['prismatic evolutions'] },
+  { code: 'SV8.5', names: ['journey together'] },
+  { code: 'SV9',   names: ['destined rivals'] },
+  { code: 'SV10',  names: ['black bolt & white flare', 'black bolt white flare'] },
   // Promos
-  { code: 'SV-P',    names: ['scarlet & violet promo', 'sv promo', 'sv black star promo'] },
-  { code: 'SWSH-P',  names: ['sword & shield promo', 'swsh promo', 'swsh black star promo', 'sword shield promo'] },
-  { code: 'SM-P',    names: ['sun & moon promo', 'sm promo', 'sm black star promo'] },
-  { code: 'PROMO-XY',   names: ['xy promo', 'xy black star promo'] },
-  { code: 'PROMO-BW',   names: ['bw promo', 'bw black star promo', 'black white promo'] },
-  { code: 'PROMO-HGSS', names: ['hgss promo', 'heartgold soulsilver promo'] },
-  { code: 'PROMO-DP',   names: ['dp promo', 'dp black star promo'] },
-  { code: 'PROMO-WOTC', names: ['wotc black star promo', 'wotc promo', 'wizards black star promo'] },
+  { code: 'SV-P',    names: ['scarlet & violet promo', 'scarlet & violet promos', 'sv promo', 'sv promos', 'sv black star promo', 'sv black star promos'] },
+  { code: 'SWSH-P',  names: ['sword & shield promo', 'sword & shield promos', 'swsh promo', 'swsh promos', 'swsh black star promo', 'swsh black star promos', 'sword shield promo'] },
+  { code: 'SM-P',    names: ['sun & moon promo', 'sun & moon promos', 'sm promo', 'sm promos', 'sm black star promo', 'sm black star promos'] },
+  { code: 'PROMO-XY',   names: ['xy promo', 'xy promos', 'xy black star promo', 'xy black star promos'] },
+  { code: 'PROMO-BW',   names: ['bw promo', 'bw promos', 'bw black star promo', 'bw black star promos', 'black white promo'] },
+  { code: 'PROMO-HGSS', names: ['hgss promo', 'hgss promos', 'heartgold soulsilver promo'] },
+  { code: 'PROMO-DP',   names: ['dp promo', 'dp promos', 'dp black star promo'] },
+  { code: 'PROMO-WOTC', names: ['wotc black star promo', 'wotc promos', 'wotc promo', 'wizards black star promo'] },
 ];
 
 // ── Japanese sets ─────────────────────────────────────────────────────────────
@@ -204,8 +222,11 @@ export const JP_SETS: SetEntry[] = [
   { code: 'BW6C',  names: ['cold flare jp', 'bw6c'] },
   { code: 'BW7',   names: ['plasma gale', 'bw7'] },
   { code: 'BW8',   names: ['thunder knuckle', 'bw8'] },
-  { code: 'BW8R',  names: ['spiral force', 'bw8r'] },
-  { code: 'BW9',   names: ['megalo cannon', 'bw9'] },
+  { code: 'BW8R',   names: ['spiral force', 'bw8r'] },
+  { code: 'BW9',    names: ['megalo cannon', 'bw9'] },
+  { code: 'BW-SHC', names: ['shiny collection', 'bw shiny collection'] },
+  { code: 'BW-DS',  names: ['dragon selection'] },
+  { code: 'BW-EB',  names: ['ex battle boost', 'bw ex battle boost'] },
   // XY / PCGxy
   { code: 'XY1',      names: ['collection x', 'xy base', 'xy'] },
   { code: 'XY2',      names: ['collection y'] },
@@ -302,8 +323,12 @@ export const JP_SETS: SetEntry[] = [
   { code: 'SV7a', names: ['paradise dragona', 'sv7a'] },
   { code: 'SV8',  names: ['super electric breaker', 'sv8'] },
   { code: 'SV8a', names: ['terastal festival ex', 'terastal fest ex', 'terastal fest', 'sv8a'] },
-  { code: 'SV9',  names: ['battle partners', 'sv9'] },
-  { code: 'SV10', names: ['glory of team rocket', 'sv10'] },
+  { code: 'SV9',   names: ['battle partners', 'sv9'] },
+  { code: 'SV10',  names: ['glory of team rocket', 'sv10'] },
+  // New 2025-2026 JP sets
+  { code: 'M3',    names: ['nihil zero'] },
+  { code: 'M4',    names: ['ninja spinner'] },
+  { code: 'M5',    names: ['abyss eye'] },
   // Promos
   { code: 'SV-P',  names: ['scarlet & violet promo', 'sv-p promo', 'sv promo jp'] },
   { code: 'S-P',   names: ['sword & shield promo', 's-p promo', 'swsh promo jp'] },
@@ -355,7 +380,14 @@ export function lookupSetCode(language: 'EN' | 'JP', setName: string): string | 
   allAliases.sort((a, b) => b.alias.length - a.alias.length);
 
   for (const { alias, code } of allAliases) {
-    if (norm.includes(alias) || normSpaced.includes(alias)) return code;
+    // Short aliases (≤4 chars, e.g. "sm2", "sv1") require word boundaries to avoid
+    // "sm2" matching inside "sm210", "bs" inside "burst", etc.
+    if (alias.length <= 4) {
+      const re = new RegExp(`(?<![a-z0-9])${alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`, 'i');
+      if (re.test(norm) || re.test(normSpaced)) return code;
+    } else {
+      if (norm.includes(alias) || normSpaced.includes(alias)) return code;
+    }
   }
 
   return null;

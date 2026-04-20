@@ -334,7 +334,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         <span className="text-xs text-zinc-600">{platform === 'ebay' ? 'eBay' : 'Other'}</span>
       </div>
       <p className="text-xs text-zinc-500">What type of card are you selling?</p>
-      <div className={cn('grid gap-3', platform === 'card_show' ? 'grid-cols-3' : 'grid-cols-2')}>
+      <div className={cn('grid gap-3', (platform === 'card_show' || platform === 'ebay') ? 'grid-cols-3' : 'grid-cols-2')}>
         <button type="button"
           onClick={() => { setSaleMode('graded'); setStep(platform === 'ebay' ? 'search' : 'other-lookup'); }}
           className="rounded-xl border-2 border-indigo-500 bg-indigo-500/10 px-4 py-5 text-left hover:bg-indigo-500/20 transition-colors">
@@ -353,6 +353,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             className="rounded-xl border-2 border-teal-600/60 bg-teal-500/10 px-4 py-5 text-left hover:bg-teal-500/20 transition-colors">
             <p className="text-sm font-semibold text-teal-300">Bulk Sale</p>
             <p className="text-xs text-zinc-500 mt-0.5">Multiple cards, one transaction</p>
+          </button>
+        )}
+        {platform === 'ebay' && (
+          <button type="button"
+            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setStep('bulk-search'); }}
+            className="rounded-xl border-2 border-teal-600/60 bg-teal-500/10 px-4 py-5 text-left hover:bg-teal-500/20 transition-colors">
+            <p className="text-sm font-semibold text-teal-300">Set Listing</p>
+            <p className="text-xs text-zinc-500 mt-0.5">Multiple cards, total split evenly</p>
           </button>
         )}
       </div>
@@ -1083,6 +1091,17 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // ── Step: bulk-review ────────────────────────────────────────────────────────
 
   if (step === 'bulk-review') {
+    const isEbaySet = platform === 'ebay';
+    const n = bulkCart.length;
+
+    // For eBay set listings: total inputs that divide evenly per card
+    const totalStrikeCents = Math.round(parseFloat(strikePrice || '0') * 100);
+    const totalEarningsCents = orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : totalStrikeCents;
+    const perCardStrike = n > 0 ? (totalStrikeCents / n / 100).toFixed(2) : '0.00';
+    const perCardEarnings = n > 0 ? (totalEarningsCents / n / 100).toFixed(2) : '0.00';
+    const perCardFees = n > 0 ? ((totalStrikeCents - totalEarningsCents) / n / 100).toFixed(2) : '0.00';
+
+    // Card show total (manual per-card pricing)
     const total = bulkCart.reduce((s, item) => {
       const final = Math.round(parseFloat(item.final_price_input || '0') * 100);
       return s + final;
@@ -1096,44 +1115,76 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-4">
         <div className="flex items-center gap-2 mb-1">
           <button type="button" onClick={() => setStep('bulk-search')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
-          <span className="text-xs text-zinc-600">Card Show · Bulk Sale · Review</span>
+          <span className="text-xs text-zinc-600">{isEbaySet ? 'eBay · Set Listing · Review' : 'Card Show · Bulk Sale · Review'}</span>
         </div>
 
-        <div className="flex items-end gap-3">
-          <div className="w-36">
-            <Input label="Discount % (all)" type="number" min="0" max="100" step="1"
-              placeholder="0" value={bulkDiscount} onChange={(e) => {
-                const pct = parseFloat(e.target.value || '0');
-                setBulkDiscount(e.target.value);
-                const multiplier = 1 - pct / 100;
-                setBulkCart(prev => prev.map(c => ({
-                  ...c,
-                  final_price_input: c.sticker_price_input
-                    ? (parseFloat(c.sticker_price_input) * multiplier).toFixed(2)
-                    : c.final_price_input,
-                })));
-              }} />
+        {isEbaySet ? (
+          /* ── eBay Set Listing: enter totals, split evenly ── */
+          <div className="space-y-3">
+            <div className="p-3 bg-zinc-800/50 border border-zinc-700 rounded-lg">
+              <p className="text-xs font-medium text-zinc-400 mb-2">Set Listing Totals — split evenly across {n} card{n !== 1 ? 's' : ''}</p>
+              <div className="grid grid-cols-2 gap-3">
+                <Input label="Total Strike Price" type="number" step="0.01" min="0" placeholder="0.00"
+                  value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+                <Input label="Total After Fees" type="number" step="0.01" min="0" placeholder="0.00"
+                  value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
+              </div>
+              {strikePrice && (
+                <p className="text-xs text-zinc-500 mt-2">
+                  Per card: <span className="text-zinc-300">${perCardStrike} strike</span>
+                  {orderEarnings && parseFloat(perCardFees) > 0 && <> · <span className="text-zinc-300">${perCardEarnings} after fees</span> · <span className="text-amber-400">${perCardFees} fees</span></>}
+                </p>
+              )}
+            </div>
+            <Input label="eBay Link" type="url" placeholder="https://www.ebay.com/…"
+              value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
+            <Input label="Order #" placeholder="e.g. eBay order number"
+              value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
           </div>
-          {parseFloat(bulkDiscount || '0') > 0 && (
-            <p className="text-xs text-zinc-500 pb-2">{parseFloat(bulkDiscount)}% off each card</p>
-          )}
-        </div>
-
+        ) : (
+          /* ── Card Show: per-card manual pricing ── */
+          <div className="flex items-end gap-3">
+            <div className="w-36">
+              <Input label="Discount % (all)" type="number" min="0" max="100" step="1"
+                placeholder="0" value={bulkDiscount} onChange={(e) => {
+                  const pct = parseFloat(e.target.value || '0');
+                  setBulkDiscount(e.target.value);
+                  const multiplier = 1 - pct / 100;
+                  setBulkCart(prev => prev.map(c => ({
+                    ...c,
+                    final_price_input: c.sticker_price_input
+                      ? (parseFloat(c.sticker_price_input) * multiplier).toFixed(2)
+                      : c.final_price_input,
+                  })));
+                }} />
+            </div>
+            {parseFloat(bulkDiscount || '0') > 0 && (
+              <p className="text-xs text-zinc-500 pb-2">{parseFloat(bulkDiscount)}% off each card</p>
+            )}
+          </div>
+        )}
 
         <div className="rounded-lg border border-zinc-700 overflow-hidden">
-          <div className="grid grid-cols-[1fr_6rem_6rem_4rem] gap-x-2 px-3 py-2 bg-zinc-900 border-b border-zinc-700">
+          <div className={cn('grid gap-x-2 px-3 py-2 bg-zinc-900 border-b border-zinc-700',
+            isEbaySet ? 'grid-cols-[1fr_auto]' : 'grid-cols-[1fr_6rem_6rem_4rem]')}>
             <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Card</span>
-            <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Sticker</span>
-            <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Final</span>
-            <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Disc.</span>
+            {isEbaySet
+              ? <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Per-Card</span>
+              : <>
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Sticker</span>
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Final</span>
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Disc.</span>
+                </>
+            }
           </div>
-          <div className="max-h-[360px] overflow-y-auto">
+          <div className="max-h-[280px] overflow-y-auto">
           {bulkCart.map((item) => {
             const sticker = parseFloat(item.sticker_price_input || '0');
             const final = parseFloat(item.final_price_input || '0');
             const discountPct = sticker > 0 ? Math.round((1 - final / sticker) * 100) : 0;
             return (
-              <div key={item.id} className="grid grid-cols-[1fr_6rem_6rem_4rem] gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start">
+              <div key={item.id} className={cn('gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start',
+                isEbaySet ? 'flex items-center justify-between' : 'grid grid-cols-[1fr_6rem_6rem_4rem]')}>
                 <div className="min-w-0">
                   <p className="text-sm text-zinc-200 leading-snug">{item.card_name ?? '—'}</p>
                   <p className="text-xs text-zinc-500 mt-0.5">
@@ -1142,64 +1193,82 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
                   </p>
                 </div>
-                <div className="flex items-center justify-end gap-0.5">
-                  <span className="text-zinc-600 text-xs">$</span>
-                  <input type="number" step="0.01" min="0"
-                    value={item.sticker_price_input}
-                    onChange={(e) => updateReviewField(item.id, 'sticker_price_input', e.target.value)}
-                    className="w-16 text-xs bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300 text-right focus:outline-none focus:border-indigo-500 [appearance:textfield]"
-                  />
-                </div>
-                <div className="flex items-center justify-end gap-0.5">
-                  <span className="text-zinc-600 text-xs">$</span>
-                  <input type="number" step="0.01" min="0"
-                    value={item.final_price_input}
-                    onChange={(e) => updateReviewField(item.id, 'final_price_input', e.target.value)}
-                    className="w-16 text-xs bg-zinc-800 border border-indigo-600/60 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500 [appearance:textfield]"
-                  />
-                </div>
-                <p className={cn('text-xs text-right tabular-nums', discountPct > 0 ? 'text-amber-400' : 'text-zinc-600')}>
-                  {discountPct > 0 ? `-${discountPct}%` : '—'}
-                </p>
+                {isEbaySet ? (
+                  <p className="text-sm tabular-nums text-zinc-400 shrink-0">
+                    {strikePrice ? `$${perCardStrike}` : '—'}
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-end gap-0.5">
+                      <span className="text-zinc-600 text-xs">$</span>
+                      <input type="number" step="0.01" min="0"
+                        value={item.sticker_price_input}
+                        onChange={(e) => updateReviewField(item.id, 'sticker_price_input', e.target.value)}
+                        className="w-16 text-xs bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300 text-right focus:outline-none focus:border-indigo-500 [appearance:textfield]"
+                      />
+                    </div>
+                    <div className="flex items-center justify-end gap-0.5">
+                      <span className="text-zinc-600 text-xs">$</span>
+                      <input type="number" step="0.01" min="0"
+                        value={item.final_price_input}
+                        onChange={(e) => updateReviewField(item.id, 'final_price_input', e.target.value)}
+                        className="w-16 text-xs bg-zinc-800 border border-indigo-600/60 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500 [appearance:textfield]"
+                      />
+                    </div>
+                    <p className={cn('text-xs text-right tabular-nums', discountPct > 0 ? 'text-amber-400' : 'text-zinc-600')}>
+                      {discountPct > 0 ? `-${discountPct}%` : '—'}
+                    </p>
+                  </>
+                )}
               </div>
             );
           })}
           </div>
-          <div className="grid grid-cols-[1fr_6rem_6rem_4rem] gap-x-2 px-3 py-2.5 bg-zinc-900/50 border-t border-zinc-700">
-            <p className="text-xs font-semibold text-zinc-400">{bulkCart.length} card{bulkCart.length !== 1 ? 's' : ''}</p>
-            <span /><span />
-            <p className="text-sm font-bold text-zinc-100 text-right tabular-nums col-start-3">${(total / 100).toFixed(2)}</p>
+          <div className={cn('gap-x-2 px-3 py-2.5 bg-zinc-900/50 border-t border-zinc-700',
+            isEbaySet ? 'flex items-center justify-between' : 'grid grid-cols-[1fr_6rem_6rem_4rem]')}>
+            <p className="text-xs font-semibold text-zinc-400">{n} card{n !== 1 ? 's' : ''}</p>
+            {isEbaySet
+              ? <p className="text-sm font-bold text-zinc-100 tabular-nums">
+                  {strikePrice ? `$${strikePrice} total` : '—'}
+                </p>
+              : <><span /><span /><p className="text-sm font-bold text-zinc-100 text-right tabular-nums col-start-3">${(total / 100).toFixed(2)}</p></>
+            }
           </div>
         </div>
 
-        {/* Card show + date + notes */}
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Card Show</label>
-          <select value={cardShowId} onChange={(e) => {
-            const val = e.target.value;
-            if (val === '__archived__') { setShowArchived(true); return; }
-            setCardShowId(val);
-            const show = (cardShowsData?.data ?? []).find((s) => s.id === val);
-            if (show) setSoldAt(show.show_date.slice(0, 10));
-          }} className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors">
-            <option value="">— Select show (optional) —</option>
-            {(() => {
-              const all = cardShowsData?.data ?? [];
-              const visibleShows = showArchived ? all : all.slice(0, 3);
-              const archived = all.slice(3);
-              return (
-                <>
-                  {visibleShows.map((s) => {
-                    const fmt = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
-                    const dateLabel = s.num_days > 1 && s.end_date ? `${fmt(s.show_date)} – ${fmt(s.end_date)}` : fmt(s.show_date);
-                    return <option key={s.id} value={s.id}>{s.name} · {dateLabel}{s.location ? ` · ${s.location}` : ''}</option>;
-                  })}
-                  {!showArchived && archived.length > 0 && <option value="__archived__">— Show {archived.length} more —</option>}
-                </>
-              );
-            })()}
-          </select>
-        </div>
+        {/* Card show fields (non-eBay only) */}
+        {!isEbaySet && (
+          <>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Card Show</label>
+              <select value={cardShowId} onChange={(e) => {
+                const val = e.target.value;
+                if (val === '__archived__') { setShowArchived(true); return; }
+                setCardShowId(val);
+                const show = (cardShowsData?.data ?? []).find((s) => s.id === val);
+                if (show) setSoldAt(show.show_date.slice(0, 10));
+              }} className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors">
+                <option value="">— Select show (optional) —</option>
+                {(() => {
+                  const all = cardShowsData?.data ?? [];
+                  const visibleShows = showArchived ? all : all.slice(0, 3);
+                  const archived = all.slice(3);
+                  return (
+                    <>
+                      {visibleShows.map((s) => {
+                        const fmt = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+                        const dateLabel = s.num_days > 1 && s.end_date ? `${fmt(s.show_date)} – ${fmt(s.end_date)}` : fmt(s.show_date);
+                        return <option key={s.id} value={s.id}>{s.name} · {dateLabel}{s.location ? ` · ${s.location}` : ''}</option>;
+                      })}
+                      {!showArchived && archived.length > 0 && <option value="__archived__">— Show {archived.length} more —</option>}
+                    </>
+                  );
+                })()}
+              </select>
+            </div>
+          </>
+        )}
+
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sold Date</label>
           <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
@@ -1210,10 +1279,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" onClick={() => setStep('bulk-search')}>Back</Button>
-          <Button type="button" disabled={bulkCart.some(i => {
-            const n = parseFloat(i.final_price_input || '0');
-            return isNaN(n) || n <= 0;
-          })} onClick={() => setStep('bulk-confirm')}>
+          <Button type="button"
+            disabled={isEbaySet
+              ? !strikePrice || parseFloat(strikePrice) <= 0
+              : bulkCart.some(i => { const n = parseFloat(i.final_price_input || '0'); return isNaN(n) || n <= 0; })
+            }
+            onClick={() => setStep('bulk-confirm')}>
             Review &amp; Confirm →
           </Button>
         </div>
@@ -1224,10 +1295,27 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // ── Step: bulk-confirm ───────────────────────────────────────────────────────
 
   if (step === 'bulk-confirm') {
-    const itemsWithFinal = bulkCart.map(item => ({
-      ...item,
-      final_price: Math.round(parseFloat(item.final_price_input || '0') * 100),
-    }));
+    const isEbaySet = platform === 'ebay';
+    const n = bulkCart.length;
+
+    // eBay set: split total evenly per card
+    const totalStrikeCents = Math.round(parseFloat(strikePrice || '0') * 100);
+    const totalEarningsCents = orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : totalStrikeCents;
+    const totalFeesCents = Math.max(0, totalStrikeCents - totalEarningsCents);
+    // Distribute remainder to first card to avoid rounding loss
+    const basePerCard = Math.floor(totalStrikeCents / n);
+    const baseFeesPerCard = Math.floor(totalFeesCents / n);
+    const strikeRemainder = totalStrikeCents - basePerCard * n;
+    const feesRemainder = totalFeesCents - baseFeesPerCard * n;
+
+    const itemsWithFinal = bulkCart.map((item, idx) => {
+      if (isEbaySet) {
+        const sale_price = basePerCard + (idx === 0 ? strikeRemainder : 0);
+        const platform_fees = baseFeesPerCard + (idx === 0 ? feesRemainder : 0);
+        return { ...item, final_price: sale_price, platform_fees };
+      }
+      return { ...item, final_price: Math.round(parseFloat(item.final_price_input || '0') * 100), platform_fees: 0 };
+    });
     const total = itemsWithFinal.reduce((s, i) => s + i.final_price, 0);
     const selectedShow = (cardShowsData?.data ?? []).find(s => s.id === cardShowId);
 
@@ -1239,9 +1327,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             card_instance_id: item.id,
             listing_id: item.listing_id,
             sale_price: item.final_price,
+            platform_fees: item.platform_fees,
           })),
-          platform: 'card_show',
-          card_show_id: cardShowId || undefined,
+          platform: isEbaySet ? 'ebay' : 'card_show',
+          card_show_id: isEbaySet ? undefined : (cardShowId || undefined),
+          unique_id: isEbaySet ? (orderNumber || undefined) : undefined,
+          order_details_link: isEbaySet ? (ebayLink || undefined) : undefined,
           currency,
           sold_at: soldAt || undefined,
           unique_id_2: notes || undefined,
@@ -1260,7 +1351,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-4">
         <div className="flex items-center gap-2 mb-1">
           <button type="button" onClick={() => setStep('bulk-review')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
-          <span className="text-xs text-zinc-600">Card Show · Bulk Sale · Confirm</span>
+          <span className="text-xs text-zinc-600">{isEbaySet ? 'eBay · Set Listing · Confirm' : 'Card Show · Bulk Sale · Confirm'}</span>
         </div>
 
         <div className="rounded-lg border border-zinc-700 bg-zinc-900/40 p-4 space-y-2">
@@ -1268,9 +1359,21 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
             <span className="text-zinc-500">Cards</span>
             <span className="text-zinc-200 font-medium">{bulkCart.length}</span>
-            <span className="text-zinc-500">Total</span>
+            <span className="text-zinc-500">{isEbaySet ? 'Total Strike' : 'Total'}</span>
             <span className="text-zinc-100 font-bold">${(total / 100).toFixed(2)}</span>
-            {selectedShow && <>
+            {isEbaySet && totalFeesCents > 0 && <>
+              <span className="text-zinc-500">After Fees</span>
+              <span className="text-zinc-100">${(totalEarningsCents / 100).toFixed(2)}</span>
+              <span className="text-zinc-500">Fees</span>
+              <span className="text-amber-400">${(totalFeesCents / 100).toFixed(2)}</span>
+              <span className="text-zinc-500">Per Card</span>
+              <span className="text-zinc-400 text-xs">${(basePerCard / 100).toFixed(2)} strike · ${((basePerCard - baseFeesPerCard) / 100).toFixed(2)} after fees</span>
+            </>}
+            {isEbaySet && orderNumber && <>
+              <span className="text-zinc-500">Order #</span>
+              <span className="text-zinc-200 font-mono text-xs">{orderNumber}</span>
+            </>}
+            {!isEbaySet && selectedShow && <>
               <span className="text-zinc-500">Card Show</span>
               <span className="text-zinc-200 truncate">{selectedShow.name}</span>
             </>}
@@ -1296,7 +1399,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
                 </p>
               </div>
-              <p className="text-sm font-medium text-zinc-100 tabular-nums shrink-0">${(item.final_price / 100).toFixed(2)}</p>
+              <div className="text-right shrink-0">
+                <p className="text-sm font-medium text-zinc-100 tabular-nums">${(item.final_price / 100).toFixed(2)}</p>
+                {isEbaySet && item.platform_fees > 0 && (
+                  <p className="text-xs text-zinc-500 tabular-nums">${((item.final_price - item.platform_fees) / 100).toFixed(2)} after fees</p>
+                )}
+              </div>
             </div>
           ))}
         </div>

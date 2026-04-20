@@ -10,6 +10,16 @@ import { Button } from '../components/ui/Button';
 
 type ImportType = 'graded' | 'raw_purchase' | 'bulk_sale' | 'expenses';
 
+interface AmbiguousRow {
+  row: number;
+  card_name: string;
+  set_name: string | null;
+  en_code: string | null;
+  en_set: string | null;
+  jp_code: string | null;
+  jp_set: string | null;
+}
+
 interface ImportPreview {
   id: string;
   original_filename: string;
@@ -32,6 +42,7 @@ interface ImportRecord {
   imported_count: number;
   error_count: number;
   created_at: string;
+  completed_at: string | null;
 }
 
 interface ImportResult {
@@ -88,6 +99,273 @@ function statusBadge(status: string) {
   return <span className="text-xs text-zinc-500">{status}</span>;
 }
 
+// ─── Inline Set Creator (used inside resolution modal) ────────────────────────
+
+const NEW_LANG_SENTINEL = '__new__';
+
+// All known Pokémon TCG release languages (shared with Set Codes page)
+const KNOWN_POKEMON_LANGUAGES = [
+  { code: 'EN', name: 'English' },
+  { code: 'JP', name: 'Japanese' },
+  { code: 'KR', name: 'Korean' },
+  { code: 'ZH-TW', name: 'Chinese (Traditional)' },
+  { code: 'ZH-CN', name: 'Chinese (Simplified)' },
+  { code: 'FR', name: 'French' },
+  { code: 'DE', name: 'German' },
+  { code: 'IT', name: 'Italian' },
+  { code: 'ES', name: 'Spanish' },
+  { code: 'PT', name: 'Portuguese' },
+  { code: 'PL', name: 'Polish' },
+  { code: 'NL', name: 'Dutch' },
+  { code: 'RU', name: 'Russian' },
+  { code: 'TH', name: 'Thai' },
+  { code: 'ID', name: 'Indonesian' },
+];
+
+const NEW_LANG_SENTINEL_IMPORT = '__new_lang__';
+
+function InlineSetCreator({ onCreated }: { onCreated: (lang: string) => void }) {
+  const qc = useQueryClient();
+  const [langSelection, setLangSelection] = useState('');
+  const [showCustomLang, setShowCustomLang] = useState(false);
+  const [customLang, setCustomLang] = useState({ code: '', name: '' });
+  const [form, setForm] = useState({ set_code: '', alias: '', set_name: '' });
+  const [saving, setSaving] = useState(false);
+
+  function handleLangChange(val: string) {
+    if (val === NEW_LANG_SENTINEL_IMPORT) {
+      setShowCustomLang(true);
+      setLangSelection('');
+    } else {
+      setShowCustomLang(false);
+      setLangSelection(val);
+    }
+  }
+
+  async function handleSave() {
+    const lang = langSelection || customLang.code.toUpperCase();
+    if (!lang || !form.set_code || !form.alias) return;
+    setSaving(true);
+    try {
+      // If it's a custom language not in the known list, register it first
+      if (showCustomLang && customLang.code && customLang.name) {
+        await api.post('/sets/languages', { code: customLang.code.toUpperCase(), name: customLang.name });
+        qc.invalidateQueries({ queryKey: ['card-languages'] });
+      }
+      await api.post('/sets/aliases', { ...form, language: lang });
+      qc.invalidateQueries({ queryKey: ['set-aliases'] });
+      toast.success(`Set ${form.set_code} registered for ${lang}`);
+      onCreated(lang);
+    } catch {
+      toast.error('Failed to register set');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const fi = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(prev => ({ ...prev, [key]: e.target.value }));
+
+  const activeLang = langSelection || (showCustomLang ? customLang.code.toUpperCase() : '');
+
+  return (
+    <div className="mt-3 p-3 bg-zinc-800/60 border border-zinc-700 rounded-lg space-y-2">
+      <p className="text-xs font-medium text-zinc-300">Register a new card set</p>
+      <div className="grid grid-cols-3 gap-2">
+        <div>
+          <label className="block text-[10px] text-zinc-500 mb-1">Language</label>
+          <select value={showCustomLang ? NEW_LANG_SENTINEL_IMPORT : langSelection} onChange={e => handleLangChange(e.target.value)}
+            className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500">
+            <option value="">Select…</option>
+            {KNOWN_POKEMON_LANGUAGES.map(l => (
+              <option key={l.code} value={l.code}>{l.code} — {l.name}</option>
+            ))}
+            <option value={NEW_LANG_SENTINEL_IMPORT}>+ Other language…</option>
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] text-zinc-500 mb-1">Set Code</label>
+          <input value={form.set_code} onChange={fi('set_code')} placeholder="e.g. SV1"
+            className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label className="block text-[10px] text-zinc-500 mb-1">Alias (match string)</label>
+          <input value={form.alias} onChange={fi('alias')} placeholder="e.g. scarlet ex kr"
+            className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
+        </div>
+      </div>
+      {showCustomLang && (
+        <div className="grid grid-cols-2 gap-2 p-2 bg-zinc-900 rounded border border-zinc-700">
+          <div>
+            <label className="block text-[10px] text-zinc-500 mb-1">Full Language Name</label>
+            <input value={customLang.name} onChange={e => setCustomLang(f => ({ ...f, name: e.target.value }))} placeholder="e.g. French"
+              className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500" />
+          </div>
+          <div>
+            <label className="block text-[10px] text-zinc-500 mb-1">Abbreviation</label>
+            <input value={customLang.code} onChange={e => setCustomLang(f => ({ ...f, code: e.target.value.toUpperCase() }))} placeholder="e.g. FR" maxLength={10}
+              className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500 uppercase" />
+          </div>
+        </div>
+      )}
+      <div className="flex justify-end">
+        <button onClick={handleSave} disabled={!activeLang || !form.set_code || !form.alias || saving}
+          className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-3 py-1.5 rounded font-medium transition-colors">
+          {saving ? 'Saving…' : 'Save Set'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Language Resolution Modal ────────────────────────────────────────────────
+
+// Group key for deduplication
+function groupKey(r: AmbiguousRow) {
+  return `${r.card_name}|${r.en_code ?? ''}|${r.jp_code ?? ''}`;
+}
+
+interface RowGroup {
+  key: string;
+  representative: AmbiguousRow;
+  rowNumbers: number[];
+}
+
+function buildGroups(rows: AmbiguousRow[]): RowGroup[] {
+  const map = new Map<string, RowGroup>();
+  for (const r of rows) {
+    const k = groupKey(r);
+    if (map.has(k)) {
+      map.get(k)!.rowNumbers.push(r.row);
+    } else {
+      map.set(k, { key: k, representative: r, rowNumbers: [r.row] });
+    }
+  }
+  return Array.from(map.values());
+}
+
+function LanguageResolutionModal({
+  rows,
+  onResolve,
+  onCancel,
+}: {
+  rows: AmbiguousRow[];
+  onResolve: (overrides: Record<number, string>) => void;
+  onCancel: () => void;
+}) {
+  const groups = buildGroups(rows);
+
+  // selections keyed by group key
+  const [selections, setSelections] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    groups.forEach((g) => { init[g.key] = 'EN'; });
+    return init;
+  });
+  // Track which group has the inline set creator open
+  const [creatorGroup, setCreatorGroup] = useState<string | null>(null);
+
+  const allResolved = groups.every((g) => selections[g.key] && selections[g.key] !== NEW_LANG_SENTINEL);
+
+  function handleLangChange(key: string, val: string) {
+    if (val === NEW_LANG_SENTINEL) {
+      setCreatorGroup(key);
+      setSelections(s => ({ ...s, [key]: NEW_LANG_SENTINEL }));
+    } else {
+      setCreatorGroup(null);
+      setSelections(s => ({ ...s, [key]: val }));
+    }
+  }
+
+  function handleConfirm() {
+    const overrides: Record<number, string> = {};
+    groups.forEach((g) => {
+      const lang = selections[g.key];
+      g.rowNumbers.forEach((rowNum) => { overrides[rowNum] = lang; });
+    });
+    onResolve(overrides);
+  }
+
+  const uniqueCount = groups.length;
+  const totalCount = rows.length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
+        <div className="p-5 border-b border-zinc-800">
+          <h2 className="text-sm font-semibold text-zinc-100">Resolve Language Ambiguity</h2>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            {totalCount} card{totalCount !== 1 ? 's' : ''} matched sets in multiple languages
+            {uniqueCount < totalCount ? ` — grouped into ${uniqueCount} unique card${uniqueCount !== 1 ? 's' : ''}` : ''}.
+            Select the correct language for each.
+          </p>
+          <p className="text-xs text-zinc-600 mt-1.5">
+            Only languages with registered card sets are shown. Select "New language…" to register a card set for a different language before importing.
+          </p>
+        </div>
+        <div className="overflow-y-auto flex-1 divide-y divide-zinc-800">
+          {groups.map((g) => {
+            const r = g.representative;
+            const options: { lang: string; code: string; set: string | null }[] = [];
+            if (r.en_code) options.push({ lang: 'EN', code: r.en_code, set: r.en_set });
+            if (r.jp_code) options.push({ lang: 'JP', code: r.jp_code, set: r.jp_set });
+            const isCreating = creatorGroup === g.key;
+            return (
+              <div key={g.key} className="px-4 py-3">
+                <div className="flex items-start gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-baseline gap-2">
+                      <p className="text-sm text-zinc-200 break-words">{r.card_name}</p>
+                      {g.rowNumbers.length > 1 && (
+                        <span className="shrink-0 text-xs font-medium text-indigo-400 bg-indigo-500/15 px-1.5 py-0.5 rounded">
+                          ×{g.rowNumbers.length}
+                        </span>
+                      )}
+                    </div>
+                    {r.set_name && <p className="text-xs text-zinc-500 mt-0.5">Set: {r.set_name}</p>}
+                    <div className="flex gap-4 mt-1.5 text-xs text-zinc-500">
+                      {options.map((o) => (
+                        <span key={o.lang}>{o.lang}: <span className="text-zinc-300">{o.code} — {o.set}</span></span>
+                      ))}
+                    </div>
+                  </div>
+                  <select
+                    value={selections[g.key] ?? options[0]?.lang ?? 'EN'}
+                    onChange={(e) => handleLangChange(g.key, e.target.value)}
+                    className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500 shrink-0"
+                  >
+                    {options.map((o) => (
+                      <option key={o.lang} value={o.lang}>{o.lang} — {o.code}</option>
+                    ))}
+                    <option value={NEW_LANG_SENTINEL}>New language…</option>
+                  </select>
+                </div>
+                {isCreating && (
+                  <InlineSetCreator
+                    onCreated={(lang) => {
+                      setCreatorGroup(null);
+                      setSelections(s => ({ ...s, [g.key]: lang }));
+                    }}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <div className="p-4 border-t border-zinc-800 flex justify-end gap-3">
+          <button onClick={onCancel} className="text-xs text-zinc-500 hover:text-zinc-300 px-3 py-1.5">Cancel</button>
+          <button
+            onClick={handleConfirm}
+            disabled={!allResolved}
+            className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-1.5 rounded font-medium transition-colors"
+          >
+            Confirm & Import
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Upload zone ──────────────────────────────────────────────────────────────
 
 function UploadZone({ onFile }: { onFile: (file: File) => void }) {
@@ -134,6 +412,7 @@ function ImportFlow() {
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [importType, setImportType] = useState<ImportType>('graded');
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [ambiguousRows, setAmbiguousRows] = useState<AmbiguousRow[] | null>(null);
 
   const uploadMut = useMutation({
     mutationFn: (f: File) => {
@@ -152,12 +431,33 @@ function ImportFlow() {
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to parse file'),
   });
 
-  const executeMut = useMutation({
+  const preflightMut = useMutation({
     mutationFn: async () => {
-      if (!preview || !file) return;
+      if (!preview || !file) return [];
       await api.post(`/import/${preview.id}/mapping`, { mapping, import_type: importType });
       const fd = new FormData();
       fd.append('file', file);
+      return api.post(`/import/${preview.id}/preflight`, fd).then((r) => r.data.data.ambiguous as AmbiguousRow[]);
+    },
+    onSuccess: (rows) => {
+      if (!rows) return;
+      if (rows.length > 0) {
+        setAmbiguousRows(rows);
+      } else {
+        doExecute({});
+      }
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Preflight failed'),
+  });
+
+  const executeMut = useMutation({
+    mutationFn: async (languageOverrides: Record<number, string>) => {
+      if (!preview || !file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      if (Object.keys(languageOverrides).length > 0) {
+        fd.append('language_overrides', JSON.stringify(languageOverrides));
+      }
       return api.post(`/import/${preview.id}/execute`, fd).then((r) => r.data.data as ImportResult);
     },
     onSuccess: (res) => {
@@ -165,6 +465,7 @@ function ImportFlow() {
       setResult(res);
       setPreview(null);
       setFile(null);
+      setAmbiguousRows(null);
       qc.invalidateQueries({ queryKey: ['imports'] });
       if (res.error_count > 0) {
         toast(`Imported ${res.imported_count}, ${res.error_count} errors`, { icon: '⚠️' });
@@ -174,6 +475,10 @@ function ImportFlow() {
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Import failed'),
   });
+
+  function doExecute(overrides: Record<number, string>) {
+    executeMut.mutate(overrides);
+  }
 
   function handleFile(f: File) {
     setFile(f);
@@ -190,7 +495,9 @@ function ImportFlow() {
     setPreview(null);
     setMapping({});
     setResult(null);
+    setAmbiguousRows(null);
     uploadMut.reset();
+    preflightMut.reset();
     executeMut.reset();
   }
 
@@ -243,6 +550,7 @@ function ImportFlow() {
     const detectedLabel = IMPORT_TYPES.find((t) => t.key === preview.detected_type)?.label ?? preview.detected_type;
 
     return (
+      <>
       <div className="space-y-4">
         {/* AI detection banner */}
         <Card>
@@ -348,13 +656,21 @@ function ImportFlow() {
           </p>
           <div className="flex gap-3 shrink-0">
             <Button variant="secondary" onClick={reset}>Cancel</Button>
-            <Button onClick={() => executeMut.mutate()} disabled={executeMut.isPending}>
-              {executeMut.isPending && <Loader2 size={14} className="animate-spin mr-1.5" />}
+            <Button onClick={() => preflightMut.mutate()} disabled={preflightMut.isPending || executeMut.isPending}>
+              {(preflightMut.isPending || executeMut.isPending) && <Loader2 size={14} className="animate-spin mr-1.5" />}
               Import {preview.total_rows} rows
             </Button>
           </div>
         </div>
       </div>
+      {ambiguousRows && (
+        <LanguageResolutionModal
+          rows={ambiguousRows}
+          onResolve={(overrides) => { setAmbiguousRows(null); doExecute(overrides); }}
+          onCancel={() => setAmbiguousRows(null)}
+        />
+      )}
+      </>
     );
   }
 
@@ -395,6 +711,10 @@ function ImportHistory() {
   const { data, isLoading } = useQuery<ImportRecord[]>({
     queryKey: ['imports'],
     queryFn: () => api.get('/import').then((r) => r.data.data ?? r.data),
+    refetchInterval: (query) => {
+      const rows = query.state.data;
+      return rows?.some((r) => r.status === 'processing') ? 2000 : false;
+    },
   });
 
   const deleteMut = useMutation({
@@ -426,7 +746,21 @@ function ImportHistory() {
               <tr key={rec.id} className="hover:bg-zinc-800/40 group">
                 <td className="py-2 px-4 text-zinc-300 truncate max-w-[200px]">{rec.filename}</td>
                 <td className="py-2 px-4 text-zinc-500 text-xs">{rec.import_type}</td>
-                <td className="py-2 px-4">{statusBadge(rec.status)}</td>
+                <td className="py-2 px-4">
+                  {rec.status === 'processing' ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-24 h-1.5 bg-zinc-700 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-indigo-500 rounded-full transition-all duration-500"
+                          style={{ width: rec.row_count > 0 ? `${Math.min(100, Math.round((rec.imported_count ?? 0) / rec.row_count * 100))}%` : '5%' }}
+                        />
+                      </div>
+                      <span className="text-xs text-zinc-500 tabular-nums">
+                        {rec.row_count > 0 ? `${Math.min(100, Math.round((rec.imported_count ?? 0) / rec.row_count * 100))}%` : '…'}
+                      </span>
+                    </div>
+                  ) : statusBadge(rec.status)}
+                </td>
                 <td className="py-2 px-4 text-right text-zinc-500 text-xs">
                   {rec.imported_count ?? 0}
                   {(rec.error_count ?? 0) > 0 && <span className="text-amber-400 ml-1">({rec.error_count} err)</span>}

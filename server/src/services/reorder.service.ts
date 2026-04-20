@@ -207,36 +207,55 @@ export async function listBulkCatalogCards(userId: string) {
  * Cards without a threshold have min_quantity = null, threshold_id = null.
  */
 export async function listBulkCardsWithThresholds(userId: string) {
-  return db
-    .selectFrom('card_instances as ci')
-    .innerJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
-    .innerJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
-    .leftJoin('reorder_thresholds as rt', (join) =>
-      join.onRef('rt.catalog_id', '=', 'ci.catalog_id').on('rt.user_id', '=', userId),
-    )
-    .select([
-      'ci.catalog_id',
-      'cc.card_name',
-      sql<string | null>`cc.set_name`.as('set_name'),
-      sql<string | null>`cc.card_number`.as('card_number'),
-      sql<string | null>`cc.sku`.as('sku'),
-      sql<string | null>`rt.id`.as('threshold_id'),
-      sql<number | null>`rt.min_quantity`.as('min_quantity'),
-      sql<boolean | null>`rt.is_ignored`.as('is_ignored'),
-      sql<Date | null>`rt.muted_until`.as('muted_until'),
-      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status NOT IN ('sold', 'lost_damaged')), 0)::int`.as('to_grade_quantity'),
-      sql<number>`COALESCE((
-        SELECT SUM(rp2.card_count)
-        FROM raw_purchases rp2
-        WHERE rp2.user_id = ${userId}
-          AND rp2.catalog_id = ci.catalog_id
-          AND rp2.type = 'bulk'
-          AND rp2.status = 'ordered'
-      ), 0)::int`.as('inbound_quantity'),
-    ])
-    .where('ci.user_id', '=', userId)
-    .where('rp.type', '=', 'bulk')
-    .groupBy(['ci.catalog_id', 'cc.card_name', 'cc.set_name', 'cc.card_number', 'cc.sku', 'rt.id', 'rt.min_quantity', 'rt.is_ignored', 'rt.muted_until'])
-    .orderBy('cc.sku', 'asc')
-    .execute();
+  // Use a raw query so we can FULL OUTER JOIN inventory rows with threshold rows.
+  // This ensures manually-added thresholds appear even when there's no current stock.
+  const rows = await sql<{
+    catalog_id: string;
+    card_name: string;
+    set_name: string | null;
+    card_number: string | null;
+    sku: string | null;
+    threshold_id: string | null;
+    min_quantity: number | null;
+    is_ignored: boolean | null;
+    muted_until: Date | null;
+    to_grade_quantity: number;
+    inbound_quantity: number;
+  }>`
+    SELECT
+      COALESCE(inv.catalog_id, rt.catalog_id) AS catalog_id,
+      cc.card_name,
+      cc.set_name,
+      cc.card_number,
+      cc.sku,
+      rt.id                AS threshold_id,
+      rt.min_quantity,
+      rt.is_ignored,
+      rt.muted_until,
+      COALESCE(inv.to_grade_quantity, 0)::int  AS to_grade_quantity,
+      COALESCE(inv.inbound_quantity,  0)::int  AS inbound_quantity
+    FROM (
+      SELECT
+        ci.catalog_id,
+        COALESCE(SUM(ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status NOT IN ('sold', 'lost_damaged')), 0) AS to_grade_quantity,
+        COALESCE((
+          SELECT SUM(rp2.card_count)
+          FROM raw_purchases rp2
+          WHERE rp2.user_id = ${userId}
+            AND rp2.catalog_id = ci.catalog_id
+            AND rp2.type = 'bulk'
+            AND rp2.status = 'ordered'
+        ), 0) AS inbound_quantity
+      FROM card_instances ci
+      INNER JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id AND rp.type = 'bulk'
+      WHERE ci.user_id = ${userId}
+      GROUP BY ci.catalog_id
+    ) inv
+    FULL OUTER JOIN reorder_thresholds rt
+      ON rt.catalog_id = inv.catalog_id AND rt.user_id = ${userId}
+    INNER JOIN card_catalog cc
+      ON cc.id = COALESCE(inv.catalog_id, rt.catalog_id)
+    ORDER BY cc.sku ASC NULLS LAST
+  `.execute(db);
+  return rows.rows;
 }

@@ -16,17 +16,18 @@ const listSchema = z.object({
   limit:    z.coerce.number().min(1).max(200).default(50),
   search:   z.string().optional(),
   types:    z.string().optional(),
+  year:     z.coerce.number().optional(),
   sort_by:  z.string().optional(),
   sort_dir: z.enum(['asc', 'desc']).default('desc'),
 });
 
 export async function listExpenses(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit, search, types, sort_by, sort_dir } = listSchema.parse(req.query);
+    const { page, limit, search, types, year, sort_by, sort_dir } = listSchema.parse(req.query);
     const result = await expensesService.listExpenses(
       req.dataUserId,
       { page, limit },
-      { search, types: splitCSV(types) },
+      { search, types: splitCSV(types), year },
       sort_by,
       sort_dir
     );

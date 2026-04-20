@@ -5,7 +5,7 @@ import { toCents } from '../../utils/cents';
 import { createRawPurchase } from '../raw-purchases.service';
 import { createExpense } from '../expenses.service';
 import { recordSale } from '../sales.service';
-import { lookupSetCode, lookupSetName, generatePartNumber } from '../../utils/set-codes';
+import { lookupSetCode, lookupSetName, generatePartNumber, EN_SETS, JP_SETS } from '../../utils/set-codes';
 import type { GradingCompany, ListingPlatform } from '../../types/db';
 
 function parseDate(raw: string | undefined): Date | null {
@@ -109,9 +109,82 @@ export async function getImportStatus(userId: string, importId: string) {
   return record;
 }
 
+// ── Preflight ─────────────────────────────────────────────────────────────────
+
+export interface AmbiguousRow {
+  row: number;         // 1-based row index
+  card_name: string;
+  set_name: string | null;
+  en_code: string | null;
+  en_set: string | null;
+  jp_code: string | null;
+  jp_set: string | null;
+}
+
+function applyMappingStatic(raw: Record<string, string>, mapping: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [col, field] of Object.entries(mapping)) {
+    if (field && raw[col] !== undefined) out[field] = raw[col];
+  }
+  return out;
+}
+
+/** Scan rows and return those where language is ambiguous (both EN and JP find a set match, no clear signal). */
+export async function preflightImport(userId: string, importId: string, buffer: Buffer): Promise<AmbiguousRow[]> {
+  const record = await db.selectFrom('csv_imports').selectAll()
+    .where('id', '=', importId).where('user_id', '=', userId).executeTakeFirst();
+  if (!record) throw new AppError(404, 'Import not found');
+  if (record.import_type !== 'graded') return []; // only graded uses catalog/part numbers
+
+  const { rows } = parseCsvBuffer(buffer, record.filename);
+  const mapping = (record.mapping ?? {}) as Record<string, string>;
+  const ambiguous: AmbiguousRow[] = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = applyMappingStatic(rows[i], mapping);
+    if (Object.values(row).every(v => !v?.trim())) continue;
+
+    const cardName = row['card_name']?.trim() || '';
+    const setName  = row['set_name']?.trim() || null;
+    const language = row['language']?.trim() || '';
+    if (!cardName) continue;
+
+    // Skip rows with explicit language
+    if (language.toUpperCase() === 'JP' || language.toUpperCase() === 'JPN') continue;
+
+    const lookupText = setName ?? cardName;
+    const enCode = lookupSetCode('EN', lookupText);
+    const jpCode = lookupSetCode('JP', lookupText);
+
+    // Skip rows where language is clear from the card name
+    const hasJpSignal = /japanese/i.test(cardName)
+      || /\b(S\d+[WH]|SM\d+[SMKLA+]|SM\d+a|SV\d+[SDPL]|SV\d+a)\b/i.test(cardName);
+    if (hasJpSignal) continue;
+
+    // Ambiguous: both languages found a match AND the set name exists in both lists
+    if (enCode && jpCode) {
+      const setInEnOnly = setName && lookupSetCode('EN', setName) !== null && lookupSetCode('JP', setName) === null;
+      const setInJpOnly = setName && lookupSetCode('JP', setName) !== null && lookupSetCode('EN', setName) === null;
+      if (setInEnOnly || setInJpOnly) continue; // clear signal from set name
+
+      ambiguous.push({
+        row: i + 2,
+        card_name: cardName,
+        set_name: setName,
+        en_code: enCode,
+        en_set: lookupSetName('EN', enCode),
+        jp_code: jpCode,
+        jp_set: lookupSetName('JP', jpCode),
+      });
+    }
+  }
+
+  return ambiguous;
+}
+
 // ── Execute ───────────────────────────────────────────────────────────────────
 
-export async function executeImport(userId: string, importId: string, buffer: Buffer) {
+export async function executeImport(userId: string, importId: string, buffer: Buffer, languageOverrides?: Record<number, string>) {
   const record = await db.selectFrom('csv_imports').selectAll()
     .where('id', '=', importId).where('user_id', '=', userId).executeTakeFirst();
 
@@ -123,20 +196,25 @@ export async function executeImport(userId: string, importId: string, buffer: Bu
   const { rows } = parseCsvBuffer(buffer, record.filename);
   const mapping = (record.mapping ?? {}) as Record<string, string>;
 
+  // Fire-and-forget progress flush every 10 rows
+  const onProgress = (count: number) => {
+    db.updateTable('csv_imports').set({ imported_count: count }).where('id', '=', importId).execute().catch(() => {});
+  };
+
   let result: { importedCount: number; errorLog: Array<{ row: number; message: string }> };
 
   switch (record.import_type) {
     case 'graded':
-      result = await executeGradedImport(userId, rows, mapping);
+      result = await executeGradedImport(userId, rows, mapping, languageOverrides, onProgress);
       break;
     case 'raw_purchase':
-      result = await executeRawPurchaseImport(userId, rows, mapping);
+      result = await executeRawPurchaseImport(userId, rows, mapping, onProgress);
       break;
     case 'bulk_sale':
-      result = await executeBulkSaleImport(userId, rows, mapping);
+      result = await executeBulkSaleImport(userId, rows, mapping, onProgress);
       break;
     case 'expenses':
-      result = await executeExpensesImport(userId, rows, mapping);
+      result = await executeExpensesImport(userId, rows, mapping, onProgress);
       break;
     default:
       result = await executeLegacyCardsImport(userId, rows, mapping);
@@ -165,7 +243,9 @@ export async function executeImport(userId: string, importId: string, buffer: Bu
 async function executeGradedImport(
   userId: string,
   rows: Record<string, string>[],
-  mapping: Record<string, string>
+  mapping: Record<string, string>,
+  languageOverrides?: Record<number, string>,
+  onProgress?: (count: number) => void
 ) {
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
@@ -174,15 +254,46 @@ async function executeGradedImport(
   const catalogCache = new Map<string, string>();
 
   async function getOrCreateCatalogId(
-    cardName: string, setName: string | null, cardNumber: string | null, language: string
+    cardName: string, setName: string | null, cardNumber: string | null, language: string, rowIndex: number
   ): Promise<string | null> {
-    // Detect language from card name if not explicit
-    const langHint = /japanese/i.test(cardName) ? 'JP' : null;
-    const lang = (language.toUpperCase() === 'JP' || language.toUpperCase() === 'JPN')
-      ? 'JP' : (langHint ?? 'EN');
+    // Detect language — priority order:
+    // 1. Manual override from resolution modal (rowIndex keyed)
+    // 2. Explicit language column (JP/JPN/EN)
+    // 3. Set name resolves to JP-only → JP
+    // 4. Set name resolves to EN-only → EN
+    // 5. "japanese" in card name or JP PSA code pattern → JP
+    // 6. Set name in both lists → no default, must be resolved (should be caught by preflight)
+    const override = languageOverrides?.[rowIndex];
+    const lookupText = setName ?? cardName;
+    const enCode = lookupSetCode('EN', lookupText);
+    const jpCode = lookupSetCode('JP', lookupText);
 
-    // Derive set code — prefer explicit setName, fall back to substring-matching the full card name
-    const setCode = lookupSetCode(lang, setName ?? cardName);
+    let resolvedLang: 'EN' | 'JP';
+    if (override) {
+      resolvedLang = override;
+    } else if (language.toUpperCase() === 'JP' || language.toUpperCase() === 'JPN') {
+      resolvedLang = 'JP';
+    } else if (language.toUpperCase() === 'EN') {
+      resolvedLang = 'EN';
+    } else if (setName) {
+      const setInEn = lookupSetCode('EN', setName) !== null;
+      const setInJp = lookupSetCode('JP', setName) !== null;
+      if (setInJp && !setInEn) resolvedLang = 'JP';
+      else if (setInEn && !setInJp) resolvedLang = 'EN';
+      else if (/japanese/i.test(cardName) || /\b(S\d+[WH]|SM\d+[SMKLA+]|SM\d+a|SV\d+[SDPL]|SV\d+a)\b/i.test(cardName)) resolvedLang = 'JP';
+      else resolvedLang = 'EN';
+    } else if (/japanese/i.test(cardName) || /\b(S\d+[WH]|SM\d+[SMKLA+]|SM\d+a|SV\d+[SDPL]|SV\d+a)\b/i.test(cardName)) {
+      resolvedLang = 'JP';
+    } else {
+      resolvedLang = 'EN';
+    }
+
+    // Pick set code from the resolved language; fall back to the other if nothing found
+    let setCode: string | null = resolvedLang === 'EN' ? enCode : jpCode;
+    if (!setCode) {
+      setCode = resolvedLang === 'EN' ? jpCode : enCode;
+      if (setCode) resolvedLang = resolvedLang === 'EN' ? 'JP' : 'EN';
+    }
     if (!setCode) return null;
 
     // Derive card number — prefer explicit, fall back to parsing the card name
@@ -203,14 +314,14 @@ async function executeGradedImport(
     }
     if (!resolvedNumber) return null;
 
-    const sku = generatePartNumber(lang, setCode, resolvedNumber);
+    const sku = generatePartNumber(resolvedLang, setCode, resolvedNumber);
     if (catalogCache.has(sku)) return catalogCache.get(sku)!;
     const existing = await db.selectFrom('card_catalog').select('id').where('sku', '=', sku).executeTakeFirst();
     if (existing) { catalogCache.set(sku, existing.id); return existing.id; }
-    const resolvedSetName = setName ?? lookupSetName(lang, setCode) ?? setCode;
+    const resolvedSetName = setName ?? lookupSetName(resolvedLang, setCode) ?? setCode;
     const created = await db.insertInto('card_catalog').values({
       game: 'pokemon', set_name: resolvedSetName, set_code: setCode,
-      card_name: cardName, card_number: resolvedNumber, language: lang, sku,
+      card_name: cardName, card_number: resolvedNumber, language: resolvedLang, sku,
     }).returning('id').executeTakeFirstOrThrow();
     catalogCache.set(sku, created.id);
     return created.id;
@@ -218,15 +329,16 @@ async function executeGradedImport(
 
   for (let i = 0; i < rows.length; i++) {
     const rowIndex = i + 2;
+    // Skip entirely blank rows (trailing spreadsheet rows) — check raw row before mapping
+    if (Object.values(rows[i]).every(v => !v?.trim())) continue;
     const row = applyMapping(rows[i], mapping);
-    // Skip entirely blank rows (trailing spreadsheet rows)
     if (Object.values(row).every(v => !v?.trim())) continue;
     try {
       const cardName = row['card_name']?.trim();
-      if (!cardName) throw new Error('card_name is required');
+      if (!cardName) continue;
 
       const certRaw = row['cert_number']?.trim();
-      if (!certRaw) throw new Error('cert_number is required');
+      if (!certRaw) continue;
 
       const gradeRaw = row['grade']?.trim();
       if (!gradeRaw) throw new Error('grade is required');
@@ -255,7 +367,7 @@ async function executeGradedImport(
       const setName    = row['set_name']?.trim()     ?? null;
       const cardNumber = row['card_number']?.trim()  ?? null;
       const language   = row['language']?.trim()     || 'EN';
-      const catalogId  = await getOrCreateCatalogId(cardName, setName, cardNumber, language);
+      const catalogId  = await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex);
 
       // When a catalog entry was matched/created via part number, don't override
       // the canonical name — otherwise each PSA label variation creates a separate group.
@@ -313,7 +425,8 @@ async function executeGradedImport(
           ? Math.max(0, salePriceRaw - afterFeesRaw)
           : 0;
         const soldAt = parseDate(soldAtRaw)!;
-        const platform = normalizePlatform(row['platform']?.trim());
+        const listingUrlForSale = row['listing_url']?.trim() || undefined;
+        const platform = normalizePlatform(row['platform']?.trim(), listingUrlForSale, existingNotes ?? undefined);
 
         await db.insertInto('sales').values({
           user_id:          userId,
@@ -337,7 +450,7 @@ async function executeGradedImport(
         const listPrice = toCents(row['list_price'] ?? '0');
         const listedAt  = parseDate(row['listed_at']);
         const listingUrl = row['listing_url']?.trim() || null;
-        const platform  = normalizePlatform(row['platform']?.trim());
+        const platform  = normalizePlatform(row['platform']?.trim(), listingUrl ?? undefined, existingNotes ?? undefined);
 
         await db.insertInto('listings').values({
           user_id:          userId,
@@ -358,6 +471,7 @@ async function executeGradedImport(
       }
 
       importedCount++;
+      if (importedCount % 10 === 0) onProgress?.(importedCount);
     } catch (err) {
       errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
     }
@@ -371,7 +485,8 @@ async function executeGradedImport(
 async function executeRawPurchaseImport(
   userId: string,
   rows: Record<string, string>[],
-  mapping: Record<string, string>
+  mapping: Record<string, string>,
+  onProgress?: (count: number) => void
 ) {
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
@@ -457,6 +572,7 @@ async function executeRawPurchaseImport(
           }).execute();
 
           importedCount++;
+          if (importedCount % 10 === 0) onProgress?.(importedCount);
         } catch (err) {
           errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
         }
@@ -476,7 +592,8 @@ async function executeRawPurchaseImport(
 async function executeBulkSaleImport(
   userId: string,
   rows: Record<string, string>[],
-  mapping: Record<string, string>
+  mapping: Record<string, string>,
+  onProgress?: (count: number) => void
 ) {
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
@@ -550,6 +667,7 @@ async function executeBulkSaleImport(
       });
 
       importedCount++;
+      if (importedCount % 10 === 0) onProgress?.(importedCount);
     } catch (err) {
       errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
     }
@@ -563,7 +681,8 @@ async function executeBulkSaleImport(
 async function executeExpensesImport(
   userId: string,
   rows: Record<string, string>[],
-  mapping: Record<string, string>
+  mapping: Record<string, string>,
+  onProgress?: (count: number) => void
 ) {
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
@@ -599,6 +718,7 @@ async function executeExpensesImport(
       });
 
       importedCount++;
+      if (importedCount % 10 === 0) onProgress?.(importedCount);
     } catch (err) {
       errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
     }
@@ -692,14 +812,27 @@ function normalizeCurrency(value?: string): string {
   return upper === 'YEN' ? 'JPY' : (['USD', 'JPY'].includes(upper) ? upper : 'USD');
 }
 
-function normalizePlatform(value?: string): ListingPlatform {
+function normalizePlatform(value?: string, listingUrl?: string, notes?: string): ListingPlatform {
   const lower = (value ?? '').toLowerCase().trim();
   const map: Record<string, ListingPlatform> = {
     ebay: 'ebay', tcgplayer: 'tcgplayer', tcg: 'tcgplayer',
     'card show': 'card_show', card_show: 'card_show', show: 'card_show',
     facebook: 'facebook', fb: 'facebook', instagram: 'instagram', ig: 'instagram', local: 'local',
   };
-  return map[lower] ?? 'other';
+  if (map[lower]) return map[lower];
+  // Infer from listing URL
+  if (listingUrl) {
+    const url = listingUrl.toLowerCase();
+    if (url.includes('ebay.')) return 'ebay';
+    if (url.includes('tcgplayer.')) return 'tcgplayer';
+    if (url.includes('facebook.') || url.includes('fb.com')) return 'facebook';
+  }
+  // Notes mentioning card show
+  if (notes && /card.?show/i.test(notes)) return 'card_show';
+  // If there's a listing URL (ebay-style), default to ebay
+  if (listingUrl) return 'ebay';
+  // No URL and no platform specified — assume card show
+  return 'card_show';
 }
 
 // Parse a grade string that may contain an explicit company prefix OR PSA/CGC label formats.

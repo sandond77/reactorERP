@@ -78,14 +78,17 @@ export async function recordBulkSale(req: Request, res: Response, next: NextFunc
         card_instance_id: z.string().uuid(),
         listing_id: z.string().uuid().optional(),
         sale_price: z.number().int().positive(),
+        platform_fees: z.number().int().nonnegative().default(0),
       })).min(1),
       platform: z.enum(['ebay', 'card_show', 'tcgplayer', 'facebook', 'instagram', 'local', 'other']),
       card_show_id: z.string().uuid().optional(),
+      unique_id: z.string().optional(),
+      order_details_link: z.string().optional(),
       currency: z.enum(['USD', 'JPY']).default('USD'),
       sold_at: z.string().optional().transform((v) => v ? new Date(v) : undefined),
       unique_id_2: z.string().optional(),
     }).parse(req.body);
-    const sales = await salesService.recordBulkSale(req.dataUserId, items, { platform, card_show_id, currency, sold_at, unique_id_2 });
+    const sales = await salesService.recordBulkSale(req.dataUserId, items, { platform, card_show_id, unique_id, order_details_link, currency, sold_at, unique_id_2 });
     res.status(201).json({ data: sales, count: sales.length });
   } catch (err) { next(err); }
 }

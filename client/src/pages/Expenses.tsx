@@ -416,6 +416,7 @@ const FILTER_DEFAULTS = {
   sortCol: 'date' as string | null,
   sortDir: 'desc' as SortDir,
   fType: null as string[] | null,
+  fYear: null as number | null,
   search: '',
 };
 
@@ -425,6 +426,7 @@ export function Expenses() {
   const [sortCol, setSortCol] = useState<string | null>(saved.sortCol);
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
   const [fType, setFType] = useState<string[] | null>(saved.fType);
+  const [fYear, setFYear] = useState<number | null>(saved.fYear);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [showAdd, setShowAdd] = useState(false);
@@ -459,8 +461,8 @@ export function Expenses() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('expenses', { sortCol, sortDir, fType, search });
-  }, [sortCol, sortDir, fType, search]);
+    saveFilters('expenses', { sortCol, sortDir, fType, fYear, search });
+  }, [sortCol, sortDir, fType, fYear, search]);
 
   const handleSort = useCallback((col: string) => {
     setSortCol((prev) => { if (prev === col) return prev; return col; });
@@ -486,6 +488,7 @@ export function Expenses() {
     sort_by: sortCol ?? undefined,
     sort_dir: sortDir,
     types: activeFilter(fType, filterOptions?.types)?.join(','),
+    year: fYear ?? undefined,
     search: debouncedSearch || undefined,
   };
 
@@ -494,7 +497,7 @@ export function Expenses() {
     queryFn: () => api.get('/expenses', { params }).then((r) => r.data),
   });
 
-  const hasActiveFilters = fType !== null || !!debouncedSearch;
+  const hasActiveFilters = fType !== null || fYear !== null || !!debouncedSearch;
 
   const totalAmount = data?.data.reduce((s, e) => s + e.amount, 0) ?? 0;
   const sh = { sortCol, sortDir, onSort: handleSort };
@@ -504,8 +507,31 @@ export function Expenses() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Expenses</h1>
         <div className="flex items-center gap-3">
+          {filterOptions?.years && filterOptions.years.length > 1 && (
+            <div className="flex gap-1">
+              <button
+                onClick={() => { setFYear(null); setPage(1); }}
+                className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${
+                  fYear === null ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                All
+              </button>
+              {filterOptions.years.map((y) => (
+                <button
+                  key={y}
+                  onClick={() => { setFYear(y); setPage(1); }}
+                  className={`px-2.5 py-1 text-xs rounded font-medium transition-colors ${
+                    fYear === y ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                  }`}
+                >
+                  {y}
+                </button>
+              ))}
+            </div>
+          )}
           {hasActiveFilters && (
-            <button onClick={() => { setFType(null); setSearch(''); }}
+            <button onClick={() => { setFType(null); setFYear(null); setSearch(''); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
               <X size={12} /> Clear filters
             </button>

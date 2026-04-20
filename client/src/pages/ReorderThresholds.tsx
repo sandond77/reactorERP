@@ -116,7 +116,91 @@ function ReorderActionButtons({ row }: { row: BulkCardRow }) {
   );
 }
 
+function AddReorderModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selected, setSelected] = useState<CatalogResult | null>(null);
+  const [minQty, setMinQty] = useState('1');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: searchData, isFetching } = useQuery<{ data: CatalogResult[] }>({
+    queryKey: ['catalog-search-reorder', debouncedSearch],
+    queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 20 } }).then(r => r.data),
+    enabled: debouncedSearch.length >= 1,
+  });
+  const results = searchData?.data ?? [];
+
+  const saveMutation = useMutation({
+    mutationFn: () => api.post('/reorder/thresholds', { catalog_id: selected!.id, min_quantity: parseInt(minQty, 10) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['bulk-cards-thresholds'] });
+      qc.invalidateQueries({ queryKey: ['reorder-alerts'] });
+      toast.success('Reorder alert added');
+      onClose();
+      setSearch(''); setSelected(null); setMinQty('1');
+    },
+    onError: () => toast.error('Failed to add'),
+  });
+
+  return (
+    <Modal open={open} onClose={onClose} title="Add Reorder Alert" className="max-w-xl">
+      {!selected ? (
+        <>
+          <div className="relative">
+            <Input label="Card Name or Part Number" placeholder="Search…"
+              value={search} onChange={e => setSearch(e.target.value)} autoFocus autoComplete="off" />
+            {isFetching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
+          </div>
+          {debouncedSearch.length >= 1 && (
+            results.length > 0 ? (
+              <div className="rounded-lg border border-zinc-700 overflow-hidden mt-3 max-h-72 overflow-y-auto">
+                {results.map(r => (
+                  <button key={r.id} type="button" onClick={() => setSelected(r)}
+                    className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors">
+                    <span className="text-sm text-zinc-200 truncate">{r.card_name}</span>
+                    <span className="shrink-0 text-xs text-zinc-500 tabular-nums text-right">
+                      {r.sku && <span className="font-mono mr-2">{r.sku}</span>}
+                      {r.set_name}
+                      {r.card_number && <span className="ml-1 text-zinc-600">#{r.card_number}</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : !isFetching ? (
+              <p className="text-xs text-zinc-500 px-1 mt-3">No cards found.</p>
+            ) : null
+          )}
+        </>
+      ) : (
+        <div className="space-y-4">
+          <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 px-4 py-3">
+            <p className="text-sm font-medium text-zinc-100">{selected.card_name}</p>
+            <p className="text-xs text-zinc-500 mt-0.5">{selected.set_name}{selected.card_number ? ` · #${selected.card_number}` : ''}</p>
+            <button type="button" onClick={() => setSelected(null)} className="text-xs text-indigo-400 hover:text-indigo-300 mt-1">Change</button>
+          </div>
+          <Input label="Min Quantity" type="number" min="1" step="1"
+            value={minQty} onChange={e => setMinQty(e.target.value)} />
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200">Cancel</button>
+            <button type="button" disabled={!minQty || parseInt(minQty, 10) < 1 || saveMutation.isPending}
+              onClick={() => saveMutation.mutate()}
+              className="px-4 py-2 text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg font-medium transition-colors">
+              {saveMutation.isPending ? 'Saving…' : 'Add Alert'}
+            </button>
+          </div>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function ReorderTab() {
+  const [showAdd, setShowAdd] = useState(false);
   const { data, isLoading } = useQuery<{ data: BulkCardRow[] }>({
     queryKey: ['bulk-cards-thresholds'],
     queryFn: () => api.get('/reorder/bulk-cards-with-thresholds').then((r) => r.data),
@@ -125,9 +209,15 @@ function ReorderTab() {
 
   return (
     <div>
-      <p className="text-xs text-zinc-500 mb-4">
-        Set minimum stock levels for bulk cards. Alerts trigger when combined in-hand (to grade) + inbound quantity falls below the threshold. Click any Min Qty cell to edit.
-      </p>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-xs text-zinc-500">
+          Set minimum stock levels for bulk cards. Alerts trigger when combined in-hand (to grade) + inbound quantity falls below the threshold. Click any Min Qty cell to edit.
+        </p>
+        <button onClick={() => setShowAdd(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium rounded-lg transition-colors shrink-0 ml-4">
+          <Plus size={13} /> Add Card
+        </button>
+      </div>
       <div className="rounded-lg border border-zinc-800">
         <table className="w-full text-sm">
           <thead>
@@ -164,6 +254,7 @@ function ReorderTab() {
           </tbody>
         </table>
       </div>
+      <AddReorderModal open={showAdd} onClose={() => setShowAdd(false)} />
     </div>
   );
 }
