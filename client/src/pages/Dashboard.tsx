@@ -1231,8 +1231,8 @@ function GradedTab() {
             <div className="flex items-center justify-center h-[200px] text-zinc-600 text-xs">No data yet</div>
           ) : (
             <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={gradeBarData} margin={{ top: 16, right: 8, left: -20, bottom: 0 }}>
-                <XAxis dataKey="name" tick={{ fill: '#a1a1aa', fontSize: 10 }} axisLine={false} tickLine={false} />
+              <BarChart data={gradeBarData} margin={{ top: 16, right: 8, left: -20, bottom: 48 }}>
+                <XAxis dataKey="name" tick={{ fill: '#a1a1aa', fontSize: 10 }} axisLine={false} tickLine={false} angle={-35} textAnchor="end" interval={0} />
                 <YAxis tick={{ fill: '#a1a1aa', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
                 <Tooltip
                   cursor={{ fill: 'rgba(255,255,255,0.04)' }}

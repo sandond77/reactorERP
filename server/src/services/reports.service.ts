@@ -256,12 +256,26 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
   const gradeDistributionQuery = sql<{
     grade: number; grade_label: string | null; company: string; count: number;
   }>`
-    SELECT sd.grade, sd.grade_label, sd.company, COUNT(*)::int as count
+    SELECT sd.grade,
+      CASE
+        WHEN sd.grade_label ILIKE 'gem%mint%' OR sd.grade_label ILIKE 'gem%mt%' THEN 'GEM MINT'
+        WHEN sd.grade_label ILIKE 'near%mint%mint%' THEN 'NEAR MINT-MINT'
+        WHEN sd.grade_label ILIKE 'near%mint%'  THEN 'NEAR MINT'
+        WHEN sd.grade_label ILIKE 'mint%'       THEN 'MINT'
+        WHEN sd.grade_label ILIKE 'excellent%mint%' THEN 'EXCELLENT-MINT'
+        WHEN sd.grade_label ILIKE 'excellent%'  THEN 'EXCELLENT'
+        WHEN sd.grade_label ILIKE 'very%good%excellent%' THEN 'VERY GOOD-EXCELLENT'
+        WHEN sd.grade_label ILIKE 'very%good%'  THEN 'VERY GOOD'
+        WHEN sd.grade_label ILIKE 'good%'       THEN 'GOOD'
+        WHEN sd.grade_label ILIKE 'poor%'       THEN 'POOR'
+        ELSE sd.grade_label
+      END AS grade_label,
+      sd.company, COUNT(*)::int as count
     FROM card_instances ci
     JOIN slab_details sd ON sd.card_instance_id = ci.id
     WHERE ci.user_id = ${userId} AND ${statusFilter}
-    GROUP BY sd.grade, sd.grade_label, sd.company
-    ORDER BY sd.grade, sd.grade_label
+    GROUP BY sd.grade, grade_label, sd.company
+    ORDER BY sd.grade, grade_label
   `.execute(db);
 
   // ── Pipeline ────────────────────────────────────────────────────────────────

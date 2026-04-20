@@ -8,6 +8,12 @@ import { recordSale } from '../sales.service';
 import { lookupSetCode, lookupSetName, generatePartNumber } from '../../utils/set-codes';
 import type { GradingCompany, ListingPlatform } from '../../types/db';
 
+function parseDate(raw: string | undefined): Date | null {
+  if (!raw?.trim()) return null;
+  const d = new Date(raw.trim());
+  return isNaN(d.getTime()) ? null : d;
+}
+
 // ── Upload / Preview ──────────────────────────────────────────────────────────
 
 export async function uploadCsv(
@@ -213,6 +219,8 @@ async function executeGradedImport(
   for (let i = 0; i < rows.length; i++) {
     const rowIndex = i + 2;
     const row = applyMapping(rows[i], mapping);
+    // Skip entirely blank rows (trailing spreadsheet rows)
+    if (Object.values(row).every(v => !v?.trim())) continue;
     try {
       const cardName = row['card_name']?.trim();
       if (!cardName) throw new Error('card_name is required');
@@ -235,12 +243,12 @@ async function executeGradedImport(
       const purchaseCost = toCents(row['purchase_cost'] ?? '0');
       const gradingCost  = toCents(row['grading_cost']  ?? '0');
       const currency = normalizeCurrency(row['currency']);
-      const purchasedAt = row['purchased_at'] ? new Date(row['purchased_at']) : null;
+      const purchasedAt = parseDate(row['purchased_at']);
 
       // Determine lifecycle state from sheet columns
       const soldAtRaw  = row['sold_at']?.trim();
       const listedRaw  = row['is_listed']?.trim().toLowerCase();
-      const isSold     = !!soldAtRaw;
+      const isSold     = !!soldAtRaw && parseDate(soldAtRaw) !== null;
       const isListed   = !isSold && (listedRaw === 'yes' || listedRaw === 'true' || listedRaw === '1');
       const cardStatus = isSold ? 'sold' : 'graded';
 
@@ -304,7 +312,7 @@ async function executeGradedImport(
         const platformFees = salePriceRaw > 0 && afterFeesRaw > 0
           ? Math.max(0, salePriceRaw - afterFeesRaw)
           : 0;
-        const soldAt = new Date(soldAtRaw);
+        const soldAt = parseDate(soldAtRaw)!;
         const platform = normalizePlatform(row['platform']?.trim());
 
         await db.insertInto('sales').values({
@@ -327,7 +335,7 @@ async function executeGradedImport(
       // Create listing record if card is currently listed
       if (isListed) {
         const listPrice = toCents(row['list_price'] ?? '0');
-        const listedAt  = row['listed_at'] ? new Date(row['listed_at']) : null;
+        const listedAt  = parseDate(row['listed_at']);
         const listingUrl = row['listing_url']?.trim() || null;
         const platform  = normalizePlatform(row['platform']?.trim());
 
@@ -372,6 +380,7 @@ async function executeRawPurchaseImport(
   const groups = new Map<string, { rows: Record<string, string>[]; indices: number[] }>();
   rows.forEach((raw, i) => {
     const row = applyMapping(raw, mapping);
+    if (Object.values(row).every(v => !v?.trim())) return;
     const key = row['order_number']?.trim() || `__solo_${i}`;
     if (!groups.has(key)) groups.set(key, { rows: [], indices: [] });
     groups.get(key)!.rows.push(row);
@@ -381,7 +390,7 @@ async function executeRawPurchaseImport(
   for (const [, group] of groups) {
     const firstRow = group.rows[0];
     try {
-      const purchasedAt = firstRow['purchased_at'] ? new Date(firstRow['purchased_at']) : null;
+      const purchasedAt = parseDate(firstRow['purchased_at']);
       const orderNumber = firstRow['order_number']?.trim() || null;
       const source = firstRow['source']?.trim() || null;
       const language = firstRow['language']?.toUpperCase() || 'EN';
@@ -475,6 +484,7 @@ async function executeBulkSaleImport(
   for (let i = 0; i < rows.length; i++) {
     const rowIndex = i + 2;
     const row = applyMapping(rows[i], mapping);
+    if (Object.values(row).every(v => !v?.trim())) continue;
     try {
       const identifier = row['identifier']?.trim();
       if (!identifier) throw new Error('identifier (cert# or purchase ID) is required');
@@ -487,7 +497,7 @@ async function executeBulkSaleImport(
       const platformFees = toCents(row['platform_fees'] ?? '0');
       const shippingCost = toCents(row['shipping_cost'] ?? '0');
       const currency = normalizeCurrency(row['currency']);
-      const soldAt = row['sold_at'] ? new Date(row['sold_at']) : undefined;
+      const soldAt = parseDate(row['sold_at']) ?? undefined;
 
       let cardInstanceId: string;
 
@@ -561,6 +571,7 @@ async function executeExpensesImport(
   for (let i = 0; i < rows.length; i++) {
     const rowIndex = i + 2;
     const row = applyMapping(rows[i], mapping);
+    if (Object.values(row).every(v => !v?.trim())) continue;
     try {
       const description = row['description']?.trim();
       if (!description) throw new Error('description is required');
@@ -573,7 +584,7 @@ async function executeExpensesImport(
 
       const type = row['type']?.trim() || 'Other';
       const currency = normalizeCurrency(row['currency']);
-      const date = row['date'] ? new Date(row['date']) : new Date();
+      const date = parseDate(row['date']) ?? new Date();
       const order_number = row['order_number']?.trim() || undefined;
       const link = row['link']?.trim() || undefined;
 
@@ -635,7 +646,7 @@ async function executeLegacyCardsImport(
           order_number:         mapped['order_number']?.trim() ?? null,
           condition:            normalizeCondition(mapped['condition']),
           condition_notes:      null, image_front_url: null, image_back_url: null,
-          purchased_at:         mapped['purchased_at'] ? new Date(mapped['purchased_at']) : null,
+          purchased_at:         parseDate(mapped['purchased_at']),
           raw_purchase_id:      null, trade_id: null, location_id: null, decision: null,
         });
       } catch (err) {
