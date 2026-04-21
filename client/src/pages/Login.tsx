@@ -1,6 +1,15 @@
 import { Zap } from 'lucide-react';
 
+const ERROR_MESSAGES: Record<string, string> = {
+  not_allowed: 'This email is not on the beta access list. Contact the admin to request access.',
+  auth_failed: 'Sign-in failed. Please try again.',
+};
+
 export function Login() {
+  const params = new URLSearchParams(window.location.search);
+  const error = params.get('error');
+  const errorMessage = error ? ERROR_MESSAGES[error] ?? ERROR_MESSAGES.auth_failed : null;
+
   return (
     <div className="min-h-svh bg-zinc-950 flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
@@ -11,7 +20,12 @@ export function Login() {
           <h1 className="text-2xl font-bold text-zinc-100">Reactor</h1>
           <p className="text-sm text-zinc-500 mt-1">Trading Card Inventory Manager</p>
         </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6">
+        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 space-y-4">
+          {errorMessage && (
+            <div className="bg-red-950 border border-red-800 text-red-300 text-sm rounded-lg px-4 py-3">
+              {errorMessage}
+            </div>
+          )}
           <a
             href="/api/v1/auth/google"
             className="flex items-center justify-center gap-3 w-full bg-white text-zinc-900 font-semibold text-sm px-4 py-4 rounded-xl active:bg-zinc-100 hover:bg-zinc-100 transition-colors"

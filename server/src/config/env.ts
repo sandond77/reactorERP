@@ -10,6 +10,8 @@ const envSchema = z.object({
   GOOGLE_CALLBACK_URL: z.string().url(),
   CLIENT_URL: z.string().url(),
   ANTHROPIC_API_KEY: z.string(),
+  // Comma-separated list of allowed emails. If unset, registration is open.
+  ALLOWED_EMAILS: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

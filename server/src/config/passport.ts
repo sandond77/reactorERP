@@ -17,6 +17,14 @@ export function configurePassport() {
           const email = profile.emails?.[0]?.value;
           if (!email) return done(new Error('No email from Google profile'));
 
+          // Allowlist check — if ALLOWED_EMAILS is set, reject unlisted emails
+          if (env.ALLOWED_EMAILS) {
+            const allowed = env.ALLOWED_EMAILS.split(',').map((e) => e.trim().toLowerCase());
+            if (!allowed.includes(email.toLowerCase())) {
+              return done(null, false, { message: 'This email is not on the beta access list.' });
+            }
+          }
+
           const googleSub = profile.id;
           const displayName = profile.displayName;
           const avatarUrl = profile.photos?.[0]?.value;

@@ -12,7 +12,7 @@ authRouter.get('/google', passport.authenticate('google', { scope: ['profile', '
 // Google callback
 authRouter.get(
   '/google/callback',
-  passport.authenticate('google', { failureRedirect: `${env.CLIENT_URL}/login?error=auth_failed` }),
+  passport.authenticate('google', { failureRedirect: `${env.CLIENT_URL}/login?error=not_allowed` }),
   (_req, res) => res.redirect(env.CLIENT_URL)
 );
 
