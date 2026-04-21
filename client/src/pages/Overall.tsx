@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Plus, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
@@ -179,12 +179,13 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
 
   useEffect(() => {
     saveFilters(filterKey, { sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonal, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search });
-  }, [sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonal, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search]);
+  }, [filterKey, sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonal, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search]);
 
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
-    clearTimeout((handleSearchChange as any)._t);
-    (handleSearchChange as any)._t = setTimeout(() => { setDebouncedSearch(val); setPage(1); }, 300);
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => { setDebouncedSearch(val); setPage(1); }, 300);
   }, []);
 
   const handleSort = useCallback((col: string) => {

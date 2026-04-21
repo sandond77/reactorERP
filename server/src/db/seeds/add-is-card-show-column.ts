@@ -34,7 +34,7 @@ async function main() {
     )
   `.execute(db);
 
-  console.log(`Marked ${result.numUpdatedRows} card(s) as is_card_show = true.`);
+  console.log(`Marked ${(result as any).numUpdatedRows ?? result.rows.length} card(s) as is_card_show = true.`);
   process.exit(0);
 }
 

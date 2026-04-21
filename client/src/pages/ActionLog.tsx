@@ -84,6 +84,7 @@ function RevertButton({ entry, onReverted }: { entry: AuditEntry; onReverted: ()
       await api.post(`/audit/revert/${entry.id}`);
       toast.success('Record restored to inventory');
       onReverted();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       const msg = err?.response?.data?.message ?? 'Failed to restore record';
       toast.error(msg);
@@ -172,7 +173,7 @@ export function ActionLog() {
   function toggleExpand(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
       return next;
     });
   }

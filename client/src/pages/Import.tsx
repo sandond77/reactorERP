@@ -403,6 +403,150 @@ function UploadZone({ onFile }: { onFile: (file: File) => void }) {
   );
 }
 
+// ─── Unlinked Resolution Modal ────────────────────────────────────────────────
+
+interface UnlinkedRow {
+  row: number;
+  card_name: string;
+  set_name: string | null;
+  game_hint: string;
+}
+
+interface CatalogOverride {
+  game: string;
+  set_code: string;
+  set_name: string;
+  language: string;
+}
+
+const KNOWN_GAMES = [
+  { value: 'pokemon',   label: 'Pokémon' },
+  { value: 'one_piece', label: 'One Piece' },
+  { value: 'magic',     label: 'Magic: The Gathering' },
+  { value: 'yugioh',    label: 'Yu-Gi-Oh!' },
+  { value: 'other',     label: 'Other' },
+];
+
+function UnlinkedResolutionModal({
+  rows,
+  onResolve,
+  onCancel,
+}: {
+  rows: UnlinkedRow[];
+  onResolve: (overrides: Record<string, CatalogOverride>) => void;
+  onCancel: () => void;
+}) {
+  // Deduplicate by card_name|set_name
+  const groups = React.useMemo(() => {
+    const map = new Map<string, UnlinkedRow>();
+    for (const r of rows) {
+      const key = `${r.card_name}|${r.set_name ?? ''}`;
+      if (!map.has(key)) map.set(key, r);
+    }
+    return Array.from(map.entries()).map(([key, row]) => ({ key, row }));
+  }, [rows]);
+
+  const [overrides, setOverrides] = useState<Record<string, CatalogOverride>>(() => {
+    const init: Record<string, CatalogOverride> = {};
+    groups.forEach(({ key, row }) => {
+      const langHint = /japanese/i.test(row.card_name) || /japanese/i.test(row.set_name ?? '') ? 'JP' : 'EN';
+      init[key] = { game: row.game_hint, set_code: '', set_name: row.set_name ?? '', language: langHint };
+    });
+    return init;
+  });
+
+  function setField(key: string, field: keyof CatalogOverride, value: string) {
+    setOverrides(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+  }
+
+  const allFilled = groups.every(({ key }) => overrides[key]?.set_code?.trim() && overrides[key]?.language?.trim());
+
+  function handleConfirm() {
+    const resolved: Record<string, CatalogOverride> = {};
+    for (const { key } of groups) {
+      resolved[key] = overrides[key];
+    }
+    onResolve(resolved);
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-3xl max-h-[85vh] flex flex-col shadow-2xl">
+        <div className="p-5 border-b border-zinc-800">
+          <h2 className="text-sm font-semibold text-zinc-100">Unlinked Cards — Assign Set & Game</h2>
+          <p className="text-xs text-zinc-500 mt-0.5">
+            {groups.length} card{groups.length !== 1 ? 's' : ''} couldn't be matched to a known set.
+            Assign a set code and game to link them, or skip to import without linking.
+          </p>
+          <p className="text-xs text-zinc-600 mt-1.5">
+            All cards must have a set code assigned before importing.
+          </p>
+        </div>
+        <div className="overflow-y-auto flex-1 divide-y divide-zinc-800">
+          {groups.map(({ key, row }) => (
+            <div key={key} className="px-4 py-3 space-y-2">
+              <div>
+                <p className="text-sm text-zinc-200 break-words">{row.card_name}</p>
+                {row.set_name && <p className="text-xs text-zinc-500 mt-0.5">Set label: {row.set_name}</p>}
+              </div>
+              <div className="grid grid-cols-4 gap-2">
+                <div>
+                  <label className="block text-[10px] text-zinc-500 mb-1">Game</label>
+                  <select
+                    value={overrides[key]?.game ?? 'pokemon'}
+                    onChange={e => setField(key, 'game', e.target.value)}
+                    className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    {KNOWN_GAMES.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 mb-1">Language</label>
+                  <select
+                    value={overrides[key]?.language ?? 'EN'}
+                    onChange={e => setField(key, 'language', e.target.value)}
+                    className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    {KNOWN_POKEMON_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.code} — {l.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 mb-1">Set Code</label>
+                  <input
+                    value={overrides[key]?.set_code ?? ''}
+                    onChange={e => setField(key, 'set_code', e.target.value)}
+                    placeholder="e.g. OP-01"
+                    className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-zinc-500 mb-1">Set Name</label>
+                  <input
+                    value={overrides[key]?.set_name ?? ''}
+                    onChange={e => setField(key, 'set_name', e.target.value)}
+                    placeholder="e.g. Romance Dawn"
+                    className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="p-4 border-t border-zinc-800 flex items-center justify-end gap-3">
+          <button onClick={onCancel} className="text-xs text-zinc-500 hover:text-zinc-300 px-3 py-1.5">Cancel</button>
+          <button
+            onClick={handleConfirm}
+            disabled={!allFilled}
+            className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-4 py-1.5 rounded font-medium transition-colors"
+          >
+            Confirm & Import
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main flow ────────────────────────────────────────────────────────────────
 
 function ImportFlow() {
@@ -413,6 +557,8 @@ function ImportFlow() {
   const [importType, setImportType] = useState<ImportType>('graded');
   const [result, setResult] = useState<ImportResult | null>(null);
   const [ambiguousRows, setAmbiguousRows] = useState<AmbiguousRow[] | null>(null);
+  const [unlinkedRows, setUnlinkedRows] = useState<UnlinkedRow[] | null>(null);
+  const [pendingLangOverrides, setPendingLangOverrides] = useState<Record<number, string>>({});
 
   const uploadMut = useMutation({
     mutationFn: (f: File) => {
@@ -428,6 +574,7 @@ function ImportFlow() {
         setImportType(detected as ImportType);
       }
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to parse file'),
   });
 
@@ -444,19 +591,44 @@ function ImportFlow() {
       if (rows.length > 0) {
         setAmbiguousRows(rows);
       } else {
-        doExecute({});
+        runPreflightUnlinked({});
       }
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Preflight failed'),
+  });
+
+  const preflightUnlinkedMut = useMutation({
+    mutationFn: async (langOverrides: Record<number, string>) => {
+      if (!preview || !file) return { rows: [], langOverrides };
+      const fd = new FormData();
+      fd.append('file', file);
+      const rows = await api.post(`/import/${preview.id}/preflight-unlinked`, fd).then((r) => r.data.data.unlinked as UnlinkedRow[]);
+      return { rows, langOverrides };
+    },
+    onSuccess: ({ rows, langOverrides }) => {
+      if (!rows) return;
+      if (rows.length > 0) {
+        setPendingLangOverrides(langOverrides);
+        setUnlinkedRows(rows);
+      } else {
+        doExecute(langOverrides, {});
+      }
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Preflight failed'),
   });
 
   const executeMut = useMutation({
-    mutationFn: async (languageOverrides: Record<number, string>) => {
+    mutationFn: async ({ langOverrides, catalogOverrides }: { langOverrides: Record<number, string>; catalogOverrides: Record<string, CatalogOverride> }) => {
       if (!preview || !file) return;
       const fd = new FormData();
       fd.append('file', file);
-      if (Object.keys(languageOverrides).length > 0) {
-        fd.append('language_overrides', JSON.stringify(languageOverrides));
+      if (Object.keys(langOverrides).length > 0) {
+        fd.append('language_overrides', JSON.stringify(langOverrides));
+      }
+      if (Object.keys(catalogOverrides).length > 0) {
+        fd.append('catalog_overrides', JSON.stringify(catalogOverrides));
       }
       return api.post(`/import/${preview.id}/execute`, fd).then((r) => r.data.data as ImportResult);
     },
@@ -466,6 +638,8 @@ function ImportFlow() {
       setPreview(null);
       setFile(null);
       setAmbiguousRows(null);
+      setUnlinkedRows(null);
+      setPendingLangOverrides({});
       qc.invalidateQueries({ queryKey: ['imports'] });
       if (res.error_count > 0) {
         toast(`Imported ${res.imported_count}, ${res.error_count} errors`, { icon: '⚠️' });
@@ -473,11 +647,16 @@ function ImportFlow() {
         toast.success(`Imported ${res.imported_count} rows`);
       }
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Import failed'),
   });
 
-  function doExecute(overrides: Record<number, string>) {
-    executeMut.mutate(overrides);
+  function runPreflightUnlinked(langOverrides: Record<number, string>) {
+    preflightUnlinkedMut.mutate(langOverrides);
+  }
+
+  function doExecute(langOverrides: Record<number, string>, catalogOverrides: Record<string, CatalogOverride>) {
+    executeMut.mutate({ langOverrides, catalogOverrides });
   }
 
   function handleFile(f: File) {
@@ -496,8 +675,11 @@ function ImportFlow() {
     setMapping({});
     setResult(null);
     setAmbiguousRows(null);
+    setUnlinkedRows(null);
+    setPendingLangOverrides({});
     uploadMut.reset();
     preflightMut.reset();
+    preflightUnlinkedMut.reset();
     executeMut.reset();
   }
 
@@ -656,8 +838,8 @@ function ImportFlow() {
           </p>
           <div className="flex gap-3 shrink-0">
             <Button variant="secondary" onClick={reset}>Cancel</Button>
-            <Button onClick={() => preflightMut.mutate()} disabled={preflightMut.isPending || executeMut.isPending}>
-              {(preflightMut.isPending || executeMut.isPending) && <Loader2 size={14} className="animate-spin mr-1.5" />}
+            <Button onClick={() => preflightMut.mutate()} disabled={preflightMut.isPending || preflightUnlinkedMut.isPending || executeMut.isPending}>
+              {(preflightMut.isPending || preflightUnlinkedMut.isPending || executeMut.isPending) && <Loader2 size={14} className="animate-spin mr-1.5" />}
               Import {preview.total_rows} rows
             </Button>
           </div>
@@ -666,8 +848,15 @@ function ImportFlow() {
       {ambiguousRows && (
         <LanguageResolutionModal
           rows={ambiguousRows}
-          onResolve={(overrides) => { setAmbiguousRows(null); doExecute(overrides); }}
+          onResolve={(overrides) => { setAmbiguousRows(null); runPreflightUnlinked(overrides); }}
           onCancel={() => setAmbiguousRows(null)}
+        />
+      )}
+      {unlinkedRows && (
+        <UnlinkedResolutionModal
+          rows={unlinkedRows}
+          onResolve={(catalogOverrides) => { setUnlinkedRows(null); doExecute(pendingLangOverrides, catalogOverrides); }}
+          onCancel={() => setUnlinkedRows(null)}
         />
       )}
       </>
@@ -720,6 +909,7 @@ function ImportHistory() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/import/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['imports'] }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Delete failed'),
   });
 

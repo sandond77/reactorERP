@@ -46,6 +46,7 @@ function PartNumberField({
   // Search using all three card fields whenever they change
   useEffect(() => {
     if (debounceRef2.current) clearTimeout(debounceRef2.current);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!hasSearchTerms) { setResults([]); return; }
     debounceRef2.current = setTimeout(() => {
       const params: Record<string, string> = { language: form.language };
@@ -168,6 +169,7 @@ function PurchaseForm({
     const yen  = parseFloat(form.total_cost_yen);
     const rate = parseFloat(form.fx_rate);
     if (!isNaN(yen) && !isNaN(rate) && rate > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm((f) => ({ ...f, total_cost_usd: (yen / rate).toFixed(2) }));
     }
   }, [form.total_cost_yen, form.fx_rate]);

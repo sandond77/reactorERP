@@ -304,6 +304,11 @@ export const JP_SETS: SetEntry[] = [
   { code: 'M1S', names: ['mega symphonia'] },
   { code: 'M2',  names: ['inferno x'] },
   // Scarlet & Violet — PSA uses SV1S, SV1V, SV2D, SV2P, SV3K, SV3M, etc.
+  // Classic Collection decks (2023)
+  { code: 'Clf',  names: ['trading card game classic venusaur', 'classic venusaur & lugia', 'classic venusaur lugia', 'clf'] },
+  { code: 'Clk',  names: ['trading card game classic blastoise', 'classic blastoise & suicune', 'classic blastoise suicune', 'clk'] },
+  { code: 'Cll',  names: ['trading card game classic charizard', 'classic charizard & ho-oh', 'classic charizard ho-oh', 'cll'] },
+  { code: 'Svg',  names: ['venusaur & charizard & blastoise special deck', 'special deck set ex', 'svg'] },
   { code: 'SV1',  names: ['scarlet ex', 'scarlet', 'sv1s', 'sv1'] },
   { code: 'SV1V', names: ['violet ex', 'violet', 'sv1v'] },
   { code: 'SV1a', names: ['triplet beat', 'sv1a'] },
@@ -322,9 +327,16 @@ export const JP_SETS: SetEntry[] = [
   { code: 'SV7',  names: ['stellar miracle', 'sv7'] },
   { code: 'SV7a', names: ['paradise dragona', 'sv7a'] },
   { code: 'SV8',  names: ['super electric breaker', 'sv8'] },
+  { code: 'SV5a',  names: ['crimson haze', 'sv5a'] },
   { code: 'SV8a', names: ['terastal festival ex', 'terastal fest ex', 'terastal fest', 'sv8a'] },
   { code: 'SV9',   names: ['battle partners', 'sv9'] },
+  { code: 'SV9a',  names: ['heat wave arena', 'sv9a'] },
   { code: 'SV10',  names: ['glory of team rocket', 'sv10'] },
+  { code: 'SV11B', names: ['black bolt', 'sv11b'] },
+  { code: 'SV11W', names: ['white flare', 'sv11w'] },
+  { code: 'SVLN',  names: ['starter deck terastal type', 'stellar sylveon', 'svln'] },
+  // Mega Starter Decks
+  { code: 'Mbg',   names: ['mega starter set mega gengar', 'mega gengar ex starter', 'mbg'] },
   // New 2025-2026 JP sets
   { code: 'M3',    names: ['nihil zero'] },
   { code: 'M4',    names: ['ninja spinner'] },

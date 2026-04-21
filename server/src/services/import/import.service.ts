@@ -129,6 +129,56 @@ function applyMappingStatic(raw: Record<string, string>, mapping: Record<string,
   return out;
 }
 
+export interface UnlinkedRow {
+  row: number;       // 1-based
+  card_name: string;
+  set_name: string | null;
+  game_hint: string; // 'pokemon' | 'one piece' | etc — best guess from card name
+}
+
+/** Scan rows and return those that would produce no set code match (and thus no catalog entry with a SKU). */
+export async function preflightUnlinked(userId: string, importId: string, buffer: Buffer): Promise<UnlinkedRow[]> {
+  const record = await db.selectFrom('csv_imports').selectAll()
+    .where('id', '=', importId).where('user_id', '=', userId).executeTakeFirst();
+  if (!record) throw new AppError(404, 'Import not found');
+  if (record.import_type !== 'graded') return [];
+
+  const { rows } = parseCsvBuffer(buffer, record.filename);
+  const mapping = (record.mapping ?? {}) as Record<string, string>;
+  const unlinked: UnlinkedRow[] = [];
+  const seen = new Set<string>();
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = applyMappingStatic(rows[i], mapping);
+    if (Object.values(row).every(v => !v?.trim())) continue;
+
+    const cardName = row['card_name']?.trim() || '';
+    const setName  = row['set_name']?.trim() || null;
+    if (!cardName) continue;
+
+    const lookupText = setName ?? cardName;
+    const enCode = lookupSetCode('EN', lookupText);
+    const jpCode = lookupSetCode('JP', lookupText);
+
+    if (enCode || jpCode) continue; // will be matched
+
+    // Deduplicate by card_name + set_name
+    const key = `${cardName}|${setName ?? ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    // Guess the game from the card name
+    let game_hint = 'pokemon';
+    if (/one piece/i.test(cardName) || /one piece/i.test(setName ?? '')) game_hint = 'one_piece';
+    else if (/magic|mtg/i.test(cardName)) game_hint = 'magic';
+    else if (/yugioh|yu-gi-oh/i.test(cardName)) game_hint = 'yugioh';
+
+    unlinked.push({ row: i + 2, card_name: cardName, set_name: setName, game_hint });
+  }
+
+  return unlinked;
+}
+
 /** Scan rows and return those where language is ambiguous (both EN and JP find a set match, no clear signal). */
 export async function preflightImport(userId: string, importId: string, buffer: Buffer): Promise<AmbiguousRow[]> {
   const record = await db.selectFrom('csv_imports').selectAll()
@@ -184,7 +234,20 @@ export async function preflightImport(userId: string, importId: string, buffer: 
 
 // ── Execute ───────────────────────────────────────────────────────────────────
 
-export async function executeImport(userId: string, importId: string, buffer: Buffer, languageOverrides?: Record<number, string>) {
+export interface CatalogOverride {
+  game: string;
+  set_code: string;
+  set_name: string;
+  language?: string;
+}
+
+export async function executeImport(
+  userId: string,
+  importId: string,
+  buffer: Buffer,
+  languageOverrides?: Record<number, string>,
+  catalogOverrides?: Record<string, CatalogOverride>  // key: "card_name|set_name"
+) {
   const record = await db.selectFrom('csv_imports').selectAll()
     .where('id', '=', importId).where('user_id', '=', userId).executeTakeFirst();
 
@@ -205,7 +268,7 @@ export async function executeImport(userId: string, importId: string, buffer: Bu
 
   switch (record.import_type) {
     case 'graded':
-      result = await executeGradedImport(userId, rows, mapping, languageOverrides, onProgress);
+      result = await executeGradedImport(userId, rows, mapping, languageOverrides, onProgress, catalogOverrides);
       break;
     case 'raw_purchase':
       result = await executeRawPurchaseImport(userId, rows, mapping, onProgress);
@@ -245,7 +308,8 @@ async function executeGradedImport(
   rows: Record<string, string>[],
   mapping: Record<string, string>,
   languageOverrides?: Record<number, string>,
-  onProgress?: (count: number) => void
+  onProgress?: (count: number) => void,
+  catalogOverrides?: Record<string, CatalogOverride>  // key: "card_name|set_name"
 ) {
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
@@ -270,7 +334,7 @@ async function executeGradedImport(
 
     let resolvedLang: 'EN' | 'JP';
     if (override) {
-      resolvedLang = override;
+      resolvedLang = override as 'EN' | 'JP';
     } else if (language.toUpperCase() === 'JP' || language.toUpperCase() === 'JPN') {
       resolvedLang = 'JP';
     } else if (language.toUpperCase() === 'EN') {
@@ -292,9 +356,22 @@ async function executeGradedImport(
     let setCode: string | null = resolvedLang === 'EN' ? enCode : jpCode;
     if (!setCode) {
       setCode = resolvedLang === 'EN' ? jpCode : enCode;
-      if (setCode) resolvedLang = resolvedLang === 'EN' ? 'JP' : 'EN';
+      // Do NOT flip resolvedLang — the card is still the resolved language even if
+      // we borrow the set code from the other language's lookup table.
     }
-    if (!setCode) return null;
+    if (!setCode) {
+      // Check if user provided a manual override for this card via the resolution modal
+      const overrideKey = `${cardName}|${setName ?? ''}`;
+      const catOverride = catalogOverrides?.[overrideKey];
+      if (catOverride?.set_code) {
+        setCode = catOverride.set_code;
+        // Apply language override if provided
+        if (catOverride.language) resolvedLang = catOverride.language.toUpperCase() as 'EN' | 'JP';
+      } else {
+        // No set code and no override — return null (unlinked)
+        return null;
+      }
+    }
 
     // Derive card number — prefer explicit, fall back to parsing the card name
     let resolvedNumber = cardNumber?.trim() || null;
@@ -318,9 +395,12 @@ async function executeGradedImport(
     if (catalogCache.has(sku)) return catalogCache.get(sku)!;
     const existing = await db.selectFrom('card_catalog').select('id').where('sku', '=', sku).executeTakeFirst();
     if (existing) { catalogCache.set(sku, existing.id); return existing.id; }
-    const resolvedSetName = setName ?? lookupSetName(resolvedLang, setCode) ?? setCode;
+    const overrideKey2 = `${cardName}|${setName ?? ''}`;
+    const catOverride2 = catalogOverrides?.[overrideKey2];
+    const resolvedGame = catOverride2?.game ?? 'pokemon';
+    const resolvedSetName = catOverride2?.set_name ?? setName ?? lookupSetName(resolvedLang, setCode) ?? setCode;
     const created = await db.insertInto('card_catalog').values({
-      game: 'pokemon', set_name: resolvedSetName, set_code: setCode,
+      game: resolvedGame, set_name: resolvedSetName, set_code: setCode,
       card_name: cardName, card_number: resolvedNumber, language: resolvedLang, sku,
     }).returning('id').executeTakeFirstOrThrow();
     catalogCache.set(sku, created.id);
@@ -366,7 +446,8 @@ async function executeGradedImport(
 
       const setName    = row['set_name']?.trim()     ?? null;
       const cardNumber = row['card_number']?.trim()  ?? null;
-      const language   = row['language']?.trim()     || 'EN';
+      const explicitLang = row['language']?.trim();
+      const language   = explicitLang || (/\bJAPANESE?\b|\bJP\b/i.test(cardName) ? 'JP' : 'EN');
       const catalogId  = await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex);
 
       // When a catalog entry was matched/created via part number, don't override
@@ -376,14 +457,14 @@ async function executeGradedImport(
       const ci = await db.insertInto('card_instances').values({
         user_id:              userId,
         catalog_id:           catalogId,
-        card_name_override:   catalogId ? null : cardName,
+        card_name_override:   cardName ?? null,
         set_name_override:    catalogId ? null : setName,
         card_number_override: catalogId ? null : cardNumber,
         card_game:            'pokemon',
         language,
         variant:              null,
         rarity:               null,
-        notes:                existingNotes ?? (catalogId ? cardName : null),
+        notes:                existingNotes ?? null,
         purchase_type:        'pre_graded',
         status:               cardStatus,
         quantity:             1,

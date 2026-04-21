@@ -105,6 +105,7 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
       onClose();
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? (err as any).response?.data?.error ?? 'Failed to delete.'
         : 'Failed to delete.';
       setError(msg);
@@ -134,6 +135,7 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
       onClose();
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? (err as any).response?.data?.error ?? 'Failed to save.'
         : 'Failed to save.';
       setError(msg);
@@ -926,7 +928,9 @@ export function InventorySummary() {
   const { data: emptyData, isLoading: emptyLoading } = useQuery<{ data: SummaryRow[] }>({
     queryKey: ['empty-parts'],
     queryFn: () => api.get('/catalog/empty-parts').then((r) => ({
-      data: r.data.data.map((e: any) => ({
+      data:
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      r.data.data.map((e: any) => ({
         ...e,
         catalog_id: e.id,
         company: '—',

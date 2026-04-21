@@ -29,9 +29,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   };
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refetch(); }, []);
 
   return <AuthContext.Provider value={{ user, loading, refetch }}>{children}</AuthContext.Provider>;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const useAuth = () => useContext(AuthContext);

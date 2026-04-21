@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, ExternalLink, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
@@ -134,10 +134,11 @@ export function Inventory() {
   const [fListDate, setFListDate] = useState('');
   const [fSoldDate, setFSoldDate] = useState('');
 
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
-    clearTimeout((handleSearchChange as any)._t);
-    (handleSearchChange as any)._t = setTimeout(() => {
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
       setDebouncedSearch(val);
       setPage(1);
     }, 300);

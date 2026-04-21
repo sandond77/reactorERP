@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, X, ArrowLeft, Loader2, Trash2 } from 'lucide-react';
+import { Plus, ArrowLeft, Loader2, Trash2 } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -120,6 +120,7 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
       toast.success('Batch created');
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to create batch');
     } finally {
@@ -206,6 +207,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
       toast.success('Card added to batch');
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to add card');
     } finally {
@@ -381,6 +383,7 @@ function CloseSubModal({ batch, onClose }: { batch: Batch; onClose: () => void }
       qc.invalidateQueries({ queryKey: ['grading-batch', batch.id] });
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to close sub');
     } finally {
@@ -439,6 +442,7 @@ function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void 
       qc.invalidateQueries({ queryKey: ['grading-batch', batch.id] });
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to update');
     } finally {

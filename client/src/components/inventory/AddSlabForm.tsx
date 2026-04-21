@@ -69,6 +69,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
     if (!name.trim() && !imageFile) return;
     setAutoFilling(true);
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let data: any;
       if (imageFile) {
         const fd = new FormData();
@@ -83,7 +84,6 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       const s = data.data?.suggestions?.[0];
       const pg = data.data?.parsed_grade;
       const parsedCert: string | undefined = data.data?.parsed_cert;
-      const parsedLabel: string | undefined = data.data?.parsed_label;
       if (s) {
         // Card name: only fill if the part exists and we have an established name from inventory
         // If part is new, leave blank — user pastes from grading company cert page
@@ -98,7 +98,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       }
       if (pg) {
         const validCompanies = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'];
-        if (validCompanies.includes(pg.company)) setValue('slab_company', pg.company as any);
+        if (validCompanies.includes(pg.company)) setValue('slab_company', pg.company as Parameters<typeof setValue>[1]);
         if (pg.grade) setValue('slab_grade', pg.grade);
         if (pg.grade_label) setValue('slab_grade_label', pg.grade_label);
       }
@@ -114,7 +114,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
     } finally {
       setAutoFilling(false);
     }
-  }, [setValue, imageFile, gradingLabel]);
+  }, [setValue, imageFile]);
 
   const createCatalogEntry = async () => {
     if (!partNumber?.catalogData) return;

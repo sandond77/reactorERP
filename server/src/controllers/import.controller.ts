@@ -70,16 +70,27 @@ export async function preflightImport(req: Request, res: Response, next: NextFun
   } catch (err) { next(err); }
 }
 
+export async function preflightUnlinked(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.file) throw new AppError(400, 'No file provided');
+    const unlinked = await importService.preflightUnlinked(req.dataUserId, req.params['id'] as string, req.file.buffer);
+    res.json({ data: { unlinked } });
+  } catch (err) { next(err); }
+}
+
 export async function executeImport(req: Request, res: Response, next: NextFunction) {
   try {
     // Re-upload needed for execution — client must send file again
     if (!req.file) throw new AppError(400, 'No CSV file provided for execution');
-    // language_overrides: { "rowIndex": "EN"|"JP" } — from resolution modal
     const overridesRaw = req.body.language_overrides;
     const languageOverrides: Record<number, 'EN' | 'JP'> | undefined = overridesRaw
       ? JSON.parse(typeof overridesRaw === 'string' ? overridesRaw : JSON.stringify(overridesRaw))
       : undefined;
-    const result = await importService.executeImport(req.dataUserId, req.params['id'] as string, req.file.buffer, languageOverrides);
+    const catalogRaw = req.body.catalog_overrides;
+    const catalogOverrides: Record<string, importService.CatalogOverride> | undefined = catalogRaw
+      ? JSON.parse(typeof catalogRaw === 'string' ? catalogRaw : JSON.stringify(catalogRaw))
+      : undefined;
+    const result = await importService.executeImport(req.dataUserId, req.params['id'] as string, req.file.buffer, languageOverrides, catalogOverrides);
     res.json({ data: result });
   } catch (err) { next(err); }
 }

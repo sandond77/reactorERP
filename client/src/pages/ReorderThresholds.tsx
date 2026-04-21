@@ -4,7 +4,7 @@ import { Check, X, BellOff, EyeOff, RotateCcw, ExternalLink, Plus, Trash2, Loade
 import { Modal } from '../components/ui/Modal';
 import { Input } from '../components/ui/Input';
 import { api } from '../lib/api';
-import { cn, formatCurrency } from '../lib/utils';
+import { cn } from '../lib/utils';
 import toast from 'react-hot-toast';
 
 // ── Shared helpers ────────────────────────────────────────────────────────────
@@ -93,7 +93,6 @@ function MinQtyCell({ row }: { row: BulkCardRow }) {
 
 function ReorderActionButtons({ row }: { row: BulkCardRow }) {
   const qc = useQueryClient();
-  if (!row.threshold_id) return null;
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['bulk-cards-thresholds'] });
     qc.invalidateQueries({ queryKey: ['reorder-alerts'] });
@@ -101,6 +100,7 @@ function ReorderActionButtons({ row }: { row: BulkCardRow }) {
   const mute   = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/mute`),   onSuccess: () => { invalidate(); toast.success('Muted 30 days'); } });
   const ignore = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/ignore`), onSuccess: () => { invalidate(); toast.success('Ignored'); } });
   const reset  = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/reset`),  onSuccess: () => { invalidate(); toast.success('Reset'); } });
+  if (!row.threshold_id) return null;
   const silenced = row.is_ignored || isMuted(row.muted_until);
   return (
     <div className="flex items-center gap-2">

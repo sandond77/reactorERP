@@ -36,28 +36,28 @@ export async function upsertThreshold(req: Request, res: Response, next: NextFun
 
 export async function ignoreThreshold(req: Request, res: Response, next: NextFunction) {
   try {
-    await svc.ignoreGradeMoreThreshold(req.dataUserId, req.params.id);
+    await svc.ignoreGradeMoreThreshold(req.dataUserId, req.params.id as string);
     res.json({ ok: true });
   } catch (err) { next(err); }
 }
 
 export async function muteThreshold(req: Request, res: Response, next: NextFunction) {
   try {
-    await svc.muteGradeMoreThreshold(req.dataUserId, req.params.id);
+    await svc.muteGradeMoreThreshold(req.dataUserId, req.params.id as string);
     res.json({ ok: true });
   } catch (err) { next(err); }
 }
 
 export async function resetThreshold(req: Request, res: Response, next: NextFunction) {
   try {
-    await svc.resetGradeMoreThreshold(req.dataUserId, req.params.id);
+    await svc.resetGradeMoreThreshold(req.dataUserId, req.params.id as string);
     res.json({ ok: true });
   } catch (err) { next(err); }
 }
 
 export async function deleteThreshold(req: Request, res: Response, next: NextFunction) {
   try {
-    await svc.deleteGradeMoreThreshold(req.dataUserId, req.params.id);
+    await svc.deleteGradeMoreThreshold(req.dataUserId, req.params.id as string);
     res.json({ ok: true });
   } catch (err) { next(err); }
 }

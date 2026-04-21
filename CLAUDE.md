@@ -2,6 +2,18 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Working Preferences
+
+- **No Python** — this is a TypeScript/Node/React codebase. Never use Python scripts for migrations, data fixes, or tooling. Use the Node.js `pg` Pool directly for raw DB queries.
+- **No bash one-liners for DB work** — use `node -e "..."` with `require('pg')` and the app's `DATABASE_URL`.
+- **TypeScript only** — all server and client code is TypeScript. Keep it that way.
+- **Fix type errors with minimal casts** — prefer proper types over `as any`, but `as any` is acceptable for Kysely edge cases (RawBuilder in where, aliased table columns, dynamic order-by).
+- **No unnecessary abstractions** — don't add helpers or utilities for one-time operations.
+- **No comments on unchanged code** — only add comments where logic isn't self-evident.
+- **Migrations are plain SQL files** — sequential numbered files in `server/src/db/migrations/`. When the migration runner has ordering issues, apply SQL directly via the Node.js pg Pool.
+
+---
+
 ## System Overview
 
 Reactor is a trading card inventory ERP (Pokemon focus) managing the full lifecycle from purchase to sale. There are two primary flows:
@@ -25,26 +37,23 @@ All inventory begins as a purchase. Each purchase generates a unique `purchase_i
 **Graded (slabs):** Item-based. Each slab is a unique individual record with cert number, grade, company, and cost basis.
 
 ### Raw Card Workflow
-```
-Purchase (raw_purchases)
-  → Intake → card_instances [status: purchased_raw]
-  → Inspection → card_instances [status: inspected, condition set, decision set]
-      → decision: sell_raw → card_instances [status: raw_for_sale]
-      → decision: grade   → card_instances [status: grading_submitted]
-                              → graded: card_instances [status: graded] + slab_details row
-```
+
+    Purchase (raw_purchases)
+      → Intake → card_instances [status: purchased_raw]
+      → Inspection → card_instances [status: inspected, condition set, decision set]
+          → decision: sell_raw → card_instances [status: raw_for_sale]
+          → decision: grade   → card_instances [status: grading_submitted]
+                                  → graded: card_instances [status: graded] + slab_details row
 
 ### Graded Card Workflow
-```
-Purchase (pre_graded) → card_instances [status: graded] + slab_details row created immediately
-```
+
+    Purchase (pre_graded) → card_instances [status: graded] + slab_details row created immediately
 
 ### Card Status State Machine (actual DB enum `card_status`)
-```
-purchased_raw → inspected → grading_submitted → graded → sold
-                          → raw_for_sale → sold
-                                                 → lost_damaged (terminal)
-```
+
+    purchased_raw → inspected → grading_submitted → graded → sold
+                              → raw_for_sale → sold
+                                                     → lost_damaged (terminal)
 
 ### Cost Basis
 - **Raw:** starts at purchase total cost, distributed proportionally across inspection allocations
@@ -65,30 +74,31 @@ Cost basis must always reconcile. No orphaned or lost cost.
 - `purchase_id` values are immutable once created
 - Do not treat graded cards as quantity-based
 - Model grading as a transformation (raw → graded), not duplication
+- Data is scoped by `user_id`. `req.dataUserId` (set by `requireAuth`) resolves to org owner's user_id for org members. Always use `req.dataUserId`, never `req.user.id`, for data queries.
+- `card_catalog` is a shared global reference table — no `user_id`. It stores canonical card info (game, set, name, SKU). User inventory is in `card_instances`.
+- Organizations (`organizations`, `org_members`) are already set up. Each user is their own org owner unless explicitly joined to another org. No `org_id` migration is needed — `user_id` scoping via `req.dataUserId` handles sharing.
 
 ---
 
 ## Commands
 
-```bash
-# Start both client and server in dev mode (from root)
-npm run dev
+    # Start both client and server in dev mode (from root)
+    npm run dev
 
-# Run migrations
-npm run migrate           # run all pending
-npm run migrate:up        # up one
-npm run migrate:down      # down one
-npm run migrate:create "description"   # create new migration file
+    # Run migrations (may have ordering issues — apply directly via Node pg Pool if needed)
+    npm run migrate:up
 
-# Client only
-cd client && npm run dev
-cd client && npm run lint
-cd client && npm run build
+    # Client only
+    cd client && npm run dev
+    cd client && npm run lint
+    cd client && npm run build
 
-# Server only
-cd server && npm run dev   # tsx watch
-cd server && npm run build
-```
+    # Server only
+    cd server && npm run dev   # tsx watch
+    cd server && npm run build
+
+    # Kill port 3001 if already in use
+    lsof -ti:3001 | xargs kill -9
 
 No test suite exists. Validate changes by running the dev server.
 
@@ -100,21 +110,21 @@ No test suite exists. Validate changes by running the dev server.
 
 **API:** REST at `/api/v1`. Client uses Axios (`client/src/lib/api.ts`) with base URL `/api/v1` and a 401 interceptor that redirects to `/login`. Static uploads served at `/uploads`.
 
-**Auth:** Google OAuth via Passport.js. Sessions stored in PostgreSQL (connect-pg-simple). All protected routes use `requireAuth` middleware. `req.user.id` is available in all authenticated handlers.
+**Auth:** Google OAuth via Passport.js. Sessions stored in PostgreSQL (connect-pg-simple). All protected routes use `requireAuth` middleware. `req.dataUserId` is always the correct user ID for data scoping.
 
 **Server pattern:** `routes/` → `controllers/` → `services/`. Controllers handle Zod validation and HTTP concerns; services contain all DB/business logic. Errors use `AppError(statusCode, message)` with a global handler.
 
 **Database:** PostgreSQL (running in Docker — do NOT use `psql` directly) via Kysely (type-safe query builder). Types in `server/src/types/db.ts` are the source of truth. Migrations are sequential SQL files in `server/src/db/migrations/`. Prices stored as **cents** (integers) — use `toCents()` util when converting. To run raw queries use the Node.js `pg` Pool via the app's `DATABASE_URL`.
 
 **Key tables:**
-- `card_catalog` — shared canonical card reference (game, set, name, SKU/part number). Not user-specific.
+- `card_catalog` — shared global card reference (game, set, name, SKU/part number). Not user-specific.
 - `card_instances` — user-owned cards. Carries status, condition, decision, cost, quantity, and optional `raw_purchase_id`. Soft-deleted via `deleted_at`.
 - `raw_purchases` — grouped bulk purchase records, the lot-level entry point.
 - `slab_details` — graded card data (cert number, grade, company) joined 1:1 to a `card_instances` row.
 - `grading_submissions` / `grading_batches` — batch submission tracking.
 - `listings`, `sales`, `trades`, `expenses` — commerce tracking.
 
-**Card naming:** Display name resolves as `COALESCE(ci.card_name_override, cc.card_name)`. The catalog stores short names (e.g. "Shining Mew"); `card_name_override` stores user-chosen names like full PSA labels.
+**Card naming:** Display name resolves as `COALESCE(ci.card_name_override, cc.card_name)`. The catalog stores short names (e.g. "Shining Mew"); `card_name_override` always stores the imported/user-entered name (e.g. full PSA labels).
 
 **Client state:** React Query for all server state (useQuery/useMutation). AuthContext for user session. Filter state persisted to localStorage via `lib/filter-store.ts`. No global state library.
 
@@ -129,3 +139,23 @@ No test suite exists. Validate changes by running the dev server.
 **Page consistency rule:** All inventory pages must have: search input, Add button, Clear Filters button, filter pattern, and empty state in `<tbody>`.
 
 **Environment:** Server runs on port 3001. Vite dev server on 5173 and proxies `/api` and `/uploads` to `localhost:3001`. Server `.env` needs `DATABASE_URL`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `CLIENT_URL`.
+
+---
+
+## Import System
+
+The import pipeline (`server/src/services/import/`) handles CSV and Excel files for graded cards, raw purchases, bulk sales, and expenses.
+
+**Flow:**
+1. Upload → AI detects import type + column mapping (Haiku)
+2. Save mapping → preflight language ambiguity check → modal if ambiguous
+3. Preflight unlinked check → modal if any cards can't be matched to a set code
+4. Execute with language overrides + catalog overrides
+
+**Set code lookup** (`server/src/utils/set-codes.ts`): EN_SETS and JP_SETS arrays with name aliases. `lookupSetCode(lang, text)` does exact then longest-substring match. When adding new sets, add entries to the correct array — no code changes elsewhere needed.
+
+**Unlinked resolution modal:** Cards that don't match any known set code show a modal requiring the user to assign Game, Language, Set Code, and Set Name before import can proceed. All fields required — no skipping.
+
+**card_name_override** is always set to the imported card name regardless of catalog match, so full PSA labels are preserved in display.
+
+**Language inference** (when no explicit language column): checks for "JAPANESE"/"JP" in card name → JP, otherwise EN. Set code fallback does not flip the resolved language.

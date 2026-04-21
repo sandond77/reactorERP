@@ -73,7 +73,7 @@ export async function recordSale(req: Request, res: Response, next: NextFunction
 
 export async function recordBulkSale(req: Request, res: Response, next: NextFunction) {
   try {
-    const { items, platform, card_show_id, currency, sold_at, unique_id_2 } = z.object({
+    const { items, platform, card_show_id, unique_id, order_details_link, currency, sold_at, unique_id_2 } = z.object({
       items: z.array(z.object({
         card_instance_id: z.string().uuid(),
         listing_id: z.string().uuid().optional(),

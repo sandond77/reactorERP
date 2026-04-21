@@ -308,6 +308,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
       qc.invalidateQueries({ queryKey: ['grading-subs'] });
       onBack();
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to process return'),
   });
 
@@ -337,7 +338,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
   function handleConfirm() {
     processReturn.mutate({
       returned_at: returnedAt || undefined,
-      items: rows.map((row, idx) => {
+      items: rows.map((row) => {
         const g = parseFloat(row.grade);
         const lbl = row.csv_grade_label || gradeLabel(batch.company, g);
         return {

@@ -81,7 +81,7 @@ function parseExcelBuffer(buffer: Buffer): ParseResult {
 
 // Known column aliases for auto-mapping
 export const FIELD_ALIASES: Record<string, string[]> = {
-  card_name: ['card name', 'name', 'card', 'title', 'item', 'item name', 'description'],
+  card_name: ['player', 'subject', 'label', 'card title', 'card name', 'name', 'card', 'title', 'item', 'item name', 'description'],
   set_name: ['set', 'set name', 'expansion', 'series'],
   card_number: ['number', 'card #', 'card number', '#', 'num'],
   card_game: ['game', 'tcg', 'product type'],
@@ -153,7 +153,8 @@ Import types:
 
 Column name hints (common aliases users use):
 - "Cert" or "Cert #" → cert_number
-- "Card" → card_name
+- "Player" or "Subject" or "Label" → card_name (PSA export uses these for the full card label)
+- "Card" → card_name (short name, lower priority than Player/Subject)
 - "Grade" → grade
 - "Raw" or "Raw Cost" or "Raw Price" → purchase_cost (the cost of the card before grading)
 - "Grading Cost" or "Grading" → grading_cost
@@ -207,14 +208,18 @@ Only include columns in mapping that you can confidently match to a target field
 export function autoDetectMapping(headers: string[]): Record<string, string> {
   const mapping: Record<string, string> = {};
   const normalizedHeaders = headers.map((h) => h.toLowerCase().trim());
+  const usedHeaders = new Set<string>();
 
   for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
-    for (const header of normalizedHeaders) {
-      if (aliases.some((alias) => header.includes(alias) || alias.includes(header))) {
-        const originalHeader = headers[normalizedHeaders.indexOf(header)];
-        if (originalHeader && !Object.values(mapping).includes(field)) {
-          mapping[originalHeader] = field;
-        }
+    if (Object.values(mapping).includes(field)) continue;
+    // Iterate aliases in priority order (first alias wins)
+    for (const alias of aliases) {
+      const idx = normalizedHeaders.findIndex(
+        (h) => !usedHeaders.has(h) && (h === alias || h.includes(alias) || alias.includes(h))
+      );
+      if (idx !== -1) {
+        mapping[headers[idx]] = field;
+        usedHeaders.add(normalizedHeaders[idx]);
         break;
       }
     }

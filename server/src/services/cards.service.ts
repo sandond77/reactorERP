@@ -81,7 +81,7 @@ export async function listCards(
   if (filters.status) {
     const statuses = filters.status.split(',').map((s: string) => s.trim()).filter(Boolean);
     if (statuses.length === 1) {
-      query = query.where('ci.status', '=', statuses[0]);
+      query = query.where('ci.status', '=', statuses[0] as any);
     } else if (statuses.length > 1) {
       query = query.where('ci.status', 'in', statuses as any);
     }
@@ -131,7 +131,7 @@ export async function listCards(
     .where('ci.user_id', '=', userId)
     .$if(!!filters.status, (qb) => {
       const ss = filters.status!.split(',').map((s: string) => s.trim()).filter(Boolean);
-      return ss.length === 1 ? qb.where('ci.status', '=', ss[0]) : qb.where('ci.status', 'in', ss as any);
+      return ss.length === 1 ? qb.where('ci.status', '=', ss[0] as any) : qb.where('ci.status', 'in', ss as any);
     })
     .$if(!!filters.card_game, (qb) => {
       const vals = filters.card_game!.split(',').map((s: string) => s.trim()).filter(Boolean);
@@ -363,8 +363,8 @@ export async function createCard(
 ) {
   // 'bulk' is a raw_purchases.type, not a card_instances.purchase_type — map it to 'raw'
   const incomingType = slab ? 'pre_graded' : (data.purchase_type ?? 'raw');
-  const rawPurchaseType = incomingType === 'bulk' ? 'bulk' : 'raw';
-  const purchaseType = (incomingType === 'bulk' ? 'raw' : incomingType) as 'raw' | 'pre_graded';
+  const rawPurchaseType = (incomingType as any) === 'bulk' ? 'bulk' : 'raw';
+  const purchaseType = ((incomingType as any) === 'bulk' ? 'raw' : incomingType) as 'raw' | 'pre_graded';
   const status = slab ? 'graded' : ((data as any).decision === 'sell_raw' ? 'raw_for_sale' : (data.status ?? 'purchased_raw'));
 
   // Auto-create a raw_purchase record for raw cards added outside the intake workflow

@@ -49,6 +49,7 @@ export function UngradedInventory() {
     return () => clearTimeout(t);
   }, [search]);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setExpandedKeys(new Set()); }, [tab]);
 
   const { data: rawData, isLoading } = useQuery<CardGroup[]>({
@@ -105,7 +106,7 @@ export function UngradedInventory() {
   function toggleExpand(key: string) {
     setExpandedKeys((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) { next.delete(key); } else { next.add(key); }
       return next;
     });
   }

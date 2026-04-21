@@ -3,7 +3,6 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, TrendingUp } from 'lucide-react';
 import { api } from '../lib/api';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
-import { Select } from '../components/ui/Select';
 import { formatCurrency, cn } from '../lib/utils';
 import { CardTrendModal } from '../components/CardTrendPanel';
 
@@ -95,8 +94,6 @@ function CardShowBreakdownRow({ showId, colSpan }: { showId: string; colSpan: nu
   const slabProfit = slabNet - slabCost;
   const rawProfit  = rawNet  - rawCost;
   const totalCount = slabCount + rawCount;
-  const hasBoth    = slabCount > 0 && rawCount > 0;
-
   const stat = (label: string, value: string) => (
     <div className="flex flex-col gap-0.5">
       <span className="text-[10px] text-zinc-600 uppercase tracking-wide">{label}</span>
@@ -149,7 +146,7 @@ function CardShowBreakdownRow({ showId, colSpan }: { showId: string; colSpan: nu
 }
 
 export function Reports() {
-  const [groupBy, setGroupBy] = useState<'month' | 'platform' | 'game'>('month');
+  const [groupBy] = useState<'month' | 'platform' | 'game'>('month');
   const [channel, setChannel] = useState<Channel>('all');
   const [cardType, setCardType] = useState<CardType>('all');
   const [expandedYears, setExpandedYears] = useState<Set<string>>(new Set());

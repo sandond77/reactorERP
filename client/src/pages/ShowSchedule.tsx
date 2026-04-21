@@ -257,7 +257,7 @@ export function ShowSchedule() {
                   <div
                     ref={archiveRef}
                     className="overflow-hidden transition-all duration-200"
-                    style={{ maxHeight: archiveOpen ? archiveRef.current?.scrollHeight ?? 9999 : 0 }}
+                    style={{ maxHeight: archiveOpen ? '9999px' : 0 }}
                   >
                     <div className="space-y-2 pt-1">
                       {archivedPast.map((show) => (

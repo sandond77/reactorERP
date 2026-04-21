@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, Loader2, Pencil, Trash2, Sparkles, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { Plus, X, Loader2, Pencil, Trash2, ExternalLink } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -144,6 +144,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [debouncedBulkSearch, setDebouncedBulkSearch] = useState('');
   const [bulkDiscount, setBulkDiscount] = useState('');
   const [bulkTab, setBulkTab] = useState<'graded' | 'raw'>('graded');
+  const [bulkSearchMode, setBulkSearchMode] = useState<'search' | 'url'>('search');
+  const [bulkUrl, setBulkUrl] = useState('');
+  const [bulkUrlLoading, setBulkUrlLoading] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedBulkSearch(bulkSearch), 300);
@@ -211,18 +214,23 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   });
 
   // Bulk search: card show graded inventory
+  const bulkIsEbay = platform === 'ebay';
   const { data: bulkSearchResults, isFetching: isBulkSearching } = useQuery<PaginatedResult<SlabResult>>({
-    queryKey: ['bulk-sale-search', debouncedBulkSearch],
+    queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay],
     queryFn: () => api.get('/grading/slabs', {
-      params: { search: debouncedBulkSearch, limit: 50, status: 'unsold', is_card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
+      params: bulkIsEbay
+        ? { search: debouncedBulkSearch, limit: 50, status: 'unsold', for_sale: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' }
+        : { search: debouncedBulkSearch, limit: 50, status: 'unsold', is_card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'graded',
   });
-  // Bulk search: card show raw inventory
+  // Bulk search: raw inventory
   const { data: bulkRawResults, isFetching: isBulkRawSearching } = useQuery<PaginatedResult<RawCardShowResult>>({
-    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch],
+    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay],
     queryFn: () => api.get('/cards', {
-      params: { search: debouncedBulkSearch || undefined, limit: 50, is_card_show: 'yes', status: 'raw_for_sale' },
+      params: bulkIsEbay
+        ? { search: debouncedBulkSearch || undefined, limit: 50, is_listed: 'yes', status: 'raw_for_sale' }
+        : { search: debouncedBulkSearch || undefined, limit: 50, is_card_show: 'yes', status: 'raw_for_sale' },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'raw',
   });
@@ -264,7 +272,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     } else {
       setSelectedCard(null);
     }
-  }, [copies.length, listedOnly]);
+  }, [copies, listedOnly]);
 
 
   async function handleSubmit(e: React.FormEvent) {
@@ -293,10 +301,59 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       toast.success('Sale recorded!');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to record sale');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function handleBulkUrlLookup() {
+    if (!bulkUrl.trim()) return;
+    setBulkUrlLoading(true);
+    try {
+      const res = await api.get('/listings/by-url/all', { params: { url: bulkUrl.trim() } });
+      const rows: Array<{
+        id: string; listing_id: string; card_name: string | null; set_name: string | null;
+        cert_number: string | null; grade_label: string | null; company: string | null;
+        raw_purchase_label: string | null; card_show_price: number | null;
+        condition: string | null;
+      }> = res.data.data;
+      if (!rows.length) { toast.error('No active listings found for that URL'); return; }
+      const alreadyAdded = new Set(bulkCart.map(c => c.id));
+      // Deduplicate: one card per unique identity (name + grade + company)
+      const seenIdentities = new Set<string>();
+      const newItems: BulkCartItem[] = rows
+        .filter(r => {
+          if (alreadyAdded.has(r.id)) return false;
+          const key = `${r.card_name ?? ''}|${r.grade_label ?? ''}|${r.company ?? ''}`;
+          if (seenIdentities.has(key)) return false;
+          seenIdentities.add(key);
+          return true;
+        })
+        .map(r => ({
+          id: r.id,
+          listing_id: r.listing_id,
+          card_name: r.card_name,
+          set_name: r.set_name,
+          cert_number: r.cert_number,
+          grade_label: r.grade_label ?? r.condition,
+          company: r.company,
+          raw_purchase_label: r.raw_purchase_label,
+          sticker_price_input: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '',
+          final_price_input: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '',
+          card_type: r.cert_number ? 'graded' : 'raw',
+        }));
+      if (!newItems.length) { toast('All cards from that URL are already in the cart'); return; }
+      setBulkCart(prev => [...prev, ...newItems]);
+      toast.success(`Added ${newItems.length} card${newItems.length !== 1 ? 's' : ''} from listing`);
+      setBulkUrl('');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Could not find listing');
+    } finally {
+      setBulkUrlLoading(false);
     }
   }
 
@@ -349,7 +406,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </button>
         {platform === 'card_show' && (
           <button type="button"
-            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setStep('bulk-search'); }}
+            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkUrl(''); setBulkSearchMode('search'); setStep('bulk-search'); }}
             className="rounded-xl border-2 border-teal-600/60 bg-teal-500/10 px-4 py-5 text-left hover:bg-teal-500/20 transition-colors">
             <p className="text-sm font-semibold text-teal-300">Bulk Sale</p>
             <p className="text-xs text-zinc-500 mt-0.5">Multiple cards, one transaction</p>
@@ -357,7 +414,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         )}
         {platform === 'ebay' && (
           <button type="button"
-            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setStep('bulk-search'); }}
+            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkUrl(''); setBulkSearchMode('search'); setStep('bulk-search'); }}
             className="rounded-xl border-2 border-teal-600/60 bg-teal-500/10 px-4 py-5 text-left hover:bg-teal-500/20 transition-colors">
             <p className="text-sm font-semibold text-teal-300">Set Listing</p>
             <p className="text-xs text-zinc-500 mt-0.5">Multiple cards, total split evenly</p>
@@ -935,23 +992,50 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3">
         <div className="flex items-center gap-2 mb-1">
           <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
-          <span className="text-xs text-zinc-600">Card Show · Bulk Sale</span>
+          <span className="text-xs text-zinc-600">{platform === 'ebay' ? 'eBay · Set Listing' : 'Card Show · Bulk Sale'}</span>
         </div>
-        <div className="flex gap-1">
-          {(['graded', 'raw'] as const).map((t) => (
-            <button key={t} type="button" onClick={() => { setBulkTab(t); setBulkSearch(''); }}
-              className={`px-3 py-1 text-xs rounded-md font-medium capitalize transition-colors ${bulkTab === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-              {t}
-            </button>
-          ))}
-        </div>
-        <div className="relative">
-          <Input label={`Search ${bulkTab === 'graded' ? 'Graded' : 'Raw'} Card Show Inventory`}
-            placeholder={bulkTab === 'graded' ? 'Card name or cert #…' : 'Card name…'}
-            value={bulkSearch} onChange={(e) => setBulkSearch(e.target.value)}
-            autoFocus autoComplete="off" />
-          {isSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
-        </div>
+
+        {bulkIsEbay && (
+          <div className="flex gap-1">
+            {(['search', 'url'] as const).map((m) => (
+              <button key={m} type="button" onClick={() => { setBulkSearchMode(m); setBulkSearch(''); setBulkUrl(''); }}
+                className={`px-3 py-1 text-xs rounded-md font-medium capitalize transition-colors ${bulkSearchMode === m ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {m === 'url' ? 'Listing URL' : 'Search'}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {bulkIsEbay && bulkSearchMode === 'url' ? (
+          <div className="space-y-2">
+            <Input label="eBay Listing URL" placeholder="https://www.ebay.com/itm/…"
+              value={bulkUrl} onChange={(e) => setBulkUrl(e.target.value)}
+              autoFocus autoComplete="off" />
+            <Button type="button" variant="secondary" className="w-full"
+              disabled={!bulkUrl.trim() || bulkUrlLoading}
+              onClick={handleBulkUrlLookup}>
+              {bulkUrlLoading ? <><Loader2 size={13} className="animate-spin mr-1.5" />Finding cards…</> : 'Find All Cards in Listing'}
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="flex gap-1">
+              {(['graded', 'raw'] as const).map((t) => (
+                <button key={t} type="button" onClick={() => { setBulkTab(t); setBulkSearch(''); }}
+                  className={`px-3 py-1 text-xs rounded-md font-medium capitalize transition-colors ${bulkTab === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                  {t}
+                </button>
+              ))}
+            </div>
+            <div className="relative">
+              <Input label={`Search ${bulkTab === 'graded' ? 'Graded' : 'Raw'} ${platform === 'ebay' ? 'eBay Listed' : 'Card Show'} Inventory`}
+                placeholder={bulkTab === 'graded' ? 'Card name or cert #…' : 'Card name…'}
+                value={bulkSearch} onChange={(e) => setBulkSearch(e.target.value)}
+                autoFocus autoComplete="off" />
+              {isSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
+            </div>
+          </>
+        )}
         {activeRows.length > 0 ? (
           <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-52 overflow-y-auto">
             {bulkTab === 'graded' ? bulkSearchRows.map((r) => {
@@ -1027,8 +1111,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               );
             })}
           </div>
-        ) : !isSearching && bulkSearch.length >= 1 ? (
-          <p className="text-xs text-zinc-500 px-1">No {bulkTab} card show inventory found.</p>
+        ) : !isSearching && bulkSearch.length >= 1 && !(bulkIsEbay && bulkSearchMode === 'url') ? (
+          <p className="text-xs text-zinc-500 px-1">No {bulkTab} {platform === 'ebay' ? 'eBay listed' : 'card show'} inventory found.</p>
         ) : null}
 
         {bulkCart.length > 0 && (
@@ -1048,19 +1132,21 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                           : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
                       </p>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className={cn('text-xs', missingPrice ? 'text-amber-500' : 'text-zinc-500')}>$</span>
-                      <input
-                        type="number" step="0.01" min="0"
-                        value={item.sticker_price_input}
-                        placeholder="Required"
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, sticker_price_input: val, final_price_input: val } : c));
-                        }}
-                        className={cn('w-20 text-xs bg-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none [appearance:textfield]', missingPrice ? 'border border-amber-600/60 placeholder:text-amber-700' : 'border border-zinc-600 focus:border-indigo-500')}
-                      />
-                    </div>
+                    {!bulkIsEbay && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className={cn('text-xs', missingPrice ? 'text-amber-500' : 'text-zinc-500')}>$</span>
+                        <input
+                          type="number" step="0.01" min="0"
+                          value={item.sticker_price_input}
+                          placeholder="Required"
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, sticker_price_input: val, final_price_input: val } : c));
+                          }}
+                          className={cn('w-20 text-xs bg-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none [appearance:textfield]', missingPrice ? 'border border-amber-600/60 placeholder:text-amber-700' : 'border border-zinc-600 focus:border-indigo-500')}
+                        />
+                      </div>
+                    )}
                     <button type="button" onClick={() => setBulkCart(prev => prev.filter((_, idx) => idx !== i))}
                       className="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
                       <X size={14} />
@@ -1071,12 +1157,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div className="flex items-center justify-between">
-              {bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0) && (
+              {!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0) && (
                 <p className="text-xs text-amber-500">Enter a sticker price for each card</p>
               )}
               <div className="ml-auto">
                 <Button type="button"
-                  disabled={bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0)}
+                  disabled={bulkCart.length === 0 || (!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0))}
                   onClick={() => setStep('bulk-review')}>
                   Review Sale →
                 </Button>
@@ -1340,7 +1426,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         toast.success(`${itemsWithFinal.length} sales recorded!`);
         queryClient.invalidateQueries({ queryKey: ['sales'] });
         onClose();
-      } catch (err: any) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
         toast.error(err?.response?.data?.error ?? 'Failed to record sales');
       } finally {
         setSubmitting(false);
@@ -1456,6 +1543,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       toast.success('Sale updated');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to update sale');
     } finally { setSubmitting(false); }
@@ -1468,6 +1556,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       toast.success('Sale deleted — card returned to inventory');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to delete sale');
     } finally { setSubmitting(false); }

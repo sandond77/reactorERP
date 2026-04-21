@@ -110,6 +110,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [autoFilling, setAutoFilling] = useState(false);
   const [catalogId, setCatalogId] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, any> } | null>(null);
   const [cardName, setCardName] = useState('');
   const [setName, setSetName] = useState('');
@@ -144,6 +145,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
     if (!name.trim() && !imageFile) return;
     setAutoFilling(true);
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let data: any;
       if (imageFile) {
         const fd = new FormData();
@@ -297,7 +299,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
             <option value="NM">NM</option><option value="LP">LP</option><option value="MP">MP</option>
             <option value="HP">HP</option><option value="DMG">DMG</option>
           </Select>
-          <Select label="Intent" value={decision} onChange={(e) => setDecision(e.target.value as any)}>
+          <Select label="Intent" value={decision} onChange={(e) => setDecision(e.target.value as "grade" | "sell_raw" | "hold")}>
             <option value="sell_raw">For Sale</option>
             <option value="grade">To Grade</option>
           </Select>
@@ -458,6 +460,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       queryClient.invalidateQueries({ queryKey: ['raw-inventory'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to record trade');
     } finally {
@@ -783,7 +786,7 @@ export function Trades() {
   function toggleExpand(id: string) {
     setExpandedIds(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) { next.delete(id); } else { next.add(id); }
       return next;
     });
   }

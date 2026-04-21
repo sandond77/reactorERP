@@ -8,7 +8,7 @@ import { AddCardForm } from '../components/inventory/AddCardForm';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { formatCurrency } from '../lib/utils';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
-import type { CardInstance, CardGroup } from '../lib/card-inventory';
+import type { CardGroup } from '../lib/card-inventory';
 import { instForSale, instToGrade, instGrading, instSold, groupKey, num } from '../lib/card-inventory';
 
 type SortDir = 'asc' | 'desc';
@@ -108,7 +108,7 @@ export function RawInventory() {
   function toggleExpand(key: string) {
     setExpandedKeys((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) { next.delete(key); } else { next.add(key); }
       return next;
     });
   }

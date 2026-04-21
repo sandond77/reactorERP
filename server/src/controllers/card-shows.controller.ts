@@ -31,7 +31,7 @@ export async function create(req: Request, res: Response, next: NextFunction) {
 export async function update(req: Request, res: Response, next: NextFunction) {
   try {
     const data = createSchema.partial().parse(req.body);
-    const row = await service.updateCardShow(req.dataUserId, req.params.id, data);
+    const row = await service.updateCardShow(req.dataUserId, req.params.id as string, data);
     if (!row) throw new AppError(404, 'Card show not found');
     res.json(row);
   } catch (err) { next(err); }
@@ -52,7 +52,7 @@ export async function addInventory(req: Request, res: Response, next: NextFuncti
 
 export async function remove(req: Request, res: Response, next: NextFunction) {
   try {
-    await service.deleteCardShow(req.dataUserId, req.params.id);
+    await service.deleteCardShow(req.dataUserId, req.params.id as string);
     res.status(204).send();
   } catch (err) { next(err); }
 }

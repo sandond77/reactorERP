@@ -5,7 +5,7 @@ import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
-import { formatCurrency, formatDate, formatCertNumber } from '../lib/utils';
+import { formatCurrency, formatCertNumber } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import toast from 'react-hot-toast';
@@ -385,6 +385,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['raw-inventory-grouped'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to create listing');
     } finally {
@@ -569,7 +570,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
                 <div key={copy.id}
                   onClick={atLimit ? undefined : () => setCustomSelected(() => {
                     const next = new Set(effectiveIds);
-                    next.has(copy.id) ? next.delete(copy.id) : next.add(copy.id);
+                    if (next.has(copy.id)) { next.delete(copy.id); } else { next.add(copy.id); }
                     return next;
                   })}
                   className={`rounded-lg border px-3 py-2 flex items-center gap-2 transition-colors ${
@@ -658,7 +659,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
             <div key={copy.id}
               onClick={() => setSelectedRawIds((prev) => {
                 const next = new Set(prev);
-                next.has(copy.id) ? next.delete(copy.id) : next.add(copy.id);
+                if (next.has(copy.id)) { next.delete(copy.id); } else { next.add(copy.id); }
                 return next;
               })}
               className={`rounded-lg border px-3 py-2 flex items-center gap-2 cursor-pointer transition-colors ${
@@ -862,6 +863,7 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to update listing');
     } finally {
@@ -877,6 +879,7 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
       onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to cancel listing');
       setDeleteStep(null);
@@ -972,6 +975,7 @@ export function Listings() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editRow, setEditRow] = useState<AggregatedListing | null>(null);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setExpandedKeys(new Set()); }, [listingTab]);
 
   function rowKey(row: AggregatedListing) {

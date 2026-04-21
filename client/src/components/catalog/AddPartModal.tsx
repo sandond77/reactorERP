@@ -145,6 +145,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
       }
     } catch (err: unknown) {
       const msg = err && typeof err === 'object' && 'response' in err
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? (err as any).response?.data?.error ?? 'Failed to save.'
         : 'Failed to save.';
       setError(msg);

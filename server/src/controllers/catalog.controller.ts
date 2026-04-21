@@ -56,7 +56,7 @@ export async function emptyCatalog(req: Request, res: Response, next: NextFuncti
 
 export async function updateCard(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     const { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language } = req.body;
     await updateCatalogCard(id, { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language });
     res.json({ ok: true });
@@ -65,7 +65,7 @@ export async function updateCard(req: Request, res: Response, next: NextFunction
 
 export async function deleteCard(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id } = req.params;
+    const id = req.params.id as string;
     await deleteCatalogCard(id);
     res.json({ ok: true });
   } catch (err) { next(err); }

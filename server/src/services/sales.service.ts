@@ -140,7 +140,7 @@ export async function listSales(
     .where('s.user_id', '=', userId)
     .$if(filters.platforms !== undefined, (qb) =>
       filters.platforms!.length === 0
-        ? qb.where(sql`1=0`)
+        ? qb.where(sql<boolean>`1=0` as any)
         : qb.where('s.platform', 'in', filters.platforms! as any)
     )
     .$if(!!filters.search, (qb) => qb.where(

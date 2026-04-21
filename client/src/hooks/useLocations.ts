@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import type { Location, LocationCardType } from '../pages/LocationManager';
+import type { Location } from '../pages/LocationManager';
 
 export function useLocations(cardType?: 'graded' | 'raw') {
   const { data } = useQuery<{ data: Location[] }>({

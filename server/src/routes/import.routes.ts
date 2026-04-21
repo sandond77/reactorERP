@@ -23,6 +23,7 @@ importRouter.get('/', importController.listImports);
 importRouter.post('/upload', upload.single('file'), importController.uploadCsv);
 importRouter.post('/:id/mapping', importController.saveMapping);
 importRouter.post('/:id/preflight', upload.single('file'), importController.preflightImport);
+importRouter.post('/:id/preflight-unlinked', upload.single('file'), importController.preflightUnlinked);
 importRouter.post('/:id/execute', upload.single('file'), importController.executeImport);
 importRouter.get('/:id/status', importController.getImportStatus);
 importRouter.delete('/:id', importController.deletePendingImport);

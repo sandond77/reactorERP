@@ -39,6 +39,7 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const [searchLabel, setSearchLabel] = useState('');
   const [autoFilling, setAutoFilling] = useState(false);
   const [catalogId, setCatalogId] = useState<string | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, any> } | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
   const [frontFile, setFrontFile] = useState<File | null>(null);

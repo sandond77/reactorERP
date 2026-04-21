@@ -4,7 +4,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
   Tooltip, Legend, ResponsiveContainer, LabelList,
 } from 'recharts';
-import { Package, TrendingUp, Star, DollarSign, AlertTriangle, BellOff, EyeOff, ArrowRight } from 'lucide-react';
+import { AlertTriangle, BellOff, EyeOff, ArrowRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
@@ -495,7 +495,7 @@ function AttentionCard() {
             <p className="text-xs text-zinc-600">No stale listings.</p>
           ) : (
             <div>
-              <div className="grid grid-cols-[0.8fr_0.8fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-zinc-950">
+              <div className="grid grid-cols-[1.2fr_0.4fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 pb-2 mb-1 border-b border-orange-500/20 sticky top-0 bg-zinc-950">
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card Name</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Set</span>
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Card #</span>
@@ -504,17 +504,17 @@ function AttentionCard() {
                 <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
               </div>
               {staleEbay.map((item) => (
-                <div key={item.id} className="grid grid-cols-[0.8fr_0.8fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+                <div key={item.id} className="grid grid-cols-[1.2fr_0.4fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 py-1.5 border-b border-orange-500/10 last:border-0 items-start">
                   <div className="min-w-0">
                     {item.ebay_listing_url ? (
-                      <a href={item.ebay_listing_url} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-400 hover:text-indigo-300 truncate block transition-colors">
+                      <a href={item.ebay_listing_url} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-400 hover:text-indigo-300 whitespace-normal break-words block transition-colors">
                         {item.card_name ?? '—'}
                       </a>
                     ) : (
-                      <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
+                      <p className="text-sm text-zinc-200 whitespace-normal break-words">{item.card_name ?? '—'}</p>
                     )}
                   </div>
-                  <span className="text-xs text-zinc-500 truncate">{item.set_name ?? '—'}</span>
+                  <span className="text-xs text-zinc-500 whitespace-normal break-words">{item.set_name ?? '—'}</span>
                   <span className="text-xs text-zinc-400 text-right tabular-nums">{item.card_number ?? '—'}</span>
                   <span className="text-sm text-orange-400 text-right font-medium tabular-nums">{item.days_listed}d</span>
                   <button onClick={() => muteEbay.mutate(item.id)} title="Snooze 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
@@ -568,7 +568,7 @@ function AttentionCard() {
 }
 
 function OverviewTab() {
-  const { data: inventory } = useQuery<InventoryRow[]>({
+  useQuery<InventoryRow[]>({
     queryKey: ['inventory-value'],
     queryFn: () => api.get('/reports/inventory-value').then((r) => r.data),
   });
@@ -579,7 +579,6 @@ function OverviewTab() {
 
   const [salesWindow, setSalesWindow] = useState<SalesWindow>('30d');
 
-  const totalCost    = inventory?.reduce((s, r) => s + (r.total_cost ?? 0), 0) ?? 0;
   const grading      = summary?.grading     ?? { sub_count: 0, card_count: 0 };
   const cards        = summary?.cards       ?? { total: { all: 0, graded: 0, raw: 0 }, unsold: { all: 0, graded: 0, raw: 0 }, sold: { all: 0, graded: 0, raw: 0 }, listed: { all: 0, graded: 0, raw: 0 }, card_show: { all: 0, unsold: 0 } };
   const pipeline     = summary?.pipeline    ?? { needs_inspection: 0, inspected: 0, pending_grading_sub: 0, grading_submitted: 0 };
@@ -589,10 +588,6 @@ function OverviewTab() {
   const sellThrough   = (cards.sold.all + cards.unsold.all) > 0
     ? ((cards.sold.all / (cards.sold.all + cards.unsold.all)) * 100).toFixed(1)
     : null;
-  const avgProfitSale = lifetimeSales.count > 0
-    ? lifetimeSales.total_profit / lifetimeSales.count
-    : null;
-
   const EMPTY_ROW: SalesRow = { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0 };
   const windowData: SalesRow = salesWindow === '30d' ? (summary?.last_30_days ?? EMPTY_ROW)
     : salesWindow === '60d'      ? (summary?.last_60_days ?? EMPTY_ROW)
@@ -759,8 +754,6 @@ function RawCardsTab() {
 
   const fmtPct = (n: number) => `${n.toFixed(1)}%`;
   const fmtDays = (n: number | null) => n != null ? `${n}d` : '—';
-
-  const pipelineTotal = PL.purchased_raw + PL.inspected + PL.raw_for_sale + PL.grading_submitted;
 
   return (
     <div className="space-y-6">

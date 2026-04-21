@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Plus, X, ChevronRight } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
@@ -191,10 +191,11 @@ export function RawOverall() {
     saveFilters(filterKey, { sortCol, sortDir, statusFilter, fCondition, fListed, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search });
   }, [sortCol, sortDir, statusFilter, fCondition, fListed, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search]);
 
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
-    clearTimeout((handleSearchChange as any)._t);
-    (handleSearchChange as any)._t = setTimeout(() => { setDebouncedSearch(val); setPage(1); }, 300);
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => { setDebouncedSearch(val); setPage(1); }, 300);
   }, []);
 
   const handleSort = useCallback((col: string) => {
@@ -261,7 +262,7 @@ export function RawOverall() {
   function toggleExpand(key: string) {
     setExpandedKeys((prev) => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      if (next.has(key)) { next.delete(key); } else { next.add(key); }
       return next;
     });
   }

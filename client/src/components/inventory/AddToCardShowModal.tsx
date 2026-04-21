@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Check, ArrowRight } from 'lucide-react';
 import { api, type PaginatedResult } from '../../lib/api';
@@ -28,8 +28,6 @@ interface RawOption {
   raw_purchase_label: string | null;
 }
 
-type CardOption = (SlabOption & { _type: 'graded' }) | (RawOption & { _type: 'raw' });
-
 interface SelectedCard {
   id: string;
   card_name: string | null;
@@ -51,10 +49,11 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selected, setSelected] = useState<Map<string, SelectedCard>>(new Map());
 
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const handleSearch = useCallback((val: string) => {
     setSearch(val);
-    clearTimeout((handleSearch as any)._t);
-    (handleSearch as any)._t = setTimeout(() => setDebouncedSearch(val), 300);
+    clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => setDebouncedSearch(val), 300);
   }, []);
 
   const { data, isLoading } = useQuery<PaginatedResult<SlabOption>>({

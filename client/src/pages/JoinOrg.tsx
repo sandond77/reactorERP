@@ -33,6 +33,7 @@ export function JoinOrg() {
       await api.post('/org/invites/accept', { token });
       toast.success('You have joined the organization!');
       navigate('/team');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (e: any) {
       toast.error(e.response?.data?.error ?? 'Failed to accept invite');
       setAccepting(false);

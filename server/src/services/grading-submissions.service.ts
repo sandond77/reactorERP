@@ -57,7 +57,7 @@ export async function listBatches(userId: string) {
       'gb.status',
       'gb.notes',
       'gb.created_at',
-      db.fn.count<number>('gbi.id').as('item_count'),
+      db.fn.count<number>('gbi.id' as any).as('item_count'),
       sql<number>`COALESCE(SUM(gbi.quantity), 0)`.as('total_qty'),
       sql<number>`COALESCE(SUM(ci.purchase_cost * gbi.quantity), 0)`.as('raw_cost'),
       sql<number>`COALESCE(SUM(gbi.estimated_value * gbi.quantity), 0)`.as('estimated_total'),

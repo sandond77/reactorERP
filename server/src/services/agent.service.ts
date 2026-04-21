@@ -927,10 +927,10 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
             quantity, purchase_cost, currency, condition, decision, language, notes } = toolInput as Record<string, unknown>;
 
     // Auto-enrich: if no catalog_id, try to find catalog match for proper sku/part number
-    let resolvedCatalogId = (catalog_id as string) ?? null;
-    let resolvedCardName = (card_name_override as string) ?? null;
-    let resolvedSetName = (set_name_override as string) ?? null;
-    let resolvedCardNumber = (card_number_override as string) ?? null;
+    let resolvedCatalogId: string | null = (catalog_id as string) ?? null;
+    let resolvedCardName: string | null = (card_name_override as string) ?? null;
+    let resolvedSetName: string | null = (set_name_override as string) ?? null;
+    let resolvedCardNumber: string | null = (card_number_override as string) ?? null;
 
     const userProvidedName = resolvedCardName; // preserve what the user explicitly chose
     if (!resolvedCatalogId && resolvedCardName) {

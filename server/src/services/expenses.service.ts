@@ -49,7 +49,7 @@ export async function listExpenses(
     .$if(!!filters.search, (qb) => qb.where('e.description', 'ilike', `%${filters.search}%`))
     .$if(filters.types !== undefined, (qb) =>
       filters.types!.length === 0
-        ? qb.where(db.dynamic.lit(false) as any)
+        ? qb.where(sql<boolean>`false`)
         : qb.where('e.type', 'in', filters.types! as any)
     )
     .$if(!!filters.year, (qb) => qb
@@ -63,7 +63,7 @@ export async function listExpenses(
 
   const data = await base()
     .selectAll('e')
-    .orderBy(SORT_COLS[sortBy ?? ''] ?? 'e.date', sortDir ?? 'desc')
+    .orderBy((SORT_COLS[sortBy ?? ''] ?? 'e.date') as any, sortDir ?? 'desc')
     .limit(pagination.limit)
     .offset(getPaginationOffset(pagination.page, pagination.limit))
     .execute();

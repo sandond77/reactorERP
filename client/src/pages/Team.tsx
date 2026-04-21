@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, Link, Mail, Trash2, Copy, Check, UserMinus, Pencil, LogIn, DatabaseZap, Download, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Users, Link, Mail, Trash2, Copy, Check, UserMinus, Pencil, LogIn, DatabaseZap, Download, ChevronLeft, AlertTriangle } from 'lucide-react';
 import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -315,12 +315,14 @@ export function Team() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['org-invites'] });
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to create invite'),
   });
 
   const deleteInviteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/org/invites/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-invites'] }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to delete invite'),
   });
 
@@ -331,6 +333,7 @@ export function Team() {
       setRemovingMember(null);
       toast.success('Member removed');
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to remove member'),
   });
 
@@ -343,6 +346,7 @@ export function Team() {
       setShowLeaveModal(false);
       setLeaveConfirmText('');
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to leave team'),
   });
 
@@ -353,6 +357,7 @@ export function Team() {
       setShowRenameModal(false);
       toast.success('Organization renamed');
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to rename'),
   });
 
@@ -374,6 +379,7 @@ export function Team() {
       setJoinLink('');
       setJoinWarning(null);
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to join team'),
   });
 

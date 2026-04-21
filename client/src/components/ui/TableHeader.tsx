@@ -116,6 +116,7 @@ export function ColumnFilter({ options, selected, onChange, align = 'left', date
 // Computes minimum column width needed to fit label + sort/filter icons + padding.
 // Uses approximate char widths for uppercase text-xs font-medium with tracking-wide.
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function colMinWidth(label: string, hasSort: boolean, hasFilter: boolean): number {
   let textW = 0;
   for (const c of label.toUpperCase()) {
@@ -213,6 +214,7 @@ export function ColHeader({
 
 // ─── useColWidths hook ────────────────────────────────────────────────────────
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useColWidths(defaults: Record<string, number>) {
   const [colWidths, setColWidths] = useState<Record<string, number>>(defaults);
 

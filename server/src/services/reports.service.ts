@@ -52,8 +52,8 @@ export async function getPnlReport(
       .where('s.user_id', '=', userId)
       .$if(from != null, (qb) => qb.where('s.sold_at', '>=', from!))
       .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
-      .where(sql`${channelFilter}`)
-      .where(sql`${cardTypeFilter}`)
+      .where(sql<boolean>`${channelFilter}` as any)
+      .where(sql<boolean>`${cardTypeFilter}` as any)
       .groupBy('s.platform')
       .orderBy('s.platform')
       .execute()) as Row[];
@@ -73,8 +73,8 @@ export async function getPnlReport(
       .where('s.user_id', '=', userId)
       .$if(from != null, (qb) => qb.where('s.sold_at', '>=', from!))
       .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
-      .where(sql`${channelFilter}`)
-      .where(sql`${cardTypeFilter}`)
+      .where(sql<boolean>`${channelFilter}` as any)
+      .where(sql<boolean>`${cardTypeFilter}` as any)
       .groupBy('ci.card_game')
       .orderBy('ci.card_game')
       .execute()) as Row[];
@@ -118,8 +118,8 @@ export async function getPnlReport(
       .where('s.user_id', '=', userId)
       .$if(from != null, (qb) => qb.where('s.sold_at', '>=', from!))
       .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
-      .where(sql`${channelFilter}`)
-      .where(sql`${cardTypeFilter}`)
+      .where(sql<boolean>`${channelFilter}` as any)
+      .where(sql<boolean>`${cardTypeFilter}` as any)
       .groupBy(sql`TO_CHAR(s.sold_at, 'YYYY-MM')`)
       .orderBy(sql`TO_CHAR(s.sold_at, 'YYYY-MM')`)
       .execute()) as Row[];

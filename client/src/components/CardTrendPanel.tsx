@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ComposedChart, Line, XAxis, YAxis, Tooltip, Legend,
+  ComposedChart, Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, CartesianGrid, Scatter,
 } from 'recharts';
-import { X, TrendingUp } from 'lucide-react';
+import { TrendingUp } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatCurrency, cn } from '../lib/utils';
 
@@ -194,7 +194,7 @@ function TrendChart({ data, view, showTrendLine }: { data: TrendData; view: Pric
   const toggleSeries = (s: string) => {
     setHiddenSeries((prev) => {
       const next = new Set(prev);
-      next.has(s) ? next.delete(s) : next.add(s);
+      if (next.has(s)) { next.delete(s); } else { next.add(s); }
       return next;
     });
   };
