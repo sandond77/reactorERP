@@ -8,7 +8,8 @@
     "start": "node dist/index.js",
     "migrate": "node-pg-migrate -m src/db/migrations",
     "migrate:create": "node-pg-migrate -m src/db/migrations create",
-    "seed:slabs": "tsx src/db/seeds/seed-slabs.ts"
+    "seed:slabs": "tsx src/db/seeds/seed-slabs.ts",
+    "seed:catalog": "tsx src/db/seeds/load-catalog-seed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
