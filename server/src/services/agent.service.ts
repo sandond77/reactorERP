@@ -145,14 +145,16 @@ export interface CardInfoResult {
 }
 
 export async function lookupCardInfo(
+  userId: string,
   query: string,
   game: string = 'pokemon'
 ): Promise<CardInfoResult[]> {
-  // 1. Check our own catalog first — word-split fuzzy: each word must match at least one field
+  // 1. Check the user's catalog first — word-split fuzzy: each word must match at least one field
   const words = query.trim().split(/\s+/).filter(Boolean);
   let catalogQuery = db
     .selectFrom('card_catalog')
     .selectAll()
+    .where('user_id', '=', userId)
     .where('game', '=', game);
 
   for (const word of words) {
@@ -185,10 +187,10 @@ export async function lookupCardInfo(
   }
 
   // 2. Fall back to Claude for fuzzy lookup
-  return lookupCardInfoWithAI(query, game);
+  return lookupCardInfoWithAI(userId, query, game);
 }
 
-async function lookupCardInfoWithAI(query: string, game: string): Promise<CardInfoResult[]> {
+async function lookupCardInfoWithAI(userId: string, query: string, game: string): Promise<CardInfoResult[]> {
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 512,
@@ -231,7 +233,7 @@ If you cannot identify the card, return [].`,
 
 // ── Automation: suggest card data from intake form partial input ──
 
-async function enrichWithSku(suggestions: CardInfoResult[]): Promise<CardInfoResult[]> {
+async function enrichWithSku(userId: string, suggestions: CardInfoResult[]): Promise<CardInfoResult[]> {
   return Promise.all(suggestions.map(async (s) => {
     if (!s.card_number) return { ...s, catalog_exists: false };
     const lang = (s.language === 'JP' ? 'JP' : 'EN') as 'EN' | 'JP';
@@ -240,12 +242,13 @@ async function enrichWithSku(suggestions: CardInfoResult[]): Promise<CardInfoRes
     if (!rawCode) return { ...s, catalog_exists: false };
     const setCode = lookupSetCode(lang, rawCode) ?? lookupSetCode(lang, s.set_name ?? '') ?? rawCode;
     const sku = generatePartNumber(lang, setCode, s.card_number);
-    let row = await db.selectFrom('card_catalog').select(['id', 'card_name', 'sku']).where('sku', '=', sku).executeTakeFirst();
+    let row = await db.selectFrom('card_catalog').select(['id', 'card_name', 'sku']).where('user_id', '=', userId).where('sku', '=', sku).executeTakeFirst();
     // Fallback 1: fuzzy match by card_name + card_number (AI may return wrong set code)
     if (!row && s.card_name && s.card_number) {
       const cardNum = s.card_number.replace(/\/.*$/, '').replace(/^0+/, '');
       row = await db.selectFrom('card_catalog')
         .select(['id', 'card_name', 'sku'])
+        .where('user_id', '=', userId)
         .where('card_name', 'ilike', `%${s.card_name}%`)
         .where('card_number', 'ilike', `%${cardNum}%`)
         .where('language', '=', lang)
@@ -257,6 +260,7 @@ async function enrichWithSku(suggestions: CardInfoResult[]): Promise<CardInfoRes
       const setWords = s.set_name.split(/\s+/).filter(w => w.length > 3);
       let q = db.selectFrom('card_catalog')
         .select(['id', 'card_name', 'sku'])
+        .where('user_id', '=', userId)
         .where('card_name', 'ilike', `%${s.card_name}%`)
         .where('language', '=', lang);
       for (const word of setWords) {
@@ -294,7 +298,7 @@ export interface AutoFillResult {
   parsed_label?: string | null;
 }
 
-export async function autoFillCardData(input: {
+export async function autoFillCardData(userId: string, input: {
   partial_name?: string;
   cert_number?: string;
   game?: string;
@@ -310,7 +314,7 @@ export async function autoFillCardData(input: {
     if (vision) {
       const { grading_company, grade, grade_label, cert_number, psa_label, ...cardInfo } = vision;
       // Use vision data directly — do NOT search catalog by name as it may match wrong entries
-      results.suggestions = await enrichWithSku([{ ...cardInfo, source: 'ai_generated' as const }]);
+      results.suggestions = await enrichWithSku(userId, [{ ...cardInfo, source: 'ai_generated' as const }]);
       if (grading_company && grade != null) {
         results.parsed_grade = { company: grading_company, grade, grade_label: normalizeGradeLabel(grading_company, grade, grade_label) };
       }
@@ -333,7 +337,7 @@ export async function autoFillCardData(input: {
         if (vision) {
           const { grading_company, grade, grade_label, cert_number, psa_label, ...cardInfo } = vision;
           // Use vision data directly — do NOT search catalog by name as it may match wrong entries
-          results.suggestions = await enrichWithSku([{ ...cardInfo, source: 'ai_generated' as const }]);
+          results.suggestions = await enrichWithSku(userId, [{ ...cardInfo, source: 'ai_generated' as const }]);
           if (grading_company && grade != null) {
             results.parsed_grade = { company: grading_company, grade, grade_label: normalizeGradeLabel(grading_company, grade, grade_label) };
           }
@@ -343,8 +347,8 @@ export async function autoFillCardData(input: {
         }
       } catch { /* fall through to text lookup */ }
     }
-    const suggestions = await lookupCardInfo(input.partial_name, game);
-    results.suggestions = await enrichWithSku(suggestions);
+    const suggestions = await lookupCardInfo(userId, input.partial_name, game);
+    results.suggestions = await enrichWithSku(userId, suggestions);
     results.parsed_grade = parseLabelGrade(input.partial_name);
   }
 
@@ -941,7 +945,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     if (!resolvedCatalogId && resolvedCardName) {
       try {
         const searchTerm = [resolvedCardName, resolvedSetName, resolvedCardNumber].filter(Boolean).join(' ');
-        const enriched = await autoFillCardData({ partial_name: searchTerm, game: 'pokemon' });
+        const enriched = await autoFillCardData(userId, { partial_name: searchTerm, game: 'pokemon' });
         const best = enriched.suggestions?.[0];
         if (best?.catalog_id) {
           resolvedCatalogId = best.catalog_id;
@@ -983,7 +987,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     let resolvedCardName = (card_name_override as string) ?? null;
     if (!resolvedCatalogId && resolvedCardName) {
       try {
-        const enriched = await autoFillCardData({ partial_name: resolvedCardName, game: 'pokemon' });
+        const enriched = await autoFillCardData(userId, { partial_name: resolvedCardName, game: 'pokemon' });
         const best = enriched.suggestions?.[0];
         if (best?.catalog_id) { resolvedCatalogId = best.catalog_id; }
       } catch { /* non-fatal */ }
@@ -1022,6 +1026,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   if (toolName === 'lookup_catalog') {
     const { query, language } = toolInput as { query: string; language?: string };
     const q = db.selectFrom('card_catalog').select(['id', 'card_name', 'set_name', 'card_number', 'sku', 'language'])
+      .where('user_id', '=', userId)
       .where((eb) => eb.or([
         eb('card_name', 'ilike', `%${query}%`),
         eb('set_name', 'ilike', `%${query}%`),

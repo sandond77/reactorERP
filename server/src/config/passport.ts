@@ -1,5 +1,6 @@
 import passport from 'passport';
 import { Strategy as GoogleStrategy } from 'passport-google-oauth20';
+import { sql } from 'kysely';
 import { env } from './env';
 import { db } from './database';
 
@@ -81,6 +82,22 @@ export function configurePassport() {
             .insertInto('org_members')
             .values({ org_id: org.id, user_id: created.id, role: 'owner' })
             .execute();
+
+          // Seed card catalog from shared seed table
+          await sql`
+            INSERT INTO card_catalog (
+              user_id, game, set_name, set_code, card_name, card_number,
+              variant, rarity, language, image_url, image_url_hi,
+              image_url_back, tcgplayer_id, external_id, sku,
+              created_at, updated_at
+            )
+            SELECT
+              ${created.id}, game, set_name, set_code, card_name, card_number,
+              variant, rarity, language, image_url, image_url_hi,
+              image_url_back, tcgplayer_id, external_id, sku,
+              created_at, updated_at
+            FROM card_catalog_seed
+          `.execute(db);
 
           return done(null, created);
         } catch (err) {

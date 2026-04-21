@@ -47,7 +47,7 @@ export async function autoFill(req: Request, res: Response, next: NextFunction) 
     const imageBase64 = imageBuffer?.toString('base64');
     const mediaType = imageBuffer ? 'image/jpeg' as const : undefined;
 
-    const result = await agentService.autoFillCardData({
+    const result = await agentService.autoFillCardData(req.dataUserId, {
       partial_name: req.body.partial_name,
       cert_number: req.body.cert_number,
       game: req.body.game ?? 'pokemon',

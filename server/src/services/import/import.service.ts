@@ -393,14 +393,14 @@ async function executeGradedImport(
 
     const sku = generatePartNumber(resolvedLang, setCode, resolvedNumber);
     if (catalogCache.has(sku)) return catalogCache.get(sku)!;
-    const existing = await db.selectFrom('card_catalog').select('id').where('sku', '=', sku).executeTakeFirst();
+    const existing = await db.selectFrom('card_catalog').select('id').where('user_id', '=', userId).where('sku', '=', sku).executeTakeFirst();
     if (existing) { catalogCache.set(sku, existing.id); return existing.id; }
     const overrideKey2 = `${cardName}|${setName ?? ''}`;
     const catOverride2 = catalogOverrides?.[overrideKey2];
     const resolvedGame = catOverride2?.game ?? 'pokemon';
     const resolvedSetName = catOverride2?.set_name ?? setName ?? lookupSetName(resolvedLang, setCode) ?? setCode;
     const created = await db.insertInto('card_catalog').values({
-      game: resolvedGame, set_name: resolvedSetName, set_code: setCode,
+      user_id: userId, game: resolvedGame, set_name: resolvedSetName, set_code: setCode,
       card_name: cardName, card_number: resolvedNumber, language: resolvedLang, sku,
     }).returning('id').executeTakeFirstOrThrow();
     catalogCache.set(sku, created.id);

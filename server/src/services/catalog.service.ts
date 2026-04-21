@@ -150,7 +150,8 @@ export async function fetchCardDetail(cardId: string, lang: 'en' | 'ja'): Promis
   return fetchWithRetry<TCGdexCardDetail>(`${TCGDEX_BASE}/${lang}/cards/${cardId}`);
 }
 
-// Upsert a single card into card_catalog. Returns the catalog id.
+// Upsert a single card into card_catalog_seed. Returns the seed id.
+// Used by admin sync tools (sync-catalog.ts). Does NOT write to per-user catalogs.
 export async function upsertCatalogCard(params: {
   externalId: string;     // TCGdex card ID e.g. 'base1-4' or 'SV1a-080'
   setCode: string;
@@ -169,7 +170,7 @@ export async function upsertCatalogCard(params: {
   });
 
   const result = await sql<{ id: string }>`
-    INSERT INTO card_catalog (
+    INSERT INTO card_catalog_seed (
       game, set_name, set_code, card_name, card_number,
       language, rarity, image_url, external_id, sku
     ) VALUES (
@@ -188,11 +189,11 @@ export async function upsertCatalogCard(params: {
     DO UPDATE SET
       card_name  = EXCLUDED.card_name,
       set_name   = EXCLUDED.set_name,
-      rarity     = COALESCE(EXCLUDED.rarity, card_catalog.rarity),
-      image_url  = COALESCE(EXCLUDED.image_url, card_catalog.image_url),
+      rarity     = COALESCE(EXCLUDED.rarity, card_catalog_seed.rarity),
+      image_url  = COALESCE(EXCLUDED.image_url, card_catalog_seed.image_url),
       sku        = CASE
         WHEN EXCLUDED.rarity IS NOT NULL THEN EXCLUDED.sku
-        ELSE card_catalog.sku
+        ELSE card_catalog_seed.sku
       END,
       updated_at = NOW()
     RETURNING id
@@ -201,7 +202,8 @@ export async function upsertCatalogCard(params: {
   return result.rows[0].id;
 }
 
-// Find a catalog entry by (setCode, cardNumber, language). Returns id or null.
+// Find a catalog entry by (setCode, cardNumber, language) in the seed table.
+// Used by admin/seed tools only.
 export async function findCatalogByKey(
   setCode: string,
   cardNumber: string,
@@ -213,7 +215,7 @@ export async function findCatalogByKey(
 
   const rows = await sql<{ id: string; sku: string | null; rarity: string | null }>`
     SELECT id, sku, rarity
-    FROM card_catalog
+    FROM card_catalog_seed
     WHERE game = 'pokemon'
       AND language = ${language}
       AND LOWER(set_code) = LOWER(${setCode})
@@ -283,7 +285,7 @@ export async function findOrFetchCard(params: {
   const cardName = detail?.name ?? params.cardName;
   const externalId = detail?.id ?? null;
 
-  // 3. Upsert catalog entry — even without a TCGdex match we create from parsed data
+  // 3. Upsert into seed table — even without a TCGdex match we create from parsed data
   const sku = generateSku({
     language: params.language,
     setCode: matchedSetCode,
@@ -292,7 +294,7 @@ export async function findOrFetchCard(params: {
   });
 
   const result = await sql<{ id: string }>`
-    INSERT INTO card_catalog (
+    INSERT INTO card_catalog_seed (
       game, set_name, set_code, card_name, card_number,
       language, rarity, image_url, external_id, sku
     ) VALUES (
@@ -311,9 +313,9 @@ export async function findOrFetchCard(params: {
     DO UPDATE SET
       card_name  = EXCLUDED.card_name,
       set_name   = EXCLUDED.set_name,
-      rarity     = COALESCE(EXCLUDED.rarity, card_catalog.rarity),
-      image_url  = COALESCE(EXCLUDED.image_url, card_catalog.image_url),
-      sku        = CASE WHEN EXCLUDED.rarity IS NOT NULL THEN EXCLUDED.sku ELSE card_catalog.sku END,
+      rarity     = COALESCE(EXCLUDED.rarity, card_catalog_seed.rarity),
+      image_url  = COALESCE(EXCLUDED.image_url, card_catalog_seed.image_url),
+      sku        = CASE WHEN EXCLUDED.rarity IS NOT NULL THEN EXCLUDED.sku ELSE card_catalog_seed.sku END,
       updated_at = NOW()
     RETURNING id
   `.execute(db);
@@ -338,15 +340,15 @@ export async function findOrCreateCatalogCard(params: {
   const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
   const sku = generatePartNumber(params.language, params.setCodePart, paddedNum);
 
-  // 1. Try to find by SKU (most precise match)
+  // 1. Try to find by SKU in seed table
   const bySkuRows = await sql<{ id: string }>`
-    SELECT id FROM card_catalog WHERE sku = ${sku} LIMIT 1
+    SELECT id FROM card_catalog_seed WHERE sku = ${sku} LIMIT 1
   `.execute(db);
   if (bySkuRows.rows.length) return bySkuRows.rows[0].id;
 
-  // 2. Try to find by (setCode, cardNumber, language)
+  // 2. Try to find by (setCode, cardNumber, language) in seed table
   const byKeyRows = await sql<{ id: string }>`
-    SELECT id FROM card_catalog
+    SELECT id FROM card_catalog_seed
     WHERE game = 'pokemon'
       AND language = ${params.language}
       AND LOWER(set_code) = LOWER(${params.setCodePart})
@@ -355,10 +357,10 @@ export async function findOrCreateCatalogCard(params: {
   `.execute(db);
   if (byKeyRows.rows.length) return byKeyRows.rows[0].id;
 
-  // 3. Create new entry
+  // 3. Create new entry in seed table
   try {
     const inserted = await sql<{ id: string }>`
-      INSERT INTO card_catalog (
+      INSERT INTO card_catalog_seed (
         game, set_name, set_code, card_name, card_number,
         language, rarity, variant, sku
       ) VALUES (
@@ -376,7 +378,7 @@ export async function findOrCreateCatalogCard(params: {
       DO UPDATE SET
         card_name  = EXCLUDED.card_name,
         set_name   = EXCLUDED.set_name,
-        rarity     = COALESCE(EXCLUDED.rarity, card_catalog.rarity),
+        rarity     = COALESCE(EXCLUDED.rarity, card_catalog_seed.rarity),
         updated_at = NOW()
       RETURNING id
     `.execute(db);
@@ -458,7 +460,7 @@ export async function getInventorySummary(userId: string) {
   return rows.rows;
 }
 
-export async function createCatalogCard(params: {
+export async function createCatalogCard(userId: string, params: {
   game: string;
   sku?: string | null;
   card_name: string;
@@ -477,6 +479,7 @@ export async function createCatalogCard(params: {
   const result = await db
     .insertInto('card_catalog')
     .values({
+      user_id: userId,
       game: params.game,
       sku: params.sku ?? autoSku ?? null,
       card_name: params.card_name,
@@ -519,17 +522,18 @@ export async function getEmptyCatalogEntries(userId: string) {
       cc.variant,
       cc.created_at
     FROM card_catalog cc
-    WHERE NOT EXISTS (
-      SELECT 1 FROM card_instances ci
-      WHERE ci.catalog_id = cc.id
-        AND ci.user_id = ${userId}
-    )
+    WHERE cc.user_id = ${userId}
+      AND NOT EXISTS (
+        SELECT 1 FROM card_instances ci
+        WHERE ci.catalog_id = cc.id
+          AND ci.user_id = ${userId}
+      )
     ORDER BY cc.sku NULLS LAST, cc.card_name
   `.execute(db);
   return result.rows;
 }
 
-export async function searchCatalog(params: {
+export async function searchCatalog(userId: string, params: {
   q?: string;
   card_name?: string;
   set_name?: string;
@@ -546,7 +550,8 @@ export async function searchCatalog(params: {
   const rows = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }>`
     SELECT id, sku, card_name, set_name, card_number, language
     FROM card_catalog
-    WHERE game = 'pokemon'
+    WHERE user_id = ${userId}
+      AND game = 'pokemon'
       ${qPattern ? sql`AND (card_name ILIKE ${qPattern} OR sku ILIKE ${qPattern})` : sql``}
       ${card_name ? sql`AND card_name ILIKE ${'%' + card_name + '%'}` : sql``}
       ${set_name  ? sql`AND set_name  ILIKE ${'%' + set_name  + '%'}` : sql``}
@@ -559,15 +564,15 @@ export async function searchCatalog(params: {
   return rows.rows;
 }
 
-export async function deleteCatalogCard(id: string) {
+export async function deleteCatalogCard(userId: string, id: string) {
   // Unlink any card instances pointing to this catalog entry
   await sql`
-    UPDATE card_instances SET catalog_id = NULL WHERE catalog_id = ${id}
+    UPDATE card_instances SET catalog_id = NULL WHERE catalog_id = ${id} AND user_id = ${userId}
   `.execute(db);
-  await db.deleteFrom('card_catalog').where('id', '=', id).execute();
+  await db.deleteFrom('card_catalog').where('id', '=', id).where('user_id', '=', userId).execute();
 }
 
-export async function updateCatalogCard(id: string, fields: {
+export async function updateCatalogCard(userId: string, id: string, fields: {
   game?: string;
   sku?: string;
   card_name?: string;
@@ -582,5 +587,6 @@ export async function updateCatalogCard(id: string, fields: {
     .updateTable('card_catalog')
     .set({ ...fields, updated_at: new Date() })
     .where('id', '=', id)
+    .where('user_id', '=', userId)
     .execute();
 }

@@ -39,7 +39,7 @@ export async function createCard(req: Request, res: Response, next: NextFunction
     if (!card_name || !set_name || !language) {
       return res.status(400).json({ error: 'card_name, set_name, and language are required' });
     }
-    const id = await createCatalogCard({ game: game ?? 'pokemon', sku, card_name, set_name, set_code, card_number, language, rarity, variant });
+    const id = await createCatalogCard(req.dataUserId, { game: game ?? 'pokemon', sku, card_name, set_name, set_code, card_number, language, rarity, variant });
     res.status(201).json({ id });
   } catch (err: any) {
     if (err?.code === '23505') return res.status(409).json({ error: 'A catalog entry with this SKU already exists.' });
@@ -58,7 +58,7 @@ export async function updateCard(req: Request, res: Response, next: NextFunction
   try {
     const id = req.params.id as string;
     const { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language } = req.body;
-    await updateCatalogCard(id, { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language });
+    await updateCatalogCard(req.dataUserId, id, { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language });
     res.json({ ok: true });
   } catch (err) { next(err); }
 }
@@ -66,7 +66,7 @@ export async function updateCard(req: Request, res: Response, next: NextFunction
 export async function deleteCard(req: Request, res: Response, next: NextFunction) {
   try {
     const id = req.params.id as string;
-    await deleteCatalogCard(id);
+    await deleteCatalogCard(req.dataUserId, id);
     res.json({ ok: true });
   } catch (err) { next(err); }
 }
@@ -74,7 +74,7 @@ export async function deleteCard(req: Request, res: Response, next: NextFunction
 export async function search(req: Request, res: Response, next: NextFunction) {
   try {
     const { q, card_name, set_name, card_number, language, limit } = req.query as Record<string, string | undefined>;
-    const results = await searchCatalog({ q, card_name, set_name, card_number, language, limit: limit ? parseInt(limit, 10) : undefined });
+    const results = await searchCatalog(req.dataUserId, { q, card_name, set_name, card_number, language, limit: limit ? parseInt(limit, 10) : undefined });
     res.json({ data: results });
   } catch (err) { next(err); }
 }
@@ -94,6 +94,7 @@ export async function namesBySku(req: Request, res: Response, next: NextFunction
     const rows = await db
       .selectFrom('card_catalog')
       .select(['id', 'card_name'])
+      .where('user_id', '=', req.dataUserId)
       .where('sku', '=', sku)
       .orderBy('card_name', 'asc')
       .execute();

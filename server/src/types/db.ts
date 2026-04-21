@@ -55,6 +55,28 @@ export interface UsersTable {
 
 export interface CardCatalogTable {
   id: Generated<string>;
+  user_id: string;
+  game: string;
+  set_name: string;
+  set_code: string | null;
+  card_name: string;
+  card_number: string | null;
+  variant: string | null;
+  rarity: string | null;
+  language: string;
+  image_url: string | null;
+  image_url_hi: string | null;
+  image_url_back: string | null;
+  tcgplayer_id: string | null;
+  external_id: string | null;
+  sku: string | null;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
+// Shared seed table — no user_id, used to initialise new user catalogs
+export interface CardCatalogSeedTable {
+  id: Generated<string>;
   game: string;
   set_name: string;
   set_code: string | null;
@@ -437,6 +459,7 @@ export interface Database {
   locations: LocationsTable;
   users: UsersTable;
   card_catalog: CardCatalogTable;
+  card_catalog_seed: CardCatalogSeedTable;
   card_instances: CardInstancesTable;
   grading_submissions: GradingSubmissionsTable;
   slab_details: SlabDetailsTable;
