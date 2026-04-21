@@ -884,6 +884,19 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ['outgoing', 'incoming'],
     },
   },
+  // ── Image saving ──────────────────────────────────────────────────────────
+  {
+    name: 'save_images',
+    description: 'Save the uploaded image(s) to one or more records. Call this only after the user confirms they want the image saved. Use record_type "card" for card instances (add_card_to_purchase / add_graded_card results) and record_type "expense" for expenses (record_expense results).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        record_type: { type: 'string', enum: ['card', 'expense'], description: '"card" to attach to card instance(s), "expense" to attach to an expense' },
+        record_ids: { type: 'array', items: { type: 'string' }, description: 'Internal UUIDs of the records to attach the image to (card_instance_id or expense internal_id)' },
+      },
+      required: ['record_type', 'record_ids'],
+    },
+  },
   // ── Locations ─────────────────────────────────────────────────────────────
   {
     name: 'list_locations',
@@ -911,14 +924,6 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   if (toolName === 'create_raw_purchase') {
     const input = toolInput as unknown as Parameters<typeof createRawPurchase>[1];
     const result = await createRawPurchase(userId, input);
-    // Save pending receipt image if one was uploaded
-    const imgs = pendingImages.get(userId);
-    if (imgs?.length) {
-      try {
-        const url = await saveReceiptFromBase64(userId, result.id, imgs[0].base64);
-        await saveRawPurchaseReceiptUrl(userId, result.id, url);
-      } catch { /* non-fatal */ }
-    }
     return { success: true, id: result.id, purchase_id: result.purchase_id };
   }
 
@@ -1217,15 +1222,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       date: date ? new Date(date) : new Date(),
       order_number: order_number ?? undefined,
     });
-    // Save pending receipt image if one was uploaded
-    const imgs = pendingImages.get(userId);
-    if (imgs?.length) {
-      try {
-        const url = await saveReceiptFromBase64(userId, expense.id, imgs[0].base64);
-        await saveExpenseReceiptUrl(userId, expense.id, url);
-      } catch { /* non-fatal */ }
-    }
-    return { success: true, expense_id: expense.expense_id };
+    return { success: true, expense_id: expense.expense_id, internal_id: expense.id };
   }
 
   if (toolName === 'delete_expense') {
@@ -1239,6 +1236,24 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     if (!row) throw new Error(`Expense ${expense_id} not found`);
     await deleteExpense(userId, row.id);
     return { success: true, deleted: expense_id, description: row.description };
+  }
+
+  if (toolName === 'save_images') {
+    const { record_type, record_ids } = toolInput as { record_type: 'card' | 'expense'; record_ids: string[] };
+    const imgs = pendingImages.get(userId);
+    if (!imgs?.length) return { success: false, reason: 'No pending images to save' };
+    if (record_type === 'card') {
+      await saveImageToCards(userId, record_ids, imgs);
+      pendingImages.delete(userId);
+      return { success: true, saved_to: record_ids.length };
+    } else {
+      // expense — save receipt to first record_id
+      const expenseInternalId = record_ids[0];
+      const url = await saveReceiptFromBase64(userId, expenseInternalId, imgs[0].base64);
+      await saveExpenseReceiptUrl(userId, expenseInternalId, url);
+      pendingImages.delete(userId);
+      return { success: true, saved_to: 1 };
+    }
   }
 
   if (toolName === 'list_grading_batches') {
@@ -1642,6 +1657,7 @@ IMAGE HANDLING:
 - Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Construct full PSA-format name automatically.
 - Card photo (raw): read card name, set, number, language. Ask for condition and decision.
 - Receipt/invoice: extract all fields, show summary, confirm before creating records.
+- After creating any record from an image (card or expense), ask the user: "Do you want me to save the image to this record?" If yes, call save_images with the record_type and the internal UUID(s) returned by the create tool. Never auto-save images without asking.
 
 SPREADSHEET HANDLING:
 - Data appears in <spreadsheet> tags. Parse header row for column mapping.
@@ -1695,11 +1711,6 @@ ${JSON.stringify(summary, null, 2)}`;
 
     if (response.stop_reason === 'end_turn') {
       const text = response.content.find((b) => b.type === 'text')?.text ?? 'I was unable to process your request.';
-      // Save uploaded images to any cards created this session, then clear the pending store
-      if (createdCardIds.length > 0 && sessionImages?.length) {
-        await saveImageToCards(userId, createdCardIds, sessionImages);
-        pendingImages.delete(userId);
-      }
       return { reply: text, mutated: [...mutatedResources] };
     }
 
@@ -1736,6 +1747,7 @@ ${JSON.stringify(summary, null, 2)}`;
             record_expense: ['expenses'],
             delete_expense: ['expenses'],
             delete_card: ['cards'],
+            save_images: ['cards', 'expenses'],
           };
           (TOOL_RESOURCE_MAP[block.name] ?? []).forEach((r) => mutatedResources.add(r));
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
