@@ -108,7 +108,7 @@ export function Inventory() {
     company:     colMinWidth('Company',           false, true),
     listed:      colMinWidth('Listed?',           true,  true),
     listed_price: colMinWidth('Listed Price',     true,  false),
-    listing:     colMinWidth('Listing',           false, false),
+    listing:     colMinWidth('Link',              false, false),
     raw:         colMinWidth('Raw',               true,  false),
     grading_cost: colMinWidth('Grading Cost',     true,  false),
     strike:      colMinWidth('Strike Price',      true,  false),
@@ -249,7 +249,7 @@ export function Inventory() {
                 <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('listed')} align="center" minWidth={MINS.listed}
                   filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
                 <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" minWidth={MINS.listed_price} />
-                <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" minWidth={MINS.listing} />
+                <ColHeader label="Link"                                      {...sh} {...rz('listing')} align="center" minWidth={MINS.listing} />
                 <ColHeader label="Raw"               col="raw_cost"          {...sh} {...rz('raw')} align="right" minWidth={MINS.raw} />
                 <ColHeader label="Grading Cost"      col="grading_cost"      {...sh} {...rz('grading_cost')} align="right" minWidth={MINS.grading_cost} />
                 <ColHeader label="Strike Price"      col="strike_price"      {...sh} {...rz('strike')} align="right" minWidth={MINS.strike} />

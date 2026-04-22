@@ -145,7 +145,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     company:            colMinWidth('Company',           false, true),
     is_listed:          colMinWidth('Listed?',           true,  true),
     listed_price:       colMinWidth('Listed',    true,  false),
-    listing:            colMinWidth('Listing',   false, false),
+    listing:            colMinWidth('Link',      false, false),
     raw_cost:           colMinWidth('Raw',       true,  false),
     grading_cost:       colMinWidth('Grading',   true,  false),
     strike_price:       colMinWidth('Strike',    true,  false),
@@ -372,7 +372,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                   filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
                 <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" minWidth={MINS.listed_price} wrap />
                 {cardShowMode && <ColHeader label="CS Price" col="card_show_price" {...sh} {...rz('card_show_price')} align="right" minWidth={MINS.card_show_price} wrap />}
-                <ColHeader label="Listing"                                   {...sh} {...rz('listing')} align="center" minWidth={MINS.listing} />
+                <ColHeader label="Link"                                      {...sh} {...rz('listing')} align="center" minWidth={MINS.listing} />
                 {!cardShowMode && <ColHeader label="Location"               {...sh} {...rz('location')} minWidth={MINS.location} />}
                 {!cardShowMode && (
                   <ColHeader label="Card Show?"                              {...sh} {...rz('card_show')} align="center" minWidth={MINS.card_show}

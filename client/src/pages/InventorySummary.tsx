@@ -395,7 +395,7 @@ function SetCodeModal({ set: s, allAliases, onClose }: { set: StaticSet; allAlia
         </div>
 
         <div className="mb-4">
-          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Custom Aliases</p>
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Added Sets</p>
           {aliases.length === 0 ? (
             <p className="text-xs text-zinc-600 italic">None yet</p>
           ) : (
@@ -839,15 +839,14 @@ function SetCodeManager() {
           </div>
         )}
 
-        {/* Custom aliases / Registered sets */}
+        {/* Added Sets */}
         {customAliases.length > 0 && (
           <div className="mx-6 mt-4 mb-2">
-            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">
-              {filtered.length > 0 ? 'Custom Aliases' : 'Registered Sets'}
-            </p>
+            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Added Sets</p>
             <table className="w-full text-xs border border-zinc-800 rounded-lg overflow-hidden">
               <thead>
                 <tr className="bg-zinc-800/60 text-zinc-400 uppercase tracking-wide text-[10px]">
+                  <th className="px-3 py-2 text-left">Game</th>
                   <th className="px-3 py-2 text-left">Code</th>
                   <th className="px-3 py-2 text-left">Alias</th>
                   <th className="px-3 py-2 text-left">Set Name</th>
@@ -856,6 +855,7 @@ function SetCodeManager() {
               <tbody className="divide-y divide-zinc-800">
                 {customAliases.map(a => (
                   <tr key={a.id} className="hover:bg-zinc-800/30 cursor-pointer transition-colors" onClick={() => setEditingAlias(a)}>
+                    <td className="px-3 py-1.5 text-zinc-500 capitalize">{a.game.replace(/_/g, ' ')}</td>
                     <td className="px-3 py-1.5 font-mono text-indigo-300">{a.set_code}</td>
                     <td className="px-3 py-1.5 text-zinc-300">{a.alias}</td>
                     <td className="px-3 py-1.5 text-zinc-500">{a.set_name ?? '—'}</td>

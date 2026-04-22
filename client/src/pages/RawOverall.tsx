@@ -117,7 +117,7 @@ export function RawOverall() {
     condition:         colMinWidth('Condition',     true,  true),
     is_listed:         colMinWidth('Listed?',       true,  true),
     listed_price:      colMinWidth('Listed',        true,  false),
-    listing:           colMinWidth('Listing',       false, false),
+    listing:           colMinWidth('Link',          false, false),
     location:          colMinWidth('Location',      false, false),
     raw_cost:          colMinWidth('Cost',          true,  false),
     strike_price:      colMinWidth('Strike',        true,  false),
@@ -398,7 +398,7 @@ export function RawOverall() {
                 <ColHeader label="Listed?"          col="is_listed"          {...sh} {...rz('is_listed')}         minWidth={MINS.is_listed} align="center"
                   filterOptions={filterOptions?.listed} filterSelected={fListed} onFilterChange={(v) => { setFListed(v); setPage(1); }} />
                 <ColHeader label="Listed Price"     col="listed_price"       {...sh} {...rz('listed_price')}      minWidth={MINS.listed_price} align="right" wrap />
-                <ColHeader label="Listing"                                   {...sh} {...rz('listing')}           minWidth={MINS.listing} align="center" />
+                <ColHeader label="Link"                                      {...sh} {...rz('listing')}           minWidth={MINS.listing} align="center" />
                 <ColHeader label="Location"                                  {...sh} {...rz('location')}          minWidth={MINS.location} />
                 <ColHeader label="Cost"             col="raw_cost"           {...sh} {...rz('raw_cost')}          minWidth={MINS.raw_cost} align="right" />
                 <ColHeader label="Strike Price"     col="strike_price"       {...sh} {...rz('strike_price')}      minWidth={MINS.strike_price} align="right" wrap />

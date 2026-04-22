@@ -521,10 +521,35 @@ async function executeGradedImport(
         const listingUrlForSale = row['listing_url']?.trim() || undefined;
         const platform = normalizePlatform(row['platform']?.trim(), listingUrlForSale, existingNotes ?? undefined);
 
+        // Auto-link to a card show if sold_at falls within a show's date range,
+        // no eBay order ID, and the listing URL isn't an eBay order confirmation link
+        const uniqueId = row['unique_id']?.trim() || null;
+        const isEbayOrder = !!uniqueId || (!!listingUrlForSale && isEbayOrderUrl(listingUrlForSale));
+        let cardShowId: string | null = null;
+        if (!isEbayOrder) {
+          const soldDate = soldAt.toISOString().slice(0, 10);
+          const show = await db
+            .selectFrom('card_shows')
+            .select(['id', 'show_date', 'end_date'])
+            .where('user_id', '=', userId)
+            .where('show_date', '<=', soldAt)
+            .orderBy('show_date', 'desc')
+            .executeTakeFirst();
+          if (show) {
+            const showEnd = show.end_date
+              ? (show.end_date as unknown as Date).toISOString().slice(0, 10)
+              : (show.show_date as unknown as Date).toISOString().slice(0, 10);
+            if (soldDate <= showEnd) {
+              cardShowId = show.id;
+            }
+          }
+        }
+
         await db.insertInto('sales').values({
           user_id:          userId,
           card_instance_id: ci.id,
           listing_id:       null,
+          card_show_id:     cardShowId,
           platform,
           sale_price:       salePriceRaw,
           platform_fees:    platformFees,
@@ -532,7 +557,7 @@ async function executeGradedImport(
           currency,
           total_cost_basis: purchaseCost + gradingCost,
           order_details_link: row['listing_url']?.trim() || null,
-          unique_id:        null,
+          unique_id:        uniqueId,
           unique_id_2:      null,
           sold_at:          soldAt,
         }).execute();
@@ -903,6 +928,18 @@ function normalizeCondition(value?: string): string | null {
 function normalizeCurrency(value?: string): string {
   const upper = (value ?? '').toUpperCase().trim();
   return upper === 'YEN' ? 'JPY' : (['USD', 'JPY'].includes(upper) ? upper : 'USD');
+}
+
+function isEbayOrderUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  return u.includes('ebay.') && (
+    u.includes('/sh/ord') ||
+    u.includes('/vod/fetchorderdetails') ||
+    u.includes('/mesh/') ||
+    u.includes('/ord/') ||
+    /orderid=/i.test(u) ||
+    /order_id=/i.test(u)
+  );
 }
 
 function normalizePlatform(value?: string, listingUrl?: string, notes?: string): ListingPlatform {
