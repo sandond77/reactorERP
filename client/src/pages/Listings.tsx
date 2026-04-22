@@ -756,7 +756,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
   // ── Step: details (shared for single + set + raw) ────────────────────────
 
-  const detailsBackStep: typeof step = listingMode === 'set' ? 'set-search' : listingMode === 'raw' ? 'raw-select' : 'quantity';
+  const detailsBackStep = (listingMode === 'set' ? 'set-search' : listingMode === 'raw' ? 'raw-select' : 'quantity') as typeof step;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -913,10 +913,10 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
               <Button type="button" size="sm" variant="ghost" onClick={() => setDeleteStep(null)}>No</Button>
               <Button type="button" size="sm"
                 className="bg-red-600 hover:bg-red-500 text-white border-0"
-                disabled={deleteStep === 'deleting'}
+                disabled={(deleteStep as string | null) === 'deleting'}
                 onClick={handleDelete}>
                 <Trash2 size={13} />
-                {deleteStep === 'deleting' ? 'Cancelling…' : 'Yes, cancel'}
+                {(deleteStep as string | null) === 'deleting' ? 'Cancelling…' : 'Yes, cancel'}
               </Button>
             </div>
           ) : (

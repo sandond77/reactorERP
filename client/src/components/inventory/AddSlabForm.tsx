@@ -47,8 +47,9 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, string> } | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { register, handleSubmit, setValue, getValues, formState: { errors, isSubmitting } } = useForm<FormData>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(schema) as any,
     defaultValues: { card_game: 'pokemon', language: 'EN', currency: 'USD', slab_company: 'PSA', is_personal_collection: false },
   });
 
@@ -98,7 +99,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       }
       if (pg) {
         const validCompanies = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'];
-        if (validCompanies.includes(pg.company)) setValue('slab_company', pg.company as Parameters<typeof setValue>[1]);
+        if (validCompanies.includes(pg.company)) setValue('slab_company', pg.company as 'PSA' | 'BGS' | 'CGC' | 'SGC' | 'HGA' | 'ACE' | 'ARS' | 'OTHER');
         if (pg.grade) setValue('slab_grade', pg.grade);
         if (pg.grade_label) setValue('slab_grade_label', pg.grade_label);
       }

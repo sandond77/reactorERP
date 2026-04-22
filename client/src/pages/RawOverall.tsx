@@ -191,7 +191,7 @@ export function RawOverall() {
     saveFilters(filterKey, { sortCol, sortDir, statusFilter, fCondition, fListed, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search });
   }, [sortCol, sortDir, statusFilter, fCondition, fListed, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search]);
 
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
     clearTimeout(searchTimerRef.current);

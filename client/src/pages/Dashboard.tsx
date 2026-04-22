@@ -112,8 +112,9 @@ function MiniDonutChart({ pieData, formatter }: { pieData: PieEntry[]; formatter
   if (!pieData.length) return <div className="flex items-center justify-center h-[170px] text-zinc-600 text-xs">No data yet</div>;
   const RADIAN = Math.PI / 180;
   const renderLabel = ({ cx, cy, midAngle, outerRadius, percent, value }: {
-    cx: number; cy: number; midAngle: number; outerRadius: number; percent: number; value: number;
+    cx?: number; cy?: number; midAngle?: number; outerRadius?: number; percent?: number; value?: number;
   }) => {
+    if (cx == null || cy == null || midAngle == null || outerRadius == null || value == null) return null;
     void percent;
     const r = outerRadius + 50;
     const x = cx + r * Math.cos(-midAngle * RADIAN);
@@ -131,7 +132,7 @@ function MiniDonutChart({ pieData, formatter }: { pieData: PieEntry[]; formatter
           {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
         </Pie>
         <Legend iconType="circle" iconSize={7} formatter={(v) => <span className="text-zinc-400 text-[10px]">{v}</span>} />
-        <Tooltip formatter={(v: number) => [formatter(v), '']} contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 12 }} />
+        <Tooltip formatter={(v) => [formatter(v as number), '']} contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 12 }} />
       </PieChart>
     </ResponsiveContainer>
   );
@@ -835,7 +836,7 @@ function RawCardsTab() {
                   contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 12 }}
                 />
                 <Bar dataKey="count" name="Cards" fill={C.indigo} radius={[4, 4, 0, 0]}>
-                  <LabelList dataKey="count" position="top" style={{ fill: '#d4d4d8', fontSize: 10 }} formatter={(v: number) => v > 0 ? v : ''} />
+                  <LabelList dataKey="count" position="top" style={{ fill: '#d4d4d8', fontSize: 10 }} formatter={(v) => (v as number) > 0 ? v : ''} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -1232,7 +1233,7 @@ function GradedTab() {
                   contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 12 }}
                 />
                 <Bar dataKey="count" name="Cards" fill={C.indigo} radius={[4, 4, 0, 0]}>
-                  <LabelList dataKey="count" position="top" style={{ fill: '#d4d4d8', fontSize: 10 }} formatter={(v: number) => v > 0 ? v : ''} />
+                  <LabelList dataKey="count" position="top" style={{ fill: '#d4d4d8', fontSize: 10 }} formatter={(v) => (v as number) > 0 ? v : ''} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>

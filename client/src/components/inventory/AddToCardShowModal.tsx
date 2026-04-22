@@ -49,7 +49,7 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selected, setSelected] = useState<Map<string, SelectedCard>>(new Map());
 
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const handleSearch = useCallback((val: string) => {
     setSearch(val);
     clearTimeout(searchTimerRef.current);

@@ -134,7 +134,7 @@ export function Inventory() {
   const [fListDate, setFListDate] = useState('');
   const [fSoldDate, setFSoldDate] = useState('');
 
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const handleSearchChange = useCallback((val: string) => {
     setSearch(val);
     clearTimeout(searchTimerRef.current);

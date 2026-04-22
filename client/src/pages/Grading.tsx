@@ -52,6 +52,7 @@ interface BatchItem {
   purchase_cost: number;
   currency: string;
   estimated_value: number | null;
+  expected_grade: number | null;
   item_total: number;
   rolling_total: number;
   raw_purchase_label: string | null;

@@ -53,7 +53,7 @@ type PriceView = 'sale_price' | 'net_proceeds' | 'cost_basis';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function seriesKey(point: { is_graded: boolean; grade_label: string | null; company: string | null; condition: string | null }): string {
+function seriesKey(point: { is_graded: boolean; grade_label: string | null; company: string | null; condition: string | null; grade?: number | null }): string {
   if (point.is_graded) {
     const label = point.grade_label ?? (point.grade != null ? String(point.grade) : '?');
     return `${point.company ?? 'Graded'} ${label}`;
@@ -251,7 +251,7 @@ function TrendChart({ data, view, showTrendLine }: { data: TrendData; view: Pric
         <Tooltip
           cursor={{ strokeDasharray: '3 3', stroke: '#52525b' }}
           contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 12 }}
-          formatter={(value: number) => [formatCurrency(Math.round(value * 100)), '']}
+          formatter={(value) => [formatCurrency(Math.round((value as number) * 100)), '']}
           labelFormatter={(label) => formatDate(new Date(label).toISOString())}
         />
         {allSeriesKeys.map((s, i) => (

@@ -299,7 +299,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
             <option value="NM">NM</option><option value="LP">LP</option><option value="MP">MP</option>
             <option value="HP">HP</option><option value="DMG">DMG</option>
           </Select>
-          <Select label="Intent" value={decision} onChange={(e) => setDecision(e.target.value as "grade" | "sell_raw" | "hold")}>
+          <Select label="Intent" value={decision} onChange={(e) => setDecision(e.target.value as 'grade' | 'sell_raw')}>
             <option value="sell_raw">For Sale</option>
             <option value="grade">To Grade</option>
           </Select>

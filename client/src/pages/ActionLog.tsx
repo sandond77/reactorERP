@@ -151,14 +151,14 @@ export function ActionLog() {
     queryFn: () => api.get('/audit/actors'),
     staleTime: 60_000,
   });
-  const actors = actorsData?.data?.data ?? [];
+  const actors = actorsData?.data ?? [];
 
   const { data, isLoading } = useQuery<{ data: AuditResponse }>({
     queryKey: ['audit-log', page, actorName, action, entityType],
     queryFn: () => api.get('/audit/log', { params: { page, limit: 50, actor_name: actorName || undefined, action: action || undefined, entity_type: entityType || undefined } }),
   });
 
-  const result = data?.data?.data;
+  const result = data?.data;
   const entries = result?.data ?? [];
   const totalPages = result?.total_pages ?? 1;
   const total = result?.total ?? 0;

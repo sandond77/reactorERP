@@ -775,7 +775,7 @@ function ImportFlow() {
               <span className="text-sm font-medium text-zinc-100">{preview.original_filename}</span>
               <span className="text-xs text-zinc-500">{preview.total_rows} rows · {preview.columns.length} columns</span>
             </div>
-            <button onClick={reset} className="text-xs text-zinc-500 hover:text-zinc-300">Cancel</button>
+            <button onClick={() => reset()} className="text-xs text-zinc-500 hover:text-zinc-300">Cancel</button>
           </div>
 
           <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">Column mapping</h3>
@@ -837,7 +837,7 @@ function ImportFlow() {
             Please verify that all column mappings are correct before importing. Auto-detected mappings may not be accurate — review each row above before proceeding.
           </p>
           <div className="flex gap-3 shrink-0">
-            <Button variant="secondary" onClick={reset}>Cancel</Button>
+            <Button variant="secondary" onClick={() => reset()}>Cancel</Button>
             <Button onClick={() => preflightMut.mutate()} disabled={preflightMut.isPending || preflightUnlinkedMut.isPending || executeMut.isPending}>
               {(preflightMut.isPending || preflightUnlinkedMut.isPending || executeMut.isPending) && <Loader2 size={14} className="animate-spin mr-1.5" />}
               Import {preview.total_rows} rows
@@ -884,7 +884,7 @@ function ImportFlow() {
               </div>
             )}
           </div>
-          <button onClick={reset} className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0">Import another</button>
+          <button onClick={() => reset()} className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0">Import another</button>
         </div>
       </Card>
     );
