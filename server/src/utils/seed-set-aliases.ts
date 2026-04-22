@@ -6,19 +6,19 @@ import { EN_SETS, JP_SETS } from './set-codes';
  * Uses ON CONFLICT DO NOTHING so it's safe to call multiple times.
  */
 export async function seedOrgSetAliases(userId: string): Promise<void> {
-  const rows: { user_id: string; language: string; set_code: string; alias: string; set_name: string }[] = [];
+  const rows: { user_id: string; language: string; game: string; set_code: string; alias: string; set_name: string }[] = [];
 
   for (const entry of EN_SETS) {
     const set_name = entry.names[0];
     for (const alias of entry.names) {
-      rows.push({ user_id: userId, language: 'EN', set_code: entry.code, alias: alias.toLowerCase().trim(), set_name });
+      rows.push({ user_id: userId, language: 'EN', game: 'pokemon', set_code: entry.code, alias: alias.toLowerCase().trim(), set_name });
     }
   }
 
   for (const entry of JP_SETS) {
     const set_name = entry.names[0];
     for (const alias of entry.names) {
-      rows.push({ user_id: userId, language: 'JP', set_code: entry.code, alias: alias.toLowerCase().trim(), set_name });
+      rows.push({ user_id: userId, language: 'JP', game: 'pokemon', set_code: entry.code, alias: alias.toLowerCase().trim(), set_name });
     }
   }
 
