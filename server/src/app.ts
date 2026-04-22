@@ -17,6 +17,9 @@ configurePassport();
 
 export const app = express();
 
+// Trust Railway's reverse proxy so req.secure is correct and secure cookies work
+app.set('trust proxy', 1);
+
 // Security
 app.use(helmet());
 app.use(cors({
