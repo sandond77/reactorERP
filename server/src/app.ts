@@ -21,7 +21,14 @@ export const app = express();
 app.set('trust proxy', 1);
 
 // Security
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+      'img-src': ["'self'", 'data:', 'https://lh3.googleusercontent.com'],
+    },
+  },
+}));
 app.use(cors({
   origin: env.CLIENT_URL,
   credentials: true,
