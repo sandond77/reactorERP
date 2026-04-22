@@ -124,7 +124,7 @@ const KNOWN_POKEMON_LANGUAGES = [
 
 const NEW_LANG_SENTINEL_IMPORT = '__new_lang__';
 
-function InlineSetCreator({ onCreated }: { onCreated: (lang: string) => void }) {
+function InlineSetCreator({ onCreated }: { onCreated: (lang: string, setCode: string, setName: string) => void }) {
   const qc = useQueryClient();
   const [langSelection, setLangSelection] = useState('');
   const [showCustomLang, setShowCustomLang] = useState(false);
@@ -155,7 +155,7 @@ function InlineSetCreator({ onCreated }: { onCreated: (lang: string) => void }) 
       await api.post('/sets/aliases', { ...form, language: lang });
       qc.invalidateQueries({ queryKey: ['set-aliases'] });
       toast.success(`Set ${form.set_code} registered for ${lang}`);
-      onCreated(lang);
+      onCreated(lang, form.set_code, form.set_name || form.alias);
     } catch {
       toast.error('Failed to register set');
     } finally {
@@ -263,6 +263,8 @@ function LanguageResolutionModal({
   });
   // Track which group has the inline set creator open
   const [creatorGroup, setCreatorGroup] = useState<string | null>(null);
+  // Extra options added via InlineSetCreator, keyed by group key
+  const [extraOptions, setExtraOptions] = useState<Record<string, { lang: string; code: string; set: string | null }[]>>({});
 
   const allResolved = groups.every((g) => selections[g.key] && selections[g.key] !== NEW_LANG_SENTINEL);
 
@@ -308,6 +310,7 @@ function LanguageResolutionModal({
             const options: { lang: string; code: string; set: string | null }[] = [];
             if (r.en_code) options.push({ lang: 'EN', code: r.en_code, set: r.en_set });
             if (r.jp_code) options.push({ lang: 'JP', code: r.jp_code, set: r.jp_set });
+            (extraOptions[g.key] ?? []).forEach(o => { if (!options.find(x => x.lang === o.lang)) options.push(o); });
             const isCreating = creatorGroup === g.key;
             return (
               <div key={g.key} className="px-4 py-3">
@@ -341,9 +344,13 @@ function LanguageResolutionModal({
                 </div>
                 {isCreating && (
                   <InlineSetCreator
-                    onCreated={(lang) => {
+                    onCreated={(lang, setCode, setName) => {
                       setCreatorGroup(null);
                       setSelections(s => ({ ...s, [g.key]: lang }));
+                      setExtraOptions(prev => ({
+                        ...prev,
+                        [g.key]: [...(prev[g.key] ?? []), { lang, code: setCode, set: setName }],
+                      }));
                     }}
                   />
                 )}
