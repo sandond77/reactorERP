@@ -63,7 +63,7 @@ app.get('/health', (_req, res) => {
 
 // Serve React client in production
 if (env.NODE_ENV === 'production') {
-  const clientDist = path.join(__dirname, '../../../client/dist');
+  const clientDist = path.join(__dirname, '../../client/dist');
   app.use(express.static(clientDist));
   app.get('*', (_req, res) => {
     res.sendFile(path.join(clientDist, 'index.html'));
