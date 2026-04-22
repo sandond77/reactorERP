@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 function toTitleCase(s: string) {
   return s.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
@@ -281,7 +281,7 @@ function Pagination({ page, totalPages, total, onChange }: { page: number; total
 
 interface CardGame { id: string | null; name: string }
 
-function GameSelect({ value, onChange }: { value: string; onChange: (g: string) => void }) {
+function GameSelect({ value, onChange, className }: { value: string; onChange: (g: string) => void; className?: string }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [newGame, setNewGame] = useState('');
@@ -302,41 +302,39 @@ function GameSelect({ value, onChange }: { value: string; onChange: (g: string) 
     onError: () => toast.error('Failed to add game'),
   });
 
-  const selectCls = 'w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500';
+  const cls = className ?? 'w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500';
 
   if (adding) {
     return (
-      <div className="flex gap-2">
+      <div className="flex gap-1">
         <input autoFocus value={newGame} onChange={e => setNewGame(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && newGame.trim()) addMut.mutate(newGame.trim()); if (e.key === 'Escape') setAdding(false); }}
           placeholder="New game name…"
-          className={selectCls} />
+          className={cls} />
         <button onClick={() => newGame.trim() && addMut.mutate(newGame.trim())}
           disabled={!newGame.trim() || addMut.isPending}
-          className="px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded-lg transition-colors">
+          className="px-2 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white rounded transition-colors text-xs">
           Add
         </button>
-        <button onClick={() => setAdding(false)} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+        <button onClick={() => setAdding(false)} className="px-2 py-1.5 text-zinc-400 hover:text-zinc-200 transition-colors text-xs">✕</button>
       </div>
     );
   }
 
   return (
-    <div className="flex gap-2">
-      <select value={value} onChange={e => { if (e.target.value === '__add__') setAdding(true); else onChange(e.target.value); }} className={selectCls}>
-        {games.map(g => (
-          <option key={g.id ?? g.name} value={g.name}>{g.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
-        ))}
-        <option value="__add__">+ Add new game…</option>
-      </select>
-    </div>
+    <select value={value} onChange={e => { if (e.target.value === '__add__') setAdding(true); else onChange(e.target.value); }} className={cls}>
+      {games.map(g => (
+        <option key={g.id ?? g.name} value={g.name}>{g.name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+      ))}
+      <option value="__add__">+ Add new game…</option>
+    </select>
   );
 }
 
 // ── Set Code Manager ─────────────────────────────────────────────────────────
 
 interface StaticSet { game: string; language: string; set_code: string; names: string[] }
-interface DbAlias { id: string; language: string; set_code: string; alias: string; set_name: string | null }
+interface DbAlias { id: string; language: string; game: string; set_code: string; alias: string; set_name: string | null }
 
 function SetCodeModal({ set: s, allAliases, onClose }: { set: StaticSet; allAliases: DbAlias[]; onClose: () => void }) {
   const qc = useQueryClient();
@@ -639,7 +637,7 @@ function SetCodeManager() {
   const [lang, setLang] = useState<string>('EN');
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
-  const [form, setForm] = useState({ language: 'EN', set_code: '', alias: '', set_name: '' });
+  const [form, setForm] = useState({ language: 'EN', game: 'pokemon', set_code: '', alias: '', set_name: '' });
   const [showNewLang, setShowNewLang] = useState(false);
   const [newLangForm, setNewLangForm] = useState({ code: '', name: '' });
   const [editingAlias, setEditingAlias] = useState<DbAlias | null>(null);
@@ -669,7 +667,7 @@ function SetCodeManager() {
 
   const addMut = useMutation({
     mutationFn: (body: typeof form) => api.post('/sets/aliases', body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['set-aliases'] }); setShowAddForm(false); setForm({ language: 'EN', set_code: '', alias: '', set_name: '' }); setShowNewLang(false); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['set-aliases'] }); setShowAddForm(false); setForm({ language: 'EN', game: 'pokemon', set_code: '', alias: '', set_name: '' }); setShowNewLang(false); },
     onError: () => toast.error('Failed to add alias'),
   });
 
@@ -692,24 +690,32 @@ function SetCodeManager() {
 
   const customAliases = dbAliases
     .filter(a => a.language === lang)
+    .filter(a => !fGame || a.game === fGame)
     .filter(a => !search || a.set_code.toLowerCase().includes(search.toLowerCase()) || a.alias.toLowerCase().includes(search.toLowerCase()) || (a.set_name ?? '').toLowerCase().includes(search.toLowerCase()));
 
-  // Build language tabs: built-in EN/JP + any languages that have custom aliases
+  // Build language tabs: built-in EN/JP always shown + custom language tabs only when they have content for the active game filter
   const customLangCodes = Array.from(new Set(dbAliases.map(a => a.language))).filter(l => l !== 'EN' && l !== 'JP');
   const langTabs: { code: string; label: string; count: number }[] = [
     { code: 'EN', label: 'English (EN)', count: staticSets.filter(s => s.language === 'EN' && (!fGame || s.game.toLowerCase() === fGame)).length },
     { code: 'JP', label: 'Japanese (JP)', count: staticSets.filter(s => s.language === 'JP' && (!fGame || s.game.toLowerCase() === fGame)).length },
-    ...customLangCodes.map(code => {
-      const name = registeredLanguages.find(l => l.code === code)?.name
-        ?? KNOWN_POKEMON_LANGUAGES.find(l => l.code === code)?.name
-        ?? code;
-      return {
-        code,
-        label: name !== code ? `${name} (${code})` : code,
-        count: dbAliases.filter(a => a.language === code).length,
-      };
-    }),
+    ...customLangCodes
+      .map(code => {
+        const name = registeredLanguages.find(l => l.code === code)?.name
+          ?? KNOWN_POKEMON_LANGUAGES.find(l => l.code === code)?.name
+          ?? code;
+        return {
+          code,
+          label: name !== code ? `${name} (${code})` : code,
+          count: dbAliases.filter(a => a.language === code && (!fGame || a.game === fGame)).length,
+        };
+      })
+      .filter(t => !fGame || t.count > 0),
   ];
+
+  // If the active tab is no longer visible (custom lang filtered out), fall back to EN
+  useEffect(() => {
+    if (!langTabs.find(t => t.code === lang)) setLang('EN');
+  }, [fGame]);
 
   return (
     <div className="flex flex-col h-full">
@@ -748,7 +754,15 @@ function SetCodeManager() {
         {showAddForm && (
           <div className="mx-6 mt-4 p-4 bg-zinc-800/50 border border-zinc-700 rounded-lg space-y-3">
             <p className="text-xs font-medium text-zinc-300">Add Custom Alias</p>
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-5 gap-3">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Game</label>
+                <GameSelect
+                  value={form.game}
+                  onChange={g => setForm(f => ({ ...f, game: g }))}
+                  className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
               <div>
                 <label className="block text-xs text-zinc-500 mb-1">Language</label>
                 <select

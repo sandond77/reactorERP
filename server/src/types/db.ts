@@ -329,6 +329,7 @@ export interface PokemonSetAliasesTable {
   id: Generated<string>;
   user_id: string;
   language: string;
+  game: string;
   alias: string;
   set_code: string;
   set_name: string | null;

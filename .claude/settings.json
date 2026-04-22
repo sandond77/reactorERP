@@ -3,7 +3,8 @@
     "allow": [
       "Bash(git -C /Users/sandon/Documents/reactor add client/src/pages/Import.tsx)",
       "Bash(git -C /Users/sandon/Documents/reactor commit -m ':*)",
-      "Bash(git -C /Users/sandon/Documents/reactor add client/src/pages/ActionLog.tsx client/src/pages/Import.tsx)"
+      "Bash(git -C /Users/sandon/Documents/reactor add client/src/pages/ActionLog.tsx client/src/pages/Import.tsx)",
+      "Bash(node -e ':*)"
     ]
   }
 }

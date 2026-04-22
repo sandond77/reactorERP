@@ -32,6 +32,7 @@ setsRouter.get('/aliases', async (req, res, next) => {
 
 const aliasSchema = z.object({
   language: z.string().min(1).max(10).transform(s => s.toUpperCase().trim()),
+  game: z.string().min(1).max(100).transform(s => s.toLowerCase().trim()).default('pokemon'),
   alias: z.string().min(1).max(200).transform(s => s.toLowerCase().trim()),
   set_code: z.string().min(1).max(50).transform(s => s.trim()),
   set_name: z.string().max(200).optional(),
