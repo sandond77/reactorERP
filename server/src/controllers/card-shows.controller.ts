@@ -9,7 +9,7 @@ const createSchema = z.object({
   show_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullish(),
   num_days: z.number().int().min(1).optional(),
-  num_tables: z.number().int().min(1).nullish(),
+  num_tables: z.number().min(0.5).step(0.5).nullish(),
   notes: z.string().nullish(),
 });
 

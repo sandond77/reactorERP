@@ -18,7 +18,7 @@ export async function createCardShow(userId: string, data: {
   show_date: string;
   end_date?: string | null;
   num_days?: number;
-  num_tables?: number | null;
+  num_tables?: number | string | null;
   notes?: string | null;
 }) {
   const numDays = data.num_days ?? 1;
@@ -31,7 +31,7 @@ export async function createCardShow(userId: string, data: {
       show_date: new Date(data.show_date) as any,
       end_date: numDays > 1 && data.end_date ? new Date(data.end_date) as any : null,
       num_days: numDays,
-      num_tables: data.num_tables ?? null,
+      num_tables: data.num_tables != null ? String(data.num_tables) : null,
       notes: data.notes ?? null,
     })
     .returningAll()
@@ -47,7 +47,7 @@ export async function updateCardShow(userId: string, id: string, data: {
   show_date?: string;
   end_date?: string | null;
   num_days?: number;
-  num_tables?: number | null;
+  num_tables?: number | string | null;
   notes?: string | null;
 }) {
   const updates: Record<string, any> = {};
@@ -56,7 +56,7 @@ export async function updateCardShow(userId: string, id: string, data: {
   if (data.show_date !== undefined) updates.show_date = new Date(data.show_date);
   if (data.end_date !== undefined) updates.end_date = data.end_date ? new Date(data.end_date) : null;
   if (data.num_days !== undefined) updates.num_days = data.num_days;
-  if (data.num_tables !== undefined) updates.num_tables = data.num_tables;
+  if (data.num_tables !== undefined) updates.num_tables = data.num_tables != null ? String(data.num_tables) : null;
   if (data.notes !== undefined) updates.notes = data.notes;
 
   const existing = await db

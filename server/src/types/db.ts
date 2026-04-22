@@ -250,7 +250,7 @@ export interface CardShowsTable {
   show_date: Date;
   end_date: Date | null;
   num_days: Generated<number>;
-  num_tables: number | null;
+  num_tables: string | null;  // NUMERIC(5,1) — stored as string by pg driver
   notes: string | null;
   created_at: Generated<Date>;
 }
@@ -322,6 +322,8 @@ export interface RawPurchaseSequencesTable {
 export interface CardGamesTable {
   id: Generated<string>;
   name: string;
+  abbreviation: string | null;
+  languages: Generated<string[]>;
   created_at: Generated<Date>;
 }
 

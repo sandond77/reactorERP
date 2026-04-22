@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 
 function toTitleCase(s: string) {
   return s.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
@@ -279,9 +279,9 @@ function Pagination({ page, totalPages, total, onChange }: { page: number; total
 
 // ── Game Dropdown ─────────────────────────────────────────────────────────────
 
-interface CardGame { id: string | null; name: string }
+interface CardGame { id: string | null; name: string; abbreviation: string | null; languages: string[]; card_count?: number }
 
-function GameSelect({ value, onChange, className }: { value: string; onChange: (g: string) => void; className?: string }) {
+function GameSelect({ value, onChange, className, onGameAdded }: { value: string; onChange: (g: string) => void; className?: string; onGameAdded?: (name: string) => void }) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [newGame, setNewGame] = useState('');
@@ -296,6 +296,7 @@ function GameSelect({ value, onChange, className }: { value: string; onChange: (
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['card-games'] });
       onChange(res.data.name);
+      onGameAdded?.(res.data.name);
       setNewGame('');
       setAdding(false);
     },
@@ -631,6 +632,261 @@ const KNOWN_POKEMON_LANGUAGES: { code: string; name: string }[] = [
   { code: 'ID', name: 'Indonesian' },
 ];
 
+// ── Games Manager ─────────────────────────────────────────────────────────────
+
+
+function CardGameModal({
+  initial,
+  onClose,
+}: {
+  initial?: CardGame;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    name: initial?.name ?? '',
+    abbreviation: initial?.abbreviation ?? '',
+    languages: initial?.languages ?? [] as string[],
+  });
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const { data: freshGames = [] } = useQuery<CardGame[]>({
+    queryKey: ['card-games'],
+    queryFn: () => api.get('/sets/games').then(r => r.data),
+  });
+  const freshGame = initial?.id ? freshGames.find(g => g.id === initial.id) : undefined;
+  const { data: registeredLanguages = [] } = useQuery<CardLanguage[]>({
+    queryKey: ['card-languages'],
+    queryFn: () => api.get('/sets/languages').then(r => r.data),
+  });
+
+  const allLangOptions = [
+    ...registeredLanguages,
+    ...KNOWN_POKEMON_LANGUAGES.filter(k => !registeredLanguages.find(r => r.code === k.code)),
+  ].sort((a, b) => a.code.localeCompare(b.code));
+
+  const saveMut = useMutation({
+    mutationFn: (body: typeof form) =>
+      initial?.id
+        ? api.put(`/sets/games/${initial.id}`, body)
+        : api.post('/sets/games', body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['card-games'] });
+      onClose();
+    },
+    onError: () => toast.error('Failed to save game'),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: () => api.delete(`/sets/games/${initial!.id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['card-games'] });
+      toast.success('Game deleted');
+      onClose();
+    },
+    onError: () => toast.error('Failed to delete game'),
+  });
+
+  const canDelete = !!initial?.id && initial.name !== 'pokemon' && ((freshGame?.card_count ?? initial.card_count) ?? 0) === 0;
+
+  function addLang(code: string) {
+    const c = code.toUpperCase().trim();
+    if (!c || form.languages.includes(c)) return;
+    setForm(f => ({ ...f, languages: [...f.languages, c] }));
+  }
+
+  function removeLang(code: string) {
+    setForm(f => ({ ...f, languages: f.languages.filter(l => l !== code) }));
+  }
+
+  const inputCls = 'w-full text-sm bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors';
+  const labelCls = 'block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl w-full max-w-xl shadow-2xl">
+        <div className="p-5 border-b border-zinc-800 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-zinc-100">{initial ? 'Edit Card Game' : 'Add Card Game'}</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors"><X size={16} /></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div>
+            <label className={labelCls}>Card Game Name</label>
+            <input autoFocus value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="e.g. One Piece" className={inputCls} disabled={initial?.name === 'pokemon'} />
+          </div>
+          <div>
+            <label className={labelCls}>Abbreviation</label>
+            <input value={form.abbreviation} onChange={e => setForm(f => ({ ...f, abbreviation: e.target.value }))}
+              placeholder="e.g. OP" className={inputCls} />
+            <p className="text-[10px] text-zinc-600 mt-1">Used for part number generation</p>
+          </div>
+          <div>
+            <label className={labelCls}>Supported Languages</label>
+            <div className="flex gap-2 mb-2">
+              <select
+                value=""
+                onChange={e => { if (e.target.value) addLang(e.target.value); }}
+                className="flex-1 text-sm bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 focus:outline-none focus:border-indigo-500"
+              >
+                <option value="">Add language…</option>
+                {allLangOptions
+                  .filter(l => !form.languages.includes(l.code))
+                  .map(l => <option key={l.code} value={l.code}>{l.name} ({l.code})</option>)
+                }
+              </select>
+            </div>
+            {form.languages.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {form.languages.map(code => {
+                  const lang = allLangOptions.find(l => l.code === code);
+                  return (
+                    <span key={code} className="inline-flex items-center gap-1 px-2 py-0.5 bg-zinc-700 text-zinc-200 text-xs rounded-full">
+                      {lang ? `${lang.name} (${code})` : code}
+                      <button onClick={() => removeLang(code)} className="text-zinc-400 hover:text-red-400 transition-colors ml-0.5"><X size={10} /></button>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-600 italic">No languages added yet</p>
+            )}
+          </div>
+        </div>
+        <div className="p-4 border-t border-zinc-800 flex items-center justify-between gap-2">
+          <div>
+            {canDelete && (
+              confirmDelete ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-red-400">Delete this game?</span>
+                  <Button variant="danger" size="sm" onClick={() => deleteMut.mutate()} disabled={deleteMut.isPending}>
+                    {deleteMut.isPending ? 'Deleting…' : 'Confirm Delete'}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>No</Button>
+                </div>
+              ) : (
+                <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(true)}
+                  className="text-red-500 hover:text-red-400">
+                  Delete
+                </Button>
+              )
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button onClick={() => saveMut.mutate(form)} disabled={!form.name.trim() || saveMut.isPending}>
+              {saveMut.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GamesManager() {
+  const qc = useQueryClient();
+  const [modalGame, setModalGame] = useState<CardGame | null | 'new'>(null);
+
+  const { data: games = [] } = useQuery<CardGame[]>({
+    queryKey: ['card-games'],
+    queryFn: () => api.get('/sets/games').then(r => r.data),
+  });
+  const { data: dbAliases = [] } = useQuery<DbAlias[]>({
+    queryKey: ['set-aliases'],
+    queryFn: () => api.get('/sets/aliases').then(r => r.data),
+  });
+  const { data: staticSets = [] } = useQuery<StaticSet[]>({
+    queryKey: ['set-codes-static'],
+    queryFn: () => api.get('/sets/codes').then(r => r.data),
+  });
+  const { data: registeredLanguages = [] } = useQuery<CardLanguage[]>({
+    queryKey: ['card-languages'],
+    queryFn: () => api.get('/sets/languages').then(r => r.data),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/sets/games/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['card-games'] }),
+    onError: () => toast.error('Failed to delete game'),
+  });
+
+  function langSummary(gameName: string): string {
+    const langCounts = new Map<string, number>();
+    if (gameName === 'pokemon') {
+      for (const s of staticSets) {
+        if (s.game === 'pokemon') langCounts.set(s.language, (langCounts.get(s.language) ?? 0) + 1);
+      }
+    }
+    for (const a of dbAliases) {
+      if (a.game === gameName) langCounts.set(a.language, (langCounts.get(a.language) ?? 0) + 1);
+    }
+    if (langCounts.size === 0) return 'No sets added yet';
+    return Array.from(langCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([code, count]) => {
+        const lang = registeredLanguages.find(l => l.code === code);
+        const name = lang?.name ?? KNOWN_POKEMON_LANGUAGES.find(l => l.code === code)?.name ?? code;
+        return `${name} (${count})`;
+      })
+      .join(', ');
+  }
+
+  return (
+    <div className="p-6 space-y-4">
+      {modalGame !== null && (
+        <CardGameModal
+          initial={modalGame === 'new' ? undefined : modalGame}
+          onClose={() => setModalGame(null)}
+        />
+      )}
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-zinc-500">{games.length} card game{games.length !== 1 ? 's' : ''} registered</p>
+        <Button size="sm" onClick={() => setModalGame('new')}><Plus size={14} /> Add Card Game</Button>
+      </div>
+
+      <div className="border border-zinc-800 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-zinc-800/60 text-zinc-400 text-xs uppercase tracking-wide">
+              <th className="px-4 py-2.5 text-left w-[30%]">Card Game</th>
+              <th className="px-4 py-2.5 text-left w-[70%]">Sets by Language (# of Registered Sets)</th>
+              <th className="px-4 py-2.5 w-32 shrink-0"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800">
+            {games.map(g => {
+              const isPokemon = g.name === 'pokemon';
+              const canDelete = !isPokemon && g.id && (g.card_count ?? 0) === 0;
+              return (
+                <tr
+                  key={g.id ?? g.name}
+                  onClick={() => setModalGame(g)}
+                  className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
+                >
+                  <td className="px-4 py-3 font-medium text-zinc-100 capitalize">{g.name.replace(/_/g, ' ')}</td>
+                  <td className="px-4 py-3 text-zinc-400 text-xs">{langSummary(g.name)}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2 justify-end">
+                      {canDelete && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteMut.mutate(g.id!); }}
+                          className="text-xs text-zinc-500 hover:text-red-400 transition-colors"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function SetCodeManager() {
   const qc = useQueryClient();
   const [fGame, setFGame] = useState<string | null>(null);
@@ -638,6 +894,7 @@ function SetCodeManager() {
   const [search, setSearch] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
   const [form, setForm] = useState({ language: 'EN', game: 'pokemon', set_code: '', alias: '', set_name: '' });
+  const [sessionGames, setSessionGames] = useState<string[]>([]); // games added during this form open
   const [showNewLang, setShowNewLang] = useState(false);
   const [newLangForm, setNewLangForm] = useState({ code: '', name: '' });
   const [editingAlias, setEditingAlias] = useState<DbAlias | null>(null);
@@ -665,11 +922,36 @@ function SetCodeManager() {
   const availableLangCodes = new Set(registeredLanguages.map(l => l.code));
   const unregisteredKnown = KNOWN_POKEMON_LANGUAGES.filter(l => !availableLangCodes.has(l.code));
 
+  const deleteGameMut = useMutation({
+    mutationFn: (id: string) => api.delete(`/sets/games/${id}`),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['card-games'] }); },
+  });
+
   const addMut = useMutation({
     mutationFn: (body: typeof form) => api.post('/sets/aliases', body),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['set-aliases'] }); setShowAddForm(false); setForm({ language: 'EN', game: 'pokemon', set_code: '', alias: '', set_name: '' }); setShowNewLang(false); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['set-aliases'] });
+      setShowAddForm(false);
+      setForm({ language: 'EN', game: 'pokemon', set_code: '', alias: '', set_name: '' });
+      setShowNewLang(false);
+      setSessionGames([]);
+    },
     onError: () => toast.error('Failed to add alias'),
   });
+
+  async function cancelAddForm() {
+    // Delete any games added this session that aren't used by any alias
+    for (const gameName of sessionGames) {
+      const usedByAlias = dbAliases.some(a => a.game === gameName);
+      if (!usedByAlias) {
+        const gameRow = games.find(g => g.name === gameName);
+        if (gameRow?.id) await deleteGameMut.mutateAsync(gameRow.id).catch(() => {});
+      }
+    }
+    setSessionGames([]);
+    setShowAddForm(false);
+    setShowNewLang(false);
+  }
 
   const addLangMut = useMutation({
     mutationFn: (body: { code: string; name: string }) => api.post('/sets/languages', body),
@@ -682,16 +964,6 @@ function SetCodeManager() {
     },
     onError: () => toast.error('Failed to register language'),
   });
-
-  const filtered = staticSets
-    .filter(s => s.language === lang)
-    .filter(s => !fGame || s.game.toLowerCase() === fGame)
-    .filter(s => !search || s.set_code.toLowerCase().includes(search.toLowerCase()) || s.names.some(n => n.includes(search.toLowerCase())));
-
-  const customAliases = dbAliases
-    .filter(a => a.language === lang)
-    .filter(a => !fGame || a.game === fGame)
-    .filter(a => !search || a.set_code.toLowerCase().includes(search.toLowerCase()) || a.alias.toLowerCase().includes(search.toLowerCase()) || (a.set_name ?? '').toLowerCase().includes(search.toLowerCase()));
 
   // Build language tabs: built-in EN/JP always shown + custom language tabs only when they have content for the active game filter
   const customLangCodes = Array.from(new Set(dbAliases.map(a => a.language))).filter(l => l !== 'EN' && l !== 'JP');
@@ -712,10 +984,17 @@ function SetCodeManager() {
       .filter(t => !fGame || t.count > 0),
   ];
 
-  // If the active tab is no longer visible (custom lang filtered out), fall back to EN
-  useEffect(() => {
-    if (!langTabs.find(t => t.code === lang)) setLang('EN');
-  }, [fGame]);
+  const activeLang = langTabs.find(t => t.code === lang) ? lang : 'EN';
+
+  const filtered = staticSets
+    .filter(s => s.language === activeLang)
+    .filter(s => !fGame || s.game.toLowerCase() === fGame)
+    .filter(s => !search || s.set_code.toLowerCase().includes(search.toLowerCase()) || s.names.some(n => n.includes(search.toLowerCase())));
+
+  const customAliases = dbAliases
+    .filter(a => a.language === activeLang)
+    .filter(a => !fGame || a.game === fGame)
+    .filter(a => !search || a.set_code.toLowerCase().includes(search.toLowerCase()) || a.alias.toLowerCase().includes(search.toLowerCase()) || (a.set_name ?? '').toLowerCase().includes(search.toLowerCase()));
 
   return (
     <div className="flex flex-col h-full">
@@ -724,7 +1003,7 @@ function SetCodeManager() {
         <div className="flex gap-4">
           {langTabs.map(l => (
             <button key={l.code} onClick={() => setLang(l.code)}
-              className={`pb-1 text-sm font-medium border-b-2 transition-colors ${lang === l.code ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
+              className={`pb-1 text-sm font-medium border-b-2 transition-colors ${activeLang === l.code ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
               {l.label} <span className="text-zinc-600 text-xs ml-1">{l.count}</span>
             </button>
           ))}
@@ -738,12 +1017,26 @@ function SetCodeManager() {
               className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${!fGame ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
               All
             </button>
-            {gameOptions.map(g => (
-              <button key={g} onClick={() => setFGame(fGame === g ? null : g)}
-                className={`px-3 py-1 text-xs rounded-md font-medium transition-colors capitalize ${fGame === g ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-                {g.replace(/_/g, ' ')}
-              </button>
-            ))}
+            {gameOptions.map(g => {
+              const gameRow = games.find(r => r.name === g);
+              const isBuiltIn = g === 'pokemon';
+              return (
+                <span key={g} className={`inline-flex items-center gap-1 rounded-md text-xs font-medium transition-colors capitalize ${fGame === g ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400'}`}>
+                  <button onClick={() => setFGame(fGame === g ? null : g)} className="px-3 py-1 hover:opacity-80 transition-opacity">
+                    {g.replace(/_/g, ' ')}
+                  </button>
+                  {!isBuiltIn && gameRow?.id && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteGameMut.mutate(gameRow.id!); if (fGame === g) setFGame(null); }}
+                      className="pr-2 text-zinc-500 hover:text-red-400 transition-colors"
+                      title="Delete game"
+                    >
+                      <X size={10} />
+                    </button>
+                  )}
+                </span>
+              );
+            })}
           </div>
           <Button size="sm" onClick={() => setShowAddForm(v => !v)}><Plus size={14} /> Add New Set</Button>
         </div>
@@ -756,10 +1049,11 @@ function SetCodeManager() {
             <p className="text-xs font-medium text-zinc-300">Add Custom Alias</p>
             <div className="grid grid-cols-5 gap-3">
               <div>
-                <label className="block text-xs text-zinc-500 mb-1">Game</label>
+                <label className="block text-xs text-zinc-500 mb-1">Card Game</label>
                 <GameSelect
                   value={form.game}
                   onChange={g => setForm(f => ({ ...f, game: g }))}
+                  onGameAdded={name => setSessionGames(prev => [...prev, name])}
                   className="w-full text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -833,7 +1127,7 @@ function SetCodeManager() {
               </div>
             )}
             <div className="flex justify-end gap-2">
-              <Button size="sm" variant="secondary" onClick={() => { setShowAddForm(false); setShowNewLang(false); }}>Cancel</Button>
+              <Button size="sm" variant="secondary" onClick={cancelAddForm}>Cancel</Button>
               <Button size="sm" onClick={() => addMut.mutate(form)} disabled={!form.language || !form.set_code || !form.alias || addMut.isPending}>Save</Button>
             </div>
           </div>
@@ -846,7 +1140,7 @@ function SetCodeManager() {
             <table className="w-full text-xs border border-zinc-800 rounded-lg overflow-hidden">
               <thead>
                 <tr className="bg-zinc-800/60 text-zinc-400 uppercase tracking-wide text-[10px]">
-                  <th className="px-3 py-2 text-left">Game</th>
+                  <th className="px-3 py-2 text-left">Card Game</th>
                   <th className="px-3 py-2 text-left">Code</th>
                   <th className="px-3 py-2 text-left">Alias</th>
                   <th className="px-3 py-2 text-left">Set Name</th>
@@ -1030,14 +1324,16 @@ export function InventorySummary() {
 
   const sh = { sortCol, sortDir, onSort: handleSort };
 
-  const [activeTab, setActiveTab] = useState<'parts' | 'sets'>('parts');
+  const [activeTab, setActiveTab] = useState<'parts' | 'sets' | 'games'>('parts');
+
+  const TAB_LABELS: Record<typeof activeTab, string> = { parts: 'Part Numbers', sets: 'Set Codes', games: 'Card Games' };
 
   const tabBar = (
     <div className="flex gap-6 px-6 pt-4 border-b border-zinc-800 shrink-0">
-      {(['parts', 'sets'] as const).map(t => (
+      {(['parts', 'sets', 'games'] as const).map(t => (
         <button key={t} onClick={() => setActiveTab(t)}
           className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === t ? 'border-indigo-500 text-zinc-100' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}>
-          {t === 'parts' ? 'Part Numbers' : 'Set Codes'}
+          {TAB_LABELS[t]}
         </button>
       ))}
     </div>
@@ -1049,6 +1345,17 @@ export function InventorySummary() {
         {tabBar}
         <div className="flex-1 overflow-auto">
           <SetCodeManager />
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTab === 'games') {
+    return (
+      <div className="flex flex-col h-full">
+        {tabBar}
+        <div className="flex-1 overflow-auto">
+          <GamesManager />
         </div>
       </div>
     );

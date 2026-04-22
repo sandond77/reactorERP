@@ -1,0 +1,1 @@
+ALTER TABLE card_shows ALTER COLUMN num_tables TYPE NUMERIC(5,1);

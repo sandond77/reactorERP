@@ -115,34 +115,72 @@ setsRouter.post('/languages', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /sets/games — all registered games (registry + distinct from catalog)
-setsRouter.get('/games', async (_req, res, next) => {
+// GET /sets/games — all registered games (registry + distinct from catalog) with card_count
+setsRouter.get('/games', async (req, res, next) => {
   try {
-    const [registry, catalog] = await Promise.all([
+    const [registry, catalog, counts] = await Promise.all([
       db.selectFrom('card_games').selectAll().orderBy('name').execute(),
       db.selectFrom('card_catalog').select('game').distinct().execute(),
+      db.selectFrom('card_instances')
+        .select(['card_game', db.fn.count<string>('id').as('cnt')])
+        .where('user_id', '=', req.dataUserId)
+        .groupBy('card_game')
+        .execute(),
     ]);
+    const countMap = new Map(counts.map(r => [r.card_game.toLowerCase(), Number(r.cnt)]));
     const registryNames = new Set(registry.map(r => r.name.toLowerCase()));
-    // merge any catalog games not already in registry
     const extra = catalog
       .map(r => r.game.toLowerCase())
       .filter(g => !registryNames.has(g))
-      .map(name => ({ id: null, name, created_at: null }));
-    res.json([...registry, ...extra]);
+      .map(name => ({ id: null, name, abbreviation: null, languages: [] as string[], created_at: null }));
+    const all = [...registry, ...extra];
+    res.json(all.map(g => ({ ...g, card_count: countMap.get(g.name.toLowerCase()) ?? 0 })));
   } catch (err) { next(err); }
+});
+
+const gameSchema = z.object({
+  name: z.string().min(1).max(100).transform(s => s.toLowerCase().trim()),
+  abbreviation: z.string().max(20).optional().nullable(),
+  languages: z.array(z.string().min(1).max(20)).optional(),
 });
 
 // POST /sets/games — register a new game
 setsRouter.post('/games', async (req, res, next) => {
   try {
-    const { name } = z.object({ name: z.string().min(1).max(100).transform(s => s.toLowerCase().trim()) }).parse(req.body);
+    const { name, abbreviation, languages } = gameSchema.parse(req.body);
     const row = await db
       .insertInto('card_games')
-      .values({ name })
+      .values({ name, abbreviation: abbreviation ?? null, languages: (languages ?? []) as any })
       .onConflict(oc => oc.constraint('card_games_name_unique').doUpdateSet({ name }))
       .returningAll()
       .executeTakeFirstOrThrow();
     res.status(201).json(row);
+  } catch (err) { next(err); }
+});
+
+// PUT /sets/games/:id — update a game (cascades name change to related tables)
+setsRouter.put('/games/:id', async (req, res, next) => {
+  try {
+    const { name, abbreviation, languages } = gameSchema.parse(req.body);
+    const existing = await db
+      .selectFrom('card_games')
+      .select('name')
+      .where('id', '=', req.params.id)
+      .executeTakeFirst();
+    const row = await db
+      .updateTable('card_games')
+      .set({ name, abbreviation: abbreviation ?? null, languages: (languages ?? []) as any })
+      .where('id', '=', req.params.id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    if (existing && existing.name !== name) {
+      await Promise.all([
+        db.updateTable('card_instances').set({ card_game: name }).where('card_game', '=', existing.name).execute(),
+        db.updateTable('card_catalog').set({ game: name }).where('game', '=', existing.name).execute(),
+        db.updateTable('pokemon_set_aliases').set({ game: name }).where('game', '=', existing.name).execute(),
+      ]);
+    }
+    res.json(row);
   } catch (err) { next(err); }
 });
 

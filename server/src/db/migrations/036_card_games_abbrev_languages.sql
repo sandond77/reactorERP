@@ -1,0 +1,2 @@
+ALTER TABLE card_games ADD COLUMN IF NOT EXISTS abbreviation TEXT;
+ALTER TABLE card_games ADD COLUMN IF NOT EXISTS languages TEXT[] NOT NULL DEFAULT '{}';
