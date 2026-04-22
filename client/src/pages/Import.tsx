@@ -501,13 +501,15 @@ interface CatalogOverride {
   language: string;
 }
 
-const KNOWN_GAMES = [
+const DEFAULT_GAMES = [
   { value: 'pokemon',   label: 'Pokémon' },
   { value: 'one_piece', label: 'One Piece' },
   { value: 'magic',     label: 'Magic: The Gathering' },
   { value: 'yugioh',    label: 'Yu-Gi-Oh!' },
   { value: 'other',     label: 'Other' },
 ];
+
+const ADD_GAME_SENTINEL = '__add_game__';
 
 function UnlinkedResolutionModal({
   rows,
@@ -537,8 +539,37 @@ function UnlinkedResolutionModal({
     return init;
   });
 
+  const [customGames, setCustomGames] = useState<{ value: string; label: string }[]>([]);
+  // key of the row currently showing the "add game" inline input
+  const [addingGameForKey, setAddingGameForKey] = useState<string | null>(null);
+  const [newGameLabel, setNewGameLabel] = useState('');
+
+  const allGames = [...DEFAULT_GAMES, ...customGames];
+
   function setField(key: string, field: keyof CatalogOverride, value: string) {
     setOverrides(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }));
+  }
+
+  function handleGameChange(key: string, value: string) {
+    if (value === ADD_GAME_SENTINEL) {
+      setAddingGameForKey(key);
+      setNewGameLabel('');
+    } else {
+      setField(key, 'game', value);
+    }
+  }
+
+  function confirmAddGame(forKey: string) {
+    const label = newGameLabel.trim();
+    if (!label) return;
+    const value = label.toLowerCase().replace(/[^a-z0-9]+/g, '_');
+    const exists = allGames.find(g => g.value === value);
+    if (!exists) {
+      setCustomGames(prev => [...prev, { value, label }]);
+    }
+    setField(forKey, 'game', exists?.value ?? value);
+    setAddingGameForKey(null);
+    setNewGameLabel('');
   }
 
   const allFilled = groups.every(({ key }) => overrides[key]?.set_code?.trim() && overrides[key]?.language?.trim());
@@ -574,13 +605,38 @@ function UnlinkedResolutionModal({
               <div className="grid grid-cols-4 gap-2">
                 <div>
                   <label className="block text-[10px] text-zinc-500 mb-1">Game</label>
-                  <select
-                    value={overrides[key]?.game ?? 'pokemon'}
-                    onChange={e => setField(key, 'game', e.target.value)}
-                    className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
-                  >
-                    {KNOWN_GAMES.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
-                  </select>
+                  {addingGameForKey === key ? (
+                    <div className="flex gap-1">
+                      <input
+                        autoFocus
+                        value={newGameLabel}
+                        onChange={e => setNewGameLabel(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') confirmAddGame(key);
+                          if (e.key === 'Escape') { setAddingGameForKey(null); setNewGameLabel(''); }
+                        }}
+                        placeholder="Game name"
+                        className="flex-1 min-w-0 text-xs bg-zinc-800 border border-indigo-500 rounded px-2 py-1.5 text-zinc-200 focus:outline-none"
+                      />
+                      <button
+                        onClick={() => confirmAddGame(key)}
+                        disabled={!newGameLabel.trim()}
+                        className="text-xs bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white px-2 py-1.5 rounded transition-colors"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  ) : (
+                    <select
+                      value={overrides[key]?.game ?? 'pokemon'}
+                      onChange={e => handleGameChange(key, e.target.value)}
+                      className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                    >
+                      {allGames.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                      <option disabled>──────────</option>
+                      <option value={ADD_GAME_SENTINEL}>+ Add game…</option>
+                    </select>
+                  )}
                 </div>
                 <div>
                   <label className="block text-[10px] text-zinc-500 mb-1">Language</label>
