@@ -148,7 +148,7 @@ export function ActionLog() {
 
   const { data: actorsData } = useQuery<{ data: AuditActor[] }>({
     queryKey: ['audit-actors'],
-    queryFn: () => api.get('/audit/actors'),
+    queryFn: () => api.get('/audit/actors').then(r => r.data),
     staleTime: 60_000,
   });
   const actors = actorsData?.data ?? [];

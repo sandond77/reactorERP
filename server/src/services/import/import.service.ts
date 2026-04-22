@@ -327,14 +327,27 @@ async function executeGradedImport(
     // 4. Set name resolves to EN-only → EN
     // 5. "japanese" in card name or JP PSA code pattern → JP
     // 6. Set name in both lists → no default, must be resolved (should be caught by preflight)
-    const override = languageOverrides?.[rowIndex];
+    // Override can be plain "EN"/"JP" or "LANG:SETCODE" (e.g. "ZH-TW:SWSH9") from disambiguation modal
+    const rawOverride = languageOverrides?.[rowIndex];
+    let overrideLang: string | null = null;
+    let overrideSetCode: string | null = null;
+    if (rawOverride) {
+      const colonIdx = rawOverride.indexOf(':');
+      if (colonIdx !== -1) {
+        overrideLang = rawOverride.slice(0, colonIdx);
+        overrideSetCode = rawOverride.slice(colonIdx + 1) || null;
+      } else {
+        overrideLang = rawOverride;
+      }
+    }
+
     const lookupText = setName ?? cardName;
     const enCode = lookupSetCode('EN', lookupText);
     const jpCode = lookupSetCode('JP', lookupText);
 
-    let resolvedLang: 'EN' | 'JP';
-    if (override) {
-      resolvedLang = override as 'EN' | 'JP';
+    let resolvedLang: string;
+    if (overrideLang) {
+      resolvedLang = overrideLang;
     } else if (language.toUpperCase() === 'JP' || language.toUpperCase() === 'JPN') {
       resolvedLang = 'JP';
     } else if (language.toUpperCase() === 'EN') {
@@ -352,10 +365,10 @@ async function executeGradedImport(
       resolvedLang = 'EN';
     }
 
-    // Pick set code from the resolved language; fall back to the other if nothing found
-    let setCode: string | null = resolvedLang === 'EN' ? enCode : jpCode;
+    // Pick set code: explicit override first, then language-matched lookup, then cross-language fallback
+    let setCode: string | null = overrideSetCode ?? (resolvedLang === 'JP' ? jpCode : enCode);
     if (!setCode) {
-      setCode = resolvedLang === 'EN' ? jpCode : enCode;
+      setCode = resolvedLang === 'JP' ? enCode : jpCode;
       // Do NOT flip resolvedLang — the card is still the resolved language even if
       // we borrow the set code from the other language's lookup table.
     }
@@ -365,8 +378,7 @@ async function executeGradedImport(
       const catOverride = catalogOverrides?.[overrideKey];
       if (catOverride?.set_code) {
         setCode = catOverride.set_code;
-        // Apply language override if provided
-        if (catOverride.language) resolvedLang = catOverride.language.toUpperCase() as 'EN' | 'JP';
+        if (catOverride.language) resolvedLang = catOverride.language.toUpperCase();
       } else {
         // No set code and no override — return null (unlinked)
         return null;

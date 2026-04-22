@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Upload, Download, FileText, Loader2, CheckCircle, XCircle, Sparkles, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -124,9 +124,9 @@ const KNOWN_POKEMON_LANGUAGES = [
 
 const NEW_LANG_SENTINEL_IMPORT = '__new_lang__';
 
-function InlineSetCreator({ onCreated }: { onCreated: (lang: string, setCode: string, setName: string) => void }) {
+function InlineSetCreator({ onCreated, defaultLang }: { onCreated: (lang: string, setCode: string, setName: string) => void; defaultLang?: string }) {
   const qc = useQueryClient();
-  const [langSelection, setLangSelection] = useState('');
+  const [langSelection, setLangSelection] = useState(defaultLang ?? '');
   const [showCustomLang, setShowCustomLang] = useState(false);
   const [customLang, setCustomLang] = useState({ code: '', name: '' });
   const [form, setForm] = useState({ set_code: '', alias: '', set_name: '' });
@@ -244,6 +244,8 @@ function buildGroups(rows: AmbiguousRow[]): RowGroup[] {
   return Array.from(map.values());
 }
 
+const NEW_SET_SENTINEL = '__new_set__';
+
 function LanguageResolutionModal({
   rows,
   onResolve,
@@ -255,34 +257,119 @@ function LanguageResolutionModal({
 }) {
   const groups = buildGroups(rows);
 
-  // selections keyed by group key
-  const [selections, setSelections] = useState<Record<string, string>>(() => {
+  // Language selection per group key
+  const [langSels, setLangSels] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
-    groups.forEach((g) => { init[g.key] = 'EN'; });
+    groups.forEach(g => { init[g.key] = 'EN'; });
     return init;
   });
-  // Track which group has the inline set creator open
+  // Set code selection per group key
+  const [setSels, setSetSels] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    groups.forEach(g => { init[g.key] = g.representative.en_code ?? ''; });
+    return init;
+  });
+  // Track which group has the inline set creator open, and whether it was triggered from lang or set dropdown
   const [creatorGroup, setCreatorGroup] = useState<string | null>(null);
-  // Extra options added via InlineSetCreator, keyed by group key
+  const [creatorDefaultLang, setCreatorDefaultLang] = useState<string>('');
+  // Extra options added via InlineSetCreator or loaded from DB aliases, keyed by group key
   const [extraOptions, setExtraOptions] = useState<Record<string, { lang: string; code: string; set: string | null }[]>>({});
 
-  const allResolved = groups.every((g) => selections[g.key] && selections[g.key] !== NEW_LANG_SENTINEL);
+  // On mount, fetch DB aliases and add any non-EN/JP matches as extra options
+  useEffect(() => {
+    api.get('/sets/aliases').then((res) => {
+      const aliases: { language: string; set_code: string; alias: string; set_name?: string }[] = res.data;
+      const extras: Record<string, { lang: string; code: string; set: string | null }[]> = {};
+      groups.forEach((g) => {
+        const setName = g.representative.set_name?.toLowerCase().trim() ?? '';
+        const enCode = g.representative.en_code?.toLowerCase() ?? '';
+        const jpCode = g.representative.jp_code?.toLowerCase() ?? '';
+        const enSet  = g.representative.en_set?.toLowerCase().trim() ?? '';
+        const jpSet  = g.representative.jp_set?.toLowerCase().trim() ?? '';
+        aliases.forEach((a) => {
+          if (a.language === 'EN' || a.language === 'JP') return;
+          const aAlias   = a.alias.toLowerCase();
+          const aCode    = a.set_code.toLowerCase();
+          const aSetName = (a.set_name ?? '').toLowerCase();
+          const matchesSet = (
+            // Match by explicit set_name column (when present)
+            (setName && (aAlias === setName || aCode === setName || aSetName === setName)) ||
+            // Match by EN/JP set codes (works even when set_name column is absent)
+            (enCode && aCode === enCode) ||
+            (jpCode && aCode === jpCode) ||
+            // Match by canonical EN/JP set display name (e.g. "brilliant stars")
+            (enSet && (aAlias === enSet || aSetName === enSet)) ||
+            (jpSet && (aAlias === jpSet || aSetName === jpSet))
+          );
+          if (matchesSet) {
+            if (!extras[g.key]) extras[g.key] = [];
+            if (!extras[g.key].find(x => x.lang === a.language)) {
+              extras[g.key].push({ lang: a.language, code: a.set_code, set: a.set_name ?? null });
+            }
+          }
+        });
+      });
+      if (Object.keys(extras).length > 0) setExtraOptions(extras);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  function handleLangChange(key: string, val: string) {
-    if (val === NEW_LANG_SENTINEL) {
-      setCreatorGroup(key);
-      setSelections(s => ({ ...s, [key]: NEW_LANG_SENTINEL }));
-    } else {
-      setCreatorGroup(null);
-      setSelections(s => ({ ...s, [key]: val }));
-    }
+  function getLangOptions(g: RowGroup): string[] {
+    const langs: string[] = [];
+    if (g.representative.en_code) langs.push('EN');
+    if (g.representative.jp_code) langs.push('JP');
+    (extraOptions[g.key] ?? []).forEach(o => { if (!langs.includes(o.lang)) langs.push(o.lang); });
+    return langs;
   }
+
+  function getSetOptions(g: RowGroup, lang: string): { code: string; label: string }[] {
+    if (lang === 'EN' && g.representative.en_code) {
+      return [{ code: g.representative.en_code, label: g.representative.en_set ? `${g.representative.en_code} — ${g.representative.en_set}` : g.representative.en_code }];
+    }
+    if (lang === 'JP' && g.representative.jp_code) {
+      return [{ code: g.representative.jp_code, label: g.representative.jp_set ? `${g.representative.jp_code} — ${g.representative.jp_set}` : g.representative.jp_code }];
+    }
+    return (extraOptions[g.key] ?? [])
+      .filter(o => o.lang === lang)
+      .map(o => ({ code: o.code, label: o.set ? `${o.code} — ${o.set}` : o.code }));
+  }
+
+  function handleLangChange(g: RowGroup, val: string) {
+    if (val === NEW_LANG_SENTINEL) {
+      setCreatorGroup(g.key);
+      setCreatorDefaultLang('');
+      return;
+    }
+    setCreatorGroup(null);
+    setLangSels(s => ({ ...s, [g.key]: val }));
+    const sets = getSetOptions(g, val);
+    setSetSels(s => ({ ...s, [g.key]: sets[0]?.code ?? '' }));
+  }
+
+  function handleSetChange(g: RowGroup, val: string) {
+    if (val === NEW_SET_SENTINEL) {
+      setCreatorGroup(g.key);
+      setCreatorDefaultLang(langSels[g.key] ?? 'EN');
+      return;
+    }
+    setCreatorGroup(null);
+    setSetSels(s => ({ ...s, [g.key]: val }));
+  }
+
+  const allResolved = groups.every(g => {
+    const lang = langSels[g.key];
+    const setCode = setSels[g.key];
+    return lang && lang !== NEW_LANG_SENTINEL && setCode;
+  });
 
   function handleConfirm() {
     const overrides: Record<number, string> = {};
-    groups.forEach((g) => {
-      const lang = selections[g.key];
-      g.rowNumbers.forEach((rowNum) => { overrides[rowNum] = lang; });
+    groups.forEach(g => {
+      const lang = langSels[g.key] ?? 'EN';
+      const setCode = setSels[g.key];
+      // Encode as "LANG:SETCODE" so server gets both pieces
+      const encoded = setCode ? `${lang}:${setCode}` : lang;
+      g.rowNumbers.forEach(rowNum => { overrides[rowNum] = encoded; });
     });
     onResolve(overrides);
   }
@@ -307,14 +394,14 @@ function LanguageResolutionModal({
         <div className="overflow-y-auto flex-1 divide-y divide-zinc-800">
           {groups.map((g) => {
             const r = g.representative;
-            const options: { lang: string; code: string; set: string | null }[] = [];
-            if (r.en_code) options.push({ lang: 'EN', code: r.en_code, set: r.en_set });
-            if (r.jp_code) options.push({ lang: 'JP', code: r.jp_code, set: r.jp_set });
-            (extraOptions[g.key] ?? []).forEach(o => { if (!options.find(x => x.lang === o.lang)) options.push(o); });
             const isCreating = creatorGroup === g.key;
+            const langOptions = getLangOptions(g);
+            const selectedLang = langSels[g.key] ?? 'EN';
+            const setOptions = getSetOptions(g, selectedLang);
+            const selectedSet = setSels[g.key] ?? '';
             return (
               <div key={g.key} className="px-4 py-3">
-                <div className="flex items-start gap-4">
+                <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-baseline gap-2">
                       <p className="text-sm text-zinc-200 break-words">{r.card_name}</p>
@@ -325,32 +412,40 @@ function LanguageResolutionModal({
                       )}
                     </div>
                     {r.set_name && <p className="text-xs text-zinc-500 mt-0.5">Set: {r.set_name}</p>}
-                    <div className="flex gap-4 mt-1.5 text-xs text-zinc-500">
-                      {options.map((o) => (
-                        <span key={o.lang}>{o.lang}: <span className="text-zinc-300">{o.code} — {o.set}</span></span>
-                      ))}
-                    </div>
                   </div>
-                  <select
-                    value={selections[g.key] ?? options[0]?.lang ?? 'EN'}
-                    onChange={(e) => handleLangChange(g.key, e.target.value)}
-                    className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500 shrink-0"
-                  >
-                    {options.map((o) => (
-                      <option key={o.lang} value={o.lang}>{o.lang} — {o.code}</option>
-                    ))}
-                    <option value={NEW_LANG_SENTINEL}>New language…</option>
-                  </select>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Language dropdown */}
+                    <select
+                      value={selectedLang}
+                      onChange={e => handleLangChange(g, e.target.value)}
+                      className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                    >
+                      {langOptions.map(l => <option key={l} value={l}>{l}</option>)}
+                      <option value={NEW_LANG_SENTINEL}>Add language…</option>
+                    </select>
+                    {/* Set code dropdown */}
+                    <select
+                      value={selectedSet}
+                      onChange={e => handleSetChange(g, e.target.value)}
+                      className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                    >
+                      {setOptions.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
+                      {setOptions.length === 0 && <option value="">No sets registered</option>}
+                      <option value={NEW_SET_SENTINEL}>Add set…</option>
+                    </select>
+                  </div>
                 </div>
                 {isCreating && (
                   <InlineSetCreator
+                    defaultLang={creatorDefaultLang}
                     onCreated={(lang, setCode, setName) => {
                       setCreatorGroup(null);
-                      setSelections(s => ({ ...s, [g.key]: lang }));
                       setExtraOptions(prev => ({
                         ...prev,
                         [g.key]: [...(prev[g.key] ?? []), { lang, code: setCode, set: setName }],
                       }));
+                      setLangSels(s => ({ ...s, [g.key]: lang }));
+                      setSetSels(s => ({ ...s, [g.key]: setCode }));
                     }}
                   />
                 )}

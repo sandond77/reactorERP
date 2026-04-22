@@ -408,7 +408,7 @@ export function lookupSetCode(language: 'EN' | 'JP', setName: string): string | 
 /**
  * Given a language and set code, return the canonical (first) name for that set.
  */
-export function lookupSetName(language: 'EN' | 'JP', setCode: string): string | null {
+export function lookupSetName(language: string, setCode: string): string | null {
   const sets = language === 'JP' ? JP_SETS : EN_SETS;
   const entry = sets.find(s => s.code === setCode);
   return entry ? entry.names[0] : null;
@@ -452,7 +452,7 @@ export async function buildLookupWithDbAliases(
 /**
  * Generate a part number (SKU) given parsed card fields.
  */
-export function generatePartNumber(language: 'EN' | 'JP', setCode: string, cardNumber: string): string {
+export function generatePartNumber(language: string, setCode: string, cardNumber: string): string {
   const rawNum = cardNumber.split('/')[0].trim();
   const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
   return `PKMN-${language}-${setCode}-${paddedNum}`;

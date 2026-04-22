@@ -532,7 +532,7 @@ function AliasModal({ alias, onClose }: { alias: DbAlias; onClose: () => void })
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-xl p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
           <h2 className="text-base font-semibold text-zinc-100">Edit Alias</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors"><X size={16} /></button>
@@ -552,11 +552,16 @@ function AliasModal({ alias, onClose }: { alias: DbAlias; onClose: () => void })
             <label className="block text-xs text-zinc-400 mb-1">Set Code</label>
             <input className={inputCls} value={form.set_code} onChange={field('set_code')} />
           </div>
-          <div>
+          <div className="col-span-2">
             <label className="block text-xs text-zinc-400 mb-1">Alias (match string)</label>
-            <input className={inputCls} value={form.alias} onChange={field('alias')} />
+            <textarea
+              className={`${inputCls} resize-y min-h-[38px]`}
+              rows={2}
+              value={form.alias}
+              onChange={e => setForm(f => ({ ...f, alias: e.target.value }))}
+            />
           </div>
-          <div>
+          <div className="col-span-2">
             <label className="block text-xs text-zinc-400 mb-1">Set Name (optional)</label>
             <input className={inputCls} value={form.set_name} onChange={field('set_name')} placeholder="optional" />
           </div>
