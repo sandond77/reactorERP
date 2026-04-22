@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Upload, Download, FileText, Loader2, CheckCircle, XCircle, Sparkles, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -287,55 +287,32 @@ function LanguageResolutionModal({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Derived: which non-EN/JP aliases match each group — recomputes whenever allAliases changes
-  const extraOptions = useMemo(() => {
-    const extras: Record<string, { lang: string; code: string; set: string | null }[]> = {};
-    groups.forEach(g => {
-      const setName = g.representative.set_name?.toLowerCase().trim() ?? '';
-      const enCode  = g.representative.en_code?.toLowerCase() ?? '';
-      const jpCode  = g.representative.jp_code?.toLowerCase() ?? '';
-      const enSet   = g.representative.en_set?.toLowerCase().trim() ?? '';
-      const jpSet   = g.representative.jp_set?.toLowerCase().trim() ?? '';
-      allAliases.forEach(a => {
-        if (a.language === 'EN' || a.language === 'JP') return;
-        const aAlias   = a.alias.toLowerCase();
-        const aCode    = a.set_code.toLowerCase();
-        const aSetName = (a.set_name ?? '').toLowerCase();
-        const matchesSet = (
-          (setName && (aAlias === setName || aCode === setName || aSetName === setName)) ||
-          (enCode && aCode === enCode) ||
-          (jpCode && aCode === jpCode) ||
-          (enSet && (aAlias === enSet || aSetName === enSet)) ||
-          (jpSet && (aAlias === jpSet || aSetName === jpSet))
-        );
-        if (matchesSet) {
-          if (!extras[g.key]) extras[g.key] = [];
-          if (!extras[g.key].find(x => x.lang === a.language)) {
-            extras[g.key].push({ lang: a.language, code: a.set_code, set: a.set_name ?? null });
-          }
-        }
-      });
-    });
-    return extras;
-  }, [allAliases, groups]);
 
   function getLangOptions(g: RowGroup): string[] {
     const langs: string[] = [];
     if (g.representative.en_code) langs.push('EN');
     if (g.representative.jp_code) langs.push('JP');
-    (extraOptions[g.key] ?? []).forEach(o => { if (!langs.includes(o.lang)) langs.push(o.lang); });
+    // Show ALL registered non-EN/JP languages, not just ones matching this group's set
+    allAliases.forEach(a => {
+      if (a.language !== 'EN' && a.language !== 'JP' && !langs.includes(a.language)) {
+        langs.push(a.language);
+      }
+    });
     return langs;
   }
 
-  function getSetOptions(g: RowGroup, lang: string): { code: string; label: string }[] {
+  function getSetOptions(_g: RowGroup, lang: string): { code: string; label: string }[] {
     if (lang === 'EN' || lang === 'JP') {
       return allSetCodes
         .filter(s => s.language === lang)
         .map(s => ({ code: s.set_code, label: `${s.set_code} — ${s.names[0]}` }));
     }
-    return (extraOptions[g.key] ?? [])
-      .filter(o => o.lang === lang)
-      .map(o => ({ code: o.code, label: o.set ? `${o.code} — ${o.set}` : o.code }));
+    // For custom languages: show all sets registered for that language
+    const seen = new Set<string>();
+    return allAliases
+      .filter(a => a.language === lang)
+      .filter(a => { if (seen.has(a.set_code)) return false; seen.add(a.set_code); return true; })
+      .map(a => ({ code: a.set_code, label: a.set_name ? `${a.set_code} — ${a.set_name}` : a.set_code }));
   }
 
   function handleLangChange(g: RowGroup, val: string) {
@@ -411,9 +388,9 @@ function LanguageResolutionModal({
             const selectedSet = setSels[g.key] ?? '';
             return (
               <div key={g.key} className="px-4 py-2.5">
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 min-w-0 flex items-center gap-2">
-                    <p className="text-sm text-zinc-200 truncate">{r.card_name}</p>
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0 flex items-start gap-2 pt-0.5">
+                    <p className="text-sm text-zinc-200 break-words">{r.card_name}</p>
                     {g.rowNumbers.length > 1 && (
                       <span className="shrink-0 text-xs font-medium text-indigo-400 bg-indigo-500/15 px-1.5 py-0.5 rounded">
                         ×{g.rowNumbers.length}
@@ -424,7 +401,7 @@ function LanguageResolutionModal({
                   <select
                     value={selectedLang}
                     onChange={e => handleLangChange(g, e.target.value)}
-                    className="w-24 shrink-0 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                    className="w-24 shrink-0 self-start text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
                   >
                     {langOptions.map(l => <option key={l} value={l}>{l}</option>)}
                     <option value={NEW_LANG_SENTINEL}>Add language…</option>
@@ -433,7 +410,7 @@ function LanguageResolutionModal({
                   <select
                     value={selectedSet}
                     onChange={e => handleSetChange(g, e.target.value)}
-                    className="w-52 shrink-0 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                    className="w-52 shrink-0 self-start text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
                   >
                     {setOptions.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
                     {setOptions.length === 0 && <option value="">No sets registered</option>}

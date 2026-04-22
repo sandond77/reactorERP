@@ -155,7 +155,7 @@ export function ActionLog() {
 
   const { data, isLoading } = useQuery<{ data: AuditResponse }>({
     queryKey: ['audit-log', page, actorName, action, entityType],
-    queryFn: () => api.get('/audit/log', { params: { page, limit: 50, actor_name: actorName || undefined, action: action || undefined, entity_type: entityType || undefined } }),
+    queryFn: () => api.get('/audit/log', { params: { page, limit: 50, actor_name: actorName || undefined, action: action || undefined, entity_type: entityType || undefined } }).then(r => r.data),
   });
 
   const result = data?.data;
