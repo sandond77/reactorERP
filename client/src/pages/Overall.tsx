@@ -363,17 +363,17 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Part #"                                    {...sh} {...rz('part_number')} minWidth={MINS.part_number} />
                 <ColHeader label="Cert"              col="cert_number"       {...sh} {...rz('cert_number')} minWidth={MINS.cert_number} />
+                <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card_name')} minWidth={MINS.card_name} />
                 <ColHeader label="Grade"             col="grade"             {...sh} {...rz('grade')} minWidth={MINS.grade}
                   filterOptions={filterOptions?.grades} filterSelected={fGrade} onFilterChange={(v) => { setFGrade(v); setPage(1); }} />
-                <ColHeader label="Card"              col="card_name"         {...sh} {...rz('card_name')} minWidth={MINS.card_name} />
                 <ColHeader label="Company"                                   {...sh} {...rz('company')} minWidth={MINS.company}
                   filterOptions={filterOptions?.companies} filterSelected={fCompany}  onFilterChange={(v) => { setFCompany(v); setPage(1); }} align="center" />
+                {!cardShowMode && <ColHeader label="Location"               {...sh} {...rz('location')} minWidth={MINS.location} />}
                 <ColHeader label="Listed?"           col="is_listed"         {...sh} {...rz('is_listed')} align="center" minWidth={MINS.is_listed}
                   filterOptions={filterOptions?.listed}    filterSelected={fListed}   onFilterChange={(v) => { setFListed(v); setPage(1); }} />
                 <ColHeader label="Listed Price"      col="listed_price"      {...sh} {...rz('listed_price')} align="right" minWidth={MINS.listed_price} wrap />
                 {cardShowMode && <ColHeader label="CS Price" col="card_show_price" {...sh} {...rz('card_show_price')} align="right" minWidth={MINS.card_show_price} wrap />}
                 <ColHeader label="Link"                                      {...sh} {...rz('listing')} align="center" minWidth={MINS.listing} />
-                {!cardShowMode && <ColHeader label="Location"               {...sh} {...rz('location')} minWidth={MINS.location} />}
                 {!cardShowMode && (
                   <ColHeader label="Card Show?"                              {...sh} {...rz('card_show')} align="center" minWidth={MINS.card_show}
                     filterOptions={filterOptions?.card_show} filterSelected={fCardShow} onFilterChange={(v) => { setFCardShow(v); setPage(1); }} filterAlign="right" />
@@ -409,9 +409,10 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                         <a href={link} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{row.cert_number}</a>
                       ) : <span className="text-zinc-400">{row.cert_number ?? ''}</span>}
                     </td>
-                    <td className="px-3 py-1 text-zinc-300">{row.grade_label ?? ''}</td>
                     <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-300">{row.grade_label ?? ''}</td>
                     <td className="px-3 py-1 text-center text-zinc-400 text-[11px]">{row.company}</td>
+                    {!cardShowMode && <td className="px-3 py-1 text-zinc-400 truncate" title={row.location_name ?? ''}>{row.location_name ?? ''}</td>}
                     <td className="px-3 py-1 text-center">
                       {row.is_listed ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}
                     </td>
@@ -430,7 +431,6 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                         </a>
                       ) : ''}
                     </td>
-                    {!cardShowMode && <td className="px-3 py-1 text-zinc-400 truncate" title={row.location_name ?? ''}>{row.location_name ?? ''}</td>}
                     {!cardShowMode && (
                       <td className="px-3 py-1 text-center">
                         {row.is_card_show ? <span className="text-yellow-400">Yes</span> : ''}

@@ -968,8 +968,8 @@ function SetCodeManager() {
   // Build language tabs: built-in EN/JP always shown + custom language tabs only when they have content for the active game filter
   const customLangCodes = Array.from(new Set(dbAliases.map(a => a.language))).filter(l => l !== 'EN' && l !== 'JP');
   const langTabs: { code: string; label: string; count: number }[] = [
-    { code: 'EN', label: 'English (EN)', count: staticSets.filter(s => s.language === 'EN' && (!fGame || s.game.toLowerCase() === fGame)).length },
-    { code: 'JP', label: 'Japanese (JP)', count: staticSets.filter(s => s.language === 'JP' && (!fGame || s.game.toLowerCase() === fGame)).length },
+    { code: 'EN', label: 'English (EN)', count: staticSets.filter(s => s.language === 'EN' && (!fGame || s.game.toLowerCase() === fGame)).length + dbAliases.filter(a => a.language === 'EN' && (!fGame || a.game === fGame)).length },
+    { code: 'JP', label: 'Japanese (JP)', count: staticSets.filter(s => s.language === 'JP' && (!fGame || s.game.toLowerCase() === fGame)).length + dbAliases.filter(a => a.language === 'JP' && (!fGame || a.game === fGame)).length },
     ...customLangCodes
       .map(code => {
         const name = registeredLanguages.find(l => l.code === code)?.name

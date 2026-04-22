@@ -96,7 +96,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
   const [editNotes,        setEditNotes]        = useState('');
   const [editLocationId,   setEditLocationId]   = useState<string>('');
 
-  const { locations: gradedLocations } = useLocations('graded');
+  const { locations: gradedLocations, allLocations } = useLocations('graded');
 
   function startEdit() {
     setEditName(slab.card_name ?? '');
@@ -196,17 +196,22 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
                   <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
                     placeholder="Optional notes…" className={inputCls} />
                 </div>
-                {gradedLocations.length > 0 && (
-                  <div>
-                    <label className="block text-xs text-zinc-500 mb-1">Location</label>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">Location</label>
+                  {gradedLocations.length > 0 ? (
                     <select value={editLocationId} onChange={(e) => setEditLocationId(e.target.value)} className={inputCls}>
                       <option value="">— No location —</option>
-                      {gradedLocations.map(l => (
-                        <option key={l.id} value={l.id}>{l.name}</option>
-                      ))}
+                      {gradedLocations.map(l => {
+                        const parent = l.parent_id ? allLocations.find(p => p.id === l.parent_id) : null;
+                        return (
+                          <option key={l.id} value={l.id}>{parent ? `${parent.name} › ${l.name}` : l.name}</option>
+                        );
+                      })}
                     </select>
-                  </div>
-                )}
+                  ) : (
+                    <p className="text-xs text-zinc-600 py-1">No locations set up yet. Add locations in Settings.</p>
+                  )}
+                </div>
               </div>
             </div>
           </div>

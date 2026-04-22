@@ -395,11 +395,11 @@ export function RawOverall() {
                 <ColHeader label="Card"             col="card_name"          {...sh} {...rz('card_name')}         minWidth={MINS.card_name} />
                 <ColHeader label="Condition"        col="condition"          {...sh} {...rz('condition')}         minWidth={MINS.condition}
                   filterOptions={filterOptions?.conditions} filterSelected={fCondition} onFilterChange={(v) => { setFCondition(v); setPage(1); }} />
+                <ColHeader label="Location"                                  {...sh} {...rz('location')}          minWidth={MINS.location} />
                 <ColHeader label="Listed?"          col="is_listed"          {...sh} {...rz('is_listed')}         minWidth={MINS.is_listed} align="center"
                   filterOptions={filterOptions?.listed} filterSelected={fListed} onFilterChange={(v) => { setFListed(v); setPage(1); }} />
                 <ColHeader label="Listed Price"     col="listed_price"       {...sh} {...rz('listed_price')}      minWidth={MINS.listed_price} align="right" wrap />
                 <ColHeader label="Link"                                      {...sh} {...rz('listing')}           minWidth={MINS.listing} align="center" />
-                <ColHeader label="Location"                                  {...sh} {...rz('location')}          minWidth={MINS.location} />
                 <ColHeader label="Cost"             col="raw_cost"           {...sh} {...rz('raw_cost')}          minWidth={MINS.raw_cost} align="right" />
                 <ColHeader label="Strike Price"     col="strike_price"       {...sh} {...rz('strike_price')}      minWidth={MINS.strike_price} align="right" wrap />
                 <ColHeader label="After Fees"       col="after_ebay"         {...sh} {...rz('after_ebay')}        minWidth={MINS.after_ebay} align="right" wrap />
@@ -426,6 +426,7 @@ export function RawOverall() {
                   <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
                   <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
                   <td className="px-3 py-1 text-zinc-300">{row.condition ?? ''}</td>
+                  <td className="px-3 py-1 text-zinc-400 truncate" title={row.location_name ?? ''}>{row.location_name ?? ''}</td>
                   <td className="px-3 py-1 text-center">
                     {row.is_listed ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}
                   </td>
@@ -437,7 +438,6 @@ export function RawOverall() {
                       <a href={row.listing_url} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="eBay listing"><ExternalLink size={11} /></a>
                     ) : ''}
                   </td>
-                  <td className="px-3 py-1 text-zinc-400 truncate" title={row.location_name ?? ''}>{row.location_name ?? ''}</td>
                   <td className="px-3 py-1 text-right text-zinc-400">{fmt(row.raw_cost)}</td>
                   <td className="px-3 py-1 text-right text-zinc-300">{fmt(row.strike_price)}</td>
                   <td className="px-3 py-1 text-right text-zinc-300">{fmt(row.after_ebay)}</td>

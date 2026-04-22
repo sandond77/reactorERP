@@ -145,6 +145,23 @@ export async function preflightUnlinked(userId: string, importId: string, buffer
 
   const { rows } = parseCsvBuffer(buffer, record.filename);
   const mapping = (record.mapping ?? {}) as Record<string, string>;
+
+  // Load user-defined aliases so we can skip cards that are already resolvable
+  const userAliases = await db.selectFrom('pokemon_set_aliases')
+    .select(['language', 'set_code', 'alias', 'set_name'])
+    .where('user_id', '=', userId)
+    .execute();
+
+  function hasAliasMatch(text: string): boolean {
+    const norm = text.toLowerCase().trim();
+    return userAliases.some(a =>
+      norm === a.alias.toLowerCase() ||
+      norm.includes(a.alias.toLowerCase()) ||
+      norm === a.set_code.toLowerCase() ||
+      (a.set_name && norm.includes(a.set_name.toLowerCase()))
+    );
+  }
+
   const unlinked: UnlinkedRow[] = [];
   const seen = new Set<string>();
 
@@ -160,7 +177,7 @@ export async function preflightUnlinked(userId: string, importId: string, buffer
     const enCode = lookupSetCode('EN', lookupText);
     const jpCode = lookupSetCode('JP', lookupText);
 
-    if (enCode || jpCode) continue; // will be matched
+    if (enCode || jpCode || hasAliasMatch(lookupText)) continue; // will be matched
 
     // Deduplicate by card_name + set_name
     const key = `${cardName}|${setName ?? ''}`;
@@ -314,6 +331,25 @@ async function executeGradedImport(
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
 
+  // Load user-defined set aliases for matching custom languages
+  const userAliasRows = await db.selectFrom('pokemon_set_aliases')
+    .select(['language', 'set_code', 'alias', 'set_name', 'game'])
+    .where('user_id', '=', userId)
+    .execute();
+
+  function lookupUserAlias(text: string): { set_code: string; language: string; game: string } | null {
+    const norm = text.toLowerCase().trim();
+    for (const a of userAliasRows) {
+      const normAlias = a.alias.toLowerCase();
+      const normCode = a.set_code.toLowerCase();
+      const normName = a.set_name?.toLowerCase() ?? '';
+      if (norm === normAlias || norm.includes(normAlias) || norm === normCode || (normName && norm.includes(normName))) {
+        return { set_code: a.set_code, language: a.language.toUpperCase(), game: a.game };
+      }
+    }
+    return null;
+  }
+
   // Cache catalog lookups: sku → catalog_id
   const catalogCache = new Map<string, string>();
 
@@ -345,21 +381,23 @@ async function executeGradedImport(
     const enCode = lookupSetCode('EN', lookupText);
     const jpCode = lookupSetCode('JP', lookupText);
 
+    const hasJpNameSignal = /japanese/i.test(cardName) || /\b(S\d+[WH]|SM\d+[SMKLA+]|SM\d+a|SV\d+[SDPL]|SV\d+a)\b/i.test(cardName);
+
     let resolvedLang: string;
     if (overrideLang) {
       resolvedLang = overrideLang;
-    } else if (language.toUpperCase() === 'JP' || language.toUpperCase() === 'JPN') {
+    } else if (/^(jp|jpn|japanese)$/i.test(language)) {
       resolvedLang = 'JP';
-    } else if (language.toUpperCase() === 'EN') {
+    } else if (/^(en|eng|english)$/i.test(language) && !hasJpNameSignal) {
       resolvedLang = 'EN';
     } else if (setName) {
       const setInEn = lookupSetCode('EN', setName) !== null;
       const setInJp = lookupSetCode('JP', setName) !== null;
       if (setInJp && !setInEn) resolvedLang = 'JP';
+      else if (hasJpNameSignal) resolvedLang = 'JP';
       else if (setInEn && !setInJp) resolvedLang = 'EN';
-      else if (/japanese/i.test(cardName) || /\b(S\d+[WH]|SM\d+[SMKLA+]|SM\d+a|SV\d+[SDPL]|SV\d+a)\b/i.test(cardName)) resolvedLang = 'JP';
       else resolvedLang = 'EN';
-    } else if (/japanese/i.test(cardName) || /\b(S\d+[WH]|SM\d+[SMKLA+]|SM\d+a|SV\d+[SDPL]|SV\d+a)\b/i.test(cardName)) {
+    } else if (hasJpNameSignal) {
       resolvedLang = 'JP';
     } else {
       resolvedLang = 'EN';
@@ -367,10 +405,22 @@ async function executeGradedImport(
 
     // Pick set code: explicit override first, then language-matched lookup, then cross-language fallback
     let setCode: string | null = overrideSetCode ?? (resolvedLang === 'JP' ? jpCode : enCode);
+    // If JP but setName-based lookup failed, retry against the full card name
+    if (!setCode && resolvedLang === 'JP' && setName) {
+      setCode = lookupSetCode('JP', cardName);
+    }
     if (!setCode) {
       setCode = resolvedLang === 'JP' ? enCode : jpCode;
       // Do NOT flip resolvedLang — the card is still the resolved language even if
       // we borrow the set code from the other language's lookup table.
+    }
+    if (!setCode) {
+      // Check user-defined aliases (covers custom languages like ZH-TW)
+      const aliasMatch = lookupUserAlias(lookupText);
+      if (aliasMatch) {
+        setCode = aliasMatch.set_code;
+        resolvedLang = aliasMatch.language;
+      }
     }
     if (!setCode) {
       // Check if user provided a manual override for this card via the resolution modal

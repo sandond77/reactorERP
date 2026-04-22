@@ -58,7 +58,7 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
 
   await db
     .updateTable('card_instances')
-    .set({ status: 'sold' })
+    .set({ status: 'sold', location_id: null })
     .where('id', '=', input.card_instance_id)
     .execute();
 

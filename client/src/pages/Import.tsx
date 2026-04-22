@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Upload, Download, FileText, Loader2, CheckCircle, XCircle, Sparkles, AlertTriangle, Trash2 } from 'lucide-react';
+import { Upload, Download, FileText, Loader2, CheckCircle, XCircle, Sparkles, AlertTriangle, Trash2, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
@@ -540,9 +540,64 @@ function UnlinkedResolutionModal({
   });
 
   const [customGames, setCustomGames] = useState<{ value: string; label: string }[]>([]);
-  // key of the row currently showing the "add game" inline input
   const [addingGameForKey, setAddingGameForKey] = useState<string | null>(null);
   const [newGameLabel, setNewGameLabel] = useState('');
+  // rows in manual set-code entry mode (not using the dropdown)
+  const [customSetRows, setCustomSetRows] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    groups.forEach(({ key, row }) => {
+      if (row.set_name) s.add(key); // pre-filled from import → start in custom mode
+    });
+    return s;
+  });
+  // sets added during this session — augments dropdown options for subsequent rows
+  const [sessionSets, setSessionSets] = useState<{ game: string; language: string; set_code: string; set_name: string }[]>([]);
+
+  function addSessionSet(game: string, language: string, set_code: string, set_name: string) {
+    if (!set_code.trim()) return;
+    setSessionSets(prev => {
+      const idx = prev.findIndex(s => s.game === game && s.language === language && s.set_code === set_code);
+      if (idx !== -1) {
+        const updated = [...prev];
+        updated[idx] = { game, language, set_code, set_name };
+        return updated;
+      }
+      return [...prev, { game, language, set_code, set_name }];
+    });
+  }
+
+  const { data: staticSets = [] } = useQuery<{ game: string; language: string; set_code: string; names: string[] }[]>({
+    queryKey: ['set-codes-static'],
+    queryFn: () => api.get('/sets/codes').then(r => r.data),
+  });
+  const { data: dbAliases = [] } = useQuery<{ game: string; language: string; set_code: string; alias: string; set_name?: string }[]>({
+    queryKey: ['set-aliases'],
+    queryFn: () => api.get('/sets/aliases').then(r => r.data),
+  });
+
+  function getSetOptions(game: string, language: string) {
+    const opts: { code: string; name: string }[] = [];
+    const seen = new Set<string>();
+    if (game === 'pokemon') {
+      for (const s of staticSets.filter(s => s.language === language)) {
+        opts.push({ code: s.set_code, name: s.names[0] ?? s.set_code });
+        seen.add(s.set_code);
+      }
+    }
+    for (const a of dbAliases.filter(a => a.language === language && (a.game ?? 'pokemon') === game)) {
+      if (!seen.has(a.set_code)) {
+        opts.push({ code: a.set_code, name: a.set_name ?? a.alias ?? a.set_code });
+        seen.add(a.set_code);
+      }
+    }
+    for (const s of sessionSets.filter(s => s.game === game && s.language === language)) {
+      if (!seen.has(s.set_code)) {
+        opts.push({ code: s.set_code, name: s.set_name || s.set_code });
+        seen.add(s.set_code);
+      }
+    }
+    return opts.sort((a, b) => a.code.localeCompare(b.code));
+  }
 
   const allGames = [...DEFAULT_GAMES, ...customGames];
 
@@ -574,7 +629,17 @@ function UnlinkedResolutionModal({
 
   const allFilled = groups.every(({ key }) => overrides[key]?.set_code?.trim() && overrides[key]?.language?.trim());
 
-  function handleConfirm() {
+  async function handleConfirm() {
+    // Save any manually-entered sets as user aliases so future imports find them automatically
+    if (sessionSets.length > 0) {
+      await Promise.all(
+        sessionSets.map(s => api.post('/sets/aliases', {
+          game: s.game, language: s.language, set_code: s.set_code,
+          alias: (s.set_name || s.set_code).toLowerCase(),
+          set_name: s.set_name || null,
+        }).catch(() => {}))
+      );
+    }
     const resolved: Record<string, CatalogOverride> = {};
     for (const { key } of groups) {
       resolved[key] = overrides[key];
@@ -648,24 +713,79 @@ function UnlinkedResolutionModal({
                     {KNOWN_POKEMON_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.code} — {l.name}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-[10px] text-zinc-500 mb-1">Set Code</label>
-                  <input
-                    value={overrides[key]?.set_code ?? ''}
-                    onChange={e => setField(key, 'set_code', e.target.value)}
-                    placeholder="e.g. OP-01"
-                    className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-zinc-500 mb-1">Set Name</label>
-                  <input
-                    value={overrides[key]?.set_name ?? ''}
-                    onChange={e => setField(key, 'set_name', e.target.value)}
-                    placeholder="e.g. Romance Dawn"
-                    className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
+                {(() => {
+                  const game = overrides[key]?.game ?? 'pokemon';
+                  const language = overrides[key]?.language ?? 'EN';
+                  const setOpts = getSetOptions(game, language);
+                  const isCustom = customSetRows.has(key);
+                  const currentCode = overrides[key]?.set_code ?? '';
+                  return (
+                    <>
+                      <div className="col-span-2">
+                        <label className="block text-[10px] text-zinc-500 mb-1">Set</label>
+                        {isCustom ? (
+                          <div className="flex gap-1">
+                            <input
+                              value={currentCode}
+                              onChange={e => setField(key, 'set_code', e.target.value)}
+                              onBlur={e => {
+                                const g = overrides[key]?.game ?? 'pokemon';
+                                const l = overrides[key]?.language ?? 'EN';
+                                addSessionSet(g, l, e.target.value, overrides[key]?.set_name ?? '');
+                              }}
+                              placeholder="Set code"
+                              className="w-24 shrink-0 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                            />
+                            <input
+                              value={overrides[key]?.set_name ?? ''}
+                              onChange={e => setField(key, 'set_name', e.target.value)}
+                              onBlur={e => {
+                                const g = overrides[key]?.game ?? 'pokemon';
+                                const l = overrides[key]?.language ?? 'EN';
+                                addSessionSet(g, l, overrides[key]?.set_code ?? '', e.target.value);
+                              }}
+                              placeholder="Set name (optional)"
+                              className="flex-1 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                            />
+                            {setOpts.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setCustomSetRows(s => { const n = new Set(s); n.delete(key); return n; })}
+                                className="text-[10px] text-indigo-400 hover:text-indigo-300 whitespace-nowrap px-1"
+                              >
+                                ← List
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <select
+                            value={currentCode}
+                            onChange={e => {
+                              const val = e.target.value;
+                              if (val === '__custom__') {
+                                setCustomSetRows(s => new Set([...s, key]));
+                                setField(key, 'set_code', '');
+                                setField(key, 'set_name', '');
+                              } else {
+                                setField(key, 'set_code', val);
+                                const opt = setOpts.find(o => o.code === val);
+                                if (opt) setField(key, 'set_name', opt.name);
+                              }
+                            }}
+                            className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                          >
+                            <option value="">— Select set —</option>
+                            {setOpts.map(o => (
+                              <option key={o.code} value={o.code}>{o.code} — {o.name}</option>
+                            ))}
+                            <option disabled>──────────</option>
+                            <option value="__custom__">+ Enter manually…</option>
+                          </select>
+                        )}
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           ))}
@@ -844,18 +964,24 @@ function ImportFlow() {
               <p className="text-sm text-zinc-300 font-medium">Smart Import</p>
               <p className="text-sm text-zinc-500 mt-0.5">Upload any CSV or Excel file — AI will detect what it is and map the columns automatically.</p>
             </div>
-            <div className="flex gap-2 shrink-0">
-              {IMPORT_TYPES.map(({ key, label }) => (
-                <button
-                  key={key}
-                  onClick={() => downloadTemplate(key)}
-                  className="text-xs text-zinc-500 hover:text-indigo-400 transition-colors flex items-center gap-1"
-                  title={`Download ${label} template`}
-                >
-                  <Download size={11} />
-                  {label}
-                </button>
-              ))}
+            <div className="relative shrink-0 group">
+              <button className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1 border border-zinc-700 rounded-md px-2.5 py-1.5 hover:border-zinc-600">
+                <Download size={11} />
+                Templates
+                <ChevronDown size={11} />
+              </button>
+              <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-10 hidden group-focus-within:block group-hover:block">
+                {IMPORT_TYPES.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    onClick={() => downloadTemplate(key)}
+                    className="w-full text-left text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 px-3 py-2 first:rounded-t-lg last:rounded-b-lg transition-colors flex items-center gap-2"
+                  >
+                    <Download size={10} className="shrink-0" />
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <UploadZone onFile={handleFile} />

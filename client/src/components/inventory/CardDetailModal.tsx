@@ -37,7 +37,7 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   const [editNotes,       setEditNotes]        = useState('');
   const [editLocationId,  setEditLocationId]   = useState('');
 
-  const { locations: rawLocations } = useLocations('raw');
+  const { locations: rawLocations, allLocations } = useLocations('raw');
 
   const frontRef = useRef<HTMLInputElement>(null);
   const backRef = useRef<HTMLInputElement>(null);
@@ -221,17 +221,22 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                       className={inputCls}
                     />
                   </div>
-                  {rawLocations.length > 0 && (
-                    <div className="col-span-2">
-                      <label className="block text-xs text-zinc-500 mb-1">Location</label>
+                  <div className="col-span-2">
+                    <label className="block text-xs text-zinc-500 mb-1">Location</label>
+                    {rawLocations.length > 0 ? (
                       <select value={editLocationId} onChange={(e) => setEditLocationId(e.target.value)} className={inputCls}>
                         <option value="">— No location —</option>
-                        {rawLocations.map(l => (
-                          <option key={l.id} value={l.id}>{l.name}</option>
-                        ))}
+                        {rawLocations.map(l => {
+                          const parent = l.parent_id ? allLocations.find(p => p.id === l.parent_id) : null;
+                          return (
+                            <option key={l.id} value={l.id}>{parent ? `${parent.name} › ${l.name}` : l.name}</option>
+                          );
+                        })}
                       </select>
-                    </div>
-                  )}
+                    ) : (
+                      <p className="text-xs text-zinc-600 py-1">No locations set up yet. Add locations in Settings.</p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
