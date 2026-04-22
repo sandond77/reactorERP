@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Upload, Download, FileText, Loader2, CheckCircle, XCircle, Sparkles, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -273,46 +273,51 @@ function LanguageResolutionModal({
   const [creatorGroup, setCreatorGroup] = useState<string | null>(null);
   const [creatorDefaultLang, setCreatorDefaultLang] = useState<string>('');
   // Extra options added via InlineSetCreator or loaded from DB aliases, keyed by group key
-  const [extraOptions, setExtraOptions] = useState<Record<string, { lang: string; code: string; set: string | null }[]>>({});
+  // Raw alias list — adding new aliases here causes all groups to recompute
+  const [allAliases, setAllAliases] = useState<{ language: string; set_code: string; alias: string; set_name?: string }[]>([]);
+  // Full static set list for EN/JP dropdowns
+  const [allSetCodes, setAllSetCodes] = useState<{ language: string; set_code: string; names: string[] }[]>([]);
 
-  // On mount, fetch DB aliases and add any non-EN/JP matches as extra options
+  // On mount, fetch static set codes + DB aliases
   useEffect(() => {
-    api.get('/sets/aliases').then((res) => {
-      const aliases: { language: string; set_code: string; alias: string; set_name?: string }[] = res.data;
-      const extras: Record<string, { lang: string; code: string; set: string | null }[]> = {};
-      groups.forEach((g) => {
-        const setName = g.representative.set_name?.toLowerCase().trim() ?? '';
-        const enCode = g.representative.en_code?.toLowerCase() ?? '';
-        const jpCode = g.representative.jp_code?.toLowerCase() ?? '';
-        const enSet  = g.representative.en_set?.toLowerCase().trim() ?? '';
-        const jpSet  = g.representative.jp_set?.toLowerCase().trim() ?? '';
-        aliases.forEach((a) => {
-          if (a.language === 'EN' || a.language === 'JP') return;
-          const aAlias   = a.alias.toLowerCase();
-          const aCode    = a.set_code.toLowerCase();
-          const aSetName = (a.set_name ?? '').toLowerCase();
-          const matchesSet = (
-            // Match by explicit set_name column (when present)
-            (setName && (aAlias === setName || aCode === setName || aSetName === setName)) ||
-            // Match by EN/JP set codes (works even when set_name column is absent)
-            (enCode && aCode === enCode) ||
-            (jpCode && aCode === jpCode) ||
-            // Match by canonical EN/JP set display name (e.g. "brilliant stars")
-            (enSet && (aAlias === enSet || aSetName === enSet)) ||
-            (jpSet && (aAlias === jpSet || aSetName === jpSet))
-          );
-          if (matchesSet) {
-            if (!extras[g.key]) extras[g.key] = [];
-            if (!extras[g.key].find(x => x.lang === a.language)) {
-              extras[g.key].push({ lang: a.language, code: a.set_code, set: a.set_name ?? null });
-            }
-          }
-        });
-      });
-      if (Object.keys(extras).length > 0) setExtraOptions(extras);
+    Promise.all([api.get('/sets/codes'), api.get('/sets/aliases')]).then(([codesRes, aliasesRes]) => {
+      setAllSetCodes(codesRes.data);
+      setAllAliases(aliasesRes.data);
     }).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Derived: which non-EN/JP aliases match each group — recomputes whenever allAliases changes
+  const extraOptions = useMemo(() => {
+    const extras: Record<string, { lang: string; code: string; set: string | null }[]> = {};
+    groups.forEach(g => {
+      const setName = g.representative.set_name?.toLowerCase().trim() ?? '';
+      const enCode  = g.representative.en_code?.toLowerCase() ?? '';
+      const jpCode  = g.representative.jp_code?.toLowerCase() ?? '';
+      const enSet   = g.representative.en_set?.toLowerCase().trim() ?? '';
+      const jpSet   = g.representative.jp_set?.toLowerCase().trim() ?? '';
+      allAliases.forEach(a => {
+        if (a.language === 'EN' || a.language === 'JP') return;
+        const aAlias   = a.alias.toLowerCase();
+        const aCode    = a.set_code.toLowerCase();
+        const aSetName = (a.set_name ?? '').toLowerCase();
+        const matchesSet = (
+          (setName && (aAlias === setName || aCode === setName || aSetName === setName)) ||
+          (enCode && aCode === enCode) ||
+          (jpCode && aCode === jpCode) ||
+          (enSet && (aAlias === enSet || aSetName === enSet)) ||
+          (jpSet && (aAlias === jpSet || aSetName === jpSet))
+        );
+        if (matchesSet) {
+          if (!extras[g.key]) extras[g.key] = [];
+          if (!extras[g.key].find(x => x.lang === a.language)) {
+            extras[g.key].push({ lang: a.language, code: a.set_code, set: a.set_name ?? null });
+          }
+        }
+      });
+    });
+    return extras;
+  }, [allAliases, groups]);
 
   function getLangOptions(g: RowGroup): string[] {
     const langs: string[] = [];
@@ -323,11 +328,10 @@ function LanguageResolutionModal({
   }
 
   function getSetOptions(g: RowGroup, lang: string): { code: string; label: string }[] {
-    if (lang === 'EN' && g.representative.en_code) {
-      return [{ code: g.representative.en_code, label: g.representative.en_set ? `${g.representative.en_code} — ${g.representative.en_set}` : g.representative.en_code }];
-    }
-    if (lang === 'JP' && g.representative.jp_code) {
-      return [{ code: g.representative.jp_code, label: g.representative.jp_set ? `${g.representative.jp_code} — ${g.representative.jp_set}` : g.representative.jp_code }];
+    if (lang === 'EN' || lang === 'JP') {
+      return allSetCodes
+        .filter(s => s.language === lang)
+        .map(s => ({ code: s.set_code, label: `${s.set_code} — ${s.names[0]}` }));
     }
     return (extraOptions[g.key] ?? [])
       .filter(o => o.lang === lang)
@@ -440,10 +444,8 @@ function LanguageResolutionModal({
                     defaultLang={creatorDefaultLang}
                     onCreated={(lang, setCode, setName) => {
                       setCreatorGroup(null);
-                      setExtraOptions(prev => ({
-                        ...prev,
-                        [g.key]: [...(prev[g.key] ?? []), { lang, code: setCode, set: setName }],
-                      }));
+                      // Push into allAliases so ALL groups recompute their extra options
+                      setAllAliases(prev => [...prev, { language: lang, set_code: setCode, alias: setCode.toLowerCase(), set_name: setName || undefined }]);
                       setLangSels(s => ({ ...s, [g.key]: lang }));
                       setSetSels(s => ({ ...s, [g.key]: setCode }));
                     }}
