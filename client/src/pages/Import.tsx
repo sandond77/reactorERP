@@ -391,9 +391,15 @@ function LanguageResolutionModal({
             {uniqueCount < totalCount ? ` — grouped into ${uniqueCount} unique card${uniqueCount !== 1 ? 's' : ''}` : ''}.
             Select the correct language for each.
           </p>
-          <p className="text-xs text-zinc-600 mt-1.5">
-            Only languages with registered card sets are shown. Select "New language…" to register a card set for a different language before importing.
+          <p className="text-xs text-zinc-600 mt-1">
+            Use "Add language…" or "Add set…" to register a new set before importing.
           </p>
+        </div>
+        {/* Column headers */}
+        <div className="px-4 py-2 border-b border-zinc-800 flex items-center gap-3 bg-zinc-900/60">
+          <div className="flex-1 text-[10px] uppercase tracking-wider text-zinc-600">Card</div>
+          <div className="w-24 text-[10px] uppercase tracking-wider text-zinc-600">Language</div>
+          <div className="w-52 text-[10px] uppercase tracking-wider text-zinc-600">Set</div>
         </div>
         <div className="overflow-y-auto flex-1 divide-y divide-zinc-800">
           {groups.map((g) => {
@@ -404,40 +410,35 @@ function LanguageResolutionModal({
             const setOptions = getSetOptions(g, selectedLang);
             const selectedSet = setSels[g.key] ?? '';
             return (
-              <div key={g.key} className="px-4 py-3">
-                <div className="flex items-start gap-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-baseline gap-2">
-                      <p className="text-sm text-zinc-200 break-words">{r.card_name}</p>
-                      {g.rowNumbers.length > 1 && (
-                        <span className="shrink-0 text-xs font-medium text-indigo-400 bg-indigo-500/15 px-1.5 py-0.5 rounded">
-                          ×{g.rowNumbers.length}
-                        </span>
-                      )}
-                    </div>
-                    {r.set_name && <p className="text-xs text-zinc-500 mt-0.5">Set: {r.set_name}</p>}
+              <div key={g.key} className="px-4 py-2.5">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0 flex items-center gap-2">
+                    <p className="text-sm text-zinc-200 truncate">{r.card_name}</p>
+                    {g.rowNumbers.length > 1 && (
+                      <span className="shrink-0 text-xs font-medium text-indigo-400 bg-indigo-500/15 px-1.5 py-0.5 rounded">
+                        ×{g.rowNumbers.length}
+                      </span>
+                    )}
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {/* Language dropdown */}
-                    <select
-                      value={selectedLang}
-                      onChange={e => handleLangChange(g, e.target.value)}
-                      className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
-                    >
-                      {langOptions.map(l => <option key={l} value={l}>{l}</option>)}
-                      <option value={NEW_LANG_SENTINEL}>Add language…</option>
-                    </select>
-                    {/* Set code dropdown */}
-                    <select
-                      value={selectedSet}
-                      onChange={e => handleSetChange(g, e.target.value)}
-                      className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
-                    >
-                      {setOptions.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
-                      {setOptions.length === 0 && <option value="">No sets registered</option>}
-                      <option value={NEW_SET_SENTINEL}>Add set…</option>
-                    </select>
-                  </div>
+                  {/* Language dropdown — fixed width */}
+                  <select
+                    value={selectedLang}
+                    onChange={e => handleLangChange(g, e.target.value)}
+                    className="w-24 shrink-0 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    {langOptions.map(l => <option key={l} value={l}>{l}</option>)}
+                    <option value={NEW_LANG_SENTINEL}>Add language…</option>
+                  </select>
+                  {/* Set code dropdown — fixed width */}
+                  <select
+                    value={selectedSet}
+                    onChange={e => handleSetChange(g, e.target.value)}
+                    className="w-52 shrink-0 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    {setOptions.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
+                    {setOptions.length === 0 && <option value="">No sets registered</option>}
+                    <option value={NEW_SET_SENTINEL}>Add set…</option>
+                  </select>
                 </div>
                 {isCreating && (
                   <InlineSetCreator
