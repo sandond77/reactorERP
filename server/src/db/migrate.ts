@@ -30,7 +30,10 @@ async function migrate() {
       }
 
       console.log(`  run   ${file}`);
-      const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+      // Strip everything from '-- Down' onward so only the Up section runs
+      const raw = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+      const downIdx = raw.search(/^-- Down\b/im);
+      const sql = downIdx === -1 ? raw : raw.slice(0, downIdx).trim();
       await client.query('BEGIN');
       try {
         await client.query(sql);

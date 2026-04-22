@@ -1,5 +1,8 @@
 -- Up
 ALTER TABLE card_instances
+  ADD COLUMN IF NOT EXISTS is_card_show BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE card_instances
   ADD COLUMN IF NOT EXISTS card_show_added_at TIMESTAMPTZ;
 
 -- Backfill existing card-show inventory with created_at as a reasonable baseline
