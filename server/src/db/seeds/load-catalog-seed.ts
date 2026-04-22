@@ -11,7 +11,8 @@ import { Pool } from 'pg';
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 async function main() {
-  const sqlPath = join(__dirname, 'catalog-seed-data.sql');
+  // Works from both src/db/seeds/ (tsx) and dist/db/seeds/ (compiled node)
+  const sqlPath = join(__dirname, '../../../src/db/seeds/catalog-seed-data.sql');
   const sql = readFileSync(sqlPath, 'utf-8');
 
   const existing = await pool.query('SELECT COUNT(*) FROM card_catalog_seed');
