@@ -72,7 +72,7 @@ function ShowForm({ initial, onSave, onCancel, saving }: ShowFormProps) {
   const [numDays, setNumDays]     = useState(initial?.num_days ?? 1);
   const [showDate, setShowDate]   = useState(initial?.show_date?.slice(0, 10) ?? '');
   const [endDate, setEndDate]     = useState(initial?.end_date?.slice(0, 10) ?? '');
-  const [numTables, setNumTables] = useState(initial?.num_tables != null ? Number(initial.num_tables) : 1);
+  const [numTables, setNumTables] = useState(initial?.num_tables != null ? String(Number(initial.num_tables)) : '1');
   const [notes, setNotes]         = useState(initial?.notes ?? '');
 
   const multiDay = numDays > 1;
@@ -112,7 +112,7 @@ function ShowForm({ initial, onSave, onCancel, saving }: ShowFormProps) {
           <input
             type="number" min="0.5" step="0.5"
             value={numTables}
-            onChange={(e) => setNumTables(parseFloat(e.target.value) || 0.5)}
+            onChange={(e) => setNumTables(e.target.value)}
             className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
           />
         </div>
@@ -315,7 +315,7 @@ function ShowRow({ show, onEdit, onDelete, current }: { show: CardShow; onEdit: 
           {current && <span className="text-[10px] bg-emerald-600/20 text-emerald-400 border border-emerald-600/30 rounded px-1.5 py-0.5 font-medium">Today</span>}
           {upcoming && <span className="text-[10px] bg-indigo-600/20 text-indigo-400 border border-indigo-600/30 rounded px-1.5 py-0.5 font-medium">Upcoming</span>}
           {show.num_days > 1 && <span className="text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 py-0.5">{show.num_days} days</span>}
-          {show.num_tables != null && <span className="text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 py-0.5">{show.num_tables} {Number(show.num_tables) === 1 ? 'table' : 'tables'}</span>}
+          {show.num_tables != null && <span className="text-[10px] bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 py-0.5">{Number(show.num_tables)} {Number(show.num_tables) === 1 ? 'table' : 'tables'}</span>}
         </div>
         <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-500">
           <span>{fmtDateRange(show)}</span>
