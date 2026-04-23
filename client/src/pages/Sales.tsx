@@ -1792,9 +1792,9 @@ export function Sales() {
                       : sale.raw_purchase_label ?? '—'}
                   </td>
                   <td className="px-3 py-2">
-                    <p className="font-medium text-zinc-200 truncate" title={sale.card_name ?? ''}>{sale.card_name ?? 'Unknown'}</p>
-                    <p className="text-[10px] text-zinc-500 truncate">
-                      {sale.set_name}{sale.grade ? ` · ${sale.grading_company} ${sale.grade_label ? `${sale.grade_label} ${sale.grade}` : sale.grade}` : ''}
+                    <p className="font-medium text-zinc-200 whitespace-normal break-words leading-snug">{sale.card_name ?? 'Unknown'}</p>
+                    <p className="text-[10px] text-zinc-500 whitespace-normal break-words">
+                      {sale.set_name}{sale.grade ? ` · ${sale.grading_company} ${sale.grade_label ?? sale.grade}` : ''}
                     </p>
                   </td>
                   <td className="px-3 py-2">

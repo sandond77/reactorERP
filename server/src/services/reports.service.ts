@@ -87,6 +87,7 @@ export async function getPnlReport(
       .select([
         sql<string>`cs.name || ' (' || TO_CHAR(cs.show_date, 'Mon DD, YYYY') || ')'`.as('label'),
         sql<string>`cs.id::text`.as('show_id'),
+        'cs.location as show_location' as any,
         sql<number>`COUNT(*)::int`.as('num_sales'),
         sql<number>`SUM(s.sale_price)::int`.as('total_revenue'),
         sql<number>`SUM(s.platform_fees + s.shipping_cost)::int`.as('total_fees'),
@@ -99,7 +100,7 @@ export async function getPnlReport(
       .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
       .$if(cardType === 'graded', (qb) => qb.where(sql<boolean>`EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`))
       .$if(cardType === 'ungraded', (qb) => qb.where(sql<boolean>`NOT EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`))
-      .groupBy(['cs.id', 'cs.name', 'cs.show_date'])
+      .groupBy(['cs.id', 'cs.name', 'cs.show_date', 'cs.location'])
       .orderBy('cs.show_date', 'desc')
       .execute()) as Row[];
   } else {

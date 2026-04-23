@@ -12,6 +12,7 @@ type CardType = 'all' | 'graded' | 'ungraded';
 interface PnlRow {
   label: string;
   show_id?: string | null;
+  show_location?: string | null;
   num_sales: number;
   total_revenue: number;
   total_fees: number;
@@ -383,9 +384,14 @@ export function Reports() {
                     onClick={() => row.show_id && toggleShow(row.show_id)}
                   >
                     <td className="py-2 text-zinc-200 font-medium">
-                      <span className="inline-flex items-center gap-1">
-                        {row.show_id ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />) : <span className="w-[14px]" />}
-                        {row.label}
+                      <span className="inline-flex items-start gap-1">
+                        {row.show_id ? (isExpanded ? <ChevronDown size={14} className="mt-0.5 shrink-0" /> : <ChevronRight size={14} className="mt-0.5 shrink-0" />) : <span className="w-[14px]" />}
+                        <span>
+                          {row.label}
+                          {row.show_location && (
+                            <span className="block text-xs font-normal text-zinc-500">{row.show_location}</span>
+                          )}
+                        </span>
                       </span>
                     </td>
                     <td className="py-2 text-right text-zinc-400">{row.num_sales}</td>
