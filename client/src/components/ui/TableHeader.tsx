@@ -66,7 +66,11 @@ export function ColumnFilter({ options, selected, onChange, align = 'left', date
               <input
                 type="date"
                 value={dateValue ?? ''}
-                onChange={(e) => onDateChange(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  // Only fire when complete (YYYY-MM-DD = 10 chars) or cleared
+                  if (v === '' || v.length === 10) onDateChange(v);
+                }}
                 className="w-full px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 focus:outline-none focus:border-indigo-500 [color-scheme:dark]"
               />
             </div>
