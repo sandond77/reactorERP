@@ -20,7 +20,7 @@ function fuzzyNameClause(search: string | undefined, nameExpr: string, certExpr?
 
 // Whitelist of sortable columns → SQL expression
 const SLAB_SORT_COLS: Record<string, string> = {
-  cert_number:       'sd.cert_number',
+  cert_number:       'sd.cert_number::bigint',
   card_name:         'COALESCE(ci.card_name_override, cc.card_name)',
   grade:             'sd.grade',
   is_listed:         '(l.id IS NOT NULL)',

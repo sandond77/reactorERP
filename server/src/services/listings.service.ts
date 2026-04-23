@@ -44,8 +44,14 @@ const LISTINGS_SORT_COLS: Record<string, string> = {
   num_sold: 'num_sold',
 };
 
+const ORDER_URL_PATTERN = `'(/mesh/|/sh/ord|/vod/fetchorderdetails|/ord/|orderid=|order_id=)'`;
+
+function isOrderUrlSql() {
+  return sql`ebay_listing_url ILIKE '%ebay.%' AND ebay_listing_url ~* ${sql.raw(ORDER_URL_PATTERN)}`;
+}
+
 export async function getListingFilterOptions(userId: string) {
-  const [platforms, grades, companies, partNumbers, numListedOpts, numSoldOpts, cardNames, prices] = await Promise.all([
+  const [platforms, grades, companies, partNumbers, numListedOpts, numSoldOpts, cardNames, prices, orderUrlCount] = await Promise.all([
     sql<{ value: string }>`
       SELECT DISTINCT l.platform AS value
       FROM listings l
@@ -128,6 +134,15 @@ export async function getListingFilterOptions(userId: string) {
       AND l.listing_status = 'active'
       ORDER BY 1
     `.execute(db),
+
+    sql<{ count: string }>`
+      SELECT COUNT(*) AS count
+      FROM listings l
+      WHERE l.user_id = ${userId}
+      AND l.listing_status = 'active'
+      AND l.ebay_listing_url IS NOT NULL
+      AND ${isOrderUrlSql()}
+    `.execute(db),
   ]);
   return {
     platforms: platforms.rows.map((r) => r.value),
@@ -138,6 +153,7 @@ export async function getListingFilterOptions(userId: string) {
     num_sold: numSoldOpts.rows.map((r) => r.value),
     card_names: cardNames.rows.map((r) => r.value),
     prices: prices.rows.map((r) => r.value),
+    order_url_count: Number(orderUrlCount.rows[0]?.count ?? 0),
   };
 }
 
@@ -595,6 +611,81 @@ export async function cancelListingsByGroup(userId: string, key: ListingGroupKey
   }
 
   return { cancelled: ids.rows.length };
+}
+
+export async function migrateOrderUrlListings(userId: string) {
+  const listings = await sql<{
+    id: string;
+    card_instance_id: string;
+    list_price: number;
+    platform: string;
+    currency: string;
+    ebay_listing_url: string;
+    listed_at: Date | null;
+  }>`
+    SELECT l.id, l.card_instance_id, l.list_price, l.platform, l.currency, l.ebay_listing_url, l.listed_at
+    FROM listings l
+    WHERE l.user_id = ${userId}
+    AND l.listing_status = 'active'
+    AND l.ebay_listing_url IS NOT NULL
+    AND ${isOrderUrlSql()}
+  `.execute(db);
+
+  let migrated = 0;
+  for (const listing of listings.rows) {
+    const prevCard = await db
+      .selectFrom('card_instances')
+      .select(['id', 'status'])
+      .where('id', '=', listing.card_instance_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+
+    const sale = await db
+      .insertInto('sales')
+      .values({
+        user_id: userId,
+        card_instance_id: listing.card_instance_id,
+        listing_id: listing.id,
+        platform: listing.platform as any,
+        sale_price: listing.list_price,
+        platform_fees: 0,
+        shipping_cost: 0,
+        currency: listing.currency,
+        order_details_link: listing.ebay_listing_url,
+        sold_at: listing.listed_at ?? new Date(),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+
+    await db
+      .updateTable('listings')
+      .set({ listing_status: 'cancelled' })
+      .where('id', '=', listing.id)
+      .execute();
+
+    await db
+      .updateTable('card_instances')
+      .set({ status: 'sold' })
+      .where('id', '=', listing.card_instance_id)
+      .where('user_id', '=', userId)
+      .execute();
+
+    await logAudit(userId, 'sales', sale.id, 'created', null, sale);
+    await logAudit(userId, 'listings', listing.id, 'status_changed',
+      { listing_status: 'active', ebay_listing_url: listing.ebay_listing_url },
+      { listing_status: 'cancelled', migrated_to_sale_id: sale.id }
+    );
+    if (prevCard) {
+      await logAudit(userId, 'card_instances', listing.card_instance_id, 'status_changed',
+        { status: prevCard.status },
+        { status: 'sold' }
+      );
+    }
+
+    migrated++;
+  }
+
+  return { migrated };
 }
 
 export async function cancelListing(userId: string, listingId: string) {

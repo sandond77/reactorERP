@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { ExternalLink, Plus, X, Loader2, Minus, Trash2, ChevronRight } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
@@ -64,6 +64,7 @@ interface ListingFilterOptions {
   num_sold: string[];
   card_names: string[];
   prices: string[];
+  order_url_count: number;
 }
 
 interface SlabResult {
@@ -1099,6 +1100,18 @@ export function Listings() {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [showAddModal, setShowAddModal] = useState(false);
   const [editRow, setEditRow] = useState<AggregatedListing | null>(null);
+  const queryClient = useQueryClient();
+
+  const { mutate: migrateOrderUrls, isPending: migrating } = useMutation({
+    mutationFn: () => api.post('/listings/migrate-order-urls').then(r => r.data as { migrated: number }),
+    onSuccess: (data) => {
+      toast.success(`Moved ${data.migrated} listing${data.migrated !== 1 ? 's' : ''} to sales`);
+      queryClient.invalidateQueries({ queryKey: ['listings'] });
+      queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Migration failed'),
+  });
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setExpandedKeys(new Set()); }, [listingTab]);
@@ -1231,6 +1244,21 @@ export function Listings() {
           </Button>
         </div>
       </div>
+
+      {(filterOptions?.order_url_count ?? 0) > 0 && (
+        <div className="px-6 py-2.5 bg-amber-500/10 border-b border-amber-500/20 flex items-center justify-between gap-4 shrink-0">
+          <div className="flex items-center gap-2 text-sm text-amber-400">
+            <AlertTriangle size={14} className="shrink-0" />
+            <span>
+              {filterOptions!.order_url_count} listing{filterOptions!.order_url_count !== 1 ? 's have' : ' has'} an eBay order URL and may already be sold.
+            </span>
+          </div>
+          <Button size="sm" onClick={() => migrateOrderUrls()} disabled={migrating}>
+            {migrating && <Loader2 size={13} className="animate-spin" />}
+            Move {filterOptions!.order_url_count} to sales
+          </Button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto">
         {isLoading ? (

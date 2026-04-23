@@ -903,8 +903,8 @@ function RawCardsTab() {
             ].map((stage, i) => (
               <>
                 {i > 0 && <div key={`arrow-${i}`} className="text-zinc-600 text-xs shrink-0">→</div>}
-                <div key={stage.label} className={cn('flex-1 border rounded-lg px-2 py-2.5 text-center', stage.color)}>
-                  <p className="text-lg font-bold">{stage.count}</p>
+                <div key={stage.label} className={cn('flex-1 border rounded-lg px-2 py-2.5 flex flex-col items-center justify-center text-center', stage.color)}>
+                  <p className="text-lg font-bold">#{stage.count}</p>
                   <p className="text-[10px] mt-0.5 opacity-80">{stage.label}</p>
                   <p className="text-[10px] mt-1 opacity-60">{stage.cost > 0 ? formatCurrency(stage.cost) : '\u00a0'}</p>
                 </div>
@@ -1277,8 +1277,8 @@ function GradedTab() {
             ].map((stage, i) => (
               <>
                 {i > 0 && <div key={`arrow-${i}`} className="text-zinc-600 text-xs shrink-0">→</div>}
-                <div key={stage.label} className={cn('flex-1 border rounded-lg px-2 py-2.5 text-center', stage.color)}>
-                  <p className="text-lg font-bold">{stage.count}</p>
+                <div key={stage.label} className={cn('flex-1 border rounded-lg px-2 py-2.5 flex flex-col items-center justify-center text-center', stage.color)}>
+                  <p className="text-lg font-bold">#{stage.count}</p>
                   <p className="text-[10px] mt-0.5 opacity-80">{stage.label}</p>
                   <p className="text-[10px] mt-1 opacity-60">{stage.cost != null && stage.cost > 0 ? formatCurrency(stage.cost) : '\u00a0'}</p>
                 </div>

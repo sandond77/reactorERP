@@ -124,6 +124,13 @@ const groupUpdateSchema = groupKeySchema.extend({
   ebay_listing_url: z.string().url().nullable().optional(),
 });
 
+listingsRouter.post('/migrate-order-urls', requireAuth, async (req, res, next) => {
+  try {
+    const result = await listingsService.migrateOrderUrlListings(req.user!.id);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 listingsRouter.patch('/set-group/:groupId', requireAuth, async (req, res, next) => {
   try {
     const { groupId } = req.params;
