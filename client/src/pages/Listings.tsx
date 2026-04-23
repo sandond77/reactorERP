@@ -1306,7 +1306,7 @@ export function Listings() {
                 return (
                   <React.Fragment key={i}>
                     <tr
-                      onClick={() => listingTab === 'graded' ? toggleExpand(key) : setEditRow(row)}
+                      onClick={() => isGraded ? toggleExpand(key) : setEditRow(row)}
                       className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
                       <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>
                         {isGraded && (
