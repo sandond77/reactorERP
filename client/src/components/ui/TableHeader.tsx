@@ -18,6 +18,8 @@ interface ColumnFilterProps {
 export function ColumnFilter({ options, selected, onChange, align = 'left', dateValue, onDateChange }: ColumnFilterProps) {
   const [open, setOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
+  const [localDate, setLocalDate] = useState(dateValue ?? '');
+  useEffect(() => { setLocalDate(dateValue ?? ''); }, [dateValue]);
   const ref = useRef<HTMLDivElement>(null);
 
   // Active = some (not null/all, not empty) items are selected
@@ -65,11 +67,11 @@ export function ColumnFilter({ options, selected, onChange, align = 'left', date
               <label className="block text-[10px] text-zinc-500 mb-1 uppercase tracking-wide">Exact date</label>
               <input
                 type="date"
-                value={dateValue ?? ''}
-                onChange={(e) => {
+                value={localDate}
+                onChange={(e) => setLocalDate(e.target.value)}
+                onBlur={(e) => {
                   const v = e.target.value;
-                  // Only fire when complete (YYYY-MM-DD = 10 chars) or cleared
-                  if (v === '' || v.length === 10) onDateChange(v);
+                  if (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) onDateChange!(v);
                 }}
                 className="w-full px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 focus:outline-none focus:border-indigo-500 [color-scheme:dark]"
               />
