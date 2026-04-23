@@ -559,11 +559,7 @@ function UnlinkedResolutionModal({
   const [newGameLabel, setNewGameLabel] = useState('');
   // rows in manual set-code entry mode (not using the dropdown)
   const [customSetRows, setCustomSetRows] = useState<Set<string>>(() => {
-    const s = new Set<string>();
-    groups.forEach(({ key, row }) => {
-      if (row.set_name) s.add(key); // pre-filled from import → start in custom mode
-    });
-    return s;
+    return new Set<string>(); // always start in dropdown mode so era-grouped list is visible
   });
   // sets added during this session — augments dropdown options for subsequent rows
   const [sessionSets, setSessionSets] = useState<{ game: string; language: string; set_code: string; set_name: string }[]>([]);
