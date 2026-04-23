@@ -11,7 +11,18 @@
       "WebFetch(domain:www.tcgcollector.com)",
       "WebFetch(domain:www.serebii.net)",
       "WebFetch(domain:pkmncards.com)",
-      "WebFetch(domain:www.pokeguardian.com)"
+      "WebFetch(domain:www.pokeguardian.com)",
+      "Bash(brew install:*)",
+      "Bash(railway --version)",
+      "Bash(railway login:*)",
+      "Bash(railway link:*)",
+      "Bash(railway list:*)",
+      "Bash(railway run node -e ':*)",
+      "Bash(railway service:*)",
+      "Bash(railway variables:*)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const j=JSON.parse\\(d\\); console.log\\(j.DATABASE_URL\\);\")",
+      "Bash(railway run --service reactorERP node -e ':*)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); try { const j=JSON.parse\\(d\\); console.log\\(j.DATABASE_PUBLIC_URL || j.POSTGRES_URL || Object.entries\\(j\\).find\\(\\([k]\\)=>k.includes\\('PUBLIC'\\)\\)?.[1] || 'not found'\\); } catch\\(e\\){console.log\\(d.substring\\(0,500\\)\\);}\")"
     ]
   }
 }
