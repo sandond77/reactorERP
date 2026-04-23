@@ -962,9 +962,9 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
       <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 overflow-hidden">
         <div className="px-4 py-3">
           {isSet ? (
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-medium text-zinc-100">{row.listing_group_name ?? 'Unnamed Set'}</p>
-              <span className="text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">Set</span>
+            <div className="flex items-start gap-2">
+              <p className="text-sm font-medium text-zinc-100 min-w-0 break-words">{row.listing_group_name ?? 'Unnamed Set'}</p>
+              <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">Set</span>
             </div>
           ) : (
             <div className="flex items-center justify-between">
@@ -1117,6 +1117,7 @@ export function Listings() {
   useEffect(() => { setExpandedKeys(new Set()); }, [listingTab]);
 
   function rowKey(row: AggregatedListing) {
+    if (row.listing_group_id) return `set|${row.listing_group_id}`;
     return `${row.part_number}|${row.card_name}|${row.grade_label}|${row.grading_company}|${row.platform}|${row.currency}`;
   }
   function toggleExpand(key: string) {
