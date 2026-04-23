@@ -132,7 +132,7 @@ listingsRouter.patch('/set-group/:groupId', requireAuth, async (req, res, next) 
       ebay_listing_url: z.string().url().nullable().optional(),
       list_price: z.union([z.string(), z.number()]).transform((v) => toCents(v)).optional(),
     }).parse(req.body);
-    const result = await listingsService.updateSetGroup(req.user!.id, groupId, body as any);
+    const result = await listingsService.updateSetGroup(req.user!.id, groupId as string, body as any);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -154,7 +154,7 @@ listingsRouter.patch('/group', requireAuth, async (req, res, next) => {
 
 listingsRouter.delete('/set-group/:groupId', requireAuth, async (req, res, next) => {
   try {
-    const result = await listingsService.cancelSetGroup(req.user!.id, req.params.groupId);
+    const result = await listingsService.cancelSetGroup(req.user!.id, req.params.groupId as string);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -169,7 +169,7 @@ listingsRouter.delete('/group', requireAuth, async (req, res, next) => {
 
 listingsRouter.delete('/:listingId', requireAuth, async (req, res, next) => {
   try {
-    const result = await listingsService.cancelSingleListing(req.user!.id, req.params.listingId);
+    const result = await listingsService.cancelSingleListing(req.user!.id, req.params.listingId as string);
     res.json(result);
   } catch (err) { next(err); }
 });
