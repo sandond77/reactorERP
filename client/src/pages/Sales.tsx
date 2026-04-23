@@ -265,14 +265,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const copies = (platform === 'ebay' && listedOnly) ? allCopies.filter(c => c.is_listed) : allCopies;
   const listedCount = allCopies.filter(c => c.is_listed).length;
 
-  // Auto-select first copy in filtered list (FIFO)
+  // Auto-select first copy in filtered list (FIFO) — only on the copies step
   useEffect(() => {
-    if (copies.length > 0) {
-      setSelectedCard(copies[0]);
-    } else {
-      setSelectedCard(null);
-    }
-  }, [copies, listedOnly]);
+    if (step !== 'copies') return;
+    setSelectedCard(copies.length > 0 ? copies[0] : null);
+  }, [copies, listedOnly, step]);
 
 
   async function handleSubmit(e: React.FormEvent) {
@@ -483,6 +480,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               try {
                 const res = await api.get('/listings/by-url', { params: { url: listingUrl } });
                 setSelectedCard(res.data.data);
+                setEbayLink(listingUrl);
                 setStep('details');
               } catch {
                 toast.error('No active listing found for that URL');
@@ -952,7 +950,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
       {platform === 'ebay' && (
         <>
-          <Input label="eBay Link" type="url" placeholder="https://www.ebay.com/…"
+          <Input label="eBay Order Details Link" type="url" placeholder="https://www.ebay.com/…"
             value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
           <Input label="Order #" placeholder="e.g. eBay order number"
             value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
@@ -1222,7 +1220,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 </p>
               )}
             </div>
-            <Input label="eBay Link" type="url" placeholder="https://www.ebay.com/…"
+            <Input label="eBay Order Details Link" type="url" placeholder="https://www.ebay.com/…"
               value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
             <Input label="Order #" placeholder="e.g. eBay order number"
               value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
@@ -1597,7 +1595,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       )}
       {platform === 'ebay' && (
         <>
-          <Input label="eBay Link" type="url" placeholder="https://www.ebay.com/…" value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
+          <Input label="eBay Order Details Link" type="url" placeholder="https://www.ebay.com/…" value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
           <Input label="Order #" value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
         </>
       )}

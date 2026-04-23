@@ -22,7 +22,19 @@
       "Bash(railway variables:*)",
       "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const j=JSON.parse\\(d\\); console.log\\(j.DATABASE_URL\\);\")",
       "Bash(railway run --service reactorERP node -e ':*)",
-      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); try { const j=JSON.parse\\(d\\); console.log\\(j.DATABASE_PUBLIC_URL || j.POSTGRES_URL || Object.entries\\(j\\).find\\(\\([k]\\)=>k.includes\\('PUBLIC'\\)\\)?.[1] || 'not found'\\); } catch\\(e\\){console.log\\(d.substring\\(0,500\\)\\);}\")"
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); try { const j=JSON.parse\\(d\\); console.log\\(j.DATABASE_PUBLIC_URL || j.POSTGRES_URL || Object.entries\\(j\\).find\\(\\([k]\\)=>k.includes\\('PUBLIC'\\)\\)?.[1] || 'not found'\\); } catch\\(e\\){console.log\\(d.substring\\(0,500\\)\\);}\")",
+      "Bash(git -C /Users/sandon/Documents/reactor status)",
+      "Bash(git -C /Users/sandon/Documents/reactor diff)",
+      "Bash(git -C /Users/sandon/Documents/reactor log --oneline -3)",
+      "Bash(git -C /Users/sandon/Documents/reactor add client/src/pages/Dashboard.tsx client/src/pages/Listings.tsx server/src/routes/listings.routes.ts server/src/services/grading.service.ts server/src/services/listings.service.ts)",
+      "Bash(git -C /Users/sandon/Documents/reactor commit -m ' *)",
+      "Bash(git -C /Users/sandon/Documents/reactor push origin main)",
+      "Bash(git -C /Users/sandon/Documents/reactor add server/src/services/import/import.service.ts)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); try { const j=JSON.parse\\(d\\); const url = j.DATABASE_PUBLIC_URL || j.DATABASE_URL || j.POSTGRES_URL || Object.entries\\(j\\).find\\(\\([k]\\)=>k.toUpperCase\\(\\).includes\\('PUBLIC'\\)\\)?.[1]; console.log\\(url || 'not found'\\); Object.keys\\(j\\).forEach\\(k => console.log\\('KEY:', k\\)\\); } catch\\(e\\){console.log\\(d.substring\\(0,1000\\)\\);}\")",
+      "Bash(node -e ' *)",
+      "Bash(git -C /Users/sandon/Documents/reactor log --oneline -10)",
+      "Bash(git -C /Users/sandon/Documents/reactor add client/src/pages/Listings.tsx)",
+      "Bash(git -C /Users/sandon/Documents/reactor add server/src/db/migrate.ts)"
     ]
   }
 }
