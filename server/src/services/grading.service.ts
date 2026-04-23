@@ -209,9 +209,9 @@ export async function listSlabs(
           THEN s.sale_price
         ELSE NULL
       END                                             AS after_ebay,
-      ci.purchased_at                                 AS raw_purchase_date,
-      l.listed_at                                     AS date_listed,
-      s.sold_at                                       AS date_sold,
+      (ci.purchased_at AT TIME ZONE 'UTC')::date      AS raw_purchase_date,
+      (l.listed_at AT TIME ZONE 'UTC')::date          AS date_listed,
+      (s.sold_at AT TIME ZONE 'UTC')::date            AS date_sold,
       CASE
         WHEN (ci.purchase_cost + sd.grading_cost) > 0 AND s.sale_price IS NOT NULL
         THEN ROUND(
