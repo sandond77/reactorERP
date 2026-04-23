@@ -264,16 +264,16 @@ function OrderMoreSection() {
           {alerts.map((alert) => (
             <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
               <div className="min-w-0">
-                <p className="text-sm text-zinc-200 truncate">{alert.card_name}</p>
+                <p className="text-xs text-zinc-200 truncate">{alert.card_name}</p>
                 <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
               </div>
-              <span className="text-sm text-right tabular-nums text-blue-400">
+              <span className="text-xs text-right tabular-nums text-blue-400">
                 {alert.inbound_quantity > 0 ? `+${alert.inbound_quantity}` : '—'}
               </span>
-              <span className={cn('text-sm font-semibold text-right tabular-nums', alert.to_grade_quantity === 0 ? 'text-red-400' : 'text-amber-400')}>
+              <span className={cn('text-xs font-semibold text-right tabular-nums', alert.to_grade_quantity === 0 ? 'text-red-400' : 'text-amber-400')}>
                 {alert.to_grade_quantity}
               </span>
-              <span className="text-sm text-zinc-400 text-right tabular-nums">{alert.min_quantity}</span>
+              <span className="text-xs text-zinc-400 text-right tabular-nums">{alert.min_quantity}</span>
               <button onClick={() => muteMutation.mutate(alert.threshold_id)} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
                 <BellOff size={13} />
               </button>
@@ -330,16 +330,16 @@ function GradeMoreSection() {
           {alerts.map((alert) => (
             <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
               <div className="min-w-0">
-                <p className="text-sm text-zinc-200 truncate">{alert.card_name}</p>
+                <p className="text-xs text-zinc-200 truncate">{alert.card_name}</p>
                 <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
               </div>
-              <span className={cn('text-sm font-semibold text-right tabular-nums', alert.unsold_graded === 0 ? 'text-red-400' : 'text-amber-400')}>
+              <span className={cn('text-xs font-semibold text-right tabular-nums', alert.unsold_graded === 0 ? 'text-red-400' : 'text-amber-400')}>
                 {alert.unsold_graded}
               </span>
-              <span className="text-sm text-blue-400 text-right tabular-nums">
+              <span className="text-xs text-blue-400 text-right tabular-nums">
                 {alert.in_grading > 0 ? `+${alert.in_grading}` : '—'}
               </span>
-              <span className="text-sm text-zinc-400 text-right tabular-nums">{alert.min_quantity}</span>
+              <span className="text-xs text-zinc-400 text-right tabular-nums">{alert.min_quantity}</span>
               <button onClick={() => muteMutation.mutate(alert.threshold_id)} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
                 <BellOff size={13} />
               </button>
@@ -476,11 +476,11 @@ function AttentionCard() {
                 <div key={item.id} className="grid grid-cols-[5rem_1fr_2.5rem_4.5rem_3rem] gap-x-3 py-2 border-b border-orange-500/10 last:border-0 items-center">
                   <span className="text-xs font-mono text-orange-400/70 truncate">{item.raw_purchase_label ?? '—'}</span>
                   <div className="min-w-0">
-                    <p className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</p>
+                    <p className="text-xs text-zinc-200 truncate">{item.card_name ?? '—'}</p>
                     {item.set_name && <p className="text-xs text-zinc-500 truncate">{item.set_name}</p>}
                   </div>
-                  <span className="text-sm text-zinc-300 text-right tabular-nums">{item.quantity}</span>
-                  <span className="text-sm text-zinc-300 text-right tabular-nums">{formatCurrency(item.purchase_cost)}</span>
+                  <span className="text-xs text-zinc-300 text-right tabular-nums">{item.quantity}</span>
+                  <span className="text-xs text-zinc-300 text-right tabular-nums">{formatCurrency(item.purchase_cost)}</span>
                   <span className="text-xs text-zinc-500 text-right">{item.condition ?? '—'}</span>
                 </div>
               ))}
@@ -508,16 +508,16 @@ function AttentionCard() {
                 <div key={item.id} className="grid grid-cols-[1.2fr_0.4fr_3rem_3.5rem_3rem_3.5rem] gap-x-2 py-1.5 border-b border-orange-500/10 last:border-0 items-start">
                   <div className="min-w-0">
                     {item.ebay_listing_url ? (
-                      <a href={item.ebay_listing_url} target="_blank" rel="noopener noreferrer" className="text-sm text-indigo-400 hover:text-indigo-300 whitespace-normal break-words block transition-colors">
+                      <a href={item.ebay_listing_url} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-400 hover:text-indigo-300 whitespace-normal break-words block transition-colors leading-relaxed">
                         {item.card_name ?? '—'}
                       </a>
                     ) : (
-                      <p className="text-sm text-zinc-200 whitespace-normal break-words">{item.card_name ?? '—'}</p>
+                      <p className="text-xs text-zinc-200 whitespace-normal break-words leading-relaxed">{item.card_name ?? '—'}</p>
                     )}
                   </div>
-                  <span className="text-xs text-zinc-500 whitespace-normal break-words">{item.set_name ?? '—'}</span>
+                  <span className="text-xs text-zinc-500 whitespace-normal break-words leading-relaxed">{item.set_name ?? '—'}</span>
                   <span className="text-xs text-zinc-400 text-right tabular-nums">{item.card_number ?? '—'}</span>
-                  <span className="text-sm text-orange-400 text-right font-medium tabular-nums">{item.days_listed}d</span>
+                  <span className="text-xs text-orange-400 text-right font-semibold tabular-nums">{item.days_listed}d</span>
                   <button onClick={() => muteEbay.mutate(item.id)} title="Snooze 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
                     <BellOff size={13} />
                   </button>
@@ -547,11 +547,11 @@ function AttentionCard() {
               </div>
               {staleCardShow.map((item) => (
                 <div key={item.id} className="grid grid-cols-[0.8fr_0.8fr_3rem_2.5rem_3.5rem_3rem_3.5rem] gap-x-2 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
-                  <span className="text-sm text-zinc-200 truncate">{item.card_name ?? '—'}</span>
+                  <span className="text-xs text-zinc-200 truncate">{item.card_name ?? '—'}</span>
                   <span className="text-xs text-zinc-500 truncate">{item.set_name ?? '—'}</span>
                   <span className="text-xs text-zinc-400 text-right tabular-nums">{item.card_number ?? '—'}</span>
-                  <span className="text-sm text-zinc-300 text-right tabular-nums">{item.quantity}</span>
-                  <span className="text-sm text-orange-400 text-right font-medium tabular-nums">{item.days_held}d</span>
+                  <span className="text-xs text-zinc-300 text-right tabular-nums">{item.quantity}</span>
+                  <span className="text-xs text-orange-400 text-right font-semibold tabular-nums">{item.days_held}d</span>
                   <button onClick={() => muteCardShow.mutate(item.id)} title="Snooze 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
                     <BellOff size={13} />
                   </button>

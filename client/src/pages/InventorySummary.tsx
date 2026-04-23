@@ -334,7 +334,7 @@ function GameSelect({ value, onChange, className, onGameAdded }: { value: string
 
 // ── Set Code Manager ─────────────────────────────────────────────────────────
 
-interface StaticSet { game: string; language: string; set_code: string; names: string[] }
+interface StaticSet { game: string; language: string; set_code: string; names: string[]; era?: string }
 interface DbAlias { id: string; language: string; game: string; set_code: string; alias: string; set_name: string | null }
 
 function SetCodeModal({ set: s, allAliases, onClose }: { set: StaticSet; allAliases: DbAlias[]; onClose: () => void }) {
@@ -1172,12 +1172,35 @@ function SetCodeManager() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {filtered.map((s, i) => (
-                  <tr key={i} className="hover:bg-zinc-800/30 cursor-pointer transition-colors" onClick={() => setEditingSet(s)}>
-                    <td className="px-3 py-1.5 font-mono text-indigo-300/80 align-top">{s.set_code}</td>
-                    <td className="px-3 py-1.5 text-zinc-400 whitespace-normal">{s.names.join(' · ')}</td>
-                  </tr>
-                ))}
+                {(() => {
+                  const byEra = new Map<string, typeof filtered>();
+                  for (const s of filtered) {
+                    const era = s.era ?? 'Other';
+                    if (!byEra.has(era)) byEra.set(era, []);
+                    byEra.get(era)!.push(s);
+                  }
+                  if (byEra.size <= 1) {
+                    return filtered.map((s, i) => (
+                      <tr key={i} className="hover:bg-zinc-800/30 cursor-pointer transition-colors" onClick={() => setEditingSet(s)}>
+                        <td className="px-3 py-1.5 font-mono text-indigo-300/80 align-top">{s.set_code}</td>
+                        <td className="px-3 py-1.5 text-zinc-400 whitespace-normal">{s.names.join(' · ')}</td>
+                      </tr>
+                    ));
+                  }
+                  return Array.from(byEra.entries()).map(([era, sets]) => (
+                    <React.Fragment key={era}>
+                      <tr className="bg-zinc-800/40">
+                        <td colSpan={2} className="px-3 py-1 text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">{era}</td>
+                      </tr>
+                      {sets.map((s, i) => (
+                        <tr key={i} className="hover:bg-zinc-800/30 cursor-pointer transition-colors" onClick={() => setEditingSet(s)}>
+                          <td className="px-3 py-1.5 font-mono text-indigo-300/80 align-top">{s.set_code}</td>
+                          <td className="px-3 py-1.5 text-zinc-400 whitespace-normal">{s.names.join(' · ')}</td>
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  ));
+                })()}
               </tbody>
             </table>
           </div>

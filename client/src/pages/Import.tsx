@@ -276,7 +276,7 @@ function LanguageResolutionModal({
   // Raw alias list — adding new aliases here causes all groups to recompute
   const [allAliases, setAllAliases] = useState<{ language: string; set_code: string; alias: string; set_name?: string }[]>([]);
   // Full static set list for EN/JP dropdowns
-  const [allSetCodes, setAllSetCodes] = useState<{ language: string; set_code: string; names: string[] }[]>([]);
+  const [allSetCodes, setAllSetCodes] = useState<{ language: string; set_code: string; names: string[]; era?: string }[]>([]);
 
   // On mount, fetch static set codes + DB aliases
   useEffect(() => {
@@ -301,11 +301,11 @@ function LanguageResolutionModal({
     return langs;
   }
 
-  function getSetOptions(_g: RowGroup, lang: string): { code: string; label: string }[] {
+  function getSetOptions(_g: RowGroup, lang: string): { code: string; label: string; era?: string }[] {
     if (lang === 'EN' || lang === 'JP') {
       return allSetCodes
         .filter(s => s.language === lang)
-        .map(s => ({ code: s.set_code, label: `${s.set_code} — ${s.names[0]}` }));
+        .map(s => ({ code: s.set_code, label: `${s.set_code} — ${s.names[0]}`, era: s.era }));
     }
     // For custom languages: show all sets registered for that language
     const seen = new Set<string>();
@@ -412,8 +412,23 @@ function LanguageResolutionModal({
                     onChange={e => handleSetChange(g, e.target.value)}
                     className="w-52 shrink-0 self-start text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
                   >
-                    {setOptions.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
                     {setOptions.length === 0 && <option value="">No sets registered</option>}
+                    {(() => {
+                      const byEra = new Map<string, typeof setOptions>();
+                      for (const s of setOptions) {
+                        const era = s.era ?? 'Other';
+                        if (!byEra.has(era)) byEra.set(era, []);
+                        byEra.get(era)!.push(s);
+                      }
+                      if (byEra.size <= 1) {
+                        return setOptions.map(s => <option key={s.code} value={s.code}>{s.label}</option>);
+                      }
+                      return Array.from(byEra.entries()).map(([era, opts]) => (
+                        <optgroup key={era} label={era}>
+                          {opts.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
+                        </optgroup>
+                      ));
+                    })()}
                     <option value={NEW_SET_SENTINEL}>Add set…</option>
                   </select>
                 </div>
@@ -566,7 +581,7 @@ function UnlinkedResolutionModal({
     });
   }
 
-  const { data: staticSets = [] } = useQuery<{ game: string; language: string; set_code: string; names: string[] }[]>({
+  const { data: staticSets = [] } = useQuery<{ game: string; language: string; set_code: string; names: string[]; era?: string }[]>({
     queryKey: ['set-codes-static'],
     queryFn: () => api.get('/sets/codes').then(r => r.data),
   });
@@ -576,11 +591,11 @@ function UnlinkedResolutionModal({
   });
 
   function getSetOptions(game: string, language: string) {
-    const opts: { code: string; name: string }[] = [];
+    const opts: { code: string; name: string; era?: string }[] = [];
     const seen = new Set<string>();
     if (game === 'pokemon') {
       for (const s of staticSets.filter(s => s.language === language)) {
-        opts.push({ code: s.set_code, name: s.names[0] ?? s.set_code });
+        opts.push({ code: s.set_code, name: s.names[0] ?? s.set_code, era: s.era });
         seen.add(s.set_code);
       }
     }
@@ -596,7 +611,7 @@ function UnlinkedResolutionModal({
         seen.add(s.set_code);
       }
     }
-    return opts.sort((a, b) => a.code.localeCompare(b.code));
+    return opts;
   }
 
   const allGames = [...DEFAULT_GAMES, ...customGames];
@@ -775,9 +790,22 @@ function UnlinkedResolutionModal({
                             className="w-full text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-zinc-200 focus:outline-none focus:border-indigo-500"
                           >
                             <option value="">— Select set —</option>
-                            {setOpts.map(o => (
-                              <option key={o.code} value={o.code}>{o.code} — {o.name}</option>
-                            ))}
+                            {(() => {
+                              const byEra = new Map<string, typeof setOpts>();
+                              for (const o of setOpts) {
+                                const era = o.era ?? 'Other';
+                                if (!byEra.has(era)) byEra.set(era, []);
+                                byEra.get(era)!.push(o);
+                              }
+                              if (byEra.size <= 1) {
+                                return setOpts.map(o => <option key={o.code} value={o.code}>{o.code} — {o.name}</option>);
+                              }
+                              return Array.from(byEra.entries()).map(([era, opts]) => (
+                                <optgroup key={era} label={era}>
+                                  {opts.map(o => <option key={o.code} value={o.code}>{o.code} — {o.name}</option>)}
+                                </optgroup>
+                              ));
+                            })()}
                             <option disabled>──────────</option>
                             <option value="__custom__">+ Enter manually…</option>
                           </select>

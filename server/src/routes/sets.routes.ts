@@ -8,10 +8,44 @@ export const setsRouter = Router();
 
 setsRouter.use(requireAuth);
 
+function deriveEra(code: string, language: 'EN' | 'JP'): string {
+  const c = code.toUpperCase();
+  if (language === 'EN') {
+    if (/^(BS2?|JU|FO|TR|G[12]|N[1-4]|LC|PROMO-WOTC)$/.test(c)) return 'WOTC';
+    if (/^(EXP|AQ|SK)$/.test(c)) return 'e-Card';
+    if (/^EX/.test(c)) return 'EX';
+    if (/^DP/.test(c)) return 'Diamond & Pearl';
+    if (/^PL/.test(c)) return 'Platinum';
+    if (/^(HS|HGSS|PROMO-HGSS)/.test(c)) return 'HeartGold & SoulSilver';
+    if (/^BW/.test(c) || c === 'PROMO-BW') return 'Black & White';
+    if (/^(KSS|XY)/.test(c) || c === 'PROMO-XY') return 'XY';
+    if (/^SM/.test(c) || c === 'SM-P') return 'Sun & Moon';
+    if (/^SWSH/.test(c) || c === 'SWSH-P') return 'Sword & Shield';
+    if (/^SV/.test(c)) return 'Scarlet & Violet';
+    return 'Other';
+  } else {
+    if (/^(BS|JU|FO|TR|GY|N[1-4]|NEO|VS|WEB|VEND|CDPROMO|PROMO-P)$/.test(c)) return 'WOTC / Vintage';
+    if (/^E[1-5]$/.test(c)) return 'e-Card';
+    if (/^ADV/.test(c)) return 'ADV';
+    if (/^PCG/.test(c)) return 'PCG (EX Era)';
+    if (/^(DP|DPt)/.test(c)) return 'Diamond & Pearl';
+    if (/^PL/.test(c)) return 'Platinum';
+    if (/^(L[1-4]|HGSS)/.test(c)) return 'HeartGold & SoulSilver';
+    if (/^BW/.test(c)) return 'Black & White';
+    if (/^XY/.test(c)) return 'XY';
+    if (/^SM/.test(c)) return 'Sun & Moon';
+    if (/^S\d/.test(c) || c === 'S-P') return 'Sword & Shield';
+    if (/^SV/.test(c)) return 'Scarlet & Violet';
+    if (/^M/.test(c)) return 'Mega Evolution';
+    if (/^(CLF|CLK|CLL|SVG)$/i.test(c)) return 'Classic Collection';
+    return 'Other';
+  }
+}
+
 // GET /sets/codes — return all static set definitions (EN + JP)
 setsRouter.get('/codes', (_req, res) => {
-  const en = EN_SETS.map(s => ({ game: 'pokemon', language: 'EN', set_code: s.code, names: s.names }));
-  const jp = JP_SETS.map(s => ({ game: 'pokemon', language: 'JP', set_code: s.code, names: s.names }));
+  const en = EN_SETS.map(s => ({ game: 'pokemon', language: 'EN', set_code: s.code, names: s.names, era: deriveEra(s.code, 'EN') }));
+  const jp = JP_SETS.map(s => ({ game: 'pokemon', language: 'JP', set_code: s.code, names: s.names, era: deriveEra(s.code, 'JP') }));
   res.json([...en, ...jp]);
 });
 
