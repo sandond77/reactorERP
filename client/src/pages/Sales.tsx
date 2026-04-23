@@ -1648,6 +1648,7 @@ const SALES_FILTER_DEFAULTS = {
   sortCol: 'sold_at' as string | null,
   sortDir: 'desc' as SortDir,
   fPlatform: null as string[] | null,
+  fSoldDates: [] as string[],
   cardType: 'all' as CardTypeFilter,
   search: '',
 };
@@ -1658,13 +1659,14 @@ export function Sales() {
   const [sortCol, setSortCol] = useState<string | null>(saved.sortCol);
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
   const [fPlatform, setFPlatform] = useState<string[] | null>(saved.fPlatform);
+  const [fSoldDates, setFSoldDates] = useState<string[]>(saved.fSoldDates ?? []);
   const [cardType, setCardType] = useState<CardTypeFilter>(saved.cardType ?? 'all');
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
   const MINS = {
-    date:         colMinWidth('Date Sold',     true,  false),
+    date:         colMinWidth('Date Sold',     true,  true),
     cert:         colMinWidth('Cert / ID', true, false),
     card:         colMinWidth('Card',          true,  false),
     sale_method:  colMinWidth('Sale Method',   true,  true),
@@ -1684,7 +1686,7 @@ export function Sales() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('sales', { sortCol, sortDir, fPlatform, cardType, search });
+    saveFilters('sales', { sortCol, sortDir, fPlatform, fSoldDates, cardType, search });
   }, [sortCol, sortDir, fPlatform, cardType, search]);
 
   const handleSort = useCallback((col: string) => {
@@ -1716,6 +1718,7 @@ export function Sales() {
     platforms: activeFilter(fPlatform, filterOptions?.platforms)?.join(','),
     search: debouncedSearch || undefined,
     card_type: cardType !== 'all' ? cardType : undefined,
+    sold_dates: fSoldDates.length ? fSoldDates.join(',') : undefined,
   };
 
   const { data, isLoading } = useQuery<PaginatedResult<Sale>>({
@@ -1723,7 +1726,7 @@ export function Sales() {
     queryFn: () => api.get('/sales', { params }).then((r) => r.data),
   });
 
-  const hasActiveFilters = fPlatform !== null || !!debouncedSearch;
+  const hasActiveFilters = fPlatform !== null || !!debouncedSearch || fSoldDates.length > 0;
 
   const sh = { sortCol, sortDir, onSort: handleSort };
 
@@ -1733,7 +1736,7 @@ export function Sales() {
         <h1 className="text-xl font-bold text-zinc-100">Sales</h1>
         <div className="flex items-center gap-3">
           {hasActiveFilters && (
-            <button onClick={() => { setFPlatform(null); setCardType('all'); setSearch(''); }}
+            <button onClick={() => { setFPlatform(null); setCardType('all'); setSearch(''); setFSoldDates([]); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
               <X size={12} /> Clear filters
             </button>
@@ -1766,7 +1769,8 @@ export function Sales() {
           <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
-                <ColHeader label="Date Sold"      col="sold_at"      {...sh} {...rz('date')} minWidth={MINS.date} />
+                <ColHeader label="Date Sold"      col="sold_at"      {...sh} {...rz('date')} minWidth={MINS.date}
+                  filterDateValues={fSoldDates} onFilterDatesChange={(d) => { setFSoldDates(d); setPage(1); }} />
                 <ColHeader label="Cert / ID" col="cert_number" {...sh} {...rz('cert')} minWidth={MINS.cert} wrap />
                 <ColHeader label="Card"           col="card_name"    {...sh} {...rz('card')} minWidth={MINS.card} />
                 <ColHeader label="Sale Method"    col="platform"     {...sh} {...rz('sale_method')} minWidth={MINS.sale_method}

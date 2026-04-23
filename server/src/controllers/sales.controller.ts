@@ -13,6 +13,7 @@ const paginationSchema = z.object({
   sort_by: z.string().optional(),
   sort_dir: z.enum(['asc', 'desc']).default('desc'),
   card_type: z.enum(['all', 'graded', 'raw']).default('all'),
+  sold_dates: z.string().optional(),
 });
 
 function splitCSV(val?: string): string[] | undefined {
@@ -22,10 +23,10 @@ function splitCSV(val?: string): string[] | undefined {
 
 export async function listSales(req: Request, res: Response, next: NextFunction) {
   try {
-    const { page, limit, platforms, search, from, to, sort_by, sort_dir, card_type } = paginationSchema.parse(req.query);
+    const { page, limit, platforms, search, from, to, sort_by, sort_dir, card_type, sold_dates } = paginationSchema.parse(req.query);
     const result = await salesService.listSales(
       req.dataUserId,
-      { platforms: splitCSV(platforms), search, from, to, cardType: card_type === 'all' ? undefined : card_type },
+      { platforms: splitCSV(platforms), search, from, to, cardType: card_type === 'all' ? undefined : card_type, soldDates: splitCSV(sold_dates) },
       { page, limit },
       sort_by,
       sort_dir

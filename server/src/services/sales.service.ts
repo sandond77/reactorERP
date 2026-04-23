@@ -127,7 +127,7 @@ export async function getSaleFilterOptions(userId: string) {
 
 export async function listSales(
   userId: string,
-  filters: { platforms?: string[]; search?: string; from?: Date; to?: Date; cardType?: 'all' | 'graded' | 'raw' },
+  filters: { platforms?: string[]; search?: string; from?: Date; to?: Date; cardType?: 'all' | 'graded' | 'raw'; soldDates?: string[] },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
@@ -148,6 +148,7 @@ export async function listSales(
     ))
     .$if(!!filters.from, (qb) => qb.where('s.sold_at', '>=', filters.from!))
     .$if(!!filters.to, (qb) => qb.where('s.sold_at', '<=', filters.to!))
+    .$if(!!filters.soldDates?.length, (qb) => qb.where(sql<boolean>`(s.sold_at AT TIME ZONE 'UTC')::date IN (${sql.join(filters.soldDates!.map((v) => sql`${v}::date`))})` as any))
     .$if(filters.cardType === 'graded', (qb) => qb.where('sd.company', 'is not', null))
     .$if(filters.cardType === 'raw', (qb) => qb.where('sd.company', 'is', null));
 
@@ -172,7 +173,7 @@ export async function listSales(
       's.unique_id',
       's.unique_id_2',
       's.order_details_link',
-      's.sold_at',
+      sql<string>`(s.sold_at AT TIME ZONE 'UTC')::date`.as('sold_at'),
       's.created_at',
       'ci.id as card_instance_id',
       'ci.purchase_cost as raw_cost',
