@@ -47,6 +47,7 @@ export async function getListingFilterOptions(userId: string) {
       FROM listings l
       WHERE l.user_id = ${userId}
       AND l.listing_status = 'active'
+      AND l.platform != 'card_show'
       ORDER BY value
     `.execute(db),
     sql<{ value: string }>`
@@ -264,6 +265,7 @@ export async function listListings(
         AND sa.platform = l.platform
       WHERE l.user_id = ${userId}
       AND l.listing_status = 'active'
+      AND l.platform != 'card_show'
       ${platformCond}
       ${searchCond}
       ${cardNameCond}
