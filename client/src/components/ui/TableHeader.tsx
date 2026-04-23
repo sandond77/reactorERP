@@ -75,16 +75,21 @@ export function ColumnFilter({ options, selected, onChange, align = 'left', date
           {onDatesChange && (
             <div className="px-3 pt-3 pb-2 border-b border-zinc-800">
               <label className="block text-[10px] text-zinc-500 mb-1 uppercase tracking-wide">Exact date</label>
-              <input
-                type="date"
-                value={localDate}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setLocalDate(v);
-                  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) addDate(v);
-                }}
-                className="w-full px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 focus:outline-none focus:border-indigo-500 [color-scheme:dark]"
-              />
+              <div className="flex gap-1">
+                <input
+                  type="date"
+                  value={localDate}
+                  onChange={(e) => setLocalDate(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addDate(localDate); }}
+                  className="flex-1 px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 focus:outline-none focus:border-indigo-500 [color-scheme:dark]"
+                />
+                <button
+                  onClick={(e) => { e.stopPropagation(); addDate(localDate); }}
+                  className="px-2 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded"
+                >
+                  Add
+                </button>
+              </div>
               {dateActive && (
                 <div className="flex flex-col gap-1 mt-2">
                   {dateValues!.map((d) => (
