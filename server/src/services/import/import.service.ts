@@ -470,8 +470,10 @@ async function executeGradedImport(
     return created.id;
   }
 
-  // Pre-pass: detect set listings — same non-order listing URL on 2+ rows → shared listing_group_id
-  const urlCardCounts = new Map<string, Set<string>>();
+  // Pre-pass: detect set listings — same non-order listing URL shared by 2+ DIFFERENT cards.
+  // "Different" means: no two rows share the same card_name OR the same card_number.
+  // If either matches between any pair, it's a duplicate/quantity listing, not a set.
+  const urlCards = new Map<string, Array<{ name: string; number: string }>>();
   for (let i = 0; i < rows.length; i++) {
     const row = applyMapping(rows[i], mapping);
     if (Object.values(row).every(v => !v?.trim())) continue;
@@ -481,13 +483,20 @@ async function executeGradedImport(
     const hasSalePrice = toCents(row['sale_price'] ?? '0') > 0;
     const isSold = (!!soldAtRaw && parseDate(soldAtRaw) !== null) || (isEbayOrderUrl(url) && hasSalePrice);
     if (isSold) continue;
-    const identifier = row['card_name']?.trim() || String(i);
-    if (!urlCardCounts.has(url)) urlCardCounts.set(url, new Set());
-    urlCardCounts.get(url)!.add(identifier);
+    if (!urlCards.has(url)) urlCards.set(url, []);
+    urlCards.get(url)!.push({
+      name:   row['card_name']?.trim()   ?? '',
+      number: row['card_number']?.trim() ?? '',
+    });
   }
   const urlToGroupId = new Map<string, string>();
-  for (const [url, cards] of urlCardCounts) {
-    if (cards.size >= 2) urlToGroupId.set(url, randomUUID());
+  for (const [url, cards] of urlCards) {
+    if (cards.length < 2) continue;
+    const names   = cards.map(c => c.name);
+    const numbers = cards.map(c => c.number).filter(Boolean);
+    const allNamesUnique   = new Set(names).size   === names.length;
+    const allNumbersUnique = numbers.length === 0 || new Set(numbers).size === numbers.length;
+    if (allNamesUnique && allNumbersUnique) urlToGroupId.set(url, randomUUID());
   }
 
   for (let i = 0; i < rows.length; i++) {
