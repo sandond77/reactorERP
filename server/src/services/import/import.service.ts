@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { db } from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
+import { logAudit } from '../../utils/audit';
 import { parseCsvBuffer, aiDetectImport } from './csvParser';
 import { toCents } from '../../utils/cents';
 import { createRawPurchase } from '../raw-purchases.service';
@@ -273,6 +274,10 @@ export async function executeImport(
   if (record.status === 'completed') throw new AppError(409, 'Import already completed');
 
   await db.updateTable('csv_imports').set({ status: 'processing' }).where('id', '=', importId).execute();
+  await logAudit(userId, 'csv_imports', importId, 'started',
+    { status: 'pending' },
+    { status: 'processing', import_type: record.import_type, filename: record.filename, row_count: record.row_count }
+  );
 
   const { rows } = parseCsvBuffer(buffer, record.filename);
   const mapping = (record.mapping ?? {}) as Record<string, string>;
@@ -310,6 +315,11 @@ export async function executeImport(
     error_log: result.errorLog.length > 0 ? JSON.stringify(result.errorLog) as any : null,
     completed_at: new Date(),
   }).where('id', '=', importId).execute();
+
+  await logAudit(userId, 'csv_imports', importId, finalStatus,
+    { status: 'processing' },
+    { status: finalStatus, import_type: record.import_type, filename: record.filename, imported_count: result.importedCount, error_count: result.errorLog.length }
+  );
 
   return {
     status: finalStatus,
