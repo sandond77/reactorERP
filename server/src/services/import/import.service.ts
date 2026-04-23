@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { db } from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { parseCsvBuffer, aiDetectImport } from './csvParser';
@@ -469,6 +470,26 @@ async function executeGradedImport(
     return created.id;
   }
 
+  // Pre-pass: detect set listings — same non-order listing URL on 2+ rows → shared listing_group_id
+  const urlCardCounts = new Map<string, Set<string>>();
+  for (let i = 0; i < rows.length; i++) {
+    const row = applyMapping(rows[i], mapping);
+    if (Object.values(row).every(v => !v?.trim())) continue;
+    const url = row['listing_url']?.trim() || null;
+    if (!url || isEbayOrderUrl(url)) continue;
+    const soldAtRaw = row['sold_at']?.trim();
+    const hasSalePrice = toCents(row['sale_price'] ?? '0') > 0;
+    const isSold = (!!soldAtRaw && parseDate(soldAtRaw) !== null) || (isEbayOrderUrl(url) && hasSalePrice);
+    if (isSold) continue;
+    const identifier = row['cert_number']?.trim() || row['card_name']?.trim() || String(i);
+    if (!urlCardCounts.has(url)) urlCardCounts.set(url, new Set());
+    urlCardCounts.get(url)!.add(identifier);
+  }
+  const urlToGroupId = new Map<string, string>();
+  for (const [url, cards] of urlCardCounts) {
+    if (cards.size >= 2) urlToGroupId.set(url, randomUUID());
+  }
+
   for (let i = 0; i < rows.length; i++) {
     const rowIndex = i + 2;
     // Skip entirely blank rows (trailing spreadsheet rows) — check raw row before mapping
@@ -651,22 +672,24 @@ async function executeGradedImport(
         const listedAt  = parseDate(row['listed_at']);
         const listingUrl = rawListingUrl;
         const platform  = normalizePlatform(row['platform']?.trim(), listingUrl ?? undefined, existingNotes ?? undefined);
+        const listingGroupId = listingUrl ? (urlToGroupId.get(listingUrl) ?? null) : null;
 
         await db.insertInto('listings').values({
-          user_id:          userId,
-          card_instance_id: ci.id,
+          user_id:           userId,
+          card_instance_id:  ci.id,
           platform,
-          listing_status:   'active',
-          ebay_listing_id:  null,
-          ebay_listing_url: listingUrl,
-          show_name:        null,
-          show_date:        null,
-          booth_cost:       null,
-          list_price:       listPrice,
-          asking_price:     listPrice,
+          listing_status:    'active',
+          ebay_listing_id:   null,
+          ebay_listing_url:  listingUrl,
+          show_name:         null,
+          show_date:         null,
+          booth_cost:        null,
+          list_price:        listPrice,
+          asking_price:      listPrice,
           currency,
-          listed_at:        listedAt,
-          sold_at:          null,
+          listed_at:         listedAt,
+          sold_at:           null,
+          listing_group_id:  listingGroupId,
         }).execute();
       }
 
