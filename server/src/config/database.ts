@@ -10,6 +10,11 @@ export const pool = new pg.Pool({
   connectionTimeoutMillis: 2000,
 });
 
+// Ensure all date/time operations use UTC regardless of server timezone
+pool.on('connect', (client) => {
+  client.query("SET timezone = 'UTC'");
+});
+
 pool.on('error', (err) => {
   console.error('[reactor] PostgreSQL pool error:', err);
 });
