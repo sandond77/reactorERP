@@ -240,6 +240,7 @@ export async function listListings(
           0::int                                                                      AS num_sold,
           NULL::text                                                                  AS raw_purchase_label,
           JSON_AGG(JSON_BUILD_OBJECT(
+            'listing_id',       l.id,
             'cert_number',      sd.cert_number,
             'grade_label',      sd.grade_label,
             'list_price',       l.list_price,
@@ -306,6 +307,7 @@ export async function listListings(
         MAX(COALESCE(sa.num_sold, 0))::int                                                                  AS num_sold,
         (ARRAY_AGG(rp.purchase_id ORDER BY l.listed_at DESC NULLS LAST))[1]                                AS raw_purchase_label,
         JSON_AGG(JSON_BUILD_OBJECT(
+          'listing_id',       l.id,
           'cert_number',      sd.cert_number,
           'grade_label',      sd.grade_label,
           'list_price',       l.list_price,
@@ -448,6 +450,41 @@ export async function updateSetGroup(userId: string, groupId: string, data: { li
     .where('id', 'in', existing.map(r => r.id))
     .execute();
   return { updated: existing.length };
+}
+
+export async function cancelSingleListing(userId: string, listingId: string) {
+  const listing = await db
+    .selectFrom('listings')
+    .select(['id', 'card_instance_id'])
+    .where('id', '=', listingId)
+    .where('user_id', '=', userId)
+    .where('listing_status', '=', 'active')
+    .executeTakeFirst();
+  if (!listing) throw new AppError(404, 'Active listing not found');
+
+  await db
+    .updateTable('listings')
+    .set({ listing_status: 'cancelled' })
+    .where('id', '=', listingId)
+    .execute();
+
+  // Revert raw_for_sale back to purchased_raw if no remaining active listings
+  const remaining = await db
+    .selectFrom('listings')
+    .select('id')
+    .where('card_instance_id', '=', listing.card_instance_id)
+    .where('listing_status', '=', 'active')
+    .executeTakeFirst();
+  if (!remaining) {
+    await db
+      .updateTable('card_instances')
+      .set({ status: 'purchased_raw' })
+      .where('id', '=', listing.card_instance_id)
+      .where('status', '=', 'raw_for_sale')
+      .where('user_id', '=', userId)
+      .execute();
+  }
+  return { cancelled: 1 };
 }
 
 export async function cancelSetGroup(userId: string, groupId: string) {

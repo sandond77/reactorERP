@@ -24,6 +24,7 @@ function isEbayOrderUrl(url: string): boolean {
 }
 
 interface CertDetail {
+  listing_id?: string | null;
   cert_number: string | null;
   grade_label: string | null;
   list_price: number | null;
@@ -878,6 +879,8 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
   const [setName, setSetName] = useState(row.listing_group_name ?? '');
   const [saving, setSaving] = useState(false);
   const [deleteStep, setDeleteStep] = useState<null | 'confirm' | 'deleting'>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [localCerts, setLocalCerts] = useState(row.cert_details ?? []);
 
   const groupKey = {
     part_number:     row.part_number ?? null,
@@ -934,28 +937,77 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
     }
   }
 
+  async function cancelOneListing(listingId: string) {
+    setCancellingId(listingId);
+    try {
+      await api.delete(`/listings/${listingId}`);
+      const remaining = localCerts.filter(c => c.listing_id !== listingId);
+      setLocalCerts(remaining);
+      queryClient.invalidateQueries({ queryKey: ['listings'] });
+      queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
+      if (remaining.length === 0) { toast.success('All listings cancelled'); onClose(); }
+      else toast.success('Listing cancelled');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to cancel listing');
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
   return (
     <form onSubmit={handleSave} className="space-y-4">
-      {/* Card summary */}
-      <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 px-4 py-3 space-y-1">
-        {isSet ? (
-          <>
+      {/* Card summary with per-cert cancel */}
+      <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 overflow-hidden">
+        <div className="px-4 py-3">
+          {isSet ? (
             <div className="flex items-center gap-2">
               <p className="text-sm font-medium text-zinc-100">{row.listing_group_name ?? 'Unnamed Set'}</p>
               <span className="text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">Set</span>
             </div>
-            <p className="text-[11px] text-zinc-500">{row.num_listed} slab{row.num_listed !== 1 ? 's' : ''}</p>
-          </>
-        ) : (
-          <>
-            <p className="text-sm font-medium text-zinc-100">{row.card_name ?? 'Unknown'}</p>
-            <div className="flex items-center gap-3 text-[11px] text-zinc-500">
-              {row.set_name && <span>{row.set_name}</span>}
-              {row.part_number && <span className="font-mono">{row.part_number}</span>}
-              {row.grading_company && <span>{row.grading_company} {row.grade_label}</span>}
-              <span className="ml-auto text-zinc-600">{row.num_listed} listing{row.num_listed !== 1 ? 's' : ''}</span>
+          ) : (
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-zinc-100">{row.card_name ?? 'Unknown'}</p>
+                <div className="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
+                  {row.set_name && <span>{row.set_name}</span>}
+                  {row.part_number && <span className="font-mono">{row.part_number}</span>}
+                  {row.grading_company && <span>{row.grading_company} {row.grade_label}</span>}
+                </div>
+              </div>
+              <span className="text-[11px] text-zinc-600">{localCerts.length} listing{localCerts.length !== 1 ? 's' : ''}</span>
             </div>
-          </>
+          )}
+        </div>
+        {localCerts.length > 0 && (
+          <div className="border-t border-zinc-700/50 divide-y divide-zinc-800/60">
+            {localCerts.map((cert) => (
+              <div key={cert.listing_id ?? cert.cert_number} className="flex items-center gap-3 px-4 py-2">
+                <div className="flex-1 min-w-0">
+                  {isSet && cert.card_name && (
+                    <p className="text-[11px] text-zinc-300 truncate">{cert.card_name}</p>
+                  )}
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-500">
+                    {cert.cert_number && <span className="font-mono text-indigo-300/70">{formatCertNumber(cert.cert_number)}</span>}
+                    {cert.grade_label && <span>{cert.grade_label}</span>}
+                    {cert.list_price != null && <span className="ml-auto text-zinc-400">{formatCurrency(cert.list_price, row.currency)}</span>}
+                  </div>
+                </div>
+                {cert.listing_id && localCerts.length > 1 && (
+                  <button
+                    type="button"
+                    disabled={cancellingId === cert.listing_id}
+                    onClick={() => cancelOneListing(cert.listing_id!)}
+                    className="shrink-0 flex items-center gap-1 text-[11px] text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-40"
+                    title="Cancel this listing">
+                    {cancellingId === cert.listing_id
+                      ? <Loader2 size={12} className="animate-spin" />
+                      : <Trash2 size={12} />}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
 
@@ -982,7 +1034,7 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
         <div>
           {deleteStep === 'confirm' ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-red-300">Cancel listing{row.num_listed !== 1 ? `s (${row.num_listed})` : ''}?</span>
+              <span className="text-sm text-red-300">Cancel all {localCerts.length > 1 ? `${localCerts.length} listings` : 'listing'}?</span>
               <Button type="button" size="sm" variant="ghost" onClick={() => setDeleteStep(null)}>No</Button>
               <Button type="button" size="sm"
                 className="bg-red-600 hover:bg-red-500 text-white border-0"
@@ -996,7 +1048,7 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
             <button type="button" onClick={() => setDeleteStep('confirm')}
               className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-red-400 transition-colors">
               <Trash2 size={13} />
-              Cancel listing{row.num_listed !== 1 ? `s (${row.num_listed})` : ''}
+              Cancel all {localCerts.length > 1 ? `(${localCerts.length})` : ''}
             </button>
           )}
         </div>

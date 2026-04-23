@@ -166,3 +166,10 @@ listingsRouter.delete('/group', requireAuth, async (req, res, next) => {
     res.json(result);
   } catch (err) { next(err); }
 });
+
+listingsRouter.delete('/:listingId', requireAuth, async (req, res, next) => {
+  try {
+    const result = await listingsService.cancelSingleListing(req.user!.id, req.params.listingId);
+    res.json(result);
+  } catch (err) { next(err); }
+});
