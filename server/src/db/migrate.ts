@@ -5,8 +5,25 @@ import { Pool } from 'pg';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
+async function connectWithRetry(retries = 10, delayMs = 3000) {
+  for (let i = 1; i <= retries; i++) {
+    try {
+      return await pool.connect();
+    } catch (err: any) {
+      const transient = err.code === 'EAI_AGAIN' || err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND';
+      if (transient && i < retries) {
+        console.log(`DB not ready (attempt ${i}/${retries}), retrying in ${delayMs / 1000}s…`);
+        await new Promise(r => setTimeout(r, delayMs));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error('Could not connect to database after retries');
+}
+
 async function migrate() {
-  const client = await pool.connect();
+  const client = await connectWithRetry();
   try {
     // Create migrations tracking table if it doesn't exist
     await client.query(`
