@@ -348,7 +348,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                     <td className="px-3 py-1 text-zinc-400 truncate">{row.set_name ?? ''}</td>
                     <td className="px-3 py-1 text-zinc-400">{row.condition ?? ''}</td>
                     <td className="px-3 py-1 text-right text-zinc-400">{row.quantity}</td>
-                    <td className="px-3 py-1 text-right text-zinc-400">{row.purchase_cost ? fmt(row.purchase_cost) : ''}</td>
+                    <td className="px-3 py-1 text-right text-zinc-400">{row.purchase_cost != null ? fmt(row.purchase_cost) : ''}</td>
                     <td className="px-3 py-1 text-right text-emerald-400 font-medium">{fmt(row.card_show_price)}</td>
                   </tr>
                 ))}

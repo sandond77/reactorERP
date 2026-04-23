@@ -596,10 +596,34 @@ async function executeGradedImport(
           }
         }
 
+        // If there's a list price, create a sold listing record so listed_price shows on the sale
+        let soldListingId: string | null = null;
+        const soldListPrice = toCents(row['list_price'] ?? '0');
+        if (soldListPrice > 0) {
+          const listingUrl = row['listing_url']?.trim() || null;
+          const soldListing = await db.insertInto('listings').values({
+            user_id:          userId,
+            card_instance_id: ci.id,
+            platform,
+            listing_status:   'sold',
+            ebay_listing_id:  null,
+            ebay_listing_url: listingUrl,
+            show_name:        null,
+            show_date:        null,
+            booth_cost:       null,
+            list_price:       soldListPrice,
+            asking_price:     soldListPrice,
+            currency,
+            listed_at:        parseDate(row['listed_at']) ?? soldAt,
+            sold_at:          soldAt,
+          }).returning('id').executeTakeFirst();
+          soldListingId = soldListing?.id ?? null;
+        }
+
         await db.insertInto('sales').values({
           user_id:          userId,
           card_instance_id: ci.id,
-          listing_id:       null,
+          listing_id:       soldListingId,
           card_show_id:     cardShowId,
           platform,
           sale_price:       salePriceRaw,
