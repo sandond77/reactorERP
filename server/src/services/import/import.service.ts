@@ -481,7 +481,7 @@ async function executeGradedImport(
     const hasSalePrice = toCents(row['sale_price'] ?? '0') > 0;
     const isSold = (!!soldAtRaw && parseDate(soldAtRaw) !== null) || (isEbayOrderUrl(url) && hasSalePrice);
     if (isSold) continue;
-    const identifier = row['cert_number']?.trim() || row['card_name']?.trim() || String(i);
+    const identifier = row['card_name']?.trim() || String(i);
     if (!urlCardCounts.has(url)) urlCardCounts.set(url, new Set());
     urlCardCounts.get(url)!.add(identifier);
   }
