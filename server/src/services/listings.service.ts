@@ -11,6 +11,8 @@ export type CertDetail = {
   grade_label: string | null;
   list_price: number | null;
   ebay_listing_url: string | null;
+  listing_group_id?: string | null;
+  card_name?: string | null;
 };
 
 export type ListingAggRow = {
@@ -29,6 +31,8 @@ export type ListingAggRow = {
   num_sold: number;
   raw_purchase_label: string | null;
   cert_details: CertDetail[] | null;
+  listing_group_id?: string | null;
+  listing_group_name?: string | null;
 };
 
 const LISTINGS_SORT_COLS: Record<string, string> = {
@@ -139,7 +143,7 @@ export async function getListingFilterOptions(userId: string) {
 
 export async function listListings(
   userId: string,
-  filters: { platforms?: string[]; search?: string; grades?: string[]; companies?: string[]; part_numbers?: string[]; num_listed?: string[]; num_sold?: string[]; card_names?: string[]; prices?: string[]; listing_type?: 'graded' | 'raw' },
+  filters: { platforms?: string[]; search?: string; grades?: string[]; companies?: string[]; part_numbers?: string[]; num_listed?: string[]; num_sold?: string[]; card_names?: string[]; prices?: string[]; listing_type?: 'graded' | 'raw' | 'graded_set' | 'raw_set' },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
@@ -208,9 +212,67 @@ export async function listListings(
       : sql``;
 
   const listingTypeCond =
-    filters.listing_type === 'raw' ? sql`AND sd.id IS NULL` :
-    filters.listing_type === 'graded' ? sql`AND sd.id IS NOT NULL` :
+    filters.listing_type === 'raw'        ? sql`AND sd.id IS NULL AND l.listing_group_id IS NULL` :
+    filters.listing_type === 'graded'     ? sql`AND sd.id IS NOT NULL AND l.listing_group_id IS NULL` :
+    filters.listing_type === 'graded_set' ? sql`AND sd.id IS NOT NULL AND l.listing_group_id IS NOT NULL` :
+    filters.listing_type === 'raw_set'    ? sql`AND sd.id IS NULL AND l.listing_group_id IS NOT NULL` :
     sql``;
+
+  // ── Graded Set: separate query grouped by listing_group_id ──────────────────
+  if (filters.listing_type === 'graded_set') {
+    const setResult = await sql<ListingAggRow & { total_count: number }>`
+      WITH grouped AS (
+        SELECT
+          l.listing_group_id,
+          (ARRAY_AGG(l.listing_group_name ORDER BY l.listed_at DESC NULLS LAST))[1]  AS listing_group_name,
+          NULL::text                                                                  AS card_name,
+          NULL::text                                                                  AS set_name,
+          NULL::text                                                                  AS part_number,
+          NULL::text                                                                  AS grade_label,
+          NULL::text                                                                  AS grading_company,
+          NULL::text                                                                  AS condition,
+          l.platform,
+          SUM(l.list_price)::int                                                      AS list_price,
+          l.currency,
+          (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST))[1]    AS ebay_listing_url,
+          MIN(l.listed_at)                                                            AS listed_at,
+          COUNT(DISTINCT l.id)::int                                                   AS num_listed,
+          0::int                                                                      AS num_sold,
+          NULL::text                                                                  AS raw_purchase_label,
+          JSON_AGG(JSON_BUILD_OBJECT(
+            'cert_number',      sd.cert_number,
+            'grade_label',      sd.grade_label,
+            'list_price',       l.list_price,
+            'ebay_listing_url', l.ebay_listing_url,
+            'listing_group_id', l.listing_group_id,
+            'card_name',        COALESCE(ci.card_name_override, cc.card_name),
+            'part_number',      cc.sku,
+            'company',          sd.company
+          ) ORDER BY l.listed_at DESC NULLS LAST)
+          FILTER (WHERE sd.id IS NOT NULL)                                            AS cert_details
+        FROM listings l
+        JOIN card_instances ci ON ci.id = l.card_instance_id
+        LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+        LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+        WHERE l.user_id = ${userId}
+        AND l.listing_status = 'active'
+        AND l.platform != 'card_show'
+        AND l.listing_group_id IS NOT NULL
+        AND sd.id IS NOT NULL
+        ${platformCond}
+        ${searchCond}
+        GROUP BY l.listing_group_id, l.platform, l.currency
+      )
+      SELECT *, COUNT(*) OVER ()::int AS total_count
+      FROM grouped
+      ORDER BY ${sql.raw(sortCol)} ${sortDirSafe}
+      LIMIT ${pagination.limit}
+      OFFSET ${getPaginationOffset(pagination.page, pagination.limit)}
+    `.execute(db);
+    const total = Number(setResult.rows[0]?.total_count ?? 0);
+    const rows = setResult.rows.map(({ total_count: _, ...rest }) => rest as ListingAggRow);
+    return buildPaginatedResult(rows, total, pagination.page, pagination.limit);
+  }
 
   const result = await sql<ListingAggRow & { total_count: number }>`
     WITH sales_agg AS (
@@ -244,10 +306,11 @@ export async function listListings(
         MAX(COALESCE(sa.num_sold, 0))::int                                                                  AS num_sold,
         (ARRAY_AGG(rp.purchase_id ORDER BY l.listed_at DESC NULLS LAST))[1]                                AS raw_purchase_label,
         JSON_AGG(JSON_BUILD_OBJECT(
-          'cert_number',    sd.cert_number,
-          'grade_label',    sd.grade_label,
-          'list_price',     l.list_price,
-          'ebay_listing_url', l.ebay_listing_url
+          'cert_number',      sd.cert_number,
+          'grade_label',      sd.grade_label,
+          'list_price',       l.list_price,
+          'ebay_listing_url', l.ebay_listing_url,
+          'listing_group_id', l.listing_group_id
         ) ORDER BY l.listed_at DESC NULLS LAST)
         FILTER (WHERE sd.id IS NOT NULL)                                                                    AS cert_details
       FROM listings l
@@ -360,6 +423,48 @@ export async function updateListing(
     .executeTakeFirstOrThrow();
   await logAudit(userId, 'listings', listingId, 'updated', existing, updated);
   return updated;
+}
+
+export async function updateSetGroup(userId: string, groupId: string, data: { listing_group_name?: string; ebay_listing_url?: string | null; list_price?: number }) {
+  // Get active listing ids first so we know the count for price splitting
+  const existing = await db
+    .selectFrom('listings')
+    .select('id')
+    .where('user_id', '=', userId)
+    .where('listing_group_id', '=', groupId)
+    .where('listing_status', '=', 'active')
+    .execute();
+  if (existing.length === 0) throw new AppError(404, 'No listings found for that set group');
+
+  const updateData: Record<string, unknown> = {};
+  if (data.listing_group_name !== undefined) updateData.listing_group_name = data.listing_group_name;
+  if (data.ebay_listing_url !== undefined) updateData.ebay_listing_url = data.ebay_listing_url;
+  // list_price from client is total set price — split evenly per listing
+  if (data.list_price !== undefined) updateData.list_price = Math.round(data.list_price / existing.length);
+
+  await db
+    .updateTable('listings')
+    .set(updateData as any)
+    .where('id', 'in', existing.map(r => r.id))
+    .execute();
+  return { updated: existing.length };
+}
+
+export async function cancelSetGroup(userId: string, groupId: string) {
+  const listingRows = await db
+    .selectFrom('listings')
+    .select(['id', 'card_instance_id'])
+    .where('user_id', '=', userId)
+    .where('listing_group_id', '=', groupId)
+    .where('listing_status', '=', 'active')
+    .execute();
+  if (listingRows.length === 0) throw new AppError(404, 'No active listings found for this set group');
+  await db
+    .updateTable('listings')
+    .set({ listing_status: 'cancelled' })
+    .where('id', 'in', listingRows.map(r => r.id))
+    .execute();
+  return { cancelled: listingRows.length };
 }
 
 // ── Group operations (act on all listings belonging to an aggregated row) ─────

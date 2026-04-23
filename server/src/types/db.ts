@@ -217,6 +217,8 @@ export interface ListingsTable {
   currency: string;
   listed_at: Date | null;
   sold_at: Date | null;
+  listing_group_id: string | null;
+  listing_group_name: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

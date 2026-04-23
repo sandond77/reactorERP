@@ -15,6 +15,10 @@ interface CertDetail {
   grade_label: string | null;
   list_price: number | null;
   ebay_listing_url: string | null;
+  listing_group_id?: string | null;
+  card_name?: string | null;
+  part_number?: string | null;
+  company?: string | null;
 }
 
 interface AggregatedListing {
@@ -33,6 +37,8 @@ interface AggregatedListing {
   num_sold: number;
   raw_purchase_label: string | null;
   cert_details: CertDetail[] | null;
+  listing_group_id?: string | null;
+  listing_group_name?: string | null;
 }
 
 interface ListingFilterOptions {
@@ -260,6 +266,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const [price, setPrice] = useState('');
   const [listedAt, setListedAt] = useState('');
   const [ebayUrl, setEbayUrl] = useState('');
+  const [setGroupName, setSetGroupName] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -370,6 +377,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       const perCardPrice = listingMode === 'set' && instancesToList.length > 1
         ? (parseFloat(price) / instancesToList.length).toFixed(2)
         : price;
+      const setGroupId = listingMode === 'set' ? crypto.randomUUID() : undefined;
       await Promise.all(instancesToList.map(copy =>
         api.post('/listings', {
           card_instance_id: copy.id,
@@ -378,6 +386,8 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
           currency: 'USD',
           listed_at: listedAt || undefined,
           ebay_listing_url: ebayUrl || undefined,
+          listing_group_id: setGroupId,
+          listing_group_name: listingMode === 'set' && setGroupName ? setGroupName : undefined,
         })
       ));
       const n = instancesToList.length;
@@ -808,6 +818,11 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
         )}
       </div>
 
+      {listingMode === 'set' && (
+        <Input label="Set Name" placeholder="e.g. Shining Legends Set, Rainbow Rares…"
+          value={setGroupName} onChange={(e) => setSetGroupName(e.target.value)} autoFocus />
+      )}
+
       <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
         value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
 
@@ -836,8 +851,10 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
 function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const isSet = !!row.listing_group_id;
   const [price, setPrice] = useState(row.list_price != null ? (row.list_price / 100).toFixed(2) : '');
   const [ebayUrl, setEbayUrl] = useState(row.ebay_listing_url ?? '');
+  const [setName, setSetName] = useState(row.listing_group_name ?? '');
   const [saving, setSaving] = useState(false);
   const [deleteStep, setDeleteStep] = useState<null | 'confirm' | 'deleting'>(null);
 
@@ -854,11 +871,19 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
     e.preventDefault();
     setSaving(true);
     try {
-      await api.patch('/listings/group', {
-        ...groupKey,
-        list_price: price || undefined,
-        ebay_listing_url: ebayUrl || null,
-      });
+      if (isSet) {
+        await api.patch(`/listings/set-group/${row.listing_group_id}`, {
+          listing_group_name: setName || undefined,
+          ebay_listing_url: ebayUrl || null,
+          list_price: price || undefined,
+        });
+      } else {
+        await api.patch('/listings/group', {
+          ...groupKey,
+          list_price: price || undefined,
+          ebay_listing_url: ebayUrl || null,
+        });
+      }
       toast.success('Listing updated');
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
@@ -874,7 +899,9 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
   async function handleDelete() {
     setDeleteStep('deleting');
     try {
-      const res = await api.delete('/listings/group', { data: groupKey });
+      const res = isSet
+        ? await api.delete(`/listings/set-group/${row.listing_group_id}`)
+        : await api.delete('/listings/group', { data: groupKey });
       toast.success(`${res.data.cancelled} listing${res.data.cancelled !== 1 ? 's' : ''} cancelled`);
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
@@ -890,19 +917,36 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
     <form onSubmit={handleSave} className="space-y-4">
       {/* Card summary */}
       <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 px-4 py-3 space-y-1">
-        <p className="text-sm font-medium text-zinc-100">{row.card_name ?? 'Unknown'}</p>
-        <div className="flex items-center gap-3 text-[11px] text-zinc-500">
-          {row.set_name && <span>{row.set_name}</span>}
-          {row.part_number && <span className="font-mono">{row.part_number}</span>}
-          {row.grading_company && <span>{row.grading_company} {row.grade_label}</span>}
-          <span className="ml-auto text-zinc-600">{row.num_listed} listing{row.num_listed !== 1 ? 's' : ''}</span>
-        </div>
+        {isSet ? (
+          <>
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium text-zinc-100">{row.listing_group_name ?? 'Unnamed Set'}</p>
+              <span className="text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">Set</span>
+            </div>
+            <p className="text-[11px] text-zinc-500">{row.num_listed} slab{row.num_listed !== 1 ? 's' : ''}</p>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-medium text-zinc-100">{row.card_name ?? 'Unknown'}</p>
+            <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+              {row.set_name && <span>{row.set_name}</span>}
+              {row.part_number && <span className="font-mono">{row.part_number}</span>}
+              {row.grading_company && <span>{row.grading_company} {row.grade_label}</span>}
+              <span className="ml-auto text-zinc-600">{row.num_listed} listing{row.num_listed !== 1 ? 's' : ''}</span>
+            </div>
+          </>
+        )}
       </div>
+
+      {isSet && (
+        <Input label="Set Name" placeholder="e.g. Shining Legends Set…"
+          value={setName} onChange={(e) => setSetName(e.target.value)} />
+      )}
 
       <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
         value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
 
-      <Input label="List Price" type="number" step="0.01" min="0" placeholder="0.00"
+      <Input label={isSet ? 'Set Price (total)' : 'List Price'} type="number" step="0.01" min="0" placeholder="0.00"
         value={price} onChange={(e) => setPrice(e.target.value)} />
 
       <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
@@ -970,7 +1014,7 @@ export function Listings() {
   const [fPrice, setFPrice] = useState<string[] | null>(saved.fPrice);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
-  const [listingTab, setListingTab] = useState<'graded' | 'raw'>('graded');
+  const [listingTab, setListingTab] = useState<'graded' | 'raw' | 'graded_set' | 'raw_set'>('graded');
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [showAddModal, setShowAddModal] = useState(false);
   const [editRow, setEditRow] = useState<AggregatedListing | null>(null);
@@ -1015,8 +1059,9 @@ export function Listings() {
     link: Math.max(MINS.link, 70), num_listed: Math.max(MINS.num_listed, 110),
     num_sold: Math.max(MINS.num_sold, 100),
   });
-  // graded tab: hide condition + raw_id; raw tab: hide company + grade
-  const totalWidth = listingTab === 'raw'
+  // graded/graded_set tab: hide condition + raw_id; raw/raw_set tab: hide company + grade
+  const isRawTab = listingTab === 'raw' || listingTab === 'raw_set';
+  const totalWidth = isRawTab
     ? _totalWidth - Math.max(MINS.company, 90) - Math.max(MINS.grade, 175) + Math.max(MINS.condition, 100)
     : _totalWidth - Math.max(MINS.condition, 100) - Math.max(MINS.raw_id, 150);
 
@@ -1086,10 +1131,10 @@ export function Listings() {
             </button>
           )}
           <div className="flex gap-1">
-            {(['graded', 'raw'] as const).map((t) => (
+            {([['graded', 'Graded'], ['raw', 'Raw'], ['graded_set', 'Graded Set']] as const).map(([t, label]) => (
               <button key={t} onClick={() => setListingTab(t)}
                 className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${listingTab === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-                {t === 'graded' ? 'Graded' : 'Raw'}
+                {label}
               </button>
             ))}
           </div>
@@ -1117,10 +1162,10 @@ export function Listings() {
                   filterOptions={filterOptions?.part_numbers} filterSelected={fPartNumber} onFilterChange={(v) => { setFPartNumber(v); setPage(1); }} />
                 <ColHeader label="Card Name"    col="card_name"  {...sh} {...rz('card')}    minWidth={MINS.card}
                   filterOptions={filterOptions?.card_names} filterSelected={fCardName} onFilterChange={(v) => { setFCardName(v); setPage(1); }} />
-                {listingTab === 'raw' && (
+                {isRawTab && (
                   <ColHeader label="Purchase ID" {...sh} {...rz('raw_id')} minWidth={MINS.raw_id} />
                 )}
-                {listingTab === 'graded' ? (
+                {!isRawTab ? (
                   <>
                     <ColHeader label="Company" {...sh} {...rz('company')} minWidth={MINS.company}
                       filterOptions={filterOptions?.companies} filterSelected={fCompany} onFilterChange={(v) => { setFCompany(v); setPage(1); }} />
@@ -1147,21 +1192,34 @@ export function Listings() {
               ) : data.data.map((row, i) => {
                 const key = rowKey(row);
                 const isExpanded = expandedKeys.has(key);
-                const isGraded = listingTab === 'graded';
+                const isGraded = listingTab === 'graded' || listingTab === 'graded_set';
                 return (
                   <React.Fragment key={i}>
                     <tr
-                      onClick={() => isGraded ? toggleExpand(key) : setEditRow(row)}
+                      onClick={() => listingTab === 'graded' ? toggleExpand(key) : setEditRow(row)}
                       className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
                       <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>
                         {isGraded && (
-                          <ChevronRight size={11} className={`inline-block mr-1 text-zinc-600 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
+                          <ChevronRight
+                            size={11}
+                            className={`inline-block mr-1 text-zinc-600 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+                            onClick={(e) => { e.stopPropagation(); toggleExpand(key); }}
+                          />
                         )}
                         {row.part_number ?? '—'}
                       </td>
                       <td className="px-3 py-2">
-                        <p className="font-medium text-zinc-200 truncate" title={row.card_name ?? ''}>{row.card_name ?? 'Unknown'}</p>
-                        {row.set_name && <p className="text-[10px] text-zinc-500 truncate">{row.set_name}</p>}
+                        {listingTab === 'graded_set' ? (
+                          <p className="font-medium text-zinc-200 break-words whitespace-normal">
+                            {row.listing_group_name ?? <span className="text-zinc-500 italic">Unnamed Set</span>}
+                            <span className="ml-2 text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5 align-middle">Set</span>
+                          </p>
+                        ) : (
+                          <>
+                            <p className="font-medium text-zinc-200 break-words whitespace-normal" title={row.card_name ?? ''}>{row.card_name ?? 'Unknown'}</p>
+                            {row.set_name && <p className="text-[10px] text-zinc-500 truncate">{row.set_name}</p>}
+                          </>
+                        )}
                       </td>
                       {!isGraded && (
                         <td className="px-3 py-2 font-mono text-indigo-300/70 text-[11px] truncate">
@@ -1204,17 +1262,41 @@ export function Listings() {
                       <tr key={ci}
                         className="border-b border-zinc-800/40 bg-zinc-900/40 hover:bg-zinc-800/50 cursor-pointer transition-colors"
                         onClick={() => setEditRow(row)}>
-                        <td className="px-3 py-1.5 text-center">
-                          <div className="w-px h-3 bg-zinc-700 mx-auto" />
+                        {/* Part # */}
+                        <td className="px-3 py-1.5 font-mono text-[11px] text-zinc-500 truncate">
+                          {listingTab === 'graded_set'
+                            ? (cert.part_number ?? '—')
+                            : <div className="w-px h-3 bg-zinc-700 mx-auto" />}
                         </td>
-                        <td className="px-3 py-1.5 pl-5" colSpan={3}>
-                          <span className="text-[10px] text-zinc-600 mr-1">Cert</span>
-                          <span className="font-mono text-[11px] text-indigo-300/70">{formatCertNumber(cert.cert_number) ?? '—'}</span>
+                        {/* Card Name */}
+                        <td className="px-3 py-1.5 pl-5">
+                          {listingTab === 'graded_set' ? (
+                            <span className="text-[11px] text-zinc-300 break-words whitespace-normal">{cert.card_name ?? '—'}</span>
+                          ) : (
+                            <>
+                              <span className="text-[10px] text-zinc-600 mr-1">Cert</span>
+                              <span className="font-mono text-[11px] text-indigo-300/70">{formatCertNumber(cert.cert_number) ?? '—'}</span>
+                              {cert.listing_group_id && (
+                                <span className="ml-2 text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">Set</span>
+                              )}
+                            </>
+                          )}
                         </td>
+                        {/* Company */}
+                        <td className="px-3 py-1.5 text-zinc-400 text-[11px]">
+                          {listingTab === 'graded_set' ? (cert.company ?? '—') : <span className="font-mono text-[11px] text-indigo-300/70">{formatCertNumber(cert.cert_number) ?? '—'}</span>}
+                        </td>
+                        {/* Grade */}
+                        <td className="px-3 py-1.5 text-zinc-300 text-[11px]">
+                          {cert.grade_label ?? '—'}
+                        </td>
+                        {/* Platform — empty */}
                         <td className="px-3 py-1.5" />
+                        {/* Price */}
                         <td className="px-3 py-1.5 text-right text-zinc-400 text-[11px]">
                           {cert.list_price != null ? formatCurrency(cert.list_price, row.currency) : '—'}
                         </td>
+                        {/* Link */}
                         <td className="px-3 py-1.5 text-center">
                           {cert.ebay_listing_url ? (
                             <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors">

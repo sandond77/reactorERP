@@ -257,7 +257,7 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
   const gradeDistributionQuery = sql<{
     grade: number; grade_label: string | null; company: string; count: number;
   }>`
-    SELECT sd.grade,
+    SELECT MAX(sd.grade) as grade,
       CASE
         WHEN sd.grade_label ILIKE 'gem%mint%' OR sd.grade_label ILIKE 'gem%mt%' THEN 'GEM MINT'
         WHEN sd.grade_label ILIKE 'near%mint%mint%' THEN 'NEAR MINT-MINT'
@@ -275,8 +275,8 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
     FROM card_instances ci
     JOIN slab_details sd ON sd.card_instance_id = ci.id
     WHERE ci.user_id = ${userId} AND ${statusFilter}
-    GROUP BY sd.grade, grade_label, sd.company
-    ORDER BY sd.grade, grade_label
+    GROUP BY grade_label, sd.company
+    ORDER BY MAX(sd.grade), grade_label
   `.execute(db);
 
   // ── Pipeline ────────────────────────────────────────────────────────────────

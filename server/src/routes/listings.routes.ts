@@ -18,7 +18,7 @@ const querySchema = z.object({
   card_names: z.string().optional(),
   prices: z.string().optional(),
   search: z.string().optional(),
-  listing_type: z.enum(['graded', 'raw']).optional(),
+  listing_type: z.enum(['graded', 'raw', 'graded_set', 'raw_set']).optional(),
   status: z.string().optional(),
   sort_by: z.string().optional(),
   sort_dir: z.enum(['asc', 'desc']).default('desc'),
@@ -37,6 +37,8 @@ const createListingSchema = z.object({
   currency: z.enum(['USD', 'JPY']).default('USD'),
   listed_at: z.string().optional().transform((v) => v ? new Date(v) : undefined),
   ebay_listing_url: z.string().url().optional(),
+  listing_group_id: z.string().uuid().optional(),
+  listing_group_name: z.string().optional(),
 });
 
 listingsRouter.get('/by-url', requireAuth, async (req, res, next) => {
@@ -122,6 +124,19 @@ const groupUpdateSchema = groupKeySchema.extend({
   ebay_listing_url: z.string().url().nullable().optional(),
 });
 
+listingsRouter.patch('/set-group/:groupId', requireAuth, async (req, res, next) => {
+  try {
+    const { groupId } = req.params;
+    const body = z.object({
+      listing_group_name: z.string().optional(),
+      ebay_listing_url: z.string().url().nullable().optional(),
+      list_price: z.union([z.string(), z.number()]).transform((v) => toCents(v)).optional(),
+    }).parse(req.body);
+    const result = await listingsService.updateSetGroup(req.user!.id, groupId, body as any);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 listingsRouter.patch('/group', requireAuth, async (req, res, next) => {
   try {
     const body = groupUpdateSchema.parse(req.body);
@@ -133,6 +148,13 @@ listingsRouter.patch('/group', requireAuth, async (req, res, next) => {
     if (currency_new !== undefined) updates.currency = currency_new;
     if (ebay_listing_url !== undefined) updates.ebay_listing_url = ebay_listing_url;
     const result = await listingsService.updateListingsByGroup(req.user!.id, key, updates);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+listingsRouter.delete('/set-group/:groupId', requireAuth, async (req, res, next) => {
+  try {
+    const result = await listingsService.cancelSetGroup(req.user!.id, req.params.groupId);
     res.json(result);
   } catch (err) { next(err); }
 });

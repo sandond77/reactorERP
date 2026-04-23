@@ -797,7 +797,7 @@ function RawCardsTab() {
         {/* Col 1 — Inventory Value */}
         <Card>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Inventory Value</h3>
+            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Inventory Breakdown</h3>
             <div className="flex gap-1">
               {(['count', 'value'] as const).map((m) => (
                 <button key={m} onClick={() => setRawPieMode(m)}
@@ -1142,11 +1142,14 @@ function GradedTab() {
   // Build unique grade keys — use grade_label when present to keep ARS10 and ARS10+ separate
   const gradeKey = (r: { grade: number; grade_label: string | null }) =>
     r.grade_label ?? fmtGrade(r.grade);
-  const allGradeKeys = Array.from(
+  const allGradeKeysWithGrade = Array.from(
     new Map(filteredGrades.map((r) => [gradeKey(r), Number(r.grade)])).entries()
-  ).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0])).map(([key]) => key);
-  const gradeBarData = allGradeKeys.map((key) => ({
-    name: key,
+  ).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]));
+  // Prepend numeric grade for alphabetic labels (e.g. "GEM MINT" → "10 GEM MINT")
+  const gradeDisplayName = (key: string, grade: number) =>
+    /^\d/.test(key) ? key : `${fmtGrade(grade)} ${key}`;
+  const gradeBarData = allGradeKeysWithGrade.map(([key, grade]) => ({
+    name: gradeDisplayName(key, grade),
     count: filteredGrades.filter((r) => gradeKey(r) === key).reduce((s, r) => s + r.count, 0),
   }));
 
@@ -1176,7 +1179,7 @@ function GradedTab() {
         {/* Col 1 — In Hand */}
         <Card>
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Inventory Value</h3>
+            <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Inventory Breakdown</h3>
             <div className="flex gap-1">
               {(['count', 'value'] as const).map((m) => (
                 <button key={m} onClick={() => setInvPieMode(m)}
@@ -1250,7 +1253,7 @@ function GradedTab() {
                 <div className="max-h-48 overflow-y-auto pr-4">
                   {gradeBarData.filter((r) => r.count > 0).map((r) => (
                     <div key={r.name} className="flex justify-between items-center py-1 text-xs border-b border-zinc-800/60 last:border-0">
-                      <span className="flex-1 text-zinc-400">{/^\d/.test(r.name) ? `${activeGradeCompany} ${r.name}` : r.name}</span>
+                      <span className="flex-1 text-zinc-400">{r.name}</span>
                       <span className="w-10 text-right text-zinc-200">{r.count}</span>
                       <span className="w-10 text-right text-zinc-400">{((r.count / total) * 100).toFixed(0)}%</span>
                     </div>
