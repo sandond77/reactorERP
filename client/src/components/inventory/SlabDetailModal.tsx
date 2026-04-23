@@ -49,6 +49,7 @@ interface SlabRow {
   location_name: string | null;
   location_id: string | null;
   is_card_show: boolean;
+  is_personal_collection: boolean;
 }
 
 interface Props {
@@ -95,6 +96,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
   const [editGradingCost,  setEditGradingCost]  = useState('');
   const [editNotes,        setEditNotes]        = useState('');
   const [editLocationId,   setEditLocationId]   = useState<string>('');
+  const [editPersonal,     setEditPersonal]     = useState(false);
 
   const { locations: gradedLocations, allLocations } = useLocations('graded');
 
@@ -106,6 +108,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
     setEditGradingCost(slab.grading_cost ? String(slab.grading_cost / 100) : '');
     setEditNotes(slab.notes ?? '');
     setEditLocationId(slab.location_id ?? '');
+    setEditPersonal(slab.is_personal_collection);
     setEditing(true);
   }
 
@@ -118,6 +121,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
         slab_grade:          editGrade ? parseFloat(editGrade) : null,
         slab_grade_label:    editGradeLabel || null,
         slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : null,
+        is_personal_collection: editPersonal,
       });
       if (editLocationId !== (slab.location_id ?? '')) {
         await api.post('/locations/assign', {
@@ -212,6 +216,15 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
                     <p className="text-xs text-zinc-600 py-1">No locations set up yet. Add locations in Settings.</p>
                   )}
                 </div>
+                <label className="flex items-center gap-2.5 cursor-pointer py-1">
+                  <input
+                    type="checkbox"
+                    checked={editPersonal}
+                    onChange={(e) => setEditPersonal(e.target.checked)}
+                    className="accent-indigo-500"
+                  />
+                  <span className="text-xs text-zinc-300">Personal collection (not for sale)</span>
+                </label>
               </div>
             </div>
           </div>

@@ -11,15 +11,14 @@ interface ColumnFilterProps {
   selected: string[] | null;
   onChange: (vals: string[] | null) => void;
   align?: 'left' | 'right';
-  dateValue?: string;
-  onDateChange?: (date: string) => void;
+  dateValues?: string[];
+  onDatesChange?: (dates: string[]) => void;
 }
 
-export function ColumnFilter({ options, selected, onChange, align = 'left', dateValue, onDateChange }: ColumnFilterProps) {
+export function ColumnFilter({ options, selected, onChange, align = 'left', dateValues, onDatesChange }: ColumnFilterProps) {
   const [open, setOpen] = useState(false);
   const [filterSearch, setFilterSearch] = useState('');
-  const [localDate, setLocalDate] = useState(dateValue ?? '');
-  useEffect(() => { setLocalDate(dateValue ?? ''); }, [dateValue]);
+  const [localDate, setLocalDate] = useState('');
   const ref = useRef<HTMLDivElement>(null);
 
   // Active = some (not null/all, not empty) items are selected
@@ -38,23 +37,34 @@ export function ColumnFilter({ options, selected, onChange, align = 'left', date
   const visible = options.filter((o) => o.toLowerCase().includes(filterSearch.toLowerCase()));
 
   function toggleAll() {
-    // null → [] (deselect all);  [] or [...all] → null (select all)
     onChange(selected === null ? [] : null);
   }
 
   function toggle(val: string) {
-    // null means all are implicitly selected — expand to full list first
     const base = selected === null ? [...options] : selected;
     const next = base.includes(val) ? base.filter((v) => v !== val) : [...base, val];
-    // If all options are checked, collapse back to null (Select All state)
     onChange(next.length === options.length ? null : next);
   }
+
+  function addDate(v: string) {
+    if (!v || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+    if (dateValues?.includes(v)) return;
+    if ((dateValues?.length ?? 0) >= 5) return;
+    onDatesChange?.([...(dateValues ?? []), v]);
+    setLocalDate('');
+  }
+
+  function removeDate(v: string) {
+    onDatesChange?.((dateValues ?? []).filter((d) => d !== v));
+  }
+
+  const dateActive = (dateValues?.length ?? 0) > 0;
 
   return (
     <div ref={ref} className="relative inline-flex">
       <button
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
-        className={`p-0.5 rounded transition-colors ${active ? 'text-indigo-400' : 'text-zinc-400 hover:text-zinc-200'}`}
+        className={`p-0.5 rounded transition-colors ${active || dateActive ? 'text-indigo-400' : 'text-zinc-400 hover:text-zinc-200'}`}
         title="Filter"
       >
         <ListFilter size={11} />
@@ -62,19 +72,42 @@ export function ColumnFilter({ options, selected, onChange, align = 'left', date
 
       {open && (
         <div className={`absolute ${align === 'right' ? 'right-0' : 'left-0'} top-full mt-1 z-50 w-max min-w-[14rem] max-w-[44rem] bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl`}>
-          {onDateChange && (
+          {onDatesChange && (
             <div className="px-3 pt-3 pb-2 border-b border-zinc-800">
               <label className="block text-[10px] text-zinc-500 mb-1 uppercase tracking-wide">Exact date</label>
               <input
                 type="date"
                 value={localDate}
-                onChange={(e) => setLocalDate(e.target.value)}
-                onBlur={(e) => {
+                onChange={(e) => {
                   const v = e.target.value;
-                  if (v === '' || /^\d{4}-\d{2}-\d{2}$/.test(v)) onDateChange!(v);
+                  setLocalDate(v);
+                  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) addDate(v);
                 }}
                 className="w-full px-2 py-1 text-xs bg-zinc-800 border border-zinc-700 rounded text-zinc-200 focus:outline-none focus:border-indigo-500 [color-scheme:dark]"
               />
+              {dateActive && (
+                <div className="flex flex-col gap-1 mt-2">
+                  {dateValues!.map((d) => (
+                    <div key={d} className="flex items-center justify-between px-2 py-1 rounded bg-indigo-500/20 border border-indigo-500/40">
+                      <span className="text-xs text-indigo-300 font-mono">{d}</span>
+                      <button onClick={(e) => { e.stopPropagation(); removeDate(d); }} className="text-indigo-400 hover:text-indigo-200 ml-3">
+                        <X size={10} />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between mt-0.5">
+                    {(dateValues?.length ?? 0) >= 5 && (
+                      <p className="text-[10px] text-zinc-500">Max 5 dates</p>
+                    )}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDatesChange!([]); }}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-300 flex items-center gap-0.5 ml-auto"
+                    >
+                      <X size={9} /> Clear all
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
           {options.length > 8 && (
@@ -88,28 +121,37 @@ export function ColumnFilter({ options, selected, onChange, align = 'left', date
               />
             </div>
           )}
-          <div className="p-1.5 max-h-60 overflow-y-auto">
-            <label className="flex items-center gap-2.5 px-3 py-1.5 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-400">
-              <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-indigo-500 shrink-0" />
-              (Select All)
-            </label>
-            {visible.map((opt) => (
-              <label key={opt} className="flex items-center gap-2.5 px-3 py-1.5 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-300">
-                <input
-                  type="checkbox"
-                  checked={selected === null || selected.includes(opt)}
-                  onChange={() => toggle(opt)}
-                  className="accent-indigo-500 shrink-0"
-                />
-                {opt}
+          {options.length > 0 && (
+            <div className="p-1.5 max-h-60 overflow-y-auto">
+              <label className="flex items-center gap-2.5 px-3 py-1.5 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-400">
+                <input type="checkbox" checked={allChecked} onChange={toggleAll} className="accent-indigo-500 shrink-0" />
+                (Select All)
               </label>
-            ))}
-          </div>
-          {active && (
-            <div className="border-t border-zinc-800 px-3 py-2">
-              <button onClick={() => onChange(null)} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
-                <X size={10} /> Clear
-              </button>
+              {visible.map((opt) => (
+                <label key={opt} className="flex items-center gap-2.5 px-3 py-1.5 rounded hover:bg-zinc-800 cursor-pointer text-xs text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={selected === null || selected.includes(opt)}
+                    onChange={() => toggle(opt)}
+                    className="accent-indigo-500 shrink-0"
+                  />
+                  {opt}
+                </label>
+              ))}
+            </div>
+          )}
+          {(active || dateActive) && (
+            <div className="border-t border-zinc-800 px-3 py-2 flex items-center gap-3">
+              {active && (
+                <button onClick={() => onChange(null)} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
+                  <X size={10} /> Clear years
+                </button>
+              )}
+              {dateActive && (
+                <button onClick={() => onDatesChange!([])} className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300">
+                  <X size={10} /> Clear dates
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -150,8 +192,8 @@ export interface ColHeaderProps {
   filterSelected?: string[] | null;
   onFilterChange?: (vals: string[] | null) => void;
   filterAlign?: 'left' | 'right';
-  filterDateValue?: string;
-  onFilterDateChange?: (date: string) => void;
+  filterDateValues?: string[];
+  onFilterDatesChange?: (dates: string[]) => void;
   align?: 'left' | 'right' | 'center';
   wrap?: boolean;
   className?: string;
@@ -163,7 +205,7 @@ export interface ColHeaderProps {
 export function ColHeader({
   label, col, sortCol, sortDir, onSort,
   filterOptions, filterSelected, onFilterChange, filterAlign = 'left',
-  filterDateValue, onFilterDateChange,
+  filterDateValues, onFilterDatesChange,
   align = 'left', wrap = false, className = '', width, minWidth = 40, onWidthChange,
 }: ColHeaderProps) {
   const isActive = col && sortCol === col;
@@ -175,9 +217,9 @@ export function ColHeader({
     </button>
   ) : null;
 
-  const filterActive = (filterDateValue ?? '') !== '' || (filterSelected !== null && (filterSelected?.length ?? 0) > 0 && (filterSelected?.length ?? 0) < (filterOptions?.length ?? 0));
-  const FilterBtn = (filterOptions?.length && onFilterChange) || onFilterDateChange
-    ? <span className="shrink-0"><ColumnFilter options={filterOptions ?? []} selected={filterSelected ?? null} onChange={onFilterChange ?? (() => {})} align={filterAlign} dateValue={filterDateValue} onDateChange={onFilterDateChange} /></span>
+  const filterActive = (filterDateValues?.length ?? 0) > 0 || (filterSelected !== null && (filterSelected?.length ?? 0) > 0 && (filterSelected?.length ?? 0) < (filterOptions?.length ?? 0));
+  const FilterBtn = (filterOptions?.length && onFilterChange) || onFilterDatesChange
+    ? <span className="shrink-0"><ColumnFilter options={filterOptions ?? []} selected={filterSelected ?? null} onChange={onFilterChange ?? (() => {})} align={filterAlign} dateValues={filterDateValues} onDatesChange={onFilterDatesChange} /></span>
     : null;
 
   const labelActive = filterActive;

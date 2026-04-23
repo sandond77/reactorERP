@@ -18,9 +18,9 @@ const slabsQuerySchema = z.object({
   purchase_years: z.string().optional(),
   listed_years: z.string().optional(),
   sold_years: z.string().optional(),
-  purchase_date: z.string().optional(),
-  listed_date: z.string().optional(),
-  sold_date: z.string().optional(),
+  purchase_dates: z.string().optional(),
+  listed_dates: z.string().optional(),
+  sold_dates: z.string().optional(),
 });
 
 // Returns undefined when param not sent (no filter), [] when sent as empty (filter to nothing)
@@ -48,9 +48,9 @@ export async function listSlabs(req: Request, res: Response, next: NextFunction)
       splitCSV(q.sold_years),
       q.personal_collection,
       q.for_sale,
-      q.purchase_date,
-      q.listed_date,
-      q.sold_date
+      splitCSV(q.purchase_dates),
+      splitCSV(q.listed_dates),
+      splitCSV(q.sold_dates)
     );
     res.json(result);
   } catch (err) { next(err); }

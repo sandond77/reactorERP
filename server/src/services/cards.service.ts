@@ -637,9 +637,9 @@ export async function listRawFlat(
   purchaseYears?: string[],
   listedYears?: string[],
   soldYears?: string[],
-  purchaseDate?: string,
-  listedDate?: string,
-  soldDate?: string,
+  purchaseDates?: string[],
+  listedDates?: string[],
+  soldDates?: string[],
 ) {
   const offset = getPaginationOffset(pagination.page, pagination.limit);
   const dir = sortDir === 'asc' ? sql`ASC` : sql`DESC`;
@@ -654,12 +654,12 @@ export async function listRawFlat(
 
   const conditionIn   = filterConditions === undefined ? sql`` : filterConditions.length ? sql`AND ci.condition IN (${sql.join(filterConditions.map((v) => sql.val(v)))})` : sql`AND 1=0`;
   const listedCond    = isListed === 'yes' ? sql`AND l.id IS NOT NULL` : isListed === 'no' ? sql`AND l.id IS NULL` : sql``;
-  const purchaseYearIn = purchaseYears === undefined ? sql`` : purchaseYears.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at)::int::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql`AND 1=0`;
-  const listedYearIn   = listedYears   === undefined ? sql`` : listedYears.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at)::int::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
-  const soldYearIn     = soldYears     === undefined ? sql`` : soldYears.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at)::int::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
-  const purchaseDateCond = purchaseDate ? sql`AND ci.purchased_at = ${purchaseDate}::date` : sql``;
-  const listedDateCond   = listedDate   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.listed_at::date = ${listedDate}::date)` : sql``;
-  const soldDateCond     = soldDate     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND s2.sold_at::date = ${soldDate}::date)` : sql``;
+  const purchaseYearIn = purchaseYears === undefined ? sql`` : purchaseYears.length ? sql`AND EXTRACT(YEAR FROM ci.purchased_at AT TIME ZONE 'UTC')::int::text IN (${sql.join(purchaseYears.map((v) => sql.val(v)))})` : sql`AND 1=0`;
+  const listedYearIn   = listedYears   === undefined ? sql`` : listedYears.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND EXTRACT(YEAR FROM l2.listed_at AT TIME ZONE 'UTC')::int::text IN (${sql.join(listedYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
+  const soldYearIn     = soldYears     === undefined ? sql`` : soldYears.length     ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND EXTRACT(YEAR FROM s2.sold_at AT TIME ZONE 'UTC')::int::text IN (${sql.join(soldYears.map((v) => sql.val(v)))}))` : sql`AND 1=0`;
+  const purchaseDateCond = purchaseDates?.length ? sql`AND (ci.purchased_at AT TIME ZONE 'UTC')::date IN (${sql.join(purchaseDates.map((v) => sql`${v}::date`))})` : sql``;
+  const listedDateCond   = listedDates?.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND (l2.listed_at AT TIME ZONE 'UTC')::date IN (${sql.join(listedDates.map((v) => sql`${v}::date`))}))` : sql``;
+  const soldDateCond     = soldDates?.length      ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND (s2.sold_at AT TIME ZONE 'UTC')::date IN (${sql.join(soldDates.map((v) => sql`${v}::date`))}))` : sql``;
   const searchCond = fuzzyRawClause(search);
 
   const BASE_FROM = sql`

@@ -135,9 +135,9 @@ const rawFlatQuerySchema = z.object({
   purchase_years: z.string().optional(),
   listed_years:   z.string().optional(),
   sold_years:     z.string().optional(),
-  purchase_date:  z.string().optional(),
-  listed_date:    z.string().optional(),
-  sold_date:      z.string().optional(),
+  purchase_dates: z.string().optional(),
+  listed_dates:   z.string().optional(),
+  sold_dates:     z.string().optional(),
 });
 
 function splitCSVRaw(val?: string): string[] | undefined {
@@ -160,9 +160,9 @@ export async function listRawFlat(req: Request, res: Response, next: NextFunctio
       splitCSVRaw(q.purchase_years),
       splitCSVRaw(q.listed_years),
       splitCSVRaw(q.sold_years),
-      q.purchase_date,
-      q.listed_date,
-      q.sold_date,
+      splitCSVRaw(q.purchase_dates),
+      splitCSVRaw(q.listed_dates),
+      splitCSVRaw(q.sold_dates),
     );
     res.json(result);
   } catch (err) { next(err); }

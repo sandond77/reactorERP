@@ -118,9 +118,9 @@ const OVERALL_FILTER_DEFAULTS = {
   fPurchYear: null as string[] | null,
   fListYear: null as string[] | null,
   fSoldYear: null as string[] | null,
-  fPurchDate: '',
-  fListDate: '',
-  fSoldDate: '',
+  fPurchDates: [] as string[],
+  fListDates: [] as string[],
+  fSoldDates: [] as string[],
   search: '',
 };
 
@@ -173,13 +173,13 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
   const [fPurchYear, setFPurchYear]         = useState<string[] | null>(saved.fPurchYear);
   const [fListYear, setFListYear]     = useState<string[] | null>(saved.fListYear);
   const [fSoldYear, setFSoldYear]     = useState<string[] | null>(saved.fSoldYear);
-  const [fPurchDate, setFPurchDate]   = useState(saved.fPurchDate);
-  const [fListDate, setFListDate]     = useState(saved.fListDate);
-  const [fSoldDate, setFSoldDate]     = useState(saved.fSoldDate);
+  const [fPurchDates, setFPurchDates] = useState<string[]>(saved.fPurchDates);
+  const [fListDates, setFListDates]   = useState<string[]>(saved.fListDates);
+  const [fSoldDates, setFSoldDates]   = useState<string[]>(saved.fSoldDates);
 
   useEffect(() => {
-    saveFilters(filterKey, { sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonal, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search });
-  }, [filterKey, sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonal, fPurchYear, fListYear, fSoldYear, fPurchDate, fListDate, fSoldDate, search]);
+    saveFilters(filterKey, { sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonal, fPurchYear, fListYear, fSoldYear, fPurchDates, fListDates, fSoldDates, search });
+  }, [filterKey, sortCol, sortDir, statusFilter, fCompany, fGrade, fListed, fCardShow, fPersonal, fPurchYear, fListYear, fSoldYear, fPurchDates, fListDates, fSoldDates, search]);
 
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const handleSearchChange = useCallback((val: string) => {
@@ -226,9 +226,9 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     purchase_years: activeFilter(fPurchYear, filterOptions?.purchase_years)?.join(','),
     listed_years:   activeFilter(fListYear,  filterOptions?.listed_years)?.join(','),
     sold_years:     activeFilter(fSoldYear,  filterOptions?.sold_years)?.join(','),
-    purchase_date:  fPurchDate || undefined,
-    listed_date:    fListDate  || undefined,
-    sold_date:      fSoldDate  || undefined,
+    purchase_dates: fPurchDates.length ? fPurchDates.join(',') : undefined,
+    listed_dates:   fListDates.length  ? fListDates.join(',')  : undefined,
+    sold_dates:     fSoldDates.length  ? fSoldDates.join(',')  : undefined,
   };
 
   const { data, isLoading } = useQuery<PaginatedResult<SlabRow>>({
@@ -251,13 +251,13 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     enabled: cardShowMode && cardType === 'raw',
   });
 
-  const hasActiveFilters = fPersonal || fPurchDate || fListDate || fSoldDate ||
+  const hasActiveFilters = fPersonal || fPurchDates.length || fListDates.length || fSoldDates.length ||
     [fCompany, fGrade, fListed, fCardShow, fPurchYear, fListYear, fSoldYear].some((f) => f !== null && f.length > 0);
 
   function clearAllFilters() {
     setFCompany(null); setFGrade(null); setFListed(null); setFCardShow(null); setFPersonal(false);
     setFPurchYear(null); setFListYear(null); setFSoldYear(null);
-    setFPurchDate(''); setFListDate(''); setFSoldDate('');
+    setFPurchDates([]); setFListDates([]); setFSoldDates([]);
     setPage(1);
   }
 
@@ -384,14 +384,14 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                 <ColHeader label="After Fees"        col="after_ebay"        {...sh} {...rz('after_ebay')} align="right" minWidth={MINS.after_ebay} wrap />
                 <ColHeader label="Net"               col="net"               {...sh} {...rz('net')} align="right" minWidth={MINS.net} />
                 <ColHeader label="Raw Purchase Date" col="raw_purchase_date" {...sh} {...rz('raw_purchase_date')} minWidth={MINS.raw_purchase_date} wrap
-                  filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setPage(1); }}
-                  filterDateValue={fPurchDate} onFilterDateChange={(d) => { setFPurchDate(d); setPage(1); }} />
+                  filterOptions={filterOptions?.purchase_years} filterSelected={fPurchYear} onFilterChange={(v) => { setFPurchYear(v); setFPurchDates([]); setPage(1); }}
+                  filterDateValues={fPurchDates} onFilterDatesChange={(d) => { setFPurchDates(d); if (d.length) setFPurchYear(null); setPage(1); }} />
                 <ColHeader label="Date Listed"       col="date_listed"       {...sh} {...rz('date_listed')} minWidth={MINS.date_listed} wrap
-                  filterOptions={filterOptions?.listed_years}   filterSelected={fListYear}  onFilterChange={(v) => { setFListYear(v); setPage(1); }}
-                  filterDateValue={fListDate} onFilterDateChange={(d) => { setFListDate(d); setPage(1); }} />
+                  filterOptions={filterOptions?.listed_years}   filterSelected={fListYear}  onFilterChange={(v) => { setFListYear(v); setFListDates([]); setPage(1); }}
+                  filterDateValues={fListDates} onFilterDatesChange={(d) => { setFListDates(d); if (d.length) setFListYear(null); setPage(1); }} />
                 <ColHeader label="Date Sold"         col="date_sold"         {...sh} {...rz('date_sold')} minWidth={MINS.date_sold} wrap
-                  filterOptions={filterOptions?.sold_years}     filterSelected={fSoldYear}  onFilterChange={(v) => { setFSoldYear(v); setPage(1); }}
-                  filterDateValue={fSoldDate} onFilterDateChange={(d) => { setFSoldDate(d); setPage(1); }} />
+                  filterOptions={filterOptions?.sold_years}     filterSelected={fSoldYear}  onFilterChange={(v) => { setFSoldYear(v); setFSoldDates([]); setPage(1); }}
+                  filterDateValues={fSoldDates} onFilterDatesChange={(d) => { setFSoldDates(d); if (d.length) setFSoldYear(null); setPage(1); }} />
                 <ColHeader label="% ROI"             col="roi_pct"           {...sh} {...rz('roi_pct')} align="right" minWidth={MINS.roi_pct} />
                 <ColHeader label="Notes"                                     {...sh} {...rz('notes')} minWidth={MINS.notes} />
               </tr>
