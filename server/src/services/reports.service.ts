@@ -87,7 +87,7 @@ export async function getPnlReport(
       .select([
         sql<string>`cs.name || ' (' || TO_CHAR(cs.show_date, 'Mon DD, YYYY') || ')'`.as('label'),
         sql<string>`cs.id::text`.as('show_id'),
-        'cs.location as show_location' as any,
+        sql<string | null>`cs.location`.as('show_location'),
         sql<number>`COUNT(*)::int`.as('num_sales'),
         sql<number>`SUM(s.sale_price)::int`.as('total_revenue'),
         sql<number>`SUM(s.platform_fees + s.shipping_cost)::int`.as('total_fees'),
