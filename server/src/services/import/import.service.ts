@@ -502,9 +502,15 @@ async function executeGradedImport(
       // Determine lifecycle state from sheet columns
       const soldAtRaw  = row['sold_at']?.trim();
       const listedRaw  = row['is_listed']?.trim().toLowerCase();
-      const isSold     = !!soldAtRaw && parseDate(soldAtRaw) !== null;
+      const rawListingUrl = row['listing_url']?.trim() || null;
+      // An eBay order URL (mesh/ord/details, /ord/, etc.) means the item was sold,
+      // not that it's an active listing — even if sold_at is missing.
+      const urlIsOrder = !!rawListingUrl && isEbayOrderUrl(rawListingUrl);
+      const hasSalePrice = toCents(row['sale_price'] ?? '0') > 0;
+      const isSold     = (!!soldAtRaw && parseDate(soldAtRaw) !== null) || (urlIsOrder && hasSalePrice);
       const hasListPrice = toCents(row['list_price'] ?? '0') > 0;
-      const isListed   = !isSold && (listedRaw === 'yes' || listedRaw === 'true' || listedRaw === '1' || hasListPrice);
+      // Never create an active listing when the URL is an eBay order URL
+      const isListed   = !isSold && !urlIsOrder && (listedRaw === 'yes' || listedRaw === 'true' || listedRaw === '1' || hasListPrice);
       const cardStatus = isSold ? 'sold' : 'graded';
 
       const setName    = row['set_name']?.trim()     ?? null;
@@ -568,8 +574,8 @@ async function executeGradedImport(
         const platformFees = salePriceRaw > 0 && afterFeesRaw > 0
           ? Math.max(0, salePriceRaw - afterFeesRaw)
           : 0;
-        const soldAt = parseDate(soldAtRaw)!;
-        const listingUrlForSale = row['listing_url']?.trim() || undefined;
+        const soldAt = parseDate(soldAtRaw) ?? new Date();
+        const listingUrlForSale = rawListingUrl ?? undefined;
         const platform = normalizePlatform(row['platform']?.trim(), listingUrlForSale, existingNotes ?? undefined);
 
         // Auto-link to a card show if sold_at falls within a show's date range,
@@ -600,7 +606,8 @@ async function executeGradedImport(
         let soldListingId: string | null = null;
         const soldListPrice = toCents(row['list_price'] ?? '0');
         if (soldListPrice > 0) {
-          const listingUrl = row['listing_url']?.trim() || null;
+          // For order URLs, store null as ebay_listing_url (the order link goes to order_details_link)
+          const listingUrl = urlIsOrder ? null : rawListingUrl;
           const soldListing = await db.insertInto('listings').values({
             user_id:          userId,
             card_instance_id: ci.id,
@@ -631,7 +638,7 @@ async function executeGradedImport(
           shipping_cost:    toCents(row['shipping_cost'] ?? '0'),
           currency,
           total_cost_basis: purchaseCost + gradingCost,
-          order_details_link: row['listing_url']?.trim() || null,
+          order_details_link: rawListingUrl,
           unique_id:        uniqueId,
           unique_id_2:      null,
           sold_at:          soldAt,
@@ -642,7 +649,7 @@ async function executeGradedImport(
       if (isListed) {
         const listPrice = toCents(row['list_price'] ?? '0');
         const listedAt  = parseDate(row['listed_at']);
-        const listingUrl = row['listing_url']?.trim() || null;
+        const listingUrl = rawListingUrl;
         const platform  = normalizePlatform(row['platform']?.trim(), listingUrl ?? undefined, existingNotes ?? undefined);
 
         await db.insertInto('listings').values({

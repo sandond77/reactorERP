@@ -9,6 +9,19 @@ import { formatCurrency, formatCertNumber } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import toast from 'react-hot-toast';
+import { AlertTriangle } from 'lucide-react';
+
+function isEbayOrderUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  return u.includes('ebay.') && (
+    u.includes('/sh/ord') ||
+    u.includes('/vod/fetchorderdetails') ||
+    u.includes('/mesh/') ||
+    u.includes('/ord/') ||
+    /orderid=/i.test(u) ||
+    /order_id=/i.test(u)
+  );
+}
 
 interface CertDetail {
   cert_number: string | null;
@@ -823,8 +836,16 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
           value={setGroupName} onChange={(e) => setSetGroupName(e.target.value)} autoFocus />
       )}
 
-      <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
-        value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
+      <div>
+        <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
+          value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
+        {ebayUrl && isEbayOrderUrl(ebayUrl) && (
+          <p className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-400">
+            <AlertTriangle size={11} />
+            This looks like a sold order URL, not a listing URL. Listing URLs contain <span className="font-mono">/itm/</span>.
+          </p>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <Input label={listingMode === 'set' ? 'Set Price (total)' : 'List Price'} type="number" step="0.01" min="0" placeholder="0.00"
@@ -943,8 +964,16 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
           value={setName} onChange={(e) => setSetName(e.target.value)} />
       )}
 
-      <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
-        value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
+      <div>
+        <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
+          value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
+        {ebayUrl && isEbayOrderUrl(ebayUrl) && (
+          <p className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-400">
+            <AlertTriangle size={11} />
+            This looks like a sold order URL, not a listing URL. Listing URLs contain <span className="font-mono">/itm/</span>.
+          </p>
+        )}
+      </div>
 
       <Input label={isSet ? 'Set Price (total)' : 'List Price'} type="number" step="0.01" min="0" placeholder="0.00"
         value={price} onChange={(e) => setPrice(e.target.value)} />
@@ -1240,9 +1269,17 @@ export function Listings() {
                       </td>
                       <td className="px-3 py-2 text-center">
                         {row.ebay_listing_url ? (
-                          <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors">
-                            <ExternalLink size={13} />
-                          </a>
+                          isEbayOrderUrl(row.ebay_listing_url) ? (
+                            <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                              title="Order URL — this may already be sold"
+                              className="inline-flex text-amber-400 hover:text-amber-300 transition-colors">
+                              <AlertTriangle size={13} />
+                            </a>
+                          ) : (
+                            <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors">
+                              <ExternalLink size={13} />
+                            </a>
+                          )
                         ) : '—'}
                       </td>
                       <td className="px-3 py-2 text-center">
@@ -1299,9 +1336,17 @@ export function Listings() {
                         {/* Link */}
                         <td className="px-3 py-1.5 text-center">
                           {cert.ebay_listing_url ? (
-                            <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors">
-                              <ExternalLink size={12} />
-                            </a>
+                            isEbayOrderUrl(cert.ebay_listing_url) ? (
+                              <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                                title="Order URL — this may already be sold"
+                                className="inline-flex text-amber-400 hover:text-amber-300 transition-colors">
+                                <AlertTriangle size={12} />
+                              </a>
+                            ) : (
+                              <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors">
+                                <ExternalLink size={12} />
+                              </a>
+                            )
                           ) : '—'}
                         </td>
                         <td colSpan={2} />
