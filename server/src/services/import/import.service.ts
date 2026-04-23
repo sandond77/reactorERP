@@ -503,7 +503,8 @@ async function executeGradedImport(
       const soldAtRaw  = row['sold_at']?.trim();
       const listedRaw  = row['is_listed']?.trim().toLowerCase();
       const isSold     = !!soldAtRaw && parseDate(soldAtRaw) !== null;
-      const isListed   = !isSold && (listedRaw === 'yes' || listedRaw === 'true' || listedRaw === '1');
+      const hasListPrice = toCents(row['list_price'] ?? '0') > 0;
+      const isListed   = !isSold && (listedRaw === 'yes' || listedRaw === 'true' || listedRaw === '1' || hasListPrice);
       const cardStatus = isSold ? 'sold' : 'graded';
 
       const setName    = row['set_name']?.trim()     ?? null;
