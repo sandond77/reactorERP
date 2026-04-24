@@ -90,7 +90,6 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
     game:        row.game ?? 'pokemon',
-    sku:         row.sku ?? '',
     card_name:   row.card_name ?? '',
     set_name:    row.set_name ?? '',
     set_code:    row.set_code ?? '',
@@ -167,7 +166,6 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
         const result = await api.post('/catalog/link-by-name', {
           card_name:   form.card_name,
           game:        form.game,
-          sku:         form.sku || null,
           set_name:    form.set_name,
           set_code:    form.set_code || null,
           card_number: form.card_number || null,
@@ -179,7 +177,6 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
       } else {
         await api.patch(`/catalog/${row.catalog_id}`, {
           game:        form.game,
-          sku:         form.sku || undefined,
           card_name:   form.card_name || undefined,
           set_name:    form.set_name || undefined,
           set_code:    form.set_code || undefined,
@@ -283,13 +280,12 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
             )}
           </div>
 
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Card #</label>
-            <input className={inputCls} value={form.card_number} onChange={field('card_number')} placeholder="required for Part #" />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Part #</label>
-            <input className={inputCls} value={form.sku} onChange={field('sku')} placeholder={form.set_code && form.card_number ? 'auto-generated' : 'needs Set + Card #'} />
+          <div className="col-span-2">
+            <div className="flex items-baseline justify-between mb-1">
+              <label className="text-xs text-zinc-400">Card #</label>
+              <span className="text-[10px] text-zinc-600">number (015) or name (Gengar) — used to generate Part #</span>
+            </div>
+            <input className={inputCls} value={form.card_number} onChange={field('card_number')} placeholder="e.g. 015 or Gengar" />
           </div>
           <div className="col-span-2">
             <label className="block text-xs text-zinc-400 mb-1">Card Name</label>

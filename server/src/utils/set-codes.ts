@@ -498,6 +498,8 @@ export async function buildLookupWithDbAliases(
  */
 export function generatePartNumber(language: string, setCode: string, cardNumber: string): string {
   const rawNum = cardNumber.split('/')[0].trim();
-  const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
+  const digitsOnly = rawNum.replace(/[^0-9]/g, '');
+  // If the value has digits, zero-pad them; otherwise use it as a reference name (e.g. "GENGAR")
+  const paddedNum = digitsOnly ? digitsOnly.padStart(3, '0') : rawNum.toUpperCase().replace(/[^A-Z0-9]/g, '');
   return `PKMN-${language}-${setCode}-${paddedNum}`;
 }
