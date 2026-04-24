@@ -261,30 +261,28 @@ export function Reports() {
         </div>
       </div>
 
-      {/* Card type filter — below the hr, hidden for card show channel */}
-      {channel !== 'card_show' && (
-        <div className="flex items-center justify-between -mt-3">
-          <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Card Type</p>
-          <div className="flex gap-1">
-            {([
-              { value: 'all',      label: 'All' },
-              { value: 'graded',   label: 'Graded' },
-              { value: 'ungraded', label: 'Ungraded' },
-            ] as { value: CardType; label: string }[]).map(({ value, label }) => (
-              <button
-                key={value}
-                onClick={() => setCardType(value)}
-                className={cn(
-                  'px-3 py-0.5 rounded text-xs font-medium transition-colors',
-                  cardType === value ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+      {/* Card type filter */}
+      <div className="flex items-center justify-between -mt-3">
+        <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Card Type</p>
+        <div className="flex gap-1">
+          {([
+            { value: 'all',      label: 'All' },
+            { value: 'graded',   label: 'Graded' },
+            { value: 'ungraded', label: 'Ungraded' },
+          ] as { value: CardType; label: string }[]).map(({ value, label }) => (
+            <button
+              key={value}
+              onClick={() => setCardType(value)}
+              className={cn(
+                'px-3 py-0.5 rounded text-xs font-medium transition-colors',
+                cardType === value ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+              )}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       {/* All-time summary cards */}
       {yearlyData?.totals && (
