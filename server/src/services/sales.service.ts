@@ -226,8 +226,12 @@ export async function deleteSale(userId: string, saleId: string) {
   await logAudit(userId, 'sales', saleId, 'deleted', sale, null);
   await db.deleteFrom('sales').where('id', '=', saleId).where('user_id', '=', userId).execute();
 
-  // Revert card status back to graded
-  await db.updateTable('card_instances').set({ status: 'graded' }).where('id', '=', sale.card_instance_id).execute();
+  // Determine correct revert status: graded slabs → 'graded', raw cards → 'raw_for_sale'
+  const hasSlab = await db.selectFrom('slab_details').select('card_instance_id')
+    .where('card_instance_id', '=', sale.card_instance_id).executeTakeFirst();
+  const revertStatus = hasSlab ? 'graded' : 'raw_for_sale';
+
+  await db.updateTable('card_instances').set({ status: revertStatus }).where('id', '=', sale.card_instance_id).execute();
 
   // Revert listing status if linked
   if (sale.listing_id) {
