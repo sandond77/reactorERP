@@ -1655,6 +1655,7 @@ add_graded_card: grading company, grade (number), cert number, purchase_cost (in
   Card name: if lookup_catalog returned an established_name for this card, use that exactly as card_name_override. Only build a PSA-format name when there is NO catalog match — format: ALL CAPS "YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION". Example: "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". No "#", spell out "1ST EDITION", no abbreviations. Never ask user for format.
 
 add_card_to_purchase: card name, purchase_cost (cents), condition, decision.
+  Card name: if lookup_catalog returned an established_name for this card, use that exactly as card_name_override. If catalog match exists but no established_name, leave card_name_override empty (catalog name will be used). Only set card_name_override when there is no catalog match.
 
 record_sale: card_instance_id (from list_inventory), platform, sale_price (dollars e.g. 150.00).
 
