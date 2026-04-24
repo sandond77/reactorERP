@@ -496,7 +496,6 @@ export function Intake() {
     page,
     pageSize: 50,
     search:   debouncedSearch || undefined,
-    status:   'ordered',
     type:     fType ?? undefined,
   };
 
@@ -608,7 +607,7 @@ export function Intake() {
                 <ColHeader label="Status"     col="status"          {...sh} {...rz('status')}  minWidth={MINS.status} />
                 <ColHeader label="Purchased"  col="purchased_at"    {...sh} {...rz('bought')}  minWidth={MINS.bought} />
                 <ColHeader label="Inspected"  col="inspected_count"  {...sh} {...rz('inspect')}   minWidth={MINS.inspect}   align="right" />
-                <th style={{ width: MINS.receipt + 'px', minWidth: MINS.receipt + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide text-xs">Receipt</th>
+                <th style={{ width: MINS.receipt + 'px', minWidth: MINS.receipt + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide text-xs">Received?</th>
                 <th style={{ width: MINS.actions }} />
               </tr>
             </thead>
@@ -678,7 +677,7 @@ export function Intake() {
 
       {/* Pagination */}
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{data.total} purchase{data.total !== 1 ? 's' : ''}</span>
           <div className="flex items-center gap-2">
             <button disabled={page === 1} onClick={() => setPage((p) => p - 1)}

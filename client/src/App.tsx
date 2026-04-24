@@ -82,7 +82,8 @@ export default function App() {
               <Route path="/expenses" element={<Expenses />} />
               <Route path="/audit/log" element={<ActionLog />} />
               <Route path="/audit/auditing" element={<Auditing />} />
-              <Route path="/reorder-thresholds" element={<ReorderThresholds />} />
+              <Route path="/alerts" element={<ReorderThresholds />} />
+              <Route path="/reorder-thresholds" element={<Navigate to="/alerts" replace />} />
               <Route path="/team" element={<Team />} />
             </Route>
             <Route path="/join/:token" element={<JoinOrg />} />

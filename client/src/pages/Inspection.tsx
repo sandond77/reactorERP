@@ -226,7 +226,7 @@ export function Inspection() {
 
       {/* Pagination */}
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{data.total} purchase{data.total !== 1 ? 's' : ''}</span>
           <div className="flex items-center gap-2">
             <button disabled={page === 1} onClick={() => setPage((p) => p - 1)}

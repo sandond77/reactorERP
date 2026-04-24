@@ -1475,10 +1475,12 @@ export async function chatWithAgent(
   spreadsheetText?: string,
   actorName?: string,
 ): Promise<{ reply: string; mutated: string[] }> {
-  // Store new images for this user; fall back to any images from a previous turn in this conversation
+  // Store new images for this user so save_images can retrieve them later
   if (images?.length) pendingImages.set(userId, images);
+  // Only attach images to the API request when freshly uploaded this turn — don't re-send pending
+  // images from a prior turn or the agent will re-read the receipt/photo and create duplicate records
+  const hasImages = !!(images?.length);
   const sessionImages = pendingImages.get(userId);
-  const hasImages = !!sessionImages?.length;
 
   // Pre-screen + inventory summary in parallel to avoid sequential round trips
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');

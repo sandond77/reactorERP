@@ -781,7 +781,12 @@ async function executeRawPurchaseImport(
         return s + (isNaN(cost) ? 0 : cost);
       }, 0);
 
-      const rp = await createRawPurchase(userId, {
+      const totalQuantity = group.rows.reduce((s, r) => {
+        const q = parseInt(r['quantity'] ?? '1', 10);
+        return s + (isNaN(q) ? 1 : q);
+      }, 0);
+
+      await createRawPurchase(userId, {
         type: purchaseType,
         source: source ?? undefined,
         order_number: orderNumber ?? undefined,
@@ -790,58 +795,14 @@ async function executeRawPurchaseImport(
         set_name:    group.rows.length === 1 ? (firstRow['set_name']?.trim()  || undefined) : undefined,
         card_number: group.rows.length === 1 ? (firstRow['card_number']?.trim() || undefined) : undefined,
         total_cost_usd: Math.round(totalCostUsd * 100),
-        card_count:  group.rows.length,
-        status:      'received',
+        card_count:  totalQuantity,
+        status:      'ordered',
         purchased_at: purchasedAt?.toISOString(),
-        received_at:  purchasedAt?.toISOString(),
+        received_at:  undefined,
       });
 
-      for (let j = 0; j < group.rows.length; j++) {
-        const rowIndex = group.indices[j];
-        const row = group.rows[j];
-        try {
-          const cardName = row['card_name']?.trim();
-          if (!cardName) throw new Error('card_name is required');
-
-          const quantity = parseInt(row['quantity'] ?? '1', 10);
-          const purchaseCost = toCents(row['cost'] ?? '0');
-          const currency = normalizeCurrency(row['currency']);
-
-          await db.insertInto('card_instances').values({
-            user_id:              userId,
-            catalog_id:           null,
-            card_name_override:   cardName,
-            set_name_override:    row['set_name']?.trim()    ?? null,
-            card_number_override: row['card_number']?.trim() ?? null,
-            card_game:            'pokemon',
-            language,
-            variant:              null,
-            rarity:               null,
-            notes:                row['notes']?.trim() ?? null,
-            purchase_type:        'raw',
-            status:               'purchased_raw',
-            quantity:             isNaN(quantity) ? 1 : quantity,
-            purchase_cost:        purchaseCost,
-            currency,
-            source_link:          null,
-            order_number:         orderNumber,
-            condition:            normalizeCondition(row['condition']),
-            condition_notes:      null,
-            image_front_url:      null,
-            image_back_url:       null,
-            purchased_at:         purchasedAt,
-            raw_purchase_id:      rp.id,
-            trade_id:             null,
-            location_id:          null,
-            decision:             null,
-          }).execute();
-
-          importedCount++;
-          if (importedCount % 10 === 0) onProgress?.(importedCount);
-        } catch (err) {
-          errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
-        }
-      }
+      importedCount++;
+      if (importedCount % 10 === 0) onProgress?.(importedCount);
     } catch (err) {
       group.indices.forEach((idx) =>
         errorLog.push({ row: idx, message: `Purchase group error: ${err instanceof Error ? err.message : String(err)}` })

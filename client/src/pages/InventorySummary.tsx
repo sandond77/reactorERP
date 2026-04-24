@@ -1649,7 +1649,7 @@ export function InventorySummary() {
         ) : !sortedKeys.length ? (
           <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">No inventory found.</div>
         ) : (
-          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
+          <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Part #"     col="sku"        {...sh} {...rz('sku')} minWidth={MINS.sku} />
@@ -1684,22 +1684,22 @@ export function InventorySummary() {
                   const r = groupRows[0];
                   return (
                     <tr key={key} className="hover:bg-zinc-800/25">
-                      <td className="px-3 py-1.5 font-mono text-[11px]">
+                      <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap">
                         <button onClick={() => setEditPart(r)} className={r.catalog_id ? 'text-indigo-400 hover:text-indigo-300 hover:underline text-left' : 'text-zinc-500 italic hover:text-zinc-300 text-left'}>
                           {sku ?? <span className="italic">unlinked</span>}
                         </button>
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-400 truncate">{setName}</td>
+                      <td className="px-3 py-1.5 text-zinc-400 truncate whitespace-nowrap">{setName}</td>
                       <td className="px-3 py-1.5 text-zinc-200 whitespace-normal break-words">
                         {displayName}
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-500">{lang}</td>
-                      <td className="px-3 py-1.5 text-zinc-500">{rarity}</td>
-                      <td className="px-3 py-1.5 text-zinc-400">{r.company}</td>
-                      <td className="px-3 py-1.5 text-zinc-300 font-medium">{r.grade_label ?? (r.grade != null ? String(r.grade) : '—')}</td>
-                      <td className="px-3 py-1.5 text-right text-zinc-300">{r.qty_total}</td>
-                      <td className="px-3 py-1.5 text-right text-zinc-300">{r.qty_unsold}</td>
-                      <td className="px-3 py-1.5 text-right text-zinc-400">{r.qty_sold}</td>
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{lang}</td>
+                      <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{rarity}</td>
+                      <td className="px-3 py-1.5 text-zinc-400 whitespace-nowrap">{r.company}</td>
+                      <td className="px-3 py-1.5 text-zinc-300 font-medium whitespace-nowrap">{r.grade_label ?? (r.grade != null ? String(r.grade) : '—')}</td>
+                      <td className="px-3 py-1.5 text-right text-zinc-300 whitespace-nowrap">{r.qty_total}</td>
+                      <td className="px-3 py-1.5 text-right text-zinc-300 whitespace-nowrap">{r.qty_unsold}</td>
+                      <td className="px-3 py-1.5 text-right text-zinc-400 whitespace-nowrap">{r.qty_sold}</td>
                     </tr>
                   );
                 }
@@ -1712,7 +1712,7 @@ export function InventorySummary() {
                     className="hover:bg-zinc-800/40 cursor-pointer bg-zinc-900/30"
                     onClick={() => toggleGroup(key)}
                   >
-                    <td className="px-3 py-1.5 font-mono text-[11px]">
+                    <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap">
                       <span className="inline-flex items-center gap-1">
                         {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                         <button
@@ -1723,24 +1723,24 @@ export function InventorySummary() {
                         </button>
                       </span>
                     </td>
-                    <td className="px-3 py-1.5 text-zinc-400 truncate">{setName}</td>
+                    <td className="px-3 py-1.5 text-zinc-400 truncate whitespace-nowrap">{setName}</td>
                     <td className="px-3 py-1.5 text-zinc-200 font-medium whitespace-normal break-words">
                       {displayName}
                     </td>
-                    <td className="px-3 py-1.5 text-zinc-500">{lang}</td>
-                    <td className="px-3 py-1.5 text-zinc-500">{rarity}</td>
-                    <td className="px-3 py-1.5 text-zinc-600">{groupRows.map((r) => r.company).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</td>
-                    <td className="px-3 py-1.5 text-zinc-600">{groupRows.length} grades</td>
-                    <td className="px-3 py-1.5 text-right text-zinc-200 font-semibold">{qty}</td>
-                    <td className="px-3 py-1.5 text-right text-zinc-200 font-semibold">{groupRows.reduce((s, r) => s + r.qty_unsold, 0)}</td>
-                    <td className="px-3 py-1.5 text-right text-zinc-400">{groupRows.reduce((s, r) => s + r.qty_sold, 0)}</td>
+                    <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{lang}</td>
+                    <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{rarity}</td>
+                    <td className="px-3 py-1.5 text-zinc-600 whitespace-nowrap">{groupRows.map((r) => r.company).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</td>
+                    <td className="px-3 py-1.5 text-zinc-600 whitespace-nowrap">{groupRows.length} grades</td>
+                    <td className="px-3 py-1.5 text-right text-zinc-200 font-semibold whitespace-nowrap">{qty}</td>
+                    <td className="px-3 py-1.5 text-right text-zinc-200 font-semibold whitespace-nowrap">{groupRows.reduce((s, r) => s + r.qty_unsold, 0)}</td>
+                    <td className="px-3 py-1.5 text-right text-zinc-400 whitespace-nowrap">{groupRows.reduce((s, r) => s + r.qty_sold, 0)}</td>
                   </tr>,
                   // Expanded grade rows
                   ...(isExpanded
                     ? groupRows.map((r, idx) => (
                         <tr key={`${key}-grade-${idx}`} className="group/subrow hover:bg-zinc-800/15">
-                          <td className="px-3 py-1 pl-8 text-zinc-700 font-mono text-[10px]">↳</td>
-                          <td className="px-3 py-1 text-zinc-600">{setName}</td>
+                          <td className="px-3 py-1 pl-8 text-zinc-700 font-mono text-[10px] whitespace-nowrap">↳</td>
+                          <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{setName}</td>
                           <td className="px-3 py-1 text-zinc-400 whitespace-normal break-words">
                             <span>{r.card_name ?? '—'}</span>
                             {r.catalog_id && (
@@ -1753,13 +1753,13 @@ export function InventorySummary() {
                               </button>
                             )}
                           </td>
-                          <td className="px-3 py-1 text-zinc-600">{r.language}</td>
-                          <td className="px-3 py-1 text-zinc-600">{r.rarity ?? '—'}</td>
-                          <td className="px-3 py-1 text-zinc-400">{r.company}</td>
-                          <td className="px-3 py-1 text-zinc-300">{r.grade_label ?? (r.grade != null ? String(r.grade) : '—')}</td>
-                          <td className="px-3 py-1 text-right text-zinc-400">{r.qty_total}</td>
-                          <td className="px-3 py-1 text-right text-zinc-400">{r.qty_unsold}</td>
-                          <td className="px-3 py-1 text-right text-zinc-400">{r.qty_sold}</td>
+                          <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{r.language}</td>
+                          <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{r.rarity ?? '—'}</td>
+                          <td className="px-3 py-1 text-zinc-400 whitespace-nowrap">{r.company}</td>
+                          <td className="px-3 py-1 text-zinc-300 whitespace-nowrap">{r.grade_label ?? (r.grade != null ? String(r.grade) : '—')}</td>
+                          <td className="px-3 py-1 text-right text-zinc-400 whitespace-nowrap">{r.qty_total}</td>
+                          <td className="px-3 py-1 text-right text-zinc-400 whitespace-nowrap">{r.qty_unsold}</td>
+                          <td className="px-3 py-1 text-right text-zinc-400 whitespace-nowrap">{r.qty_sold}</td>
                         </tr>
                       ))
                     : []),

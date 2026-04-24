@@ -80,6 +80,46 @@ interface Props {
   };
 }
 
+const LANG_NORMALIZE: Record<string, string> = {
+  japanese: 'JP', jpn: 'JP', jp: 'JP',
+  english: 'EN', eng: 'EN', en: 'EN',
+  korean: 'KR', kor: 'KR', kr: 'KR',
+  'chinese traditional': 'ZH-TW', 'chinese (traditional)': 'ZH-TW', 'zh-tw': 'ZH-TW', zhtw: 'ZH-TW',
+  'chinese simplified': 'ZH-CN', 'chinese (simplified)': 'ZH-CN', 'zh-cn': 'ZH-CN', zhcn: 'ZH-CN',
+  french: 'FR', fra: 'FR', fr: 'FR',
+  german: 'DE', deu: 'DE', de: 'DE',
+  italian: 'IT', ita: 'IT', it: 'IT',
+  spanish: 'ES', esp: 'ES', es: 'ES',
+  portuguese: 'PT', por: 'PT', pt: 'PT',
+  polish: 'PL', pol: 'PL', pl: 'PL',
+  dutch: 'NL', nld: 'NL', nl: 'NL',
+  russian: 'RU', rus: 'RU', ru: 'RU',
+  thai: 'TH', tha: 'TH', th: 'TH',
+  indonesian: 'ID', ind: 'ID', id: 'ID',
+};
+function normalizeLang(lang?: string): string {
+  if (!lang) return 'JP';
+  return LANG_NORMALIZE[lang.toLowerCase()] ?? lang.toUpperCase();
+}
+
+const LANGUAGES = [
+  { code: 'JP',    name: 'Japanese' },
+  { code: 'EN',    name: 'English' },
+  { code: 'KR',    name: 'Korean' },
+  { code: 'ZH-TW', name: 'Chinese (Traditional)' },
+  { code: 'ZH-CN', name: 'Chinese (Simplified)' },
+  { code: 'FR',    name: 'French' },
+  { code: 'DE',    name: 'German' },
+  { code: 'IT',    name: 'Italian' },
+  { code: 'ES',    name: 'Spanish' },
+  { code: 'PT',    name: 'Portuguese' },
+  { code: 'PL',    name: 'Polish' },
+  { code: 'NL',    name: 'Dutch' },
+  { code: 'RU',    name: 'Russian' },
+  { code: 'TH',    name: 'Thai' },
+  { code: 'ID',    name: 'Indonesian' },
+];
+
 export function AddPartModal({ onClose, onCreated, prefill }: Props) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
@@ -89,7 +129,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     set_name:    prefill?.set_name    ?? '',
     set_code:    '',
     card_number: prefill?.card_number ?? '',
-    language:    prefill?.language    ?? 'JP',
+    language:    normalizeLang(prefill?.language),
     rarity:      '',
     variant:     '',
   });
@@ -173,8 +213,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Language</label>
               <select value={form.language} onChange={field('language')} className={inputCls}>
-                <option value="JP">JP</option>
-                <option value="EN">EN</option>
+                {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.code} — {l.name}</option>)}
               </select>
             </div>
             <div className="col-span-2">

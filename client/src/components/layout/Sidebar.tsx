@@ -27,11 +27,11 @@ const SELLING_NAV = [
   { to: '/trades',   icon: ArrowRightLeft, label: 'Trades' },
 ];
 
-const MANAGE_ROUTES = ['/parts', '/locations', '/reorder-thresholds'];
+const MANAGE_ROUTES = ['/parts', '/locations', '/alerts'];
 const MANAGE_NAV = [
   { to: '/parts',                icon: Layers, label: 'Parts' },
   { to: '/locations',            icon: MapPin,  label: 'Locations' },
-  { to: '/reorder-thresholds',   icon: Bell,    label: 'Alerts' },
+  { to: '/alerts',   icon: Bell,    label: 'Alerts' },
 ];
 
 

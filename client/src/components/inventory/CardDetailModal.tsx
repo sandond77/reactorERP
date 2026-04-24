@@ -87,6 +87,7 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
       qc.invalidateQueries({ queryKey: ['card', cardId] });
       qc.invalidateQueries({ queryKey: ['ungraded-inventory'] });
       qc.invalidateQueries({ queryKey: ['raw-inventory'] });
+      qc.invalidateQueries({ queryKey: ['raw-overall'] });
       setEditing(false);
     },
   });

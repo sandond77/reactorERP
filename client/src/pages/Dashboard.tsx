@@ -434,8 +434,13 @@ function AttentionCard() {
   const gradingItems = gradingData?.data ?? [];
   const reorderAlerts = alertsData?.data ?? [];
   const gradeMoreAlerts = gradeMoreData?.data ?? [];
-  const staleEbay = staleEbayData?.data ?? [];
-  const staleCardShow = staleCardShowData?.data ?? [];
+  const now = new Date();
+  const staleEbay = (staleEbayData?.data ?? []).filter(
+    (item) => !item.is_ignored && (!item.muted_until || new Date(item.muted_until) < now),
+  );
+  const staleCardShow = (staleCardShowData?.data ?? []).filter(
+    (item) => !item.is_ignored && (!item.muted_until || new Date(item.muted_until) < now),
+  );
 
   const hasAny = gradingItems.length > 0 || reorderAlerts.length > 0 || gradeMoreAlerts.length > 0 || staleEbay.length > 0 || staleCardShow.length > 0;
 
@@ -450,11 +455,11 @@ function AttentionCard() {
 
       {/* Row 1: 3 equal boxes */}
       <div className="grid grid-cols-3 gap-3 flex-1 min-h-[180px]">
-        <AttentionBox title="Order More" count={reorderAlerts.length} hasAlert={reorderAlerts.length > 0} linkTo="/reorder-thresholds?tab=reorder">
+        <AttentionBox title="Order More" count={reorderAlerts.length} hasAlert={reorderAlerts.length > 0} linkTo="/alerts?tab=reorder">
           <OrderMoreSection />
         </AttentionBox>
 
-        <AttentionBox title="Grade More" count={gradeMoreAlerts.length} hasAlert={gradeMoreAlerts.length > 0} linkTo="/reorder-thresholds?tab=grade_more">
+        <AttentionBox title="Grade More" count={gradeMoreAlerts.length} hasAlert={gradeMoreAlerts.length > 0} linkTo="/alerts?tab=grade_more">
           <GradeMoreSection />
         </AttentionBox>
 
@@ -491,7 +496,7 @@ function AttentionCard() {
 
       {/* Row 2: 2 equal boxes */}
       <div className="grid grid-cols-2 gap-3 flex-[1.5] min-h-[220px] mt-3">
-        <AttentionBox title={`eBay Listings Unsold 30+ Days`} count={staleEbay.length} hasAlert={staleEbay.length > 0} linkTo="/reorder-thresholds?tab=ebay">
+        <AttentionBox title={`eBay Listings Unsold 30+ Days`} count={staleEbay.length} hasAlert={staleEbay.length > 0} linkTo="/alerts?tab=ebay">
           {staleEbay.length === 0 ? (
             <p className="text-xs text-zinc-600">No stale listings.</p>
           ) : (
@@ -531,7 +536,7 @@ function AttentionCard() {
         </AttentionBox>
 
         {/* Box 4: Stale Card Show Inventory */}
-        <AttentionBox title={`Card Show Inventory Unsold 30+ Days`} count={staleCardShow.length} hasAlert={staleCardShow.length > 0} linkTo="/reorder-thresholds?tab=card_show">
+        <AttentionBox title={`Card Show Inventory Unsold 30+ Days`} count={staleCardShow.length} hasAlert={staleCardShow.length > 0} linkTo="/alerts?tab=card_show">
           {staleCardShow.length === 0 ? (
             <p className="text-xs text-zinc-600">No stale card show inventory.</p>
           ) : (
@@ -904,7 +909,7 @@ function RawCardsTab() {
               <>
                 {i > 0 && <div key={`arrow-${i}`} className="text-zinc-600 text-xs shrink-0">→</div>}
                 <div key={stage.label} className={cn('flex-1 border rounded-lg px-2 py-2.5 flex flex-col items-center justify-center text-center', stage.color)}>
-                  <p className="text-lg font-bold">#{stage.count}</p>
+                  <p className="text-lg font-bold">{stage.count}</p>
                   <p className="text-[10px] mt-0.5 opacity-80">{stage.label}</p>
                   <p className="text-[10px] mt-1 opacity-60">{stage.cost > 0 ? formatCurrency(stage.cost) : '\u00a0'}</p>
                 </div>
@@ -1278,7 +1283,7 @@ function GradedTab() {
               <>
                 {i > 0 && <div key={`arrow-${i}`} className="text-zinc-600 text-xs shrink-0">→</div>}
                 <div key={stage.label} className={cn('flex-1 border rounded-lg px-2 py-2.5 flex flex-col items-center justify-center text-center', stage.color)}>
-                  <p className="text-lg font-bold">#{stage.count}</p>
+                  <p className="text-lg font-bold">{stage.count}</p>
                   <p className="text-[10px] mt-0.5 opacity-80">{stage.label}</p>
                   <p className="text-[10px] mt-1 opacity-60">{stage.cost != null && stage.cost > 0 ? formatCurrency(stage.cost) : '\u00a0'}</p>
                 </div>

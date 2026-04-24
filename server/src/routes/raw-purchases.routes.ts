@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
+import { requireAuth } from '../middleware/auth';
 import * as ctrl from '../controllers/raw-purchases.controller';
 
 const upload = multer({
@@ -11,6 +12,7 @@ const upload = multer({
 });
 
 const router = Router();
+router.use(requireAuth);
 
 // Purchases
 router.get('/',           ctrl.list);
