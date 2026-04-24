@@ -1670,7 +1670,7 @@ Trade:
 
 === REQUIRED FIELDS ===
 
-add_graded_card: grading company, grade (number), cert number, purchase_cost (in CENTS e.g. 50000=$500), currency.
+add_graded_card: grading company, grade (number), cert number, purchase_cost (in CENTS e.g. 50000=$500), currency, purchased_at (date).
   Card name: if lookup_catalog returned an established_name for this card, use that exactly as card_name_override. Only build a PSA-format name when there is NO catalog match — format: ALL CAPS "YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION". Example: "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". No "#", spell out "1ST EDITION", no abbreviations. Never ask user for format.
 
 add_card_to_purchase: card name, purchase_cost (cents), condition, decision.
