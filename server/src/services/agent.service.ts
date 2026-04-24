@@ -281,7 +281,7 @@ async function enrichWithSku(userId: string, suggestions: CardInfoResult[]): Pro
       .select('card_name_override')
       .where('catalog_id', '=', row.id)
       .where('card_name_override', 'is not', null)
-      .orderBy('created_at', 'desc')
+      .orderBy('created_at', 'asc')
       .limit(1)
       .executeTakeFirst();
     const catalog_card_name = established?.card_name_override ?? row.card_name ?? undefined;
@@ -1044,7 +1044,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         .where('catalog_id', '=', row.id)
         .where('user_id', '=', userId)
         .where('card_name_override', 'is not', null)
-        .orderBy('created_at', 'desc')
+        .orderBy('created_at', 'asc')
         .limit(1)
         .executeTakeFirst();
       return { ...row, established_name: established?.card_name_override ?? null };
@@ -1669,7 +1669,7 @@ record_trade: outgoing_cards [{card_instance_id, trade_value}], incoming_cards [
 === BEHAVIOR RULES ===
 
 1. For any write on a specific card: always call list_inventory first. Never guess IDs.
-1a. Before add_graded_card or add_card_to_purchase: always call lookup_catalog first. If a catalog entry is found, pass its id as catalog_id. Never skip this step even if you think you know the card.
+1a. Before add_graded_card or add_card_to_purchase: always call lookup_catalog first. If a catalog entry is found, pass its id as catalog_id. If the result includes a non-null established_name, you MUST use that exact string as card_name_override — never build a PSA-format name when established_name is present. Never skip lookup_catalog even if you think you know the card.
 2. For grading returns: call list_grading_batches first to get item IDs. Do not ask user for UUIDs.
 3. Collect ALL required fields before calling any write tool. Ask in one message, not one field at a time.
 4. If multiple cards match a search (same name, different copies): show the list and ask which one.
@@ -1680,7 +1680,7 @@ record_trade: outgoing_cards [{card_instance_id, trade_value}], incoming_cards [
 9. Graded vs raw: image with PSA/BGS/CGC label + cert + grade → add_graded_card. No exceptions.
 
 IMAGE HANDLING:
-- Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Construct full PSA-format name automatically.
+- Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Then call lookup_catalog — if it returns an established_name, use that exactly as card_name_override. Only construct a PSA-format name when lookup_catalog finds NO match.
 - Card photo (raw): read card name, set, number, language. Ask for condition and decision.
 - Receipt/invoice: extract all fields, show summary, confirm before creating records.
 - After creating any record from an image (card or expense), ask the user: "Do you want me to save the image to this record?" If yes, call save_images with the record_type and the internal UUID(s) returned by the create tool. Never auto-save images without asking.

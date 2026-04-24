@@ -25,7 +25,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-      'img-src': ["'self'", 'data:', 'https://lh3.googleusercontent.com'],
+      'img-src': ["'self'", 'data:', 'blob:', 'https://lh3.googleusercontent.com'],
     },
   },
 }));
