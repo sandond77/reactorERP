@@ -572,6 +572,66 @@ export async function deleteCatalogCard(userId: string, id: string) {
   await db.deleteFrom('card_catalog').where('id', '=', id).where('user_id', '=', userId).execute();
 }
 
+export async function linkUnlinkedByCardName(userId: string, cardName: string, params: {
+  game: string;
+  sku?: string | null;
+  set_name: string;
+  set_code?: string | null;
+  card_number?: string | null;
+  language: string;
+  rarity?: string | null;
+  variant?: string | null;
+}): Promise<{ catalog_id: string; linked_count: number }> {
+  const lang = params.language.toUpperCase() === 'JP' ? 'JP' : params.language.toUpperCase();
+  const autoSku = (!params.sku && params.set_code && params.card_number)
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: params.card_number })
+    : null;
+
+  const existing = await db.selectFrom('card_catalog').select('id')
+    .where('user_id', '=', userId)
+    .where('card_name', '=', cardName)
+    .$if(!!params.set_code, q => q.where('set_code', '=', params.set_code!))
+    .executeTakeFirst();
+
+  let catalogId: string;
+  if (existing) {
+    catalogId = existing.id;
+    await db.updateTable('card_catalog').set({
+      game: params.game,
+      sku: params.sku ?? autoSku ?? null,
+      set_name: params.set_name,
+      card_number: params.card_number ?? null,
+      language: params.language,
+      rarity: params.rarity ?? null,
+      variant: params.variant ?? null,
+      updated_at: new Date(),
+    }).where('id', '=', catalogId).execute();
+  } else {
+    const result = await db.insertInto('card_catalog').values({
+      user_id: userId,
+      game: params.game,
+      sku: params.sku ?? autoSku ?? null,
+      card_name: cardName,
+      set_name: params.set_name,
+      set_code: params.set_code ?? null,
+      card_number: params.card_number ?? null,
+      language: params.language,
+      rarity: params.rarity ?? null,
+      variant: params.variant ?? null,
+    }).returning('id').executeTakeFirstOrThrow();
+    catalogId = result.id;
+  }
+
+  const { numUpdatedRows } = await db.updateTable('card_instances')
+    .set({ catalog_id: catalogId })
+    .where('user_id', '=', userId)
+    .where('catalog_id', 'is', null)
+    .where('card_name_override', '=', cardName)
+    .executeTakeFirst();
+
+  return { catalog_id: catalogId, linked_count: Number(numUpdatedRows) };
+}
+
 export async function updateCatalogCard(userId: string, id: string, fields: {
   game?: string;
   sku?: string;

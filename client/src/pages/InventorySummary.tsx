@@ -65,7 +65,20 @@ function getSortValue(row: SummaryRow, col: SortKey): string | number | null {
   }
 }
 
-// ── Edit Part Modal ───────────────────────────────────────────────────────────
+// ── Edit / Link Part Modal ────────────────────────────────────────────────────
+
+const LANGUAGES = [
+  { code: 'EN', name: 'English' },
+  { code: 'JP', name: 'Japanese' },
+  { code: 'KR', name: 'Korean' },
+  { code: 'ZH-TW', name: 'Chinese (Traditional)' },
+  { code: 'ZH-CN', name: 'Chinese (Simplified)' },
+  { code: 'FR', name: 'French' },
+  { code: 'DE', name: 'German' },
+  { code: 'IT', name: 'Italian' },
+  { code: 'ES', name: 'Spanish' },
+  { code: 'PT', name: 'Portuguese' },
+];
 
 interface EditPartModalProps {
   row: SummaryRow;
@@ -73,6 +86,7 @@ interface EditPartModalProps {
 }
 
 function EditPartModal({ row, onClose }: EditPartModalProps) {
+  const isNew = !row.catalog_id;
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
     game:        row.game ?? 'pokemon',
@@ -83,13 +97,45 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
     card_number: row.card_number ?? '',
     rarity:      row.rarity ?? '',
     variant:     row.variant ?? '',
-    language:    row.language ?? '',
+    language:    row.language ?? 'EN',
   });
+  const [customSetMode, setCustomSetMode] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [deleteStep, setDeleteStep] = useState<0 | 1 | 2>(0);
+
+  const { data: staticSets = [] } = useQuery<{ game: string; language: string; set_code: string; names: string[]; era?: string }[]>({
+    queryKey: ['set-codes-static'],
+    queryFn: () => api.get('/sets/codes').then(r => r.data),
+  });
+  const { data: dbAliases = [] } = useQuery<{ game: string; language: string; set_code: string; alias: string; set_name?: string }[]>({
+    queryKey: ['set-aliases'],
+    queryFn: () => api.get('/sets/aliases').then(r => r.data),
+  });
+
+  function getSetOptions(game: string, language: string) {
+    const opts: { code: string; name: string; era?: string }[] = [];
+    const seen = new Set<string>();
+    if (game === 'pokemon') {
+      for (const s of staticSets.filter(s => s.language === language)) {
+        opts.push({ code: s.set_code, name: s.names[0] ?? s.set_code, era: s.era });
+        seen.add(s.set_code);
+      }
+    }
+    for (const a of dbAliases.filter(a => a.language === language && (a.game ?? 'pokemon') === game)) {
+      if (!seen.has(a.set_code)) {
+        opts.push({ code: a.set_code, name: a.set_name ?? a.alias ?? a.set_code });
+        seen.add(a.set_code);
+      }
+    }
+    return opts;
+  }
+
+  const setOpts = getSetOptions(form.game, form.language);
+  const currentSetInList = setOpts.some(o => o.code === form.set_code);
+  const showCustomSet = customSetMode || (!!form.set_code && !currentSetInList && setOpts.length > 0);
 
   const field = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(prev => ({ ...prev, [key]: e.target.value }));
@@ -104,11 +150,8 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
       queryClient.invalidateQueries({ queryKey: ['empty-parts'] });
       onClose();
     } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'response' in err
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (err as any).response?.data?.error ?? 'Failed to delete.'
-        : 'Failed to delete.';
-      setError(msg);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setError((err as any)?.response?.data?.error ?? 'Failed to delete.');
       setDeleteStep(0);
     } finally {
       setDeleting(false);
@@ -116,73 +159,141 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
   }
 
   async function handleSave() {
-    if (!row.catalog_id) return;
     setSaving(true);
     setError(null);
     try {
-      await api.patch(`/catalog/${row.catalog_id}`, {
-        game:        form.game ? form.game.toLowerCase().trim() : undefined,
-        sku:         form.sku || undefined,
-        card_name:   form.card_name || undefined,
-        set_name:    form.set_name || undefined,
-        set_code:    form.set_code || undefined,
-        card_number: form.card_number || undefined,
-        rarity:      form.rarity || null,
-        variant:     form.variant || null,
-        language:    form.language || undefined,
-      });
+      if (isNew) {
+        if (!form.set_name || !form.language) { setError('Set name and language are required.'); setSaving(false); return; }
+        const result = await api.post('/catalog/link-by-name', {
+          card_name:   form.card_name,
+          game:        form.game,
+          sku:         form.sku || null,
+          set_name:    form.set_name,
+          set_code:    form.set_code || null,
+          card_number: form.card_number || null,
+          language:    form.language,
+          rarity:      form.rarity || null,
+          variant:     form.variant || null,
+        });
+        toast.success(`Linked ${result.data.linked_count} card${result.data.linked_count !== 1 ? 's' : ''}`);
+      } else {
+        await api.patch(`/catalog/${row.catalog_id}`, {
+          game:        form.game,
+          sku:         form.sku || undefined,
+          card_name:   form.card_name || undefined,
+          set_name:    form.set_name || undefined,
+          set_code:    form.set_code || undefined,
+          card_number: form.card_number || undefined,
+          rarity:      form.rarity || null,
+          variant:     form.variant || null,
+          language:    form.language || undefined,
+        });
+      }
       queryClient.invalidateQueries({ queryKey: ['inventory-summary'] });
       onClose();
     } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'response' in err
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (err as any).response?.data?.error ?? 'Failed to save.'
-        : 'Failed to save.';
-      setError(msg);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setError((err as any)?.response?.data?.error ?? 'Failed to save.');
       setConfirm(false);
     } finally {
       setSaving(false);
     }
   }
 
+  const selectCls = 'w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500';
   const inputCls = 'w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-lg p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-zinc-100">Edit Part</h2>
+          <h2 className="text-base font-semibold text-zinc-100">{isNew ? 'Link to Catalog' : 'Edit Part'}</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors"><X size={16} /></button>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Game</label>
-            <GameSelect value={form.game} onChange={v => setForm(f => ({ ...f, game: v }))} />
+            <GameSelect value={form.game} onChange={v => setForm(f => ({ ...f, game: v, set_code: '', set_name: '' }))} />
           </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1">Language</label>
+            <select className={selectCls} value={form.language} onChange={e => setForm(f => ({ ...f, language: e.target.value, set_code: '', set_name: '' }))}>
+              {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.code} — {l.name}</option>)}
+            </select>
+          </div>
+
+          {/* Set selector — dropdown or custom entry */}
+          <div className="col-span-2">
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs text-zinc-400">Set</label>
+              {setOpts.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setCustomSetMode(m => !m); if (!customSetMode) setForm(f => ({ ...f, set_code: '', set_name: '' })); }}
+                  className="text-[10px] text-indigo-400 hover:text-indigo-300"
+                >
+                  {showCustomSet ? '← List' : '+ Add custom set'}
+                </button>
+              )}
+            </div>
+            {showCustomSet ? (
+              <div className="flex gap-2">
+                <input
+                  className={inputCls + ' w-28 shrink-0'}
+                  placeholder="Set code"
+                  value={form.set_code}
+                  onChange={e => setForm(f => ({ ...f, set_code: e.target.value }))}
+                />
+                <input
+                  className={inputCls}
+                  placeholder="Set name"
+                  value={form.set_name}
+                  onChange={e => setForm(f => ({ ...f, set_name: e.target.value }))}
+                />
+              </div>
+            ) : (
+              <select
+                className={selectCls}
+                value={form.set_code}
+                onChange={e => {
+                  const val = e.target.value;
+                  const opt = setOpts.find(o => o.code === val);
+                  setForm(f => ({ ...f, set_code: val, set_name: opt?.name ?? f.set_name }));
+                }}
+              >
+                <option value="">— Select set —</option>
+                {(() => {
+                  const byEra = new Map<string, typeof setOpts>();
+                  for (const o of setOpts) {
+                    const era = o.era ?? 'Other';
+                    if (!byEra.has(era)) byEra.set(era, []);
+                    byEra.get(era)!.push(o);
+                  }
+                  if (byEra.size <= 1) {
+                    return setOpts.map(o => <option key={o.code} value={o.code}>{o.code} — {o.name}</option>);
+                  }
+                  return Array.from(byEra.entries()).map(([era, opts]) => (
+                    <optgroup key={era} label={era}>
+                      {opts.map(o => <option key={o.code} value={o.code}>{o.code} — {o.name}</option>)}
+                    </optgroup>
+                  ));
+                })()}
+              </select>
+            )}
+          </div>
+
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Part #</label>
-            <input className={inputCls} value={form.sku} onChange={field('sku')} />
-          </div>
-          <div className="col-span-2">
-            <label className="block text-xs text-zinc-400 mb-1">Card Name</label>
-            <input className={inputCls} value={form.card_name} onChange={field('card_name')} />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Set Name</label>
-            <input className={inputCls} value={form.set_name} onChange={field('set_name')} />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Set Code</label>
-            <input className={inputCls} value={form.set_code} onChange={field('set_code')} />
+            <input className={inputCls} value={form.sku} onChange={field('sku')} placeholder="auto-generated" />
           </div>
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Card #</label>
             <input className={inputCls} value={form.card_number} onChange={field('card_number')} />
           </div>
-          <div>
-            <label className="block text-xs text-zinc-400 mb-1">Language</label>
-            <input className={inputCls} value={form.language} onChange={field('language')} />
+          <div className="col-span-2">
+            <label className="block text-xs text-zinc-400 mb-1">Card Name</label>
+            <input className={inputCls} value={form.card_name} onChange={field('card_name')} />
           </div>
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Rarity</label>
@@ -197,13 +308,10 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
         {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
 
         <div className="flex items-center justify-between mt-5">
-          {/* Delete flow */}
+          {/* Delete flow — only for existing catalog entries */}
           <div className="flex items-center gap-2">
-            {deleteStep === 0 && (
-              <button
-                onClick={() => setDeleteStep(1)}
-                className="px-3 py-1.5 text-sm text-red-500 hover:text-red-400 transition-colors"
-              >
+            {!isNew && deleteStep === 0 && (
+              <button onClick={() => setDeleteStep(1)} className="px-3 py-1.5 text-sm text-red-500 hover:text-red-400 transition-colors">
                 Delete
               </button>
             )}
@@ -211,23 +319,14 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
               <>
                 <span className="text-xs text-zinc-400">Delete this part?</span>
                 <button onClick={() => setDeleteStep(0)} className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors">No</button>
-                <button
-                  onClick={() => setDeleteStep(2)}
-                  className="px-2 py-1 text-xs text-red-500 hover:text-red-400 transition-colors font-medium"
-                >
-                  Yes, Delete
-                </button>
+                <button onClick={() => setDeleteStep(2)} className="px-2 py-1 text-xs text-red-500 hover:text-red-400 transition-colors font-medium">Yes, Delete</button>
               </>
             )}
             {deleteStep === 2 && (
               <>
                 <span className="text-xs text-red-400 font-medium">Cannot be undone. Confirm?</span>
                 <button onClick={() => setDeleteStep(0)} className="px-2 py-1 text-xs text-zinc-400 hover:text-zinc-200 transition-colors">No</button>
-                <button
-                  onClick={handleDelete}
-                  disabled={deleting}
-                  className="px-2 py-1 text-xs bg-red-700 hover:bg-red-600 text-white rounded transition-colors font-medium disabled:opacity-50"
-                >
+                <button onClick={handleDelete} disabled={deleting} className="px-2 py-1 text-xs bg-red-700 hover:bg-red-600 text-white rounded transition-colors font-medium disabled:opacity-50">
                   {deleting ? 'Deleting…' : 'Confirm Delete'}
                 </button>
               </>
@@ -236,22 +335,16 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
 
           {/* Save flow */}
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">
-              Cancel
-            </button>
+            <button onClick={onClose} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
             {confirm ? (
               <>
                 <span className="px-3 py-1.5 text-xs text-zinc-400 self-center">Save changes?</span>
-                <button onClick={() => setConfirm(false)} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">
-                  No
-                </button>
-                <Button size="sm" onClick={handleSave} disabled={saving}>
-                  {saving ? 'Saving…' : 'Yes, Save'}
-                </Button>
+                <button onClick={() => setConfirm(false)} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">No</button>
+                <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Yes, Save'}</Button>
               </>
             ) : (
-              <Button size="sm" onClick={() => setConfirm(true)}>
-                Save Changes
+              <Button size="sm" onClick={() => isNew ? handleSave() : setConfirm(true)}>
+                {isNew ? 'Link to Catalog' : 'Save Changes'}
               </Button>
             )}
           </div>
@@ -1479,13 +1572,9 @@ export function InventorySummary() {
                   return (
                     <tr key={key} className="hover:bg-zinc-800/25">
                       <td className="px-3 py-1.5 font-mono text-[11px]">
-                        {r.catalog_id ? (
-                          <button onClick={() => setEditPart(r)} className="text-indigo-400 hover:text-indigo-300 hover:underline text-left">
-                            {sku ?? <span className="text-zinc-600 italic">unlinked</span>}
-                          </button>
-                        ) : (
-                          <span className="text-zinc-600 italic">unlinked</span>
-                        )}
+                        <button onClick={() => setEditPart(r)} className={r.catalog_id ? 'text-indigo-400 hover:text-indigo-300 hover:underline text-left' : 'text-zinc-500 italic hover:text-zinc-300 text-left'}>
+                          {sku ?? <span className="italic">unlinked</span>}
+                        </button>
                       </td>
                       <td className="px-3 py-1.5 text-zinc-400 truncate">{setName}</td>
                       <td className="px-3 py-1.5 text-zinc-200 whitespace-normal break-words">
@@ -1513,16 +1602,12 @@ export function InventorySummary() {
                     <td className="px-3 py-1.5 font-mono text-[11px]">
                       <span className="inline-flex items-center gap-1">
                         {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                        {groupRows[0].catalog_id ? (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setEditPart(groupRows[0]); }}
-                            className="text-indigo-400 hover:text-indigo-300 hover:underline text-left"
-                          >
-                            {sku ?? <span className="text-zinc-600 italic">unlinked</span>}
-                          </button>
-                        ) : (
-                          <span className="text-zinc-600 italic">unlinked</span>
-                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setEditPart(groupRows[0]); }}
+                          className={groupRows[0].catalog_id ? 'text-indigo-400 hover:text-indigo-300 hover:underline text-left' : 'text-zinc-500 italic hover:text-zinc-300 text-left'}
+                        >
+                          {sku ?? <span className="italic">unlinked</span>}
+                        </button>
                       </span>
                     </td>
                     <td className="px-3 py-1.5 text-zinc-400 truncate">{setName}</td>

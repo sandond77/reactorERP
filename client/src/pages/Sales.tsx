@@ -480,7 +480,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               try {
                 const res = await api.get('/listings/by-url', { params: { url: listingUrl } });
                 setSelectedCard(res.data.data);
-                setEbayLink(listingUrl);
                 setStep('details');
               } catch {
                 toast.error('No active listing found for that URL');

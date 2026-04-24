@@ -462,7 +462,30 @@ async function executeGradedImport(
       const lastSmall  = smallNums.length > 0 ? smallNums[smallNums.length - 1][1] : null;
       resolvedNumber = promoHash?.[1] ?? codedNum?.[1] ?? threeDigit?.[1] ?? twoDigit?.[1] ?? lastSmall ?? null;
     }
-    if (!resolvedNumber) return null;
+    if (!resolvedNumber) {
+      // If the user provided an explicit override for this card, create a catalog entry
+      // without a card number rather than leaving it unlinked.
+      const noNumKey = `${cardName}|${setName ?? ''}`;
+      const noNumOverride = catalogOverrides?.[noNumKey];
+      if (!noNumOverride) return null;
+      const cacheKey = `nonum:${resolvedLang}|${setCode}|${cardName}`;
+      if (catalogCache.has(cacheKey)) return catalogCache.get(cacheKey)!;
+      const existingNoNum = await db.selectFrom('card_catalog').select('id')
+        .where('user_id', '=', userId)
+        .where('set_code', '=', setCode as string)
+        .where('card_name', '=', cardName)
+        .where('language', '=', resolvedLang)
+        .executeTakeFirst();
+      if (existingNoNum) { catalogCache.set(cacheKey, existingNoNum.id); return existingNoNum.id; }
+      const noNumGame = noNumOverride.game ?? 'pokemon';
+      const noNumSetName = noNumOverride.set_name ?? setName ?? lookupSetName(resolvedLang, setCode!) ?? setCode!;
+      const noNumCreated = await db.insertInto('card_catalog').values({
+        user_id: userId, game: noNumGame, set_name: noNumSetName, set_code: setCode,
+        card_name: cardName, card_number: null, language: resolvedLang, sku: null,
+      }).returning('id').executeTakeFirstOrThrow();
+      catalogCache.set(cacheKey, noNumCreated.id);
+      return noNumCreated.id;
+    }
 
     const sku = generatePartNumber(resolvedLang, setCode, resolvedNumber);
     if (catalogCache.has(sku)) return catalogCache.get(sku)!;

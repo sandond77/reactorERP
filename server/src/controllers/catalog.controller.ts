@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { db } from '../config/database';
-import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog } from '../services/catalog.service';
+import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog, linkUnlinkedByCardName } from '../services/catalog.service';
 
 export async function inventorySummary(req: Request, res: Response, next: NextFunction) {
   try {
@@ -41,6 +41,20 @@ export async function createCard(req: Request, res: Response, next: NextFunction
     }
     const id = await createCatalogCard(req.dataUserId, { game: game ?? 'pokemon', sku, card_name, set_name, set_code, card_number, language, rarity, variant });
     res.status(201).json({ id });
+  } catch (err: any) {
+    if (err?.code === '23505') return res.status(409).json({ error: 'A catalog entry with this SKU already exists.' });
+    next(err);
+  }
+}
+
+export async function linkByName(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { card_name, game, sku, set_name, set_code, card_number, language, rarity, variant } = req.body;
+    if (!card_name || !set_name || !language) {
+      return res.status(400).json({ error: 'card_name, set_name, and language are required' });
+    }
+    const result = await linkUnlinkedByCardName(req.dataUserId, card_name, { game: game ?? 'pokemon', sku, set_name, set_code, card_number, language, rarity, variant });
+    res.status(201).json(result);
   } catch (err: any) {
     if (err?.code === '23505') return res.status(409).json({ error: 'A catalog entry with this SKU already exists.' });
     next(err);
