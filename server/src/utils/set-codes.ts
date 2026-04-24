@@ -175,7 +175,7 @@ export const EN_SETS: SetEntry[] = [
 
 export const JP_SETS: SetEntry[] = [
   // Vintage / WOTC era
-  { code: 'BS',  names: ['expansion pack', 'basic', 'japanese base', 'base set jp'] },
+  { code: 'BS',  names: ['japanese base set', 'basic', 'japanese base', 'base set jp'] },
   { code: 'JU',  names: ['jungle jp', 'jungle'] },
   { code: 'FO',  names: ['fossil jp', 'fossil'] },
   { code: 'TR',  names: ['rocket gang', 'team rocket jp'] },

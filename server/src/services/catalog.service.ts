@@ -587,30 +587,32 @@ export async function linkUnlinkedByCardName(userId: string, cardName: string, p
     ? generateSku({ language: lang, setCode: params.set_code, cardNumber: params.card_number })
     : null;
 
-  const existing = await db.selectFrom('card_catalog').select('id')
-    .where('user_id', '=', userId)
-    .where('card_name', '=', cardName)
-    .$if(!!params.set_code, q => q.where('set_code', '=', params.set_code!))
-    .executeTakeFirst();
+  // Look up an existing entry: first by SKU (if we can compute one), then by card_name+set_code
+  const effectiveSku = params.sku ?? autoSku;
+  const existingBySku = effectiveSku
+    ? await db.selectFrom('card_catalog').select('id')
+        .where('user_id', '=', userId)
+        .where('sku', '=', effectiveSku)
+        .executeTakeFirst()
+    : null;
+  const existingByName = !existingBySku
+    ? await db.selectFrom('card_catalog').select('id')
+        .where('user_id', '=', userId)
+        .where('card_name', '=', cardName)
+        .$if(!!params.set_code, q => q.where('set_code', '=', params.set_code!))
+        .executeTakeFirst()
+    : null;
+  const existing = existingBySku ?? existingByName;
 
   let catalogId: string;
   if (existing) {
+    // Link to the existing catalog entry without overwriting it
     catalogId = existing.id;
-    await db.updateTable('card_catalog').set({
-      game: params.game,
-      sku: params.sku ?? autoSku ?? null,
-      set_name: params.set_name,
-      card_number: params.card_number ?? null,
-      language: params.language,
-      rarity: params.rarity ?? null,
-      variant: params.variant ?? null,
-      updated_at: new Date(),
-    }).where('id', '=', catalogId).execute();
   } else {
     const result = await db.insertInto('card_catalog').values({
       user_id: userId,
       game: params.game,
-      sku: params.sku ?? autoSku ?? null,
+      sku: effectiveSku ?? null,
       card_name: cardName,
       set_name: params.set_name,
       set_code: params.set_code ?? null,
