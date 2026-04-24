@@ -46,6 +46,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, string> } | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
+  const [createdCatalogId, setCreatedCatalogId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { register, handleSubmit, setValue, getValues, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
@@ -125,16 +126,17 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
     setCreatingPart(true);
     try {
       const s = partNumber.catalogData;
-      await api.post('/catalog', {
-        game: 'pokemon',
+      const res = await api.post('/catalog', {
+        game: getValues('card_game') || 'pokemon',
         sku: partNumber.sku,
-        card_name: s.card_name,
-        set_name: s.set_name,
+        card_name: getValues('card_name_override'),
+        set_name: getValues('set_name_override'),
         set_code: s.set_code ?? null,
-        card_number: s.card_number ?? null,
-        language: s.language ?? 'EN',
+        card_number: getValues('card_number_override') || s.card_number || null,
+        language: getValues('language') || s.language || 'EN',
         rarity: getValues('rarity') || s.rarity || null,
       });
+      setCreatedCatalogId(res.data.id);
       setPartNumber((p) => p ? { ...p, exists: true } : p);
       toast.success('Part number created');
     } catch {
@@ -156,6 +158,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       purchase_cost: purchase_cost.toFixed(2),
       slab_additional_cost: grading_cost.toFixed(2),
       is_personal_collection: rest.is_personal_collection ?? false,
+      ...(createdCatalogId ? { catalog_id: createdCatalogId } : {}),
     });
     toast.success('Slab added!');
     onSuccess();

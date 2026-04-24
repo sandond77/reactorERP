@@ -282,19 +282,17 @@ function EbayActionButtons({ row }: { row: StaleEbayRow }) {
     qc.invalidateQueries({ queryKey: ['stale-ebay-listings'] });
   };
   const mute   = useMutation({ mutationFn: () => api.post('/alerts/mute',   { entity_type: 'ebay_listing', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Muted 30 days'); } });
-  const ignore = useMutation({ mutationFn: () => api.post('/alerts/ignore', { entity_type: 'ebay_listing', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Ignored'); } });
+  const ignore = useMutation({ mutationFn: () => api.post('/alerts/ignore', { entity_type: 'ebay_listing', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Dismissed'); } });
   const reset  = useMutation({ mutationFn: () => api.post('/alerts/reset',  { entity_type: 'ebay_listing', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Reset'); } });
-  const silenced = row.is_ignored || isMuted(row.muted_until);
+  const silenced = isMuted(row.muted_until);
   return (
     <div className="flex items-center gap-2">
       {silenced ? (
         <button onClick={() => reset.mutate()} title="Re-enable" className="text-zinc-500 hover:text-zinc-300"><RotateCcw size={13} /></button>
       ) : (
-        <>
-          <button onClick={() => mute.mutate()}   title="Mute 30 days"       className="text-zinc-500 hover:text-zinc-300"><BellOff size={13} /></button>
-          <button onClick={() => ignore.mutate()} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400"><EyeOff size={13} /></button>
-        </>
+        <button onClick={() => mute.mutate()} title="Mute 30 days" className="text-zinc-500 hover:text-zinc-300"><BellOff size={13} /></button>
       )}
+      <button onClick={() => ignore.mutate()} title="Dismiss permanently" className="text-zinc-600 hover:text-red-400"><Trash2 size={13} /></button>
     </div>
   );
 }
@@ -329,7 +327,7 @@ function EbayListingsTab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-zinc-500">eBay listings that have been active for longer than the selected threshold. Mute or ignore to suppress dashboard alerts.</p>
+        <p className="text-xs text-zinc-500">eBay listings that have been active for longer than the selected threshold. Mute to snooze 30 days, or delete to permanently dismiss.</p>
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-500">Unsold for</span>
           {[14, 30, 60, 90].map((d) => (
@@ -410,19 +408,17 @@ function CardShowActionButtons({ row }: { row: StaleCardShowRow }) {
     qc.invalidateQueries({ queryKey: ['stale-card-show'] });
   };
   const mute   = useMutation({ mutationFn: () => api.post('/alerts/mute',   { entity_type: 'card_show', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Muted 30 days'); } });
-  const ignore = useMutation({ mutationFn: () => api.post('/alerts/ignore', { entity_type: 'card_show', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Ignored'); } });
+  const ignore = useMutation({ mutationFn: () => api.post('/alerts/ignore', { entity_type: 'card_show', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Dismissed'); } });
   const reset  = useMutation({ mutationFn: () => api.post('/alerts/reset',  { entity_type: 'card_show', entity_id: row.id }), onSuccess: () => { invalidate(); toast.success('Reset'); } });
-  const silenced = row.is_ignored || isMuted(row.muted_until);
+  const silenced = isMuted(row.muted_until);
   return (
     <div className="flex items-center gap-2">
       {silenced ? (
         <button onClick={() => reset.mutate()} title="Re-enable" className="text-zinc-500 hover:text-zinc-300"><RotateCcw size={13} /></button>
       ) : (
-        <>
-          <button onClick={() => mute.mutate()}   title="Mute 30 days"       className="text-zinc-500 hover:text-zinc-300"><BellOff size={13} /></button>
-          <button onClick={() => ignore.mutate()} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400"><EyeOff size={13} /></button>
-        </>
+        <button onClick={() => mute.mutate()} title="Mute 30 days" className="text-zinc-500 hover:text-zinc-300"><BellOff size={13} /></button>
       )}
+      <button onClick={() => ignore.mutate()} title="Dismiss permanently" className="text-zinc-600 hover:text-red-400"><Trash2 size={13} /></button>
     </div>
   );
 }
@@ -441,7 +437,7 @@ function CardShowTab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <p className="text-xs text-zinc-500">Card show inventory that has been unsold past the selected threshold. Mute or ignore to suppress dashboard alerts.</p>
+        <p className="text-xs text-zinc-500">Card show inventory that has been unsold past the selected threshold. Mute to snooze 30 days, or delete to permanently dismiss.</p>
         <div className="flex items-center gap-2">
           <span className="text-xs text-zinc-500">Unsold for</span>
           {[14, 30, 60, 90].map((d) => (
