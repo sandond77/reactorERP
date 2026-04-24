@@ -48,10 +48,13 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   const [creatingPart, setCreatingPart] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { register, handleSubmit, setValue, getValues, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { register, handleSubmit, setValue, getValues, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
     defaultValues: { card_game: 'pokemon', language: 'EN', currency: 'USD', slab_company: 'PSA', is_personal_collection: false },
   });
+
+  const watchedCompany = watch('slab_company');
+  const watchedCert = watch('slab_cert_number');
 
   const handleImageSelect = (file: File) => {
     setImageFile(file);
@@ -204,7 +207,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
             type="text"
             value={gradingLabel}
             onChange={(e) => { setGradingLabel(e.target.value); if (imageFile) clearImage(); }}
-            placeholder="or paste PSA label / cert URL"
+            placeholder="or paste scanned PSA image URL"
             disabled={!!imageFile}
             className="flex-1 rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-40"
           />
@@ -231,7 +234,19 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
         />
         {partNumber && !partNumber.exists && (
           <p className="text-xs text-yellow-500/80 leading-snug">
-            New part — enter the card name from the grading company cert page (the text in the blue box)
+            New part — enter the card name from the cert page
+            {watchedCert && (() => {
+              const cert = watchedCert.trim();
+              const url =
+                watchedCompany === 'PSA' ? `https://www.psacard.com/cert/${cert}` :
+                watchedCompany === 'BGS' ? `https://www.beckett.com/grading/show/${cert}` :
+                watchedCompany === 'CGC' ? `https://www.cgccards.com/certlookup/${cert}` :
+                watchedCompany === 'SGC' ? `https://www.gosgc.com/certlookup?cert=${cert}` :
+                null;
+              return url ? (
+                <> — <a href={url} target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-300">{watchedCompany} cert ↗</a></>
+              ) : null;
+            })()}
           </p>
         )}
       </div>
