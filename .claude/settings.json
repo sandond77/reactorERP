@@ -34,7 +34,8 @@
       "Bash(node -e ' *)",
       "Bash(git -C /Users/sandon/Documents/reactor log --oneline -10)",
       "Bash(git -C /Users/sandon/Documents/reactor add client/src/pages/Listings.tsx)",
-      "Bash(git -C /Users/sandon/Documents/reactor add server/src/db/migrate.ts)"
+      "Bash(git -C /Users/sandon/Documents/reactor add server/src/db/migrate.ts)",
+      "Bash(grep -v \".js$\")"
     ]
   }
 }

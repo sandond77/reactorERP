@@ -8,6 +8,7 @@ catalogRouter.use(requireAuth);
 catalogRouter.get('/inventory-summary', catalogController.inventorySummary);
 catalogRouter.get('/search', catalogController.search);
 catalogRouter.get('/empty-parts', catalogController.emptyCatalog);
+catalogRouter.patch('/reassign-row', catalogController.reassignRow);
 catalogRouter.post('/link-by-name', catalogController.linkByName);
 catalogRouter.post('/', catalogController.createCard);
 catalogRouter.patch('/:id', catalogController.updateCard);

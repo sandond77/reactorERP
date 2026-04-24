@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { db } from '../config/database';
-import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog, linkUnlinkedByCardName } from '../services/catalog.service';
+import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog, linkUnlinkedByCardName, reassignCatalogRow } from '../services/catalog.service';
 
 export async function inventorySummary(req: Request, res: Response, next: NextFunction) {
   try {
@@ -45,6 +45,15 @@ export async function createCard(req: Request, res: Response, next: NextFunction
     if (err?.code === '23505') return res.status(409).json({ error: 'A catalog entry with this SKU already exists.' });
     next(err);
   }
+}
+
+export async function reassignRow(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { card_name, company, grade, grade_label, old_catalog_id, new_catalog_id } = req.body;
+    if (!company || !old_catalog_id) return res.status(400).json({ error: 'company and old_catalog_id are required' });
+    const result = await reassignCatalogRow(req.dataUserId, { card_name, company, grade: grade ?? null, grade_label: grade_label ?? null, old_catalog_id, new_catalog_id: new_catalog_id ?? null });
+    res.json(result);
+  } catch (err) { next(err); }
 }
 
 export async function linkByName(req: Request, res: Response, next: NextFunction) {

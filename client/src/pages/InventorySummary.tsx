@@ -4,7 +4,7 @@ function toTitleCase(s: string) {
   return s.replace(/\w\S*/g, w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 }
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Plus, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pencil, Plus, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
@@ -344,6 +344,121 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
                 {saving ? 'Saving…' : isNew ? 'Link to Catalog' : isIncomplete ? 'Generate Part #' : 'Save Changes'}
               </Button>
             )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Reassign Row Modal ────────────────────────────────────────────────────────
+
+interface ReassignTarget {
+  card_name: string | null;
+  company: string;
+  grade: number | null;
+  grade_label: string | null;
+  catalog_id: string;
+}
+
+function ReassignModal({ row, onClose }: { row: ReassignTarget; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selected, setSelected] = useState<{ id: string; sku: string | null; card_name: string; set_name: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: results = [] } = useQuery<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }[]>({
+    queryKey: ['catalog-search', debouncedSearch],
+    queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 20 } }).then(r => r.data.data),
+    enabled: debouncedSearch.length >= 2,
+  });
+
+  async function doReassign(newCatalogId: string | null) {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.patch('/catalog/reassign-row', {
+        card_name:      row.card_name,
+        company:        row.company,
+        grade:          row.grade,
+        grade_label:    row.grade_label,
+        old_catalog_id: row.catalog_id,
+        new_catalog_id: newCatalogId,
+      });
+      queryClient.invalidateQueries({ queryKey: ['inventory-summary'] });
+      toast.success(newCatalogId ? 'Reassigned' : 'Unlinked');
+      onClose();
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setError((err as any)?.response?.data?.error ?? 'Failed.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const gradeLabel = row.grade_label ?? (row.grade != null ? String(row.grade) : '—');
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-lg p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-zinc-100">Reassign Card</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X size={16} /></button>
+        </div>
+
+        <div className="mb-4 p-3 bg-zinc-800/60 rounded-lg text-sm space-y-0.5">
+          <p className="text-zinc-200 break-words">{row.card_name ?? '—'}</p>
+          <p className="text-zinc-500 text-xs">{row.company} · {gradeLabel}</p>
+        </div>
+
+        <div className="mb-3">
+          <input
+            autoFocus
+            className="w-full px-3 py-2 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+            placeholder="Search part numbers or card names…"
+            value={search}
+            onChange={e => { setSearch(e.target.value); setSelected(null); }}
+          />
+        </div>
+
+        {results.length > 0 && (
+          <div className="max-h-52 overflow-y-auto divide-y divide-zinc-800 border border-zinc-700 rounded-lg mb-3">
+            {results.map(r => (
+              <button
+                key={r.id}
+                onClick={() => setSelected(r)}
+                className={`w-full text-left px-3 py-2 text-sm hover:bg-zinc-800 transition-colors ${selected?.id === r.id ? 'bg-indigo-900/40' : ''}`}
+              >
+                <span className="font-mono text-indigo-300 text-xs mr-2">{r.sku ?? '—'}</span>
+                <span className="text-zinc-300">{r.card_name}</span>
+                <span className="text-zinc-600 ml-1 text-xs">· {r.set_name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => doReassign(null)}
+            disabled={saving}
+            className="px-3 py-1.5 text-sm text-zinc-500 hover:text-zinc-300 transition-colors disabled:opacity-50"
+          >
+            Unlink
+          </button>
+          <div className="flex gap-2">
+            <button onClick={onClose} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+            <Button size="sm" onClick={() => selected && doReassign(selected.id)} disabled={!selected || saving}>
+              {saving ? 'Saving…' : 'Reassign'}
+            </Button>
           </div>
         </div>
       </div>
@@ -1325,6 +1440,7 @@ export function InventorySummary() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEmpty, setShowEmpty] = useState(false);
   const [editPart, setEditPart] = useState<SummaryRow | null>(null);
+  const [reassignRow, setReassignRow] = useState<ReassignTarget | null>(null);
   const MINS = {
     sku:       colMinWidth('Part #',  true,  false),
     set:       colMinWidth('Set',     true,  false),
@@ -1622,10 +1738,21 @@ export function InventorySummary() {
                   // Expanded grade rows
                   ...(isExpanded
                     ? groupRows.map((r, idx) => (
-                        <tr key={`${key}-grade-${idx}`} className="hover:bg-zinc-800/15">
+                        <tr key={`${key}-grade-${idx}`} className="group/subrow hover:bg-zinc-800/15">
                           <td className="px-3 py-1 pl-8 text-zinc-700 font-mono text-[10px]">↳</td>
                           <td className="px-3 py-1 text-zinc-600">{setName}</td>
-                          <td className="px-3 py-1 text-zinc-400 whitespace-normal break-words">{r.card_name ?? '—'}</td>
+                          <td className="px-3 py-1 text-zinc-400 whitespace-normal break-words">
+                            <span>{r.card_name ?? '—'}</span>
+                            {r.catalog_id && (
+                              <button
+                                onClick={() => setReassignRow({ card_name: r.card_name, company: r.company, grade: r.grade, grade_label: r.grade_label, catalog_id: r.catalog_id! })}
+                                className="ml-1.5 opacity-0 group-hover/subrow:opacity-100 transition-opacity text-zinc-600 hover:text-zinc-300"
+                                title="Reassign to different part number"
+                              >
+                                <Pencil size={10} />
+                              </button>
+                            )}
+                          </td>
                           <td className="px-3 py-1 text-zinc-600">{r.language}</td>
                           <td className="px-3 py-1 text-zinc-600">{r.rarity ?? '—'}</td>
                           <td className="px-3 py-1 text-zinc-400">{r.company}</td>
@@ -1648,6 +1775,7 @@ export function InventorySummary() {
       {/* Add Set Alias Modal */}
       {showAddModal && <AddPartModal onClose={() => setShowAddModal(false)} />}
       {editPart && <EditPartModal row={editPart} onClose={() => setEditPart(null)} />}
+      {reassignRow && <ReassignModal row={reassignRow} onClose={() => setReassignRow(null)} />}
     </div>
   );
 }

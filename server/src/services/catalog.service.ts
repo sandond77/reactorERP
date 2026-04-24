@@ -564,6 +564,28 @@ export async function searchCatalog(userId: string, params: {
   return rows.rows;
 }
 
+export async function reassignCatalogRow(userId: string, params: {
+  card_name: string | null;
+  company: string;
+  grade: number | null;
+  grade_label: string | null;
+  old_catalog_id: string;
+  new_catalog_id: string | null;
+}): Promise<{ updated: number }> {
+  const result = await sql`
+    UPDATE card_instances ci
+    SET catalog_id = ${params.new_catalog_id}
+    FROM slab_details sd
+    WHERE ci.id = sd.card_instance_id
+      AND ci.user_id = ${userId}
+      AND ci.catalog_id = ${params.old_catalog_id}
+      AND LOWER(TRIM(COALESCE(ci.card_name_override, ''))) = LOWER(TRIM(${params.card_name ?? ''}))
+      AND sd.company = ${params.company}
+      AND (${params.grade} IS NULL AND sd.grade IS NULL OR sd.grade = ${params.grade})
+  `.execute(db);
+  return { updated: Number(result.numAffectedRows ?? 0) };
+}
+
 export async function deleteCatalogCard(userId: string, id: string) {
   // Unlink any card instances pointing to this catalog entry
   await sql`
