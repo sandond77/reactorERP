@@ -1031,11 +1031,25 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         eb('card_name', 'ilike', `%${query}%`),
         eb('set_name', 'ilike', `%${query}%`),
         eb('card_number', 'ilike', `%${query}%`),
+        eb('sku', 'ilike', `%${query}%`),
       ]));
     const rows = language
       ? await q.where('language', '=', language).limit(5).execute()
       : await q.limit(5).execute();
-    return rows;
+    // Enrich each result with the established card_name_override from existing inventory
+    const enriched = await Promise.all(rows.map(async (row) => {
+      const established = await db
+        .selectFrom('card_instances')
+        .select('card_name_override')
+        .where('catalog_id', '=', row.id)
+        .where('user_id', '=', userId)
+        .where('card_name_override', 'is not', null)
+        .orderBy('created_at', 'desc')
+        .limit(1)
+        .executeTakeFirst();
+      return { ...row, established_name: established?.card_name_override ?? null };
+    }));
+    return enriched;
   }
 
   if (toolName === 'list_inventory') {
@@ -1609,7 +1623,7 @@ SET / CATALOG QUESTIONS ("what Gengar cards do we carry", "show me Dark Phantasm
 === WORKFLOW SEQUENCES ===
 
 Add graded card:
-  lookup_catalog(card_name or set name or card number) → if match found: add_graded_card(catalog_id=match.id, card_name_override=PSA_label, ...) → if no match: add_graded_card(set_name_override, card_number_override, ...) without catalog_id
+  lookup_catalog(card_name or set name or card number) → if match found: add_graded_card(catalog_id=match.id, card_name_override=match.established_name if present, else build PSA-format name, ...) → if no match: add_graded_card(set_name_override, card_number_override, build PSA-format name) without catalog_id
 
 Raw purchase intake:
   create_raw_purchase(source, date, total_cost) → for each card: lookup_catalog(card name) → add_card_to_purchase(catalog_id=match.id if found, card per line)
@@ -1638,7 +1652,7 @@ Trade:
 === REQUIRED FIELDS ===
 
 add_graded_card: grading company, grade (number), cert number, purchase_cost (in CENTS e.g. 50000=$500), currency.
-  Card name: always build card_name_override in PSA label format — ALL CAPS: "YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION". Example: "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". No "#", spell out "1ST EDITION", no abbreviations. Never ask user for format.
+  Card name: if lookup_catalog returned an established_name for this card, use that exactly as card_name_override. Only build a PSA-format name when there is NO catalog match — format: ALL CAPS "YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION". Example: "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". No "#", spell out "1ST EDITION", no abbreviations. Never ask user for format.
 
 add_card_to_purchase: card name, purchase_cost (cents), condition, decision.
 
