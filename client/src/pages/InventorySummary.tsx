@@ -284,12 +284,12 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
           </div>
 
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Part #</label>
-            <input className={inputCls} value={form.sku} onChange={field('sku')} placeholder="auto-generated" />
+            <label className="block text-xs text-zinc-400 mb-1">Card #</label>
+            <input className={inputCls} value={form.card_number} onChange={field('card_number')} placeholder="required for Part #" />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Card #</label>
-            <input className={inputCls} value={form.card_number} onChange={field('card_number')} />
+            <label className="block text-xs text-zinc-400 mb-1">Part #</label>
+            <input className={inputCls} value={form.sku} onChange={field('sku')} placeholder={form.set_code && form.card_number ? 'auto-generated' : 'needs Set + Card #'} />
           </div>
           <div className="col-span-2">
             <label className="block text-xs text-zinc-400 mb-1">Card Name</label>

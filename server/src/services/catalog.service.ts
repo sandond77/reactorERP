@@ -643,9 +643,22 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
   variant?: string | null;
   language?: string;
 }) {
+  // Auto-generate SKU when card_number is being set but no explicit sku is provided
+  let effectiveSku = fields.sku;
+  if (!effectiveSku && fields.card_number) {
+    const existing = await db.selectFrom('card_catalog')
+      .select(['set_code', 'language'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    const setCode = fields.set_code ?? existing?.set_code;
+    const lang = (fields.language ?? existing?.language ?? 'EN').toUpperCase();
+    if (setCode) {
+      effectiveSku = generateSku({ language: lang === 'JP' ? 'JP' : 'EN', setCode, cardNumber: fields.card_number });
+    }
+  }
   await db
     .updateTable('card_catalog')
-    .set({ ...fields, updated_at: new Date() })
+    .set({ ...fields, ...(effectiveSku ? { sku: effectiveSku } : {}), updated_at: new Date() })
     .where('id', '=', id)
     .where('user_id', '=', userId)
     .execute();
