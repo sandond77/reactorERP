@@ -114,7 +114,7 @@ function CardShowBreakdownRow({ showId, colSpan }: { showId: string; colSpan: nu
                 {stat('# Slabs Sold', String(slabCount))}
                 {stat('Gross', formatCurrency(slabRev))}
                 {stat('Slab Cost', formatCurrency(slabCost))}
-                {stat('Net', formatCurrency(slabNet))}
+                {stat('Net', formatCurrency(slabProfit))}
               </div>
             </div>
             <div className="w-px self-stretch bg-zinc-800 mx-6" />
@@ -124,7 +124,7 @@ function CardShowBreakdownRow({ showId, colSpan }: { showId: string; colSpan: nu
                 {stat('# Cards Sold', String(rawCount))}
                 {stat('Gross Raw', formatCurrency(rawRev))}
                 {stat('Raw Cost', formatCurrency(rawCost))}
-                {stat('Net Raw', formatCurrency(rawNet))}
+                {stat('Net Raw', formatCurrency(rawProfit))}
               </div>
             </div>
             <div className="w-px self-stretch bg-zinc-800 mx-6" />
