@@ -4,9 +4,8 @@ import { Bot, Send, X, Loader2, Paperclip, FileSpreadsheet } from 'lucide-react'
 import { cn } from '../../lib/utils';
 import { api } from '../../lib/api';
 
-const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const SPREADSHEET_TYPES = ['text/csv', 'text/plain', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel'];
-const ACCEPTED_TYPES = [...IMAGE_TYPES, ...SPREADSHEET_TYPES].join(',');
+const ACCEPTED_TYPES = ['image/*', ...SPREADSHEET_TYPES].join(',');
 
 // Maps server resource names → React Query key prefixes to invalidate
 const RESOURCE_QUERY_KEYS: Record<string, string[]> = {
@@ -92,7 +91,7 @@ export function AgentPanel() {
     const remaining = MAX_ATTACHMENTS - attachments.length;
     const toAdd = files.slice(0, remaining);
     setAttachments(prev => [...prev, ...toAdd]);
-    setPreviews(prev => [...prev, ...toAdd.map(f => IMAGE_TYPES.includes(f.type) ? URL.createObjectURL(f) : null)]);
+    setPreviews(prev => [...prev, ...toAdd.map(f => f.type.startsWith('image/') ? URL.createObjectURL(f) : null)]);
     e.target.value = '';
   }
 
@@ -153,7 +152,7 @@ export function AgentPanel() {
       const form = new FormData();
       form.append('messages', JSON.stringify(newMessages.map(({ role, content }) => ({ role, content }))));
       attachments.forEach(f => {
-        if (IMAGE_TYPES.includes(f.type)) form.append('images', f);
+        if (f.type.startsWith('image/')) form.append('images', f);
         else form.append('files', f);
       });
 

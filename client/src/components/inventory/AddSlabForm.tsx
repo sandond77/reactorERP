@@ -160,8 +160,8 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       is_personal_collection: rest.is_personal_collection ?? false,
       ...(createdCatalogId
         ? { catalog_id: createdCatalogId }
-        : partNumber?.catalogData?.id
-          ? { catalog_id: partNumber.catalogData.id }
+        : partNumber?.catalogData?.catalog_id
+          ? { catalog_id: partNumber.catalogData.catalog_id }
           : {}),
     });
     toast.success('Slab added!');
