@@ -1699,7 +1699,7 @@ record_trade: outgoing_cards [{card_instance_id, trade_value}], incoming_cards [
 9. Graded vs raw: image with PSA/BGS/CGC label + cert + grade → add_graded_card. No exceptions.
 
 IMAGE HANDLING:
-- Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Then call lookup_catalog — if it returns an established_name, use that exactly as card_name_override. Only construct a PSA-format name when lookup_catalog finds NO match.
+- Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Then call lookup_catalog using the SHORT card name (e.g. "Gengar") or set name (e.g. "Dark Phantasma") or card number (e.g. "074") — NOT the full PSA-format string. If lookup_catalog returns an established_name, use that exactly as card_name_override. Only construct a PSA-format name when lookup_catalog finds NO match.
 - Card photo (raw): read card name, set, number, language. Ask for condition and decision.
 - Receipt/invoice: extract all fields, show summary, confirm before creating records.
 - After creating a card from an image, do NOT ask about saving the image — the cert link provides access to the card. Only call save_images for expenses when the user explicitly requests saving a receipt.
