@@ -531,7 +531,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         purchased_at: { type: 'string', description: 'Purchase date in YYYY-MM-DD format' },
         notes: { type: 'string', description: 'Any additional notes' },
       },
-      required: ['type'],
+      required: ['type', 'purchased_at', 'source'],
     },
   },
   {
@@ -553,7 +553,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Card language' },
         notes: { type: 'string', description: 'Notes about this specific card' },
       },
-      required: ['raw_purchase_id', 'condition', 'decision'],
+      required: ['raw_purchase_id', 'purchase_cost', 'currency', 'condition', 'decision'],
     },
   },
   {
@@ -577,7 +577,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         purchased_at: { type: 'string', description: 'Purchase date YYYY-MM-DD' },
         notes: { type: 'string', description: 'Any notes' },
       },
-      required: ['slab_company', 'slab_grade', 'slab_cert_number', 'purchase_cost'],
+      required: ['slab_company', 'slab_grade', 'slab_cert_number', 'purchase_cost', 'currency', 'purchased_at'],
     },
   },
   {
