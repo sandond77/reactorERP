@@ -158,7 +158,11 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       purchase_cost: purchase_cost.toFixed(2),
       slab_additional_cost: grading_cost.toFixed(2),
       is_personal_collection: rest.is_personal_collection ?? false,
-      ...(createdCatalogId ? { catalog_id: createdCatalogId } : {}),
+      ...(createdCatalogId
+        ? { catalog_id: createdCatalogId }
+        : partNumber?.catalogData?.id
+          ? { catalog_id: partNumber.catalogData.id }
+          : {}),
     });
     toast.success('Slab added!');
     onSuccess();
