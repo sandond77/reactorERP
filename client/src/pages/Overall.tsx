@@ -289,7 +289,6 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                 { value: 'all',    label: 'All' },
                 { value: 'unsold', label: 'Unsold' },
                 { value: 'sold',   label: 'Sold' },
-                { value: 'graded', label: 'Graded' },
               ] as { value: StatusFilter; label: string }[]).map(({ value, label }) => (
                 <button key={value} onClick={() => { setStatusFilter(value); setPage(1); }}
                   className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${statusFilter === value ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>

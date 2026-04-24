@@ -989,7 +989,26 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       try {
         const enriched = await autoFillCardData(userId, { partial_name: resolvedCardName, game: 'pokemon' });
         const best = enriched.suggestions?.[0];
-        if (best?.catalog_id) { resolvedCatalogId = best.catalog_id; }
+        if (best?.catalog_id) {
+          resolvedCatalogId = best.catalog_id;
+          if (best?.catalog_card_name) resolvedCardName = best.catalog_card_name;
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    // Always enforce established name from first-ever inventory entry for this catalog
+    if (resolvedCatalogId) {
+      try {
+        const established = await db
+          .selectFrom('card_instances')
+          .select('card_name_override')
+          .where('catalog_id', '=', resolvedCatalogId)
+          .where('user_id', '=', userId)
+          .where('card_name_override', 'is not', null)
+          .orderBy('created_at', 'asc')
+          .limit(1)
+          .executeTakeFirst();
+        if (established?.card_name_override) resolvedCardName = established.card_name_override;
       } catch { /* non-fatal */ }
     }
 
@@ -1683,7 +1702,7 @@ IMAGE HANDLING:
 - Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Then call lookup_catalog — if it returns an established_name, use that exactly as card_name_override. Only construct a PSA-format name when lookup_catalog finds NO match.
 - Card photo (raw): read card name, set, number, language. Ask for condition and decision.
 - Receipt/invoice: extract all fields, show summary, confirm before creating records.
-- After creating any record from an image (card or expense), ask the user: "Do you want me to save the image to this record?" If yes, call save_images with the record_type and the internal UUID(s) returned by the create tool. Never auto-save images without asking.
+- After creating a card from an image, do NOT ask about saving the image — the cert link provides access to the card. Only call save_images for expenses when the user explicitly requests saving a receipt.
 
 SPREADSHEET HANDLING:
 - Data appears in <spreadsheet> tags. Parse header row for column mapping.
