@@ -18,6 +18,7 @@ const cardFiltersSchema = z.object({
   purchase_type: z.string().optional(),
   exclude_decision: z.string().optional(),
   is_card_show: z.string().optional(),
+  is_personal_collection: z.string().optional(),
   page: z.coerce.number().default(1),
   limit: z.coerce.number().min(1).max(100).default(25),
 });

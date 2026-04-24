@@ -59,7 +59,7 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
   const { data, isLoading } = useQuery<PaginatedResult<SlabOption>>({
     queryKey: ['slab-card-show-picker', debouncedSearch],
     queryFn: () => api.get('/grading/slabs', {
-      params: { status: 'unsold', is_card_show: 'no', search: debouncedSearch || undefined, limit: 50, page: 1 },
+      params: { status: 'unsold', is_card_show: 'no', personal_collection: 'no', search: debouncedSearch || undefined, limit: 50, page: 1 },
     }).then((r) => r.data),
     enabled: tab === 'graded',
   });
@@ -69,6 +69,7 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
     queryFn: () => api.get('/cards', {
       params: {
         is_card_show: 'no',
+        personal_collection: 'no',
         status: 'raw_for_sale',
         search: debouncedSearch || undefined,
         limit: 50,

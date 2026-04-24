@@ -28,6 +28,7 @@ export interface CardFilters {
   decision?: string;
   exclude_decision?: string;
   is_card_show?: string;  // 'yes' | 'no'
+  is_personal_collection?: string;  // 'yes' | 'no'
 }
 
 export async function listCards(
@@ -106,6 +107,8 @@ export async function listCards(
   ]));
   if (filters.is_card_show === 'yes') query = query.where('ci.is_card_show', '=', true);
   if (filters.is_card_show === 'no') query = query.where('ci.is_card_show', '=', false);
+  if (filters.is_personal_collection === 'yes') query = query.where('ci.is_personal_collection', '=', true);
+  if (filters.is_personal_collection === 'no') query = query.where('ci.is_personal_collection', '=', false);
   if (filters.search) {
     const words = filters.search.trim().split(/\s+/).filter(Boolean);
     for (const word of words) {
