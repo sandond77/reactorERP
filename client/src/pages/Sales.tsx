@@ -208,7 +208,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const { data: rawResults, isFetching: isRawSearching } = useQuery<PaginatedResult<RawCardResult>>({
     queryKey: ['sale-raw-search', debouncedRawSearch],
     queryFn: () => api.get('/cards', {
-      params: { search: debouncedRawSearch, decision: 'sell_raw', status: 'purchased_raw,inspected,raw_for_sale', limit: 100, sort_by: 'card_name', sort_dir: 'asc' },
+      params: { search: debouncedRawSearch, decision: 'sell_raw', status: 'purchased_raw,inspected,raw_for_sale', limit: 100, sort_by: 'card_name', sort_dir: 'asc', is_personal_collection: 'no' },
     }).then(r => r.data),
     enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select' || (step === 'other-lookup' && saleMode === 'raw')),
   });
@@ -229,8 +229,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay],
     queryFn: () => api.get('/cards', {
       params: bulkIsEbay
-        ? { search: debouncedBulkSearch || undefined, limit: 50, is_listed: 'yes', status: 'raw_for_sale' }
-        : { search: debouncedBulkSearch || undefined, limit: 50, is_card_show: 'yes', status: 'raw_for_sale' },
+        ? { search: debouncedBulkSearch || undefined, limit: 50, is_listed: 'yes', status: 'raw_for_sale', is_personal_collection: 'no' }
+        : { search: debouncedBulkSearch || undefined, limit: 50, is_card_show: 'yes', status: 'raw_for_sale', is_personal_collection: 'no' },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'raw',
   });

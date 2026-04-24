@@ -390,7 +390,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
   const { data: rawSearchData, isFetching: isRawSearching } = useQuery<PaginatedResult<RawCardResult>>({
     queryKey: ['trade-raw-search', debouncedOutSearch],
     queryFn: () => api.get('/cards', {
-      params: { search: debouncedOutSearch, status: 'raw_for_sale', limit: 50, sort_by: 'card_name', sort_dir: 'asc' },
+      params: { search: debouncedOutSearch, status: 'raw_for_sale', limit: 50, sort_by: 'card_name', sort_dir: 'asc', is_personal_collection: 'no' },
     }).then(r => r.data),
     enabled: debouncedOutSearch.length >= 2 && outType === 'raw' && step === 'out',
   });
