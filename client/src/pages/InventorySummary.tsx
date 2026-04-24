@@ -86,7 +86,8 @@ interface EditPartModalProps {
 }
 
 function EditPartModal({ row, onClose }: EditPartModalProps) {
-  const isNew = !row.catalog_id;
+  const isNew = !row.catalog_id;          // no catalog entry at all → "Link to Catalog"
+  const isIncomplete = !isNew && !row.sku; // has catalog entry but no SKU → "Complete Setup"
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
     game:        row.game ?? 'pokemon',
@@ -204,7 +205,7 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
       <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-lg p-6" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-base font-semibold text-zinc-100">{isNew ? 'Link to Catalog' : 'Edit Part'}</h2>
+          <h2 className="text-base font-semibold text-zinc-100">{isNew ? 'Link to Catalog' : isIncomplete ? 'Complete Part Setup' : 'Edit Part'}</h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors"><X size={16} /></button>
         </div>
 
@@ -339,8 +340,8 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
                 <Button size="sm" onClick={handleSave} disabled={saving}>{saving ? 'Saving…' : 'Yes, Save'}</Button>
               </>
             ) : (
-              <Button size="sm" onClick={() => isNew ? handleSave() : setConfirm(true)}>
-                {isNew ? 'Link to Catalog' : 'Save Changes'}
+              <Button size="sm" onClick={() => (isNew || isIncomplete) ? handleSave() : setConfirm(true)} disabled={saving}>
+                {saving ? 'Saving…' : isNew ? 'Link to Catalog' : isIncomplete ? 'Generate Part #' : 'Save Changes'}
               </Button>
             )}
           </div>
