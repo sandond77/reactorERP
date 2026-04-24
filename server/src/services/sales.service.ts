@@ -25,13 +25,14 @@ export interface RecordSaleInput {
 export async function recordSale(userId: string, input: RecordSaleInput) {
   const card = await db
     .selectFrom('card_instances')
-    .select(['id', 'status'])
+    .select(['id', 'status', 'is_personal_collection'])
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');
   if (card.status === 'sold') throw new AppError(409, 'Card already marked as sold');
+  if (card.is_personal_collection) throw new AppError(400, 'Personal collection cards cannot be sold. Remove from personal collection first.');
 
   const totalCostBasis = await computeCostBasis(input.card_instance_id);
 

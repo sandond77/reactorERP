@@ -384,12 +384,13 @@ export type CreateListingInput = Omit<NewListing, 'user_id'>;
 export async function createListing(userId: string, input: CreateListingInput) {
   const card = await db
     .selectFrom('card_instances')
-    .select(['id', 'status'])
+    .select(['id', 'status', 'is_personal_collection'])
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
     .executeTakeFirst();
 
   if (!card) throw new AppError(404, 'Card not found');
+  if (card.is_personal_collection) throw new AppError(400, 'Personal collection cards cannot be listed. Remove from personal collection first.');
 
   const existing = await db
     .selectFrom('listings')
