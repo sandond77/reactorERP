@@ -72,21 +72,23 @@ function formatDate(iso: string) {
 
 function linearRegression(points: Array<{ x: number; y: number }>): Array<{ x: number; y: number }> {
   if (points.length < 2) return [];
-  const n = points.length;
-  const sumX = points.reduce((a, p) => a + p.x, 0);
-  const sumY = points.reduce((a, p) => a + p.y, 0);
-  const sumXY = points.reduce((a, p) => a + p.x * p.y, 0);
-  const sumX2 = points.reduce((a, p) => a + p.x * p.x, 0);
+  const xs = points.map((p) => p.x);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  // Normalize x to avoid floating-point collapse with large timestamps
+  const norm = points.map((p) => ({ x: p.x - minX, y: p.y }));
+  const n = norm.length;
+  const sumX = norm.reduce((a, p) => a + p.x, 0);
+  const sumY = norm.reduce((a, p) => a + p.y, 0);
+  const sumXY = norm.reduce((a, p) => a + p.x * p.y, 0);
+  const sumX2 = norm.reduce((a, p) => a + p.x * p.x, 0);
   const denom = n * sumX2 - sumX * sumX;
   if (denom === 0) return [];
   const slope = (n * sumXY - sumX * sumY) / denom;
   const intercept = (sumY - slope * sumX) / n;
-  const xs = points.map((p) => p.x);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
   return [
-    { x: minX, y: slope * minX + intercept },
-    { x: maxX, y: slope * maxX + intercept },
+    { x: minX, y: intercept },
+    { x: maxX, y: slope * (maxX - minX) + intercept },
   ];
 }
 
