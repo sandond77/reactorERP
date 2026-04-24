@@ -69,7 +69,7 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
     queryFn: () => api.get('/cards', {
       params: {
         is_card_show: 'no',
-        personal_collection: 'no',
+        is_personal_collection: 'no',
         status: 'raw_for_sale',
         search: debouncedSearch || undefined,
         limit: 50,

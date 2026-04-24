@@ -87,7 +87,7 @@ export async function addCardsToCardShow(userId: string, cards: { id: string; ca
       .where('id', '=', id)
       .where('user_id', '=', userId)
       .executeTakeFirst();
-    if (!existing) continue;
+    if (!existing || existing.is_personal_collection) continue;
     await db
       .updateTable('card_instances')
       .set({ is_card_show: true, card_show_added_at: now, card_show_price })
