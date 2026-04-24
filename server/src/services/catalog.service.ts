@@ -624,14 +624,15 @@ export async function linkUnlinkedByCardName(userId: string, cardName: string, p
     catalogId = result.id;
   }
 
-  const { numUpdatedRows } = await db.updateTable('card_instances')
-    .set({ catalog_id: catalogId })
-    .where('user_id', '=', userId)
-    .where('catalog_id', 'is', null)
-    .where('card_name_override', '=', cardName)
-    .executeTakeFirst();
+  const linkResult = await sql`
+    UPDATE card_instances
+    SET catalog_id = ${catalogId}
+    WHERE user_id = ${userId}
+      AND catalog_id IS NULL
+      AND LOWER(TRIM(card_name_override)) = LOWER(TRIM(${cardName}))
+  `.execute(db);
 
-  return { catalog_id: catalogId, linked_count: Number(numUpdatedRows) };
+  return { catalog_id: catalogId, linked_count: Number(linkResult.numAffectedRows ?? 0) };
 }
 
 export async function updateCatalogCard(userId: string, id: string, fields: {
