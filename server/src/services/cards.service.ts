@@ -575,12 +575,16 @@ function fuzzyRawClause(search: string | undefined) {
 }
 
 const RAW_FLAT_SORT_COLS: Record<string, string> = {
+  sku:                'cc.sku',
   card_name:          `COALESCE(ci.card_name_override, cc.card_name)`,
   condition:          'ci.condition',
   raw_purchase_label: 'rp.purchase_id',
+  is_listed:          '(l.id IS NOT NULL)',
   listed_price:       'l.list_price',
   raw_cost:           'ci.purchase_cost',
+  strike_price:       's.sale_price',
   after_ebay:         'after_ebay',
+  net:                '(after_ebay - ci.purchase_cost)',
   raw_purchase_date:  'ci.purchased_at',
   date_listed:        'l.listed_at',
   date_sold:          's.sold_at',
