@@ -768,47 +768,28 @@ async function executeRawPurchaseImport(
   let importedCount = 0;
   const { getOrCreateCatalogId } = await createCatalogResolver(userId, languageOverrides, catalogOverrides);
 
-  // Group by order_number; rows without one each get their own purchase
-  const groups = new Map<string, { rows: Record<string, string>[]; indices: number[] }>();
-  rows.forEach((raw, i) => {
-    const row = applyMapping(raw, mapping);
-    if (Object.values(row).every(v => !v?.trim())) return;
-    const key = row['order_number']?.trim() || `__solo_${i}`;
-    if (!groups.has(key)) groups.set(key, { rows: [], indices: [] });
-    groups.get(key)!.rows.push(row);
-    groups.get(key)!.indices.push(i + 2);
-  });
-
-  for (const [, group] of groups) {
-    const firstRow = group.rows[0];
-    const firstRowIndex = group.indices[0];
+  for (let i = 0; i < rows.length; i++) {
+    const rowIndex = i + 2;
+    const row = applyMapping(rows[i], mapping);
+    if (Object.values(row).every(v => !v?.trim())) continue;
     try {
-      const purchasedAt = parseDate(firstRow['purchased_at']);
-      const orderNumber = firstRow['order_number']?.trim() || null;
-      const source = firstRow['source']?.trim() || null;
-      const language = firstRow['language']?.toUpperCase() || 'EN';
-      const purchaseType: 'raw' | 'bulk' = firstRow['type']?.toLowerCase() === 'bulk' ? 'bulk' : 'raw';
+      const purchasedAt = parseDate(row['purchased_at']);
+      const orderNumber = row['order_number']?.trim() || null;
+      const source = row['source']?.trim() || null;
+      const language = row['language']?.toUpperCase() || 'EN';
+      const purchaseType: 'raw' | 'bulk' = row['type']?.toLowerCase() === 'bulk' ? 'bulk' : 'raw';
 
-      const totalCostUsd = group.rows.reduce((s, r) => {
-        const cost = parseFloat(r['cost'] ?? '0');
-        return s + (isNaN(cost) ? 0 : cost);
-      }, 0);
+      const cost = parseFloat(row['cost'] ?? '0');
+      const totalCostUsd = isNaN(cost) ? 0 : cost;
+      const qty = parseInt(row['quantity'] ?? '1', 10);
+      const cardCount = isNaN(qty) ? 1 : qty;
 
-      const totalQuantity = group.rows.reduce((s, r) => {
-        const q = parseInt(r['quantity'] ?? '1', 10);
-        return s + (isNaN(q) ? 1 : q);
-      }, 0);
-
-      // Resolve catalog (part number) — only for single-card purchases
-      let catalogId: string | null = null;
-      if (group.rows.length === 1) {
-        const cardName = firstRow['card_name']?.trim();
-        const setName = firstRow['set_name']?.trim() ?? null;
-        const cardNumber = firstRow['card_number']?.trim() ?? null;
-        if (cardName) {
-          catalogId = await getOrCreateCatalogId(cardName, setName, cardNumber, language, firstRowIndex);
-        }
-      }
+      const cardName = row['card_name']?.trim();
+      const setName = row['set_name']?.trim() ?? null;
+      const cardNumber = row['card_number']?.trim() ?? null;
+      const catalogId = cardName
+        ? await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex)
+        : null;
 
       await createRawPurchase(userId, {
         type: purchaseType,
@@ -816,11 +797,11 @@ async function executeRawPurchaseImport(
         order_number: orderNumber ?? undefined,
         language,
         catalog_id:  catalogId ?? undefined,
-        card_name:   group.rows.length === 1 ? (firstRow['card_name']?.trim() || undefined) : undefined,
-        set_name:    group.rows.length === 1 && !catalogId ? (firstRow['set_name']?.trim()  || undefined) : undefined,
-        card_number: group.rows.length === 1 && !catalogId ? (firstRow['card_number']?.trim() || undefined) : undefined,
+        card_name:   cardName || undefined,
+        set_name:    !catalogId ? (setName ?? undefined) : undefined,
+        card_number: !catalogId ? (cardNumber ?? undefined) : undefined,
         total_cost_usd: Math.round(totalCostUsd * 100),
-        card_count:  totalQuantity,
+        card_count:  cardCount,
         status:      'ordered',
         purchased_at: purchasedAt?.toISOString(),
         received_at:  undefined,
@@ -829,9 +810,7 @@ async function executeRawPurchaseImport(
       importedCount++;
       if (importedCount % 10 === 0) onProgress?.(importedCount);
     } catch (err) {
-      group.indices.forEach((idx) =>
-        errorLog.push({ row: idx, message: `Purchase group error: ${err instanceof Error ? err.message : String(err)}` })
-      );
+      errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
     }
   }
 
