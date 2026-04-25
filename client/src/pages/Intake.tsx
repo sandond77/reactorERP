@@ -678,14 +678,14 @@ export function Intake() {
       {/* Pagination */}
       {data && (
         <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
-          <span>{data.total} purchase{data.total !== 1 ? 's' : ''}</span>
-          <div className="flex items-center gap-2">
-            <button disabled={page === 1} onClick={() => setPage((p) => p - 1)}
-              className="px-2 py-1 rounded bg-zinc-800 disabled:opacity-30 hover:bg-zinc-700">Prev</button>
-            <span>Page {page}</span>
-            <button disabled={page >= (data.totalPages ?? 1)} onClick={() => setPage((p) => p + 1)}
-              className="px-2 py-1 rounded bg-zinc-800 disabled:opacity-30 hover:bg-zinc-700">Next</button>
-          </div>
+          <span>{data.total.toLocaleString()} purchase{data.total !== 1 ? 's' : ''}</span>
+          {(data.totalPages ?? 1) > 1 && (
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
+              <span>{page} / {data.totalPages ?? 1}</span>
+              <Button variant="ghost" size="sm" disabled={page >= (data.totalPages ?? 1)} onClick={() => setPage((p) => p + 1)}>Next</Button>
+            </div>
+          )}
         </div>
       )}
 
