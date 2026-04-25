@@ -294,7 +294,7 @@ export async function executeImport(
       result = await executeGradedImport(userId, rows, mapping, languageOverrides, onProgress, catalogOverrides);
       break;
     case 'raw_purchase':
-      result = await executeRawPurchaseImport(userId, rows, mapping, onProgress);
+      result = await executeRawPurchaseImport(userId, rows, mapping, onProgress, languageOverrides, catalogOverrides);
       break;
     case 'bulk_sale':
       result = await executeBulkSaleImport(userId, rows, mapping, onProgress);
@@ -329,20 +329,13 @@ export async function executeImport(
   };
 }
 
-// ── Graded Cards Import ───────────────────────────────────────────────────────
+// ── Catalog Resolver Factory ──────────────────────────────────────────────────
 
-async function executeGradedImport(
+async function createCatalogResolver(
   userId: string,
-  rows: Record<string, string>[],
-  mapping: Record<string, string>,
   languageOverrides?: Record<number, string>,
-  onProgress?: (count: number) => void,
-  catalogOverrides?: Record<string, CatalogOverride>  // key: "card_name|set_name"
+  catalogOverrides?: Record<string, CatalogOverride>
 ) {
-  const errorLog: Array<{ row: number; message: string }> = [];
-  let importedCount = 0;
-
-  // Load user-defined set aliases for matching custom languages
   const userAliasRows = await db.selectFrom('pokemon_set_aliases')
     .select(['language', 'set_code', 'alias', 'set_name', 'game'])
     .where('user_id', '=', userId)
@@ -361,7 +354,6 @@ async function executeGradedImport(
     return null;
   }
 
-  // Cache catalog lookups: sku → catalog_id
   const catalogCache = new Map<string, string>();
 
   async function getOrCreateCatalogId(
@@ -502,6 +494,23 @@ async function executeGradedImport(
     catalogCache.set(sku, created.id);
     return created.id;
   }
+
+  return { getOrCreateCatalogId };
+}
+
+// ── Graded Cards Import ───────────────────────────────────────────────────────
+
+async function executeGradedImport(
+  userId: string,
+  rows: Record<string, string>[],
+  mapping: Record<string, string>,
+  languageOverrides?: Record<number, string>,
+  onProgress?: (count: number) => void,
+  catalogOverrides?: Record<string, CatalogOverride>
+) {
+  const errorLog: Array<{ row: number; message: string }> = [];
+  let importedCount = 0;
+  const { getOrCreateCatalogId } = await createCatalogResolver(userId, languageOverrides, catalogOverrides);
 
   // Pre-pass: detect set listings — same non-order listing URL shared by 2+ DIFFERENT cards.
   // "Different" means: no two rows share the same card_name OR the same card_number.
@@ -751,10 +760,13 @@ async function executeRawPurchaseImport(
   userId: string,
   rows: Record<string, string>[],
   mapping: Record<string, string>,
-  onProgress?: (count: number) => void
+  onProgress?: (count: number) => void,
+  languageOverrides?: Record<number, string>,
+  catalogOverrides?: Record<string, CatalogOverride>
 ) {
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
+  const { getOrCreateCatalogId } = await createCatalogResolver(userId, languageOverrides, catalogOverrides);
 
   // Group by order_number; rows without one each get their own purchase
   const groups = new Map<string, { rows: Record<string, string>[]; indices: number[] }>();
@@ -769,6 +781,7 @@ async function executeRawPurchaseImport(
 
   for (const [, group] of groups) {
     const firstRow = group.rows[0];
+    const firstRowIndex = group.indices[0];
     try {
       const purchasedAt = parseDate(firstRow['purchased_at']);
       const orderNumber = firstRow['order_number']?.trim() || null;
@@ -786,14 +799,26 @@ async function executeRawPurchaseImport(
         return s + (isNaN(q) ? 1 : q);
       }, 0);
 
+      // Resolve catalog (part number) — only for single-card purchases
+      let catalogId: string | null = null;
+      if (group.rows.length === 1) {
+        const cardName = firstRow['card_name']?.trim();
+        const setName = firstRow['set_name']?.trim() ?? null;
+        const cardNumber = firstRow['card_number']?.trim() ?? null;
+        if (cardName) {
+          catalogId = await getOrCreateCatalogId(cardName, setName, cardNumber, language, firstRowIndex);
+        }
+      }
+
       await createRawPurchase(userId, {
         type: purchaseType,
         source: source ?? undefined,
         order_number: orderNumber ?? undefined,
         language,
+        catalog_id:  catalogId ?? undefined,
         card_name:   group.rows.length === 1 ? (firstRow['card_name']?.trim() || undefined) : undefined,
-        set_name:    group.rows.length === 1 ? (firstRow['set_name']?.trim()  || undefined) : undefined,
-        card_number: group.rows.length === 1 ? (firstRow['card_number']?.trim() || undefined) : undefined,
+        set_name:    group.rows.length === 1 && !catalogId ? (firstRow['set_name']?.trim()  || undefined) : undefined,
+        card_number: group.rows.length === 1 && !catalogId ? (firstRow['card_number']?.trim() || undefined) : undefined,
         total_cost_usd: Math.round(totalCostUsd * 100),
         card_count:  totalQuantity,
         status:      'ordered',
@@ -958,54 +983,53 @@ async function executeExpensesImport(
 async function executeLegacyCardsImport(
   userId: string,
   rows: Record<string, string>[],
-  mapping: Record<string, string>
+  mapping: Record<string, string>,
+  languageOverrides?: Record<number, string>,
+  catalogOverrides?: Record<string, CatalogOverride>
 ) {
   const errorLog: Array<{ row: number; message: string }> = [];
   let importedCount = 0;
-  const BATCH_SIZE = 100;
+  const { getOrCreateCatalogId } = await createCatalogResolver(userId, languageOverrides, catalogOverrides);
 
-  for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-    const batch = rows.slice(i, i + BATCH_SIZE);
-    const inserts = [];
+  for (let i = 0; i < rows.length; i++) {
+    const rowIndex = i + 2;
+    if (Object.values(rows[i]).every(v => !v?.trim())) continue;
+    try {
+      const mapped = applyMapping(rows[i], mapping);
+      if (Object.values(mapped).every(v => !v?.trim())) continue;
+      const cardName = mapped['card_name']?.trim();
+      if (!cardName) throw new Error('card_name is required');
+      const qty = parseInt(mapped['quantity'] ?? '1', 10);
+      const setName = mapped['set_name']?.trim() ?? null;
+      const cardNumber = mapped['card_number']?.trim() ?? null;
+      const explicitLang = mapped['language']?.trim();
+      const language = explicitLang?.toUpperCase() || (/japanese/i.test(cardName) ? 'JP' : 'EN');
+      const catalogId = await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex);
 
-    for (let j = 0; j < batch.length; j++) {
-      const rowIndex = i + j + 2;
-      try {
-        const mapped = applyMapping(batch[j], mapping);
-        const cardName = mapped['card_name']?.trim();
-        if (!cardName) throw new Error('card_name is required');
-        const qty = parseInt(mapped['quantity'] ?? '1', 10);
-        inserts.push({
-          catalog_id:           null,
-          card_name_override:   cardName,
-          set_name_override:    mapped['set_name']?.trim()    ?? null,
-          card_number_override: mapped['card_number']?.trim() ?? null,
-          card_game:            mapped['card_game']?.toLowerCase() ?? 'pokemon',
-          language:             mapped['language']?.toUpperCase() ?? 'EN',
-          variant:              null, rarity: null, notes: null,
-          purchase_type:        'raw' as const,
-          status:               'purchased_raw' as const,
-          quantity:             isNaN(qty) ? 1 : qty,
-          purchase_cost:        toCents(mapped['purchase_cost'] ?? '0'),
-          currency:             normalizeCurrency(mapped['currency']),
-          source_link:          mapped['source_link']?.trim() ?? null,
-          order_number:         mapped['order_number']?.trim() ?? null,
-          condition:            normalizeCondition(mapped['condition']),
-          condition_notes:      null, image_front_url: null, image_back_url: null,
-          purchased_at:         parseDate(mapped['purchased_at']),
-          raw_purchase_id:      null, trade_id: null, location_id: null, decision: null,
-        });
-      } catch (err) {
-        errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
-      }
-    }
-
-    if (inserts.length > 0) {
-      await db.insertInto('card_instances')
-        .values(inserts.map((ins) => ({ ...ins, user_id: userId })))
-        .execute()
-        .catch((err) => errorLog.push({ row: -1, message: `Batch insert failed: ${err.message}` }));
-      importedCount += inserts.length;
+      await db.insertInto('card_instances').values({
+        user_id:              userId,
+        catalog_id:           catalogId,
+        card_name_override:   cardName,
+        set_name_override:    catalogId ? null : setName,
+        card_number_override: catalogId ? null : cardNumber,
+        card_game:            mapped['card_game']?.toLowerCase() ?? 'pokemon',
+        language,
+        variant:              null, rarity: null, notes: null,
+        purchase_type:        'raw' as const,
+        status:               'purchased_raw' as const,
+        quantity:             isNaN(qty) ? 1 : qty,
+        purchase_cost:        toCents(mapped['purchase_cost'] ?? '0'),
+        currency:             normalizeCurrency(mapped['currency']),
+        source_link:          mapped['source_link']?.trim() ?? null,
+        order_number:         mapped['order_number']?.trim() ?? null,
+        condition:            normalizeCondition(mapped['condition']),
+        condition_notes:      null, image_front_url: null, image_back_url: null,
+        purchased_at:         parseDate(mapped['purchased_at']),
+        raw_purchase_id:      null, trade_id: null, location_id: null, decision: null,
+      }).execute();
+      importedCount++;
+    } catch (err) {
+      errorLog.push({ row: rowIndex, message: err instanceof Error ? err.message : String(err) });
     }
   }
 
