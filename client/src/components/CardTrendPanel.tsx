@@ -323,10 +323,13 @@ function TrendStats({ data, view }: { data: TrendData; view: PriceView }) {
   });
   const gradeEntries = Object.entries(grades).sort((a, b) => a[0].localeCompare(b[0]));
 
-  // Price change
-  const sorted = [...sales].sort((a, b) => new Date(a.sold_at).getTime() - new Date(b.sold_at).getTime());
-  const first = valueOf(sorted[0]);
-  const last  = valueOf(sorted[sorted.length - 1]);
+  // Price change — use the most common grade/series so we compare like-for-like
+  const dominantSeries = gradeEntries.reduce((best, e) => e[1].count > best[1].count ? e : best, gradeEntries[0])[0];
+  const dominantSales = [...sales]
+    .filter((s) => seriesKey(s) === dominantSeries)
+    .sort((a, b) => new Date(a.sold_at).getTime() - new Date(b.sold_at).getTime());
+  const first = dominantSales.length ? valueOf(dominantSales[0]) : 0;
+  const last  = dominantSales.length ? valueOf(dominantSales[dominantSales.length - 1]) : 0;
   const pctChange = first > 0 ? ((last - first) / first) * 100 : null;
 
   // Overall avg + range
@@ -355,12 +358,12 @@ function TrendStats({ data, view }: { data: TrendData; view: PriceView }) {
             <p className="text-xs text-zinc-500">{sales.length} total sales</p>
           </StatBlock>
 
-          {pctChange !== null && sorted.length >= 2 && (
+          {pctChange !== null && dominantSales.length >= 2 && (
             <StatBlock label="Price Change">
               <p className={cn('text-sm font-semibold', pctChange >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                 {pctChange >= 0 ? '+' : ''}{pctChange.toFixed(1)}%
               </p>
-              <p className="text-xs text-zinc-500">first → last sale</p>
+              <p className="text-xs text-zinc-500">first → last ({dominantSeries})</p>
             </StatBlock>
           )}
 
