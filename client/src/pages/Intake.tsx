@@ -432,9 +432,13 @@ function ReceiveModal({
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 
+type SortDir = 'asc' | 'desc';
+
 const INTAKE_FILTER_DEFAULTS = {
   search:  '',
   fType:   null as PurchaseType | null,
+  sortCol: null as string | null,
+  sortDir: 'desc' as SortDir,
 };
 
 export function Intake() {
@@ -444,6 +448,8 @@ export function Intake() {
   const [search, setSearch]             = useState(saved.search);
   const [debouncedSearch, setDebounced] = useState(saved.search);
   const [fType, setFType]               = useState<PurchaseType | null>(saved.fType);
+  const [sortCol, setSortCol]           = useState<string | null>(saved.sortCol);
+  const [sortDir, setSortDir]           = useState<SortDir>(saved.sortDir);
   const [addOpen, setAddOpen]           = useState(false);
   const [editRow, setEditRow]           = useState<PurchaseRow | null>(null);
   const [receiveRow, setReceiveRow]     = useState<PurchaseRow | null>(null);
@@ -489,14 +495,22 @@ export function Intake() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('intake', { search, fType });
-  }, [search, fType]);
+    saveFilters('intake', { search, fType, sortCol, sortDir });
+  }, [search, fType, sortCol, sortDir]);
+
+  function handleSort(col: string) {
+    if (sortCol === col) setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('desc'); }
+    setPage(1);
+  }
 
   const params = {
     page,
     pageSize: 50,
     search:   debouncedSearch || undefined,
     type:     fType ?? undefined,
+    sort_by:  sortCol ?? undefined,
+    sort_dir: sortDir,
   };
 
   const { data, isLoading } = useQuery<{ data: PurchaseRow[]; total: number; totalPages: number }>({
@@ -549,7 +563,7 @@ export function Intake() {
   const hasActiveFilters = !!debouncedSearch || fType !== null;
   function clearFilters() { setSearch(''); setFType(null); setPage(1); }
 
-  const sh = { sortCol: null, sortDir: 'asc' as const, onSort: () => {} };
+  const sh = { sortCol, sortDir, onSort: handleSort };
 
   return (
     <div className="flex flex-col h-full">

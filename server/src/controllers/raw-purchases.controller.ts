@@ -12,6 +12,8 @@ export async function list(req: Request, res: Response) {
       search: Array.isArray(req.query.search) ? req.query.search[0] as string : req.query.search as string | undefined,
       page: req.query.page ? Number(req.query.page) : undefined,
       pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
+      sortBy: req.query.sort_by as string | undefined,
+      sortDir: req.query.sort_dir === 'asc' ? 'asc' : req.query.sort_dir === 'desc' ? 'desc' : undefined,
     });
     res.json(result);
   } catch (err) {

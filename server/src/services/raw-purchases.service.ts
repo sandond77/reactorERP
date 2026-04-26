@@ -75,6 +75,21 @@ async function nextPurchaseId(userId: string, type: RawPurchaseType, year: numbe
 
 // ── Queries ───────────────────────────────────────────────────────────────────
 
+const RAW_PURCHASES_SORT_COLS: Record<string, string> = {
+  purchase_id:     'rp.purchase_id',
+  type:            'rp.type',
+  card_name:       'rp.card_name',
+  source:          'rp.source',
+  order_number:    'rp.order_number',
+  language:        'rp.language',
+  card_count:      'rp.card_count',
+  total_cost_usd:  'rp.total_cost_usd',
+  avg_cost_usd:    `(CASE WHEN rp.card_count > 0 THEN rp.total_cost_usd::numeric / rp.card_count ELSE NULL END)`,
+  status:          'rp.status',
+  purchased_at:    'rp.purchased_at',
+  inspected_count: `COALESCE(SUM(ci.quantity), 0)`,
+};
+
 export async function listRawPurchases(
   userId: string,
   filters: {
@@ -84,10 +99,14 @@ export async function listRawPurchases(
     search?: string;
     page?: number;
     pageSize?: number;
+    sortBy?: string;
+    sortDir?: 'asc' | 'desc';
   } = {}
 ) {
-  const { type, status, needs_inspection, search, page = 1, pageSize = 50 } = filters;
+  const { type, status, needs_inspection, search, page = 1, pageSize = 50, sortBy, sortDir } = filters;
   const offset = (page - 1) * pageSize;
+  const sortExpr = RAW_PURCHASES_SORT_COLS[sortBy ?? ''] ?? 'rp.purchased_at';
+  const dir = sortDir === 'asc' ? 'asc' : 'desc';
 
   let query = db
     .selectFrom('raw_purchases as rp')
@@ -121,7 +140,7 @@ export async function listRawPurchases(
     ])
     .where('rp.user_id', '=', userId)
     .groupBy('rp.id')
-    .orderBy('rp.purchased_at', 'desc')
+    .orderBy(sql.raw(`${sortExpr} ${dir} NULLS LAST`))
     .orderBy('rp.purchase_id', 'desc');
 
   if (type) query = query.where('rp.type', '=', type);
