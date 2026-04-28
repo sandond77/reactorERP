@@ -891,12 +891,12 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   // ── Image saving ──────────────────────────────────────────────────────────
   {
     name: 'save_images',
-    description: 'Save the uploaded image(s) to one or more records. Call this only after the user confirms they want the image saved. Use record_type "card" for card instances (add_card_to_purchase / add_graded_card results) and record_type "expense" for expenses (record_expense results).',
+    description: 'Save the uploaded image(s) to one or more records. Call this only after the user confirms they want the image saved. Use record_type "card" for card instances (add_card_to_purchase / add_graded_card results) and record_type "expense" for expenses (record_expense results). Accepts either internal UUIDs from a tool_result, or display IDs visible in chat history (e.g. expense_id "2026E3").',
     input_schema: {
       type: 'object' as const,
       properties: {
         record_type: { type: 'string', enum: ['card', 'expense'], description: '"card" to attach to card instance(s), "expense" to attach to an expense' },
-        record_ids: { type: 'array', items: { type: 'string' }, description: 'Internal UUIDs of the records to attach the image to (card_instance_id or expense internal_id)' },
+        record_ids: { type: 'array', items: { type: 'string' }, description: 'Internal UUID OR display ID of each record. For expenses, display IDs look like "2026E3". For cards, internal UUIDs are required.' },
       },
       required: ['record_type', 'record_ids'],
     },
@@ -1285,8 +1285,16 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       pendingImages.delete(userId);
       return { success: true, saved_to: record_ids.length };
     } else {
-      // expense — save receipt to first record_id
-      const expenseInternalId = record_ids[0];
+      // expense — resolve display IDs (e.g. "2026E3") to internal UUIDs if needed
+      const rawId = record_ids[0];
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId);
+      let expenseInternalId = rawId;
+      if (!isUuid) {
+        const row = await db.selectFrom('expenses').select('id')
+          .where('user_id', '=', userId).where('expense_id', '=', rawId).executeTakeFirst();
+        if (!row) return { success: false, reason: `Expense ${rawId} not found` };
+        expenseInternalId = row.id;
+      }
       const url = await saveReceiptFromBase64(userId, expenseInternalId, imgs[0].base64);
       await saveExpenseReceiptUrl(userId, expenseInternalId, url);
       pendingImages.delete(userId);
@@ -1702,9 +1710,9 @@ IMAGE HANDLING:
 - Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Then call lookup_catalog using the SHORT card name (e.g. "Gengar") or set name (e.g. "Dark Phantasma") or card number (e.g. "074") — NOT the full PSA-format string. If lookup_catalog returns an established_name, use that exactly as card_name_override. Only construct a PSA-format name when lookup_catalog finds NO match.
 - Card photo (raw): read card name, set, number, language. Ask for condition and decision.
 - Receipt/invoice: extract all fields, show summary, confirm before creating records.
-- After creating a card or expense from an image, do NOT ask about saving the image or receipt. The user can attach via the UI if they want it. Never proactively offer save_images.
-- save_images requires the record's internal_id from a tool_result block earlier in this turn. If the conversation has scrolled past that and only a display ID (e.g. 2026E3, RP-2026-001) is visible, do NOT recreate the record to get a new internal_id — instead tell the user to attach the image via the UI. Recreating would create a duplicate.
-- If a prior assistant message in the history says a record was already created (expense, card, sale, listing, etc.), treat it as already done. Never run the same write tool again to "redo" what was already reported.
+- After creating a card from an image, do NOT ask about saving the image — the cert link provides access to the card.
+- After creating an expense from a receipt image, you MAY ask the user once if they want the receipt saved. If they say yes, call save_images with record_type="expense" and the expense's display ID (e.g. "2026E3") in record_ids — do NOT call record_expense again to obtain a new internal_id.
+- If a prior assistant message in the history says a record was already created (expense, card, sale, listing, etc.), treat it as already done. Never re-run the same write tool to "redo" what was already reported — the duplicate cannot be undone automatically.
 
 SPREADSHEET HANDLING:
 - Data appears in <spreadsheet> tags. Parse header row for column mapping.
