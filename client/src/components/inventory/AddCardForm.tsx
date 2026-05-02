@@ -42,6 +42,7 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, any> } | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
+  const [unnumbered, setUnnumbered] = useState(false);
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
   const [frontPreview, setFrontPreview] = useState<string | null>(null);
@@ -95,11 +96,11 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
       const s = partNumber.catalogData;
       await api.post('/catalog', {
         game: 'pokemon',
-        sku: partNumber.sku,
+        sku: unnumbered ? null : partNumber.sku,
         card_name: s.card_name,
         set_name: s.set_name,
         set_code: s.set_code ?? null,
-        card_number: s.card_number ?? null,
+        card_number: unnumbered ? null : (s.card_number ?? null),
         language: s.language ?? 'EN',
         rarity: getValues('rarity') || s.rarity || null,
       });
@@ -187,7 +188,26 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
 
       <div className="grid grid-cols-3 gap-3">
         <Input label="Set Name" placeholder="e.g. Base Set" {...register('set_name_override')} />
-        <Input label="Card Number" placeholder="e.g. 4/102" {...register('card_number_override')} />
+        <div>
+          <Input
+            label="Card Number"
+            placeholder={unnumbered ? '—' : 'e.g. 4/102'}
+            disabled={unnumbered}
+            {...register('card_number_override')}
+            className={unnumbered ? 'opacity-50' : undefined}
+          />
+          <label className="flex items-center gap-1 text-[10px] text-zinc-500 cursor-pointer select-none mt-1">
+            <input
+              type="checkbox"
+              checked={unnumbered}
+              onChange={(e) => {
+                setUnnumbered(e.target.checked);
+                if (e.target.checked) setValue('card_number_override', '');
+              }}
+              className="accent-indigo-500" />
+            no card # (unnumbered)
+          </label>
+        </div>
         <Input label="Rarity" placeholder="e.g. Holo" {...register('rarity')} />
       </div>
 

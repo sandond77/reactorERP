@@ -15,7 +15,7 @@ const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTH
 const schema = z.object({
   card_name_override: z.string().min(1, 'Card name required'),
   set_name_override: z.string().min(1, 'Set name required'),
-  card_number_override: z.string().min(1, 'Card number required'),
+  card_number_override: z.string().optional(),
   rarity: z.string().optional(),
   card_game: z.string().default('pokemon'),
   language: z.string().default('EN'),
@@ -47,6 +47,8 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, string> } | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
   const [createdCatalogId, setCreatedCatalogId] = useState<string | null>(null);
+  const [unnumbered, setUnnumbered] = useState(false);
+  const [unnumberedError, setUnnumberedError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { register, handleSubmit, setValue, getValues, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
@@ -128,11 +130,11 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       const s = partNumber.catalogData;
       const res = await api.post('/catalog', {
         game: getValues('card_game') || 'pokemon',
-        sku: partNumber.sku,
+        sku: unnumbered ? null : partNumber.sku,
         card_name: getValues('card_name_override'),
         set_name: getValues('set_name_override'),
         set_code: s.set_code ?? null,
-        card_number: getValues('card_number_override') || s.card_number || null,
+        card_number: unnumbered ? null : (getValues('card_number_override') || s.card_number || null),
         language: getValues('language') || s.language || 'EN',
         rarity: getValues('rarity') || s.rarity || null,
       });
@@ -147,6 +149,10 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   };
 
   const onSubmit = async (data: FormData) => {
+    if (!unnumbered && !data.card_number_override?.trim()) {
+      setUnnumberedError('Card number required');
+      return;
+    }
     if (partNumber && !partNumber.exists) {
       toast.error('Create the part number before adding the slab');
       return;
@@ -260,7 +266,28 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
 
       <div className="grid grid-cols-3 gap-3">
         <Input label="Set Name" placeholder="e.g. Base Set" {...register('set_name_override')} error={errors.set_name_override?.message} />
-        <Input label="Card Number" placeholder="e.g. 4/102" {...register('card_number_override')} error={errors.card_number_override?.message} />
+        <div>
+          <Input
+            label="Card Number"
+            placeholder={unnumbered ? '—' : 'e.g. 4/102'}
+            disabled={unnumbered}
+            {...register('card_number_override')}
+            error={errors.card_number_override?.message ?? unnumberedError ?? undefined}
+            className={unnumbered ? 'opacity-50' : undefined}
+          />
+          <label className="flex items-center gap-1 text-[10px] text-zinc-500 cursor-pointer select-none mt-1">
+            <input
+              type="checkbox"
+              checked={unnumbered}
+              onChange={(e) => {
+                setUnnumbered(e.target.checked);
+                setUnnumberedError(null);
+                if (e.target.checked) setValue('card_number_override', '');
+              }}
+              className="accent-indigo-500" />
+            no card # (unnumbered)
+          </label>
+        </div>
         <Input label="Rarity" placeholder="e.g. Holo, Art Rare" {...register('rarity')} />
       </div>
 

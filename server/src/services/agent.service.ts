@@ -55,9 +55,14 @@ export async function parseReceiptImage(
   hint?: 'purchase' | 'sale'
 ): Promise<ParsedReceiptData> {
   const systemPrompt = `You are an expert at parsing trading card receipts, invoices, and order confirmations.
-Extract structured data from images of purchase receipts (eBay, Whatnot, card shows, etc.) and sale confirmations.
+Extract structured data from images of purchase receipts (eBay, Whatnot, card shows, Buyee/Yahoo Auctions, etc.) and sale confirmations.
 Always respond with valid JSON matching the requested schema. Be precise with prices — extract exact amounts shown.
-For card names, preserve the full official name. For PSA/BGS cert numbers, extract them exactly.`;
+
+CRITICAL: card_name and set_name MUST be returned in English (Latin script) regardless of the source language. Translate Japanese/Korean/Chinese names to their official English equivalents:
+- Pokemon names → official English names (エリカのミニリュウ → "Erika's Dratini", レントラー → "Luxray", ミュウ → "Mew")
+- Set names → established English transliterations (旧裏 → "Old Back", コロコロコミック → "Corocoro Comics", 黒炎の支配者 → "Ruler of the Black Flame", 拡張パック → "Expansion Pack")
+- Never include parenthetical Japanese alongside English (don't return "Old Back (旧裏)" — just "Old Back")
+- For PSA/BGS cert numbers, extract them exactly.`;
 
   const userPrompt = `Parse this ${hint ?? 'trading card'} receipt image and extract all card and transaction data.
 
@@ -66,8 +71,8 @@ Return a JSON object with this exact structure:
   "type": "purchase" | "sale",
   "cards": [
     {
-      "card_name": "string or null",
-      "set_name": "string or null",
+      "card_name": "OFFICIAL ENGLISH card name only (translate from Japanese/Korean/etc.) — never non-Latin script",
+      "set_name": "ENGLISH set name (translate or use established transliteration) — never non-Latin script",
       "card_number": "string or null",
       "quantity": number or null,
       "cost": number (in dollars, e.g. 12.99) or null,
@@ -398,12 +403,12 @@ async function extractCardInfoFromImage(
 Extract all visible information. Return ONLY this JSON (no markdown):
 {
   "psa_label": "normalized card identifier in format: '{YEAR} POKEMON {LANGUAGE} {SET_CODE}-{SET_NAME} {NUMBER} {CARD NAME} {RARITY}' — e.g. '2024 POKEMON JAPANESE SV8a-TERASTAL FEST ex 093 UMBREON EX' or '1996 POKEMON JAPANESE BS1-BASIC 006 CHARIZARD HOLO'. Use POKEMON (not P.M.), spell out JAPANESE/ENGLISH, zero-pad card numbers to 3 digits. Exclude grade and cert.",
-  "card_name": "card name only, e.g. 'Charizard'",
-  "set_name": "set name, e.g. 'Basic'",
+  "card_name": "OFFICIAL ENGLISH card name only — e.g. 'Charizard', 'Luxray ex', 'Mew'. Always translate from Japanese/Korean/etc. to the official English Pokemon name. Never return non-Latin script.",
+  "set_name": "ENGLISH set name. For JP-exclusive sets use the established English transliteration (e.g. 'コロコロコミック' → 'Corocoro Comics', 'スカーレット&バイオレット ex スターターセット' → 'Scarlet & Violet ex Starter Set', '黒炎の支配者' → 'Ruler of the Black Flame'). Match the canonical English name from the set reference below when possible. Never return non-Latin script.",
   "set_code": "internal set code — match the set abbreviation or symbol visible on the card to the reference list below and return the exact code, e.g. 'SV8a' or 'SM1' or 'XY4' or null",
   "card_number": "card number only, e.g. '006' or '034/087'",
-  "rarity": "rarity if visible, e.g. 'Holo' or '1st Edition'",
-  "language": "EN | JP | KR",
+  "rarity": "rarity if visible in English, e.g. 'Holo' or '1st Edition'",
+  "language": "EN | JP | KR — the language printed on the card itself, NOT the language of the returned card_name/set_name",
   "game": "${game}",
   "grading_company": "PSA | BGS | CGC | SGC | HGA | ACE | ARS | null",
   "grade": 10,
@@ -411,7 +416,9 @@ Extract all visible information. Return ONLY this JSON (no markdown):
   "cert_number": "cert number if visible, e.g. '26354848'"
 }
 
-Set code reference (match abbreviations visible on card or PSA label):
+CRITICAL: card_name and set_name MUST be in English even when the card is Japanese, Korean, etc. The "language" field captures what's printed on the card; the names you return must always be Latin script for catalog matching.
+
+Set code reference (canonical English names — match these exactly when the card's set is in the list):
 ${setCodeRef}
 
 If not a card image, return null.`,

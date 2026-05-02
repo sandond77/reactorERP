@@ -1,68 +1,15 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
-import { filterSets } from '../../lib/set-codes';
+import { SetCombobox, useMergedSets } from './SetCombobox';
 
 const GAMES = [
   { value: 'pokemon',   label: 'Pokémon' },
   { value: 'one_piece', label: 'One Piece' },
   { value: 'old_maid',  label: 'Old Maid' },
 ];
-
-function SetCombobox({
-  value,
-  language,
-  inputCls,
-  placeholder,
-  onTyped,
-  onSelect,
-}: {
-  value: string;
-  language: 'JP' | 'EN';
-  inputCls: string;
-  placeholder: string;
-  onTyped: (raw: string) => void;
-  onSelect: (entry: { code: string; name: string }) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const suggestions = filterSets(language, value).slice(0, 12);
-
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  return (
-    <div ref={ref} className="relative">
-      <input
-        className={inputCls}
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => { onTyped(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-      />
-      {open && suggestions.length > 0 && (
-        <ul className="absolute z-50 left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl text-xs">
-          {suggestions.map((s) => (
-            <li
-              key={s.code}
-              onMouseDown={(e) => { e.preventDefault(); onSelect(s); setOpen(false); }}
-              className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-zinc-800">
-              <span className="font-mono text-indigo-300 w-24 shrink-0">{s.code}</span>
-              <span className="text-zinc-400 truncate">{s.name}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
 
 export interface CreatedPart {
   id: string;
@@ -137,12 +84,37 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     rarity:      '',
     variant:     '',
   });
+  const [unnumbered, setUnnumbered] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const setOptions = useMergedSets(form.language);
 
-  function autoSku(game: string, lang: string, setCode: string, cardNum: string) {
+  async function handleAddNewSet() {
+    const code = form.set_code.trim();
+    const name = form.set_name.trim();
+    if (!code || !name) return;
+    try {
+      await api.post('/sets/aliases', {
+        language: form.language,
+        game: form.game,
+        alias: name.toLowerCase(),
+        set_code: code,
+        set_name: name,
+      });
+      queryClient.invalidateQueries({ queryKey: ['set-aliases'] });
+    } catch (err: unknown) {
+      const msg = err && typeof err === 'object' && 'response' in err
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        ? (err as any).response?.data?.error ?? 'Failed to register set.'
+        : 'Failed to register set.';
+      setError(msg);
+    }
+  }
+
+  function autoSku(game: string, lang: string, setCode: string, cardNum: string, isUnnumbered: boolean) {
     if (!setCode && !cardNum) return '';
     const prefix = game === 'one_piece' ? 'OP' : game === 'old_maid' ? 'OM' : 'PKMN';
+    if (isUnnumbered) return ''; // unnumbered cards leave sku null at the server
     return [prefix, lang.toUpperCase(), setCode.toUpperCase(), cardNum.toUpperCase()].filter(Boolean).join('-');
   }
 
@@ -150,7 +122,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     const val = e.target.value;
     setForm(prev => {
       const next = { ...prev, [key]: val };
-      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
       return next;
     });
   };
@@ -239,39 +211,67 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
               <label className="block text-xs text-zinc-400 mb-1">Set Name <span className="text-red-500">*</span></label>
               <SetCombobox
                 value={form.set_name}
-                language={form.language as 'JP' | 'EN'}
+                selectedCode={form.set_code || undefined}
                 inputCls={inputCls}
                 placeholder="e.g. Obsidian Flames"
+                options={setOptions}
+                typedSetName={form.set_name}
+                typedSetCode={form.set_code}
                 onTyped={(name) => setForm((prev) => ({ ...prev, set_name: name }))}
                 onSelect={(entry) => setForm((prev) => {
                   const next = { ...prev, set_name: entry.name, set_code: entry.code };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
                   return next;
                 })}
+                onAddNew={handleAddNewSet}
               />
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Set Code</label>
               <SetCombobox
                 value={form.set_code}
-                language={form.language as 'JP' | 'EN'}
                 inputCls={inputCls}
                 placeholder="e.g. SV3"
+                options={setOptions}
+                typedSetName={form.set_name}
+                typedSetCode={form.set_code}
                 onTyped={(code) => setForm((prev) => {
                   const next = { ...prev, set_code: code };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
                   return next;
                 })}
                 onSelect={(entry) => setForm((prev) => {
                   const next = { ...prev, set_code: entry.code, set_name: entry.name };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
                   return next;
                 })}
+                onAddNew={handleAddNewSet}
               />
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Card #</label>
-              <input className={inputCls} value={form.card_number} onChange={field('card_number')} placeholder="e.g. 215" />
+              <input
+                className={`${inputCls} ${unnumbered ? 'opacity-50' : ''}`}
+                value={unnumbered ? '' : form.card_number}
+                disabled={unnumbered}
+                placeholder={unnumbered ? '—' : 'e.g. 215'}
+                onChange={field('card_number')} />
+              <label className="flex items-center gap-1 text-[10px] text-zinc-500 cursor-pointer select-none mt-1">
+                <input
+                  type="checkbox"
+                  checked={unnumbered}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setUnnumbered(checked);
+                    setForm((prev) => {
+                      const next = checked ? { ...prev, card_number: '' } : prev;
+                      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, checked);
+                      return next;
+                    });
+                  }}
+                  className="accent-indigo-500" />
+                no card # (unnumbered)
+              </label>
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Rarity</label>
