@@ -638,7 +638,7 @@ export function Intake() {
                   </td>
                   <td className="px-4 py-2">
                     <p className="text-zinc-200 truncate">{row.card_name ?? '—'}</p>
-                    {row.set_name && <p className="text-[10px] text-zinc-500">{row.set_name}{row.card_number ? ` · #${row.card_number}` : ''}</p>}
+                    {row.set_name && <p className="text-[10px] text-zinc-500 whitespace-normal break-words leading-tight">{row.set_name}{row.card_number ? ` · #${row.card_number}` : ''}</p>}
                   </td>
                   <td className="px-4 py-2 text-zinc-400">{row.source ?? '—'}</td>
                   <td className="px-4 py-2 text-zinc-400 font-mono text-[10px]">{row.order_number ?? '—'}</td>

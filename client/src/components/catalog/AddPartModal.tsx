@@ -11,16 +11,20 @@ const GAMES = [
   { value: 'old_maid',  label: 'Old Maid' },
 ];
 
-function SetCodeCombobox({
+function SetCombobox({
   value,
   language,
   inputCls,
-  onChange,
+  placeholder,
+  onTyped,
+  onSelect,
 }: {
   value: string;
   language: 'JP' | 'EN';
   inputCls: string;
-  onChange: (code: string) => void;
+  placeholder: string;
+  onTyped: (raw: string) => void;
+  onSelect: (entry: { code: string; name: string }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -39,8 +43,8 @@ function SetCodeCombobox({
       <input
         className={inputCls}
         value={value}
-        placeholder="e.g. SV3"
-        onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+        placeholder={placeholder}
+        onChange={(e) => { onTyped(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
       />
       {open && suggestions.length > 0 && (
@@ -48,7 +52,7 @@ function SetCodeCombobox({
           {suggestions.map((s) => (
             <li
               key={s.code}
-              onMouseDown={(e) => { e.preventDefault(); onChange(s.code); setOpen(false); }}
+              onMouseDown={(e) => { e.preventDefault(); onSelect(s); setOpen(false); }}
               className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-zinc-800">
               <span className="font-mono text-indigo-300 w-24 shrink-0">{s.code}</span>
               <span className="text-zinc-400 truncate">{s.name}</span>
@@ -135,7 +139,6 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
   });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [skuManual, setSkuManual] = useState(false);
 
   function autoSku(game: string, lang: string, setCode: string, cardNum: string) {
     if (!setCode && !cardNum) return '';
@@ -147,7 +150,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     const val = e.target.value;
     setForm(prev => {
       const next = { ...prev, [key]: val };
-      if (!skuManual) next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
       return next;
     });
   };
@@ -221,9 +224,10 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                 Part # <span className="text-zinc-600">auto-generated from set code + card #</span>
               </label>
               <input
-                className={inputCls}
+                className={`${inputCls} cursor-not-allowed text-zinc-400`}
                 value={form.sku}
-                onChange={e => { setSkuManual(true); setForm(prev => ({ ...prev, sku: e.target.value })); }}
+                readOnly
+                tabIndex={-1}
                 placeholder="e.g. PKMN-JP-SV1-001"
               />
             </div>
@@ -233,21 +237,36 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Set Name <span className="text-red-500">*</span></label>
-              <input className={inputCls} value={form.set_name} onChange={field('set_name')} required placeholder="e.g. Obsidian Flames" />
+              <SetCombobox
+                value={form.set_name}
+                language={form.language as 'JP' | 'EN'}
+                inputCls={inputCls}
+                placeholder="e.g. Obsidian Flames"
+                onTyped={(name) => setForm((prev) => ({ ...prev, set_name: name }))}
+                onSelect={(entry) => setForm((prev) => {
+                  const next = { ...prev, set_name: entry.name, set_code: entry.code };
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+                  return next;
+                })}
+              />
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Set Code</label>
-              <SetCodeCombobox
+              <SetCombobox
                 value={form.set_code}
                 language={form.language as 'JP' | 'EN'}
                 inputCls={inputCls}
-                onChange={(code) => {
-                  setForm((prev) => {
-                    const next = { ...prev, set_code: code };
-                    if (!skuManual) next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
-                    return next;
-                  });
-                }}
+                placeholder="e.g. SV3"
+                onTyped={(code) => setForm((prev) => {
+                  const next = { ...prev, set_code: code };
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+                  return next;
+                })}
+                onSelect={(entry) => setForm((prev) => {
+                  const next = { ...prev, set_code: entry.code, set_name: entry.name };
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number);
+                  return next;
+                })}
               />
             </div>
             <div>
