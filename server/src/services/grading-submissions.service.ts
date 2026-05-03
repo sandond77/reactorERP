@@ -243,10 +243,11 @@ export async function addItem(userId: string, batchId: string, input: AddItemInp
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  // Move card instance to grading_submitted
+  // Move card instance to grading_submitted and clear physical location —
+  // the card is at the grader, not in any of our locations.
   await db
     .updateTable('card_instances')
-    .set({ status: 'grading_submitted' })
+    .set({ status: 'grading_submitted', location_id: null })
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
     .execute();
@@ -475,7 +476,8 @@ export async function revertReturn(userId: string, batchId: string) {
           decision: snap.decision ?? null,
           notes: snap.notes ?? null,
           catalog_id: snap.catalog_id ?? null,
-          location_id: snap.location_id ?? null,
+          // Card is at the grader — no physical location while submitted
+          location_id: null,
           trade_id: snap.trade_id ?? null,
           purchased_at: snap.purchased_at ? new Date(snap.purchased_at) : null,
           created_at: snap.created_at ? new Date(snap.created_at) : new Date(),

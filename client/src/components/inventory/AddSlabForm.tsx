@@ -39,7 +39,7 @@ interface AddSlabFormProps {
 }
 
 export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
-  const { locations: gradedLocations } = useLocations('graded');
+  const { locations: gradedLocations, allLocations } = useLocations('graded');
   const [autoFilling, setAutoFilling] = useState(false);
   const [gradingLabel, setGradingLabel] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -400,14 +400,22 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
 
       <Input label="Notes" placeholder="Optional notes" {...register('notes')} />
 
-      {gradedLocations.length > 0 && (
-        <Select label="Location" {...register('location_id')}>
-          <option value="">— No location —</option>
-          {gradedLocations.map(l => (
-            <option key={l.id} value={l.id}>{l.name}{l.is_card_show ? ' (Card Show)' : ''}</option>
-          ))}
-        </Select>
-      )}
+      <div>
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">Location</label>
+        {gradedLocations.length > 0 ? (
+          <Select {...register('location_id')}>
+            <option value="">— No location —</option>
+            {gradedLocations.map(l => {
+              const parent = l.parent_id ? allLocations.find(p => p.id === l.parent_id) : null;
+              return (
+                <option key={l.id} value={l.id}>{parent ? `${parent.name} › ${l.name}` : l.name}{l.is_card_show ? ' (Card Show)' : ''}</option>
+              );
+            })}
+          </Select>
+        ) : (
+          <p className="text-xs text-zinc-600 py-1">No graded locations yet. Add them in Settings → Locations.</p>
+        )}
+      </div>
 
       <label className="flex items-center gap-3 cursor-pointer select-none">
         <input

@@ -8,6 +8,7 @@ import { formatCurrency } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import type { PurchaseRow, PurchaseDetail, InspectionLine, Decision } from './types';
 import { CONDITIONS, DECISION_LABELS } from './types';
+import { useLocations } from '../../hooks/useLocations';
 
 // ── Inspection line form ──────────────────────────────────────────────────────
 
@@ -39,7 +40,9 @@ function InspectionLineForm({
       : String(avgUsd / 100),
     currency: initial?.currency ?? 'USD',
     notes:    initial?.notes ?? '',
+    location_id: (initial as { location_id?: string | null })?.location_id ?? '',
   });
+  const { locations: rawLocations, allLocations } = useLocations('raw');
 
   function set(k: string, v: unknown) { setForm((f) => ({ ...f, [k]: v })); }
 
@@ -75,6 +78,7 @@ function InspectionLineForm({
       purchase_cost: Math.round(parseFloat(form.purchase_cost) * 100),
       currency:      form.currency,
       notes:         form.notes || undefined,
+      location_id:   form.location_id || null,
     }, { front: frontFile ?? undefined, back: backFile ?? undefined });
   }
 
@@ -124,6 +128,22 @@ function InspectionLineForm({
       <div>
         <label className={label}>Notes</label>
         <input value={form.notes} onChange={(e) => set('notes', e.target.value)} className={inp} />
+      </div>
+      <div>
+        <label className={label}>Location</label>
+        {rawLocations.length > 0 ? (
+          <select value={form.location_id} onChange={(e) => set('location_id', e.target.value)} className={inp}>
+            <option value="">— No location —</option>
+            {rawLocations.map((l) => {
+              const parent = l.parent_id ? allLocations.find((p) => p.id === l.parent_id) : null;
+              return (
+                <option key={l.id} value={l.id}>{parent ? `${parent.name} › ${l.name}` : l.name}{l.is_card_show ? ' (Card Show)' : ''}</option>
+              );
+            })}
+          </select>
+        ) : (
+          <p className="text-xs text-zinc-600 py-1">No raw locations yet. Add them in Settings → Locations.</p>
+        )}
       </div>
       {showImages && (
         <div>

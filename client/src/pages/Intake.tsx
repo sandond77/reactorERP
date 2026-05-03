@@ -1210,7 +1210,10 @@ export function Intake() {
         {editRow && (
           <PurchaseForm
             initial={editRow}
-            onSave={(body, receiptFile) => updateMut.mutate({ id: editRow.id, body, receiptFile })}
+            onSave={(body, receiptFile) => {
+              if (Array.isArray(body)) return; // edit only handles single-row updates
+              updateMut.mutate({ id: editRow.id, body, receiptFile });
+            }}
             onClose={() => setEditRow(null)}
             onDelete={() => { setEditRow(null); setDeleteRow(editRow); }}
           />

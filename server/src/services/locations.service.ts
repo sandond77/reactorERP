@@ -141,7 +141,15 @@ export async function getLocationCards(userId: string, locationId: string) {
     raw_label: string | null;
     purchase_cost: number;
     currency: string;
+    location_name: string;
   }>`
+    WITH RECURSIVE descendants AS (
+      SELECT id, name FROM locations WHERE id = ${locationId} AND user_id = ${userId}
+      UNION ALL
+      SELECT l.id, l.name FROM locations l
+      JOIN descendants d ON l.parent_id = d.id
+      WHERE l.user_id = ${userId}
+    )
     SELECT
       ci.id,
       COALESCE(ci.card_name_override, cc.card_name) AS card_name,
@@ -156,13 +164,14 @@ export async function getLocationCards(userId: string, locationId: string) {
       sd.cert_number,
       rp.purchase_id AS raw_label,
       ci.purchase_cost,
-      ci.currency
+      ci.currency,
+      d.name AS location_name
     FROM card_instances ci
+    JOIN descendants d ON ci.location_id = d.id
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
-    WHERE ci.location_id = ${locationId}
-    AND ci.user_id = ${userId}
+    WHERE ci.user_id = ${userId}
     ORDER BY card_name ASC
   `.execute(db);
   return rows.rows;

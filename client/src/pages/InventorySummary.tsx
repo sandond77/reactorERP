@@ -1687,8 +1687,6 @@ export function InventorySummary() {
             <tbody className="divide-y divide-zinc-800/50">
               {pagedKeys.map((key) => {
                 const groupRows = groups.get(key)!;
-                const isNoSku = key.startsWith('__nosku__');
-                const sku = isNoSku ? null : key;
                 const displayName = groupRows[0].card_name ?? '—';
                 const setName = toTitleCase(groupRows[0].set_name ?? groupRows[0].set_code ?? '—');
                 const lang = groupRows[0].language;
