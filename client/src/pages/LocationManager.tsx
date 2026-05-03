@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Plus, Pencil, Trash2, ChevronRight, MapPin, Loader2,
-  Package, Star,
+  Eye,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
@@ -32,6 +32,9 @@ export interface Location {
 interface LocationNode extends Location {
   children: LocationNode[];
   depth: number;
+  rollup_total: number;
+  rollup_graded: number;
+  rollup_raw: number;
 }
 
 interface LocationCard {
@@ -49,6 +52,7 @@ interface LocationCard {
   raw_label: string | null;
   purchase_cost: number;
   currency: string;
+  location_name: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -68,7 +72,7 @@ const CARD_TYPE_COLORS: Record<LocationCardType, string> = {
 function buildTree(locations: Location[]): LocationNode[] {
   const map = new Map<string, LocationNode>();
   for (const loc of locations) {
-    map.set(loc.id, { ...loc, children: [], depth: 0 });
+    map.set(loc.id, { ...loc, children: [], depth: 0, rollup_total: 0, rollup_graded: 0, rollup_raw: 0 });
   }
   const roots: LocationNode[] = [];
   for (const node of map.values()) {
@@ -91,6 +95,23 @@ function buildTree(locations: Location[]): LocationNode[] {
   }
   roots.sort((a, b) => a.name.localeCompare(b.name));
   for (const root of roots) sortChildren(root);
+  // Compute rollup counts (self + all descendants)
+  function rollup(node: LocationNode): { total: number; graded: number; raw: number } {
+    let total = node.total_count;
+    let graded = node.graded_count;
+    let raw = node.raw_count;
+    for (const child of node.children) {
+      const c = rollup(child);
+      total += c.total;
+      graded += c.graded;
+      raw += c.raw;
+    }
+    node.rollup_total = total;
+    node.rollup_graded = graded;
+    node.rollup_raw = raw;
+    return { total, graded, raw };
+  }
+  for (const root of roots) rollup(root);
   return roots;
 }
 
@@ -138,14 +159,6 @@ function LocationForm({ initial, parentLocation, depth, onSave, onCancel, loadin
         <label className="block text-xs text-zinc-400 mb-1">{levelLabel} Name</label>
         <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Shelf 1, Bin 123" autoFocus />
       </div>
-      <div>
-        <label className="block text-xs text-zinc-400 mb-1">Card Type</label>
-        <Select value={cardType} onChange={e => setCardType(e.target.value as LocationCardType)}>
-          <option value="both">Graded &amp; Raw</option>
-          <option value="graded">Graded only</option>
-          <option value="raw">Raw only</option>
-        </Select>
-      </div>
       {depth < 4 && (
         <label className="flex items-start gap-3 cursor-pointer select-none group">
           <input
@@ -159,6 +172,16 @@ function LocationForm({ initial, parentLocation, depth, onSave, onCancel, loadin
             <p className="text-xs text-zinc-500 mt-0.5">Cards can only be assigned to sub-locations, not directly here</p>
           </div>
         </label>
+      )}
+      {!isContainer && (
+        <div>
+          <label className="block text-xs text-zinc-400 mb-1">Card Type</label>
+          <Select value={cardType} onChange={e => setCardType(e.target.value as LocationCardType)}>
+            <option value="both">Graded &amp; Raw</option>
+            <option value="graded">Graded only</option>
+            <option value="raw">Raw only</option>
+          </Select>
+        </div>
       )}
       <div>
         <label className="block text-xs text-zinc-400 mb-1">Notes <span className="text-zinc-600">(optional)</span></label>
@@ -183,28 +206,27 @@ interface LocationNodeRowProps {
   onEdit: (loc: Location) => void;
   onDelete: (loc: Location) => void;
   onAddChild: (parent: Location) => void;
+  onShowCards: (loc: Location) => void;
 }
 
-function LocationNodeRow({ node, allLocations, onEdit, onDelete, onAddChild }: LocationNodeRowProps) {
+function LocationNodeRow({ node, allLocations, onEdit, onDelete, onAddChild, onShowCards }: LocationNodeRowProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const hasChildrenOrCards = node.children.length > 0 || node.total_count > 0;
+  const hasChildren = node.children.length > 0;
   const indent = node.depth * 24;
   const canAddChild = node.depth < 4;
 
-  const { data: cardsData, isFetching } = useQuery<{ data: LocationCard[] }>({
-    queryKey: ['location-cards', node.id],
-    queryFn: () => api.get(`/locations/${node.id}/cards`).then(r => r.data),
-    enabled: expanded && node.total_count > 0,
-  });
-  const cards = cardsData?.data ?? [];
+  // Containers can't hold cards directly — show rolled-up totals from descendants instead
+  const displayTotal = node.is_container ? node.rollup_total : node.total_count;
+  const displayGraded = node.is_container ? node.rollup_graded : node.graded_count;
+  const displayRaw = node.is_container ? node.rollup_raw : node.raw_count;
 
   return (
     <>
       {/* Location row */}
       <tr className="border-b border-zinc-800/60 hover:bg-zinc-800/20 transition-colors group">
         <td className="py-3 w-6" style={{ paddingLeft: `${8 + indent}px` }}>
-          {hasChildrenOrCards ? (
+          {hasChildren ? (
             <button onClick={() => setExpanded(e => !e)} className="text-zinc-600 hover:text-zinc-400">
               <ChevronRight size={13} className={`transition-transform ${expanded ? 'rotate-90' : ''}`} />
             </button>
@@ -213,9 +235,9 @@ function LocationNodeRow({ node, allLocations, onEdit, onDelete, onAddChild }: L
           )}
         </td>
 
-        {/* Name + summary — spans ID/Cert + Card Name + Set cols */}
-        <td colSpan={3} className={`px-3 py-3 ${hasChildrenOrCards ? 'cursor-pointer' : ''}`}
-          onClick={() => hasChildrenOrCards && setExpanded(e => !e)}>
+        {/* Name + notes */}
+        <td className={`px-3 py-3 ${hasChildren ? 'cursor-pointer' : ''}`}
+          onClick={() => hasChildren && setExpanded(e => !e)}>
           <div className="flex items-center gap-2">
             {node.depth === 1 && <span className="text-zinc-600 select-none text-xs">└</span>}
             {node.depth === 2 && <span className="text-zinc-600 select-none text-xs">└─└</span>}
@@ -230,32 +252,54 @@ function LocationNodeRow({ node, allLocations, onEdit, onDelete, onAddChild }: L
             }>
               {node.name}
             </span>
-            {node.total_count > 0 && (
-              <span className="text-xs text-zinc-600">
-                {node.total_count} card{node.total_count !== 1 ? 's' : ''}
-                {node.graded_count > 0 && node.raw_count > 0 && (
-                  <span className="ml-1">
-                    (<span className="text-yellow-400/60">{node.graded_count}G</span>
-                    {' · '}
-                    <span className="text-blue-400/60">{node.raw_count}R</span>)
-                  </span>
-                )}
-              </span>
-            )}
           </div>
           {node.notes && <p className="text-xs text-zinc-600 mt-0.5 ml-4">{node.notes}</p>}
         </td>
 
+        {/* Cards count — plain text; viewing happens via eye icon in Actions */}
+        <td className="px-3 py-3">
+          {displayTotal > 0 ? (
+            <span
+              className="text-xs text-zinc-400"
+              title={node.is_container ? 'Total across sub-locations' : undefined}
+            >
+              {displayTotal} card{displayTotal !== 1 ? 's' : ''}
+              {displayGraded > 0 && displayRaw > 0 && (
+                <span className="ml-1.5 text-zinc-600">
+                  (<span className="text-yellow-400/60">{displayGraded}G</span>
+                  {' · '}
+                  <span className="text-blue-400/60">{displayRaw}R</span>)
+                </span>
+              )}
+            </span>
+          ) : (
+            <span className="text-xs text-zinc-700">—</span>
+          )}
+        </td>
+
         {/* Type */}
         <td className="px-3 py-3">
-          <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${CARD_TYPE_COLORS[node.card_type]}`}>
-            {CARD_TYPE_LABELS[node.card_type]}
-          </span>
+          {node.is_container ? (
+            <span className="text-[11px] px-2 py-0.5 rounded font-medium text-zinc-400 bg-zinc-700/40">
+              Container
+            </span>
+          ) : (
+            <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${CARD_TYPE_COLORS[node.card_type]}`}>
+              {CARD_TYPE_LABELS[node.card_type]}
+            </span>
+          )}
         </td>
 
         {/* Actions */}
         <td className="px-3 py-3">
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {displayTotal > 0 && (
+              <button onClick={() => onShowCards(node)}
+                className="p-1.5 rounded text-zinc-500 hover:text-indigo-400 hover:bg-indigo-400/10 transition-colors"
+                title="View cards">
+                <Eye size={13} />
+              </button>
+            )}
             {canAddChild && (
               <button onClick={() => onAddChild(node)}
                 className="p-1.5 rounded text-zinc-500 hover:text-indigo-400 hover:bg-indigo-400/10 transition-colors"
@@ -275,64 +319,85 @@ function LocationNodeRow({ node, allLocations, onEdit, onDelete, onAddChild }: L
         </td>
       </tr>
 
-      {/* Expanded: card sub-rows + children */}
-      {expanded && (
-        <>
-          {/* Card rows */}
-          {isFetching ? (
-            <tr className="border-b border-zinc-800/30">
-              <td colSpan={5} style={{ paddingLeft: `${32 + indent}px` }} className="py-2">
-                <div className="flex items-center gap-2 text-zinc-600 text-xs">
-                  <Loader2 size={12} className="animate-spin" /> Loading…
-                </div>
-              </td>
-            </tr>
-          ) : cards.map(card => {
-            const isGraded = card.purchase_type === 'pre_graded';
-            const idCol = isGraded ? card.cert_number ?? '—' : card.raw_label ?? '—';
-            return (
-              <tr key={card.id} className="border-b border-zinc-800/30 bg-zinc-900/20 hover:bg-zinc-800/20 transition-colors">
-                <td style={{ paddingLeft: `${32 + indent}px` }} className="py-2 pr-2">
-                  {isGraded
-                    ? <Star size={11} className="text-yellow-400/60" />
-                    : <Package size={11} className="text-blue-400/60" />
-                  }
-                </td>
-                {/* ID / Cert */}
-                <td className="px-3 py-2">
-                  <span className="font-mono text-xs text-zinc-400">{idCol}</span>
-                </td>
-                {/* Card name */}
-                <td className="px-3 py-2 text-sm text-zinc-200 whitespace-normal break-words">
-                  {card.card_name ?? '—'}
-                </td>
-                {/* Set name */}
-                <td className="px-3 py-2 text-xs text-zinc-400 max-w-[160px] truncate">
-                  {card.set_name ?? '—'}
-                </td>
-                {/* Card # + qty */}
-                <td className="px-3 py-2 text-xs text-zinc-500 whitespace-nowrap">
-                  {card.card_number ?? '—'}
-                  {card.quantity > 1 && <span className="ml-2 text-zinc-400">×{card.quantity}</span>}
-                </td>
-              </tr>
-            );
-          })}
-
-          {/* Child location rows */}
-          {node.children.map(child => (
-            <LocationNodeRow
-              key={child.id}
-              node={child}
-              allLocations={allLocations}
-              onEdit={onEdit}
-              onDelete={onDelete}
-              onAddChild={onAddChild}
-            />
-          ))}
-        </>
-      )}
+      {/* Expanded: child location rows */}
+      {expanded && hasChildren && node.children.map(child => (
+        <LocationNodeRow
+          key={child.id}
+          node={child}
+          allLocations={allLocations}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onAddChild={onAddChild}
+          onShowCards={onShowCards}
+        />
+      ))}
     </>
+  );
+}
+
+// ── Cards In Location Modal ───────────────────────────────────────────────────
+
+function LocationCardsModal({ location, onClose }: { location: Location | null; onClose: () => void }) {
+  const { data, isFetching } = useQuery<{ data: LocationCard[] }>({
+    queryKey: ['location-cards', location?.id],
+    queryFn: () => api.get(`/locations/${location!.id}/cards`).then(r => r.data),
+    enabled: !!location,
+  });
+  const cards = data?.data ?? [];
+  const showLocationCol = !!location?.is_container;
+
+  return (
+    <Modal open={!!location} onClose={onClose} title={location ? `Cards in ${location.name}` : ''} className="max-w-3xl">
+      {location && (
+        <div className="max-h-[70vh] overflow-auto">
+          {isFetching ? (
+            <div className="flex items-center justify-center py-8 text-zinc-600 text-sm gap-2">
+              <Loader2 size={14} className="animate-spin" /> Loading…
+            </div>
+          ) : cards.length === 0 ? (
+            <div className="text-center py-8 text-sm text-zinc-600">No cards in this location.</div>
+          ) : (
+            <table className="w-full text-sm border-collapse">
+              <thead className="sticky top-0 bg-zinc-900">
+                <tr className="border-b border-zinc-800">
+                  <th className="text-left px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">ID / Cert</th>
+                  <th className="text-left px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Card Name</th>
+                  <th className="text-left px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Set</th>
+                  <th className="text-left px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Card #</th>
+                  {showLocationCol && (
+                    <th className="text-left px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Sub-Location</th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {cards.map(card => {
+                  const isGraded = card.purchase_type === 'pre_graded';
+                  const idCol = isGraded ? card.cert_number ?? '—' : card.raw_label ?? '—';
+                  return (
+                    <tr key={card.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20">
+                      <td className="px-3 py-2">
+                        <span className="font-mono text-xs text-zinc-400">{idCol}</span>
+                      </td>
+                      <td className="px-3 py-2 text-sm text-zinc-200 whitespace-normal break-words">
+                        {card.card_name ?? '—'}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-zinc-400">{card.set_name ?? '—'}</td>
+                      <td className="px-3 py-2 text-xs text-zinc-500 whitespace-nowrap">
+                        {card.card_number ?? '—'}
+                        {card.quantity > 1 && <span className="ml-2 text-zinc-400">×{card.quantity}</span>}
+                      </td>
+                      {showLocationCol && (
+                        <td className="px-3 py-2 text-xs text-zinc-400">{card.location_name ?? '—'}</td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -347,6 +412,7 @@ export default function LocationManager() {
   const [deletingLoc, setDeletingLoc] = useState<Location | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [formLoading, setFormLoading] = useState(false);
+  const [cardsModalLoc, setCardsModalLoc] = useState<Location | null>(null);
 
   const { data, isLoading } = useQuery<{ data: Location[] }>({
     queryKey: ['locations'],
@@ -358,7 +424,7 @@ export default function LocationManager() {
   const totalCards = locations.reduce((s, l) => s + l.total_count, 0);
   const rootCount = locations.filter(l => !l.parent_id).length;
 
-  async function handleCreate(input: { name: string; card_type: LocationCardType; is_card_show: boolean; notes: string; parent_id?: string | null }) {
+  async function handleCreate(input: { name: string; card_type: LocationCardType; is_card_show: boolean; is_container: boolean; notes: string; parent_id?: string | null }) {
     setFormLoading(true);
     try {
       await api.post('/locations', input);
@@ -372,7 +438,7 @@ export default function LocationManager() {
     }
   }
 
-  async function handleEdit(input: { name: string; card_type: LocationCardType; is_card_show: boolean; notes: string }) {
+  async function handleEdit(input: { name: string; card_type: LocationCardType; is_card_show: boolean; is_container: boolean; notes: string }) {
     if (!editingLoc) return;
     setFormLoading(true);
     try {
@@ -446,7 +512,7 @@ export default function LocationManager() {
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto px-6 py-2">
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm gap-2">
             <Loader2 size={16} className="animate-spin" /> Loading…
@@ -458,14 +524,14 @@ export default function LocationManager() {
             <Button size="sm" variant="ghost" onClick={() => setCreateModal({ parent: null })}>Create your first location</Button>
           </div>
         ) : (
-          <table className="w-full text-sm border-collapse">
+          <table className="max-w-3xl w-full text-sm border-collapse">
             <thead>
               <tr className="border-b border-zinc-800">
                 <th className="w-6" />
-                <th className="text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">ID / Cert</th>
-                <th className="text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Card Name</th>
-                <th className="text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Set</th>
-                <th className="text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Card #</th>
+                <th className="text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Name</th>
+                <th className="text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 w-32">Cards</th>
+                <th className="text-left px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 w-32">Type</th>
+                <th className="text-right px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-500 w-28">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -477,6 +543,7 @@ export default function LocationManager() {
                   onEdit={setEditingLoc}
                   onDelete={setDeletingLoc}
                   onAddChild={(parent) => setCreateModal({ parent })}
+                  onShowCards={setCardsModalLoc}
                 />
               ))}
             </tbody>
@@ -513,6 +580,9 @@ export default function LocationManager() {
           />
         )}
       </Modal>
+
+      {/* Cards in Location Modal */}
+      <LocationCardsModal location={cardsModalLoc} onClose={() => setCardsModalLoc(null)} />
 
       {/* Delete Confirm */}
       <Modal

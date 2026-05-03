@@ -244,7 +244,7 @@ export async function getRawPurchase(userId: string, id: string) {
       sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
-      'cc.sku as part_number',
+      sql<string | null>`COALESCE(cc.sku, CASE WHEN ci.catalog_id IS NOT NULL AND cc.set_code IS NOT NULL THEN 'PKMN-' || UPPER(ci.language) || '-' || UPPER(cc.set_code) ELSE NULL END)`.as('part_number'),
     ])
     .where('ci.raw_purchase_id', '=', id)
     .where('ci.user_id', '=', userId)
@@ -377,6 +377,7 @@ export interface InspectionLineInput {
   purchase_cost: number;
   currency?: string;
   notes?: string;
+  location_id?: string | null;
 }
 
 export async function addInspectionLine(
@@ -414,6 +415,7 @@ export async function addInspectionLine(
       set_name_override: purchase.set_name ?? null,
       card_number_override: purchase.card_number ?? null,
       catalog_id: purchase.catalog_id ?? null,
+      location_id: input.location_id ?? null,
       notes: input.notes ?? null,
       purchased_at: purchase.purchased_at ?? null,
     })
@@ -439,6 +441,7 @@ export async function updateInspectionLine(
   if (input.quantity !== undefined)      update.quantity = input.quantity;
   if (input.purchase_cost !== undefined) update.purchase_cost = input.purchase_cost;
   if (input.notes !== undefined)         update.notes = input.notes;
+  if (input.location_id !== undefined)   update.location_id = input.location_id;
 
   const updated = await db
     .updateTable('card_instances')
