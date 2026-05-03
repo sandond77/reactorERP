@@ -35,7 +35,14 @@
       "Bash(git -C /Users/sandon/Documents/reactor log --oneline -10)",
       "Bash(git -C /Users/sandon/Documents/reactor add client/src/pages/Listings.tsx)",
       "Bash(git -C /Users/sandon/Documents/reactor add server/src/db/migrate.ts)",
-      "Bash(grep -v \".js$\")"
+      "Bash(grep -v \".js$\")",
+      "Bash(railway status *)",
+      "Bash(railway run *)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); const v=JSON.parse\\(d\\); console.log\\(Object.keys\\(v\\).filter\\(k=>k.includes\\('PUBLIC'\\)||k.includes\\('DATABASE'\\)||k.includes\\('PG'\\)\\)\\);\")",
+      "Bash(railway connect *)",
+      "Bash(node -e \"const d=require\\('fs'\\).readFileSync\\('/dev/stdin','utf8'\\); try{const v=JSON.parse\\(d\\); const pub=Object.entries\\(v\\).find\\(\\([k]\\)=>k.includes\\('PUBLIC_URL'\\)||k.includes\\('DATABASE_PUBLIC'\\)\\); console.log\\(pub\\);}catch\\(e\\){console.log\\('parse error',d.slice\\(0,200\\)\\);}\")",
+      "Bash(grep -n '\"#\"\\\\|`#\\\\|>#\\\\b\\\\|>#[0-9]' /Users/sandon/Documents/reactor/client/src/pages/Dashboard.tsx)",
+      "Bash(awk -F'│' '{print $3}')"
     ]
   }
 }
