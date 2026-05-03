@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { AppError } from '../middleware/errorHandler';
 import type { RawPurchaseType, RawPurchaseStatus } from '../types/db';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -96,6 +97,7 @@ export async function listRawPurchases(
     type?: RawPurchaseType;
     status?: RawPurchaseStatus;
     needs_inspection?: boolean;
+    inspection_state?: 'needs' | 'done';
     search?: string;
     page?: number;
     pageSize?: number;
@@ -103,7 +105,7 @@ export async function listRawPurchases(
     sortDir?: 'asc' | 'desc';
   } = {}
 ) {
-  const { type, status, needs_inspection, search, page = 1, pageSize = 50, sortBy, sortDir } = filters;
+  const { type, status, needs_inspection, inspection_state, search, page = 1, pageSize = 50, sortBy, sortDir } = filters;
   const offset = (page - 1) * pageSize;
   const sortExpr = RAW_PURCHASES_SORT_COLS[sortBy ?? ''] ?? 'rp.purchased_at';
   const dir = sortDir === 'asc' ? 'asc' : 'desc';
@@ -145,10 +147,14 @@ export async function listRawPurchases(
 
   if (type) query = query.where('rp.type', '=', type);
   if (status) query = query.where('rp.status', '=', status);
-  if (needs_inspection) {
+  if (needs_inspection || inspection_state === 'needs') {
     query = query
       .where('rp.status', '=', 'received')
       .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`);
+  } else if (inspection_state === 'done') {
+    query = query
+      .where('rp.status', '=', 'received')
+      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) >= rp.card_count`);
   }
   if (search) {
     const term = `%${search}%`;
@@ -163,9 +169,11 @@ export async function listRawPurchases(
     );
   }
 
+  const usingInspectionFilter = needs_inspection || inspection_state === 'needs' || inspection_state === 'done';
+  const inspectionDoneSide = inspection_state === 'done';
   const [rows, countResult] = await Promise.all([
     query.limit(pageSize).offset(offset).execute(),
-    needs_inspection
+    usingInspectionFilter
       ? db
           .selectFrom('raw_purchases as rp')
           .leftJoin('card_instances as ci', (join) =>
@@ -176,7 +184,9 @@ export async function listRawPurchases(
           .where('rp.status', '=', 'received')
           .$if(!!type, (q) => q.where('rp.type', '=', type!))
           .groupBy('rp.id')
-          .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`)
+          .having(inspectionDoneSide
+            ? sql<boolean>`COALESCE(SUM(ci.quantity), 0) >= rp.card_count`
+            : sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`)
           .execute()
           .then((rows) => ({ total: rows.length }))
       : db
@@ -453,4 +463,83 @@ export async function deleteInspectionLine(userId: string, cardInstanceId: strin
   await logAudit(userId, 'card_instances', cardInstanceId, 'deleted', card, null);
   await db.deleteFrom('card_instances').where('id', '=', cardInstanceId).where('user_id', '=', userId).execute();
   return card;
+}
+
+/**
+ * Unreceive a purchase: flip status from 'received' back to 'ordered'.
+ * Refuses if any inspection lines (card_instances) exist — caller must revert
+ * inspection first. Used to undo an accidental "Mark Received" action without
+ * deleting the underlying record.
+ */
+export async function unreceiveRawPurchase(userId: string, purchaseId: string) {
+  const purchase = await db
+    .selectFrom('raw_purchases')
+    .selectAll()
+    .where('id', '=', purchaseId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!purchase) throw new AppError(404, 'Purchase not found');
+  if (purchase.status !== 'received') {
+    throw new AppError(409, `Can't unreceive — status is "${purchase.status}", not "received"`);
+  }
+
+  const cards = await db
+    .selectFrom('card_instances')
+    .select('id')
+    .where('raw_purchase_id', '=', purchaseId)
+    .where('user_id', '=', userId)
+    .execute();
+  if (cards.length > 0) {
+    throw new AppError(409, `Can't unreceive — ${cards.length} inspection line${cards.length === 1 ? '' : 's'} exist. Revert inspection first.`);
+  }
+
+  await db
+    .updateTable('raw_purchases')
+    .set({ status: 'ordered', received_at: null })
+    .where('id', '=', purchaseId)
+    .where('user_id', '=', userId)
+    .execute();
+  await logAudit(userId, 'raw_purchases', purchaseId, 'updated', purchase, { ...purchase, status: 'ordered', received_at: null });
+  return { id: purchaseId };
+}
+
+/**
+ * Revert a fully-inspected purchase back to "needs inspection" by deleting all
+ * linked card_instances. Refuses if any linked card has progressed beyond the
+ * inspectable lifecycle (submitted, graded, sold, etc.) — those would need to
+ * be reverted manually first.
+ */
+export async function revertInspection(userId: string, purchaseId: string) {
+  const purchase = await db
+    .selectFrom('raw_purchases')
+    .selectAll()
+    .where('id', '=', purchaseId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!purchase) throw new AppError(404, 'Purchase not found');
+
+  const cards = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('raw_purchase_id', '=', purchaseId)
+    .where('user_id', '=', userId)
+    .execute();
+
+  const blockedStatuses = new Set(['grading_submitted', 'graded', 'sold', 'lost_damaged']);
+  const blocked = cards.filter((c) => blockedStatuses.has(c.status));
+  if (blocked.length > 0) {
+    throw new AppError(409,
+      `Can't revert — ${blocked.length} card${blocked.length === 1 ? ' has' : 's have'} progressed beyond inspection (${[...new Set(blocked.map((c) => c.status))].join(', ')}). Revert those individually first.`
+    );
+  }
+
+  for (const c of cards) {
+    await logAudit(userId, 'card_instances', c.id, 'deleted', c, null);
+  }
+  await db
+    .deleteFrom('card_instances')
+    .where('raw_purchase_id', '=', purchaseId)
+    .where('user_id', '=', userId)
+    .execute();
+  return { deleted: cards.length };
 }

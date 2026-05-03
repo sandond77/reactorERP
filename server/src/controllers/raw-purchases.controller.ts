@@ -5,10 +5,16 @@ import { saveReceiptImage } from '../utils/save-receipt';
 export async function list(req: Request, res: Response) {
   try {
     const userId = req.dataUserId;
+    const inspectionStateRaw = req.query.inspection_state as string | undefined;
+    const inspection_state =
+      inspectionStateRaw === 'needs' ? 'needs' as const :
+      inspectionStateRaw === 'done'  ? 'done'  as const :
+      undefined;
     const result = await svc.listRawPurchases(userId, {
       type: req.query.type as any,
       status: req.query.status as any,
       needs_inspection: req.query.needs_inspection === 'true',
+      inspection_state,
       search: Array.isArray(req.query.search) ? req.query.search[0] as string : req.query.search as string | undefined,
       page: req.query.page ? Number(req.query.page) : undefined,
       pageSize: req.query.pageSize ? Number(req.query.pageSize) : undefined,
@@ -83,6 +89,26 @@ export async function deleteLine(req: Request, res: Response) {
     await svc.deleteInspectionLine(req.dataUserId, req.params['cardId'] as string);
     res.status(204).send();
   } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+}
+
+export async function revertInspection(req: Request, res: Response) {
+  try {
+    const result = await svc.revertInspection(req.dataUserId, req.params['id'] as string);
+    res.json(result);
+  } catch (err: any) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    res.status(500).json({ error: String(err) });
+  }
+}
+
+export async function unreceive(req: Request, res: Response) {
+  try {
+    const result = await svc.unreceiveRawPurchase(req.dataUserId, req.params['id'] as string);
+    res.json(result);
+  } catch (err: any) {
+    if (err?.statusCode) return res.status(err.statusCode).json({ error: err.message });
     res.status(500).json({ error: String(err) });
   }
 }

@@ -303,8 +303,10 @@ function LanguageResolutionModal({
 
   function getSetOptions(_g: RowGroup, lang: string): { code: string; label: string; era?: string }[] {
     if (lang === 'EN' || lang === 'JP') {
+      const seenStatic = new Set<string>();
       return allSetCodes
         .filter(s => s.language === lang)
+        .filter(s => { if (seenStatic.has(s.set_code)) return false; seenStatic.add(s.set_code); return true; })
         .map(s => ({ code: s.set_code, label: `${s.set_code} — ${s.names[0]}`, era: s.era }));
     }
     // For custom languages: show all sets registered for that language

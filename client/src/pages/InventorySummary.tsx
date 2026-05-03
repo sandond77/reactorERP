@@ -30,6 +30,23 @@ interface SummaryRow {
   catalog_id: string | null;
 }
 
+// Render the part number cell. Three states:
+//   - SKU present → show SKU
+//   - linked but unnumbered (catalog_id + set_code, no sku) → show PKMN-LANG-CODE (no #)
+//   - no catalog link at all → italic "unlinked"
+function renderPartLabel(row: { sku: string | null; catalog_id: string | null; set_code: string | null; language: string }) {
+  if (row.sku) return <>{row.sku}</>;
+  if (row.catalog_id && row.set_code) {
+    return (
+      <>
+        <span>{`PKMN-${row.language.toUpperCase()}-${row.set_code.toUpperCase()}`}</span>
+        <span className="ml-1 text-[9px] text-zinc-500 not-italic">(no #)</span>
+      </>
+    );
+  }
+  return <span className="italic">unlinked</span>;
+}
+
 // Group rows by SKU (or card_name if no SKU)
 function groupRows(rows: SummaryRow[]) {
   const groups: Map<string, SummaryRow[]> = new Map();
@@ -120,15 +137,15 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
     const seen = new Set<string>();
     if (game === 'pokemon') {
       for (const s of staticSets.filter(s => s.language === language)) {
+        if (seen.has(s.set_code)) continue;
         opts.push({ code: s.set_code, name: s.names[0] ?? s.set_code, era: s.era });
         seen.add(s.set_code);
       }
     }
     for (const a of dbAliases.filter(a => a.language === language && (a.game ?? 'pokemon') === game)) {
-      if (!seen.has(a.set_code)) {
-        opts.push({ code: a.set_code, name: a.set_name ?? a.alias ?? a.set_code });
-        seen.add(a.set_code);
-      }
+      if (seen.has(a.set_code)) continue;
+      opts.push({ code: a.set_code, name: a.set_name ?? a.alias ?? a.set_code });
+      seen.add(a.set_code);
     }
     return opts;
   }
@@ -1686,7 +1703,7 @@ export function InventorySummary() {
                     <tr key={key} className="hover:bg-zinc-800/25">
                       <td className="px-3 py-1.5 font-mono text-[11px] whitespace-nowrap">
                         <button onClick={() => setEditPart(r)} className={r.catalog_id ? 'text-indigo-400 hover:text-indigo-300 hover:underline text-left' : 'text-zinc-500 italic hover:text-zinc-300 text-left'}>
-                          {sku ?? <span className="italic">unlinked</span>}
+                          {renderPartLabel(r)}
                         </button>
                       </td>
                       <td className="px-3 py-1.5 text-zinc-400 truncate whitespace-nowrap">{setName}</td>
@@ -1719,7 +1736,7 @@ export function InventorySummary() {
                           onClick={(e) => { e.stopPropagation(); setEditPart(groupRows[0]); }}
                           className={groupRows[0].catalog_id ? 'text-indigo-400 hover:text-indigo-300 hover:underline text-left' : 'text-zinc-500 italic hover:text-zinc-300 text-left'}
                         >
-                          {sku ?? <span className="italic">unlinked</span>}
+                          {renderPartLabel(groupRows[0])}
                         </button>
                       </span>
                     </td>

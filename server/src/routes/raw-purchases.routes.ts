@@ -27,4 +27,9 @@ router.post('/:id/lines',              ctrl.addLine);
 router.patch('/:id/lines/:cardId',     ctrl.updateLine);
 router.delete('/:id/lines/:cardId',    ctrl.deleteLine);
 
+// Revert: clear all inspection lines so the purchase reappears as needing inspection
+router.post('/:id/revert-inspection',  ctrl.revertInspection);
+// Unreceive: flip status received → ordered (only if no inspection lines exist)
+router.post('/:id/unreceive',          ctrl.unreceive);
+
 export default router;

@@ -218,7 +218,14 @@ export async function listCardsGroupedByPart(
       'ci.notes',
       'ci.language',
       'ci.card_game',
-      'cc.sku',
+      sql<string | null>`COALESCE(
+        cc.sku,
+        CASE
+          WHEN ci.catalog_id IS NOT NULL AND cc.set_code IS NOT NULL
+            THEN 'PKMN-' || UPPER(ci.language) || '-' || UPPER(cc.set_code)
+          ELSE NULL
+        END
+      )`.as('sku'),
       'rp.purchase_id as raw_purchase_label',
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
@@ -447,9 +454,11 @@ export async function updateCard(
   if (instanceData.decision === 'sell_raw' && ['purchased_raw', 'inspected'].includes(existing.status)) {
     (instanceData as any).status = 'raw_for_sale';
   }
-  // When decision changes away from sell_raw on a non-listed raw card, revert status
+  // When decision changes from sell_raw → grade on an already-inspected raw card,
+  // restore status to 'inspected' so the card appears in the grading queue.
+  // (Don't drop back to 'purchased_raw' — it was inspected, just re-routed.)
   if (instanceData.decision === 'grade' && existing.status === 'raw_for_sale' && existing.decision === 'sell_raw') {
-    (instanceData as any).status = 'purchased_raw';
+    (instanceData as any).status = 'inspected';
   }
 
   const updated = await db
@@ -719,7 +728,14 @@ export async function listRawFlat(
     SELECT
       ci.id,
       rp.purchase_id                                      AS raw_purchase_label,
-      cc.sku,
+      COALESCE(
+        cc.sku,
+        CASE
+          WHEN ci.catalog_id IS NOT NULL AND cc.set_code IS NOT NULL
+            THEN 'PKMN-' || UPPER(ci.language) || '-' || UPPER(cc.set_code)
+          ELSE NULL
+        END
+      )                                                   AS sku,
       COALESCE(ci.card_name_override, cc.card_name)      AS card_name,
       COALESCE(cc.set_name, ci.set_name_override)        AS set_name,
       COALESCE(cc.card_number, ci.card_number_override)  AS card_number,

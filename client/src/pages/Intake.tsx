@@ -224,6 +224,10 @@ function PurchaseForm({
   async function createPartForLine(idx: number) {
     const li = lineItems?.[idx];
     if (!li) return;
+    if (!li.card_number && !li.unnumbered) {
+      toast.error('Tick "no #" first to create an unnumbered part');
+      return;
+    }
     // Unnumbered cards share PKMN-LANG-CODE so we leave sku null and let the catalog
     // key on (set_code, card_name, language) instead, mirroring the server import path.
     const sku = li.card_number ? buildPartNumber(form.language, li.set_code, li.card_number) : null;
@@ -318,16 +322,18 @@ function PurchaseForm({
           toast.success(`Receipt parsed — ${cards.length} cards detected`);
 
           // Fire catalog lookups in parallel; populate catalog_id + canonical fields when an exact-1 match
+          // Only run when card_number is present — unnumbered matches require the user to explicitly
+          // tick "no #" first, otherwise we'd silently link to an unintended entry.
           Promise.all(baseItems.map(async (li) => {
-            if (!li.card_name) return null;
+            if (!li.card_name || !li.card_number) return null;
             try {
               const params: Record<string, string> = {
                 card_name:   li.card_name,
+                card_number: li.card_number,
                 language:    form.language,
                 limit:       '5',
               };
-              if (li.card_number) params.card_number = li.card_number;
-              if (li.set_name)    params.set_name    = li.set_name;
+              if (li.set_name) params.set_name = li.set_name;
               const res = await api.get('/catalog/search', { params });
               const matches = (res.data?.data ?? res.data ?? []) as Array<{
                 id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string;
@@ -438,7 +444,12 @@ function PurchaseForm({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      const firstMsg = errs.cost ?? Object.values(errs)[0] ?? 'Please fix the highlighted fields';
+      toast.error(firstMsg);
+      return;
+    }
 
     if (lineItems && lineItems.length > 0) {
       const fxRate = parseFloat(form.fx_rate);
@@ -692,7 +703,7 @@ function PurchaseForm({
                         {!li.card_number && <span className="font-sans text-[9px] text-zinc-500">(no #)</span>}
                         <span title="Matches existing catalog entry" className="text-green-400 font-sans text-[9px]">✓</span>
                       </>
-                    ) : sku ? (
+                    ) : sku && (li.card_number || li.unnumbered) ? (
                       <button
                         type="button"
                         onClick={() => createPartForLine(i)}
@@ -998,18 +1009,13 @@ export function Intake() {
   const createMut = useMutation({
     mutationFn: async ({ body, receiptFile }: { body: Record<string, unknown> | Record<string, unknown>[]; receiptFile?: File }) => {
       const bodies = Array.isArray(body) ? body : [body];
-      const created: { id: string }[] = [];
+      const created: { id: string; type: string }[] = [];
       for (const b of bodies) {
         const res = await api.post('/raw-purchases', b);
-        created.push(res.data);
+        created.push({ id: res.data.id, type: (b.type as string) ?? 'raw' });
       }
-      if (receiptFile) {
-        for (const c of created) {
-          const fd = new FormData();
-          fd.append('image', receiptFile);
-          await api.post(`/raw-purchases/${c.id}/receipt`, fd).catch(() => {});
-        }
-      }
+      // Receipt image is used for parsing only — never persisted to purchase records.
+      void receiptFile;
       return { count: created.length };
     },
     onSuccess: ({ count }) => { invalidate(); setAddOpen(false); toast.success(count > 1 ? `${count} purchases added` : 'Purchase added'); },

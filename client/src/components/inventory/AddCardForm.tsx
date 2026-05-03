@@ -91,6 +91,11 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
 
   const createCatalogEntry = async () => {
     if (!partNumber?.catalogData) return;
+    const cardNumber = (getValues('card_number_override') ?? '').trim();
+    if (!unnumbered && !cardNumber) {
+      toast.error('Card number required (or tick "no card #" to create unnumbered)');
+      return;
+    }
     setCreatingPart(true);
     try {
       const s = partNumber.catalogData;

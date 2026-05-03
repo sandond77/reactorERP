@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { X, Trash2 } from 'lucide-react';
+import { X, Undo2, RotateCcw } from 'lucide-react';
 import { api } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
@@ -12,9 +12,12 @@ import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import toast from 'react-hot-toast';
 
+type InspectionState = 'needs' | 'done' | 'all';
+
 const DEFAULTS = {
   search: '',
   fType:  null as PurchaseType | null,
+  state:  'needs' as InspectionState,
 };
 
 export function Inspection() {
@@ -24,8 +27,10 @@ export function Inspection() {
   const [search, setSearch]           = useState(saved.search);
   const [debouncedSearch, setDebounced] = useState(saved.search);
   const [fType, setFType]             = useState<PurchaseType | null>(saved.fType);
+  const [stateTab, setStateTab]       = useState<InspectionState>(saved.state);
   const [drillRow, setDrillRow]       = useState<PurchaseRow | null>(null);
-  const [deleteRow, setDeleteRow]     = useState<PurchaseRow | null>(null);
+  const [revertRow, setRevertRow]     = useState<PurchaseRow | null>(null);
+  const [unreceiveRow, setUnreceiveRow] = useState<PurchaseRow | null>(null);
 
   const MINS = {
     pid:     colMinWidth('ID',         true, false),
@@ -44,7 +49,7 @@ export function Inspection() {
   const { rz, totalWidth } = useColWidths({
     pid:       Math.max(MINS.pid,       110),
     type:      Math.max(MINS.type,       80),
-    card:      Math.max(MINS.card,      280),
+    card:      Math.max(MINS.card,      720),
     source:    Math.max(MINS.source,    140),
     cards:     Math.max(MINS.cards,      70),
     cost:      Math.max(MINS.cost,      110),
@@ -62,14 +67,14 @@ export function Inspection() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('inspection', { search, fType });
-  }, [search, fType]);
+    saveFilters('inspection', { search, fType, state: stateTab });
+  }, [search, fType, stateTab]);
 
   const params = {
     page,
     pageSize:         50,
     search:           debouncedSearch || undefined,
-    needs_inspection: true,
+    inspection_state: stateTab === 'all' ? undefined : stateTab,
     type:             fType ?? undefined,
   };
 
@@ -80,10 +85,20 @@ export function Inspection() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['raw-purchases'] });
 
-  const deleteMut = useMutation({
-    mutationFn: (id: string) => api.delete(`/raw-purchases/${id}`),
-    onSuccess: () => { invalidate(); setDeleteRow(null); toast.success('Purchase deleted'); },
-    onError: () => toast.error('Failed to delete'),
+  const revertMut = useMutation({
+    mutationFn: (id: string) => api.post(`/raw-purchases/${id}/revert-inspection`).then(r => r.data),
+    onSuccess: ({ deleted }) => {
+      invalidate();
+      setRevertRow(null);
+      toast.success(`Reverted — ${deleted} inspection line${deleted === 1 ? '' : 's'} cleared`);
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to revert'),
+  });
+
+  const unreceiveMut = useMutation({
+    mutationFn: (id: string) => api.post(`/raw-purchases/${id}/unreceive`).then(r => r.data),
+    onSuccess: () => { invalidate(); setUnreceiveRow(null); toast.success('Reverted to Ordered'); },
+    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to unreceive'),
   });
 
   const hasActiveFilters = !!debouncedSearch || fType !== null;
@@ -98,37 +113,56 @@ export function Inspection() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h1 className="text-xl font-bold text-zinc-100">Inspection</h1>
-        <div className="flex items-center gap-3">
-          {hasActiveFilters && (
-            <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
-              <X size={12} /> Reset filters
-            </button>
-          )}
-
-          {/* Type filter */}
-          <div className="flex gap-1">
-            <button onClick={() => { setFType(null); setPage(1); }}
-              className={`px-3 py-1 text-xs rounded-md text-xs font-medium transition-colors ${fType === null ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-              All
-            </button>
-            {(['raw', 'bulk'] as PurchaseType[]).map((t) => (
-              <button key={t}
-                onClick={() => { setFType(t); setPage(1); }}
-                className={`px-3 py-1 text-xs rounded-md text-xs font-medium transition-colors capitalize ${fType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-                {t}
+      <div className="px-6 py-4 border-b border-zinc-800 space-y-3">
+        {/* Row 1: title + state tabs + search */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-xl font-bold text-zinc-100">Inspection</h1>
+          <div className="flex items-center gap-3">
+            {hasActiveFilters && (
+              <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
+                <X size={12} /> Reset filters
               </button>
-            ))}
-          </div>
+            )}
 
-          <input
-            type="text"
-            placeholder="Search…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-52 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
-          />
+            {/* State tabs */}
+            <div className="flex gap-1">
+              {([
+                { value: 'needs', label: 'Needs Inspection' },
+                { value: 'done',  label: 'Inspected' },
+                { value: 'all',   label: 'All' },
+              ] as { value: InspectionState; label: string }[]).map((s) => (
+                <button key={s.value}
+                  onClick={() => { setStateTab(s.value); setPage(1); }}
+                  className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${stateTab === s.value ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+
+            <input
+              type="text"
+              placeholder="Search…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-52 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+        </div>
+
+        {/* Row 2: type filter */}
+        <div className="flex items-center justify-end gap-1">
+          <span className="text-[10px] uppercase tracking-wide text-zinc-600 mr-1">Type</span>
+          <button onClick={() => { setFType(null); setPage(1); }}
+            className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${fType === null ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+            All
+          </button>
+          {(['raw', 'bulk'] as PurchaseType[]).map((t) => (
+            <button key={t}
+              onClick={() => { setFType(t); setPage(1); }}
+              className={`px-3 py-1 text-xs rounded-md font-medium transition-colors capitalize ${fType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+              {t}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -175,9 +209,9 @@ export function Inspection() {
                     </span>
                   </td>
                   <td className="px-4 py-2">
-                    <p className="text-zinc-200 truncate">{row.card_name ?? '—'}</p>
+                    <p className="text-zinc-200 whitespace-normal break-words leading-tight">{row.card_name ?? '—'}</p>
                     {row.set_name && (
-                      <p className="text-[10px] text-zinc-500">
+                      <p className="text-[10px] text-zinc-500 whitespace-normal break-words leading-tight">
                         {row.set_name}{row.card_number ? ` · #${row.card_number}` : ''}
                       </p>
                     )}
@@ -210,12 +244,21 @@ export function Inspection() {
                     </span>
                   </td>
                   <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      onClick={() => setDeleteRow(row)}
-                      title="Delete purchase"
-                      className="p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
-                      <Trash2 size={14} />
-                    </button>
+                    {row.inspected_count > 0 ? (
+                      <button
+                        onClick={() => setRevertRow(row)}
+                        title="Revert inspection (clears inspection lines, keeps the purchase received)"
+                        className="p-1 rounded text-zinc-600 hover:text-amber-400 hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
+                        <Undo2 size={14} />
+                      </button>
+                    ) : row.status === 'received' ? (
+                      <button
+                        onClick={() => setUnreceiveRow(row)}
+                        title="Unreceive — flip back to Ordered status"
+                        className="p-1 rounded text-zinc-600 hover:text-amber-400 hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
+                        <RotateCcw size={14} />
+                      </button>
+                    ) : null}
                   </td>
                 </tr>
               ))}
@@ -237,19 +280,45 @@ export function Inspection() {
           </div>
         </div>
       )}
-      {/* Delete confirmation */}
-      <Modal open={!!deleteRow} onClose={() => setDeleteRow(null)} title="Delete Purchase">
-        {deleteRow && (
+      {/* Unreceive confirmation */}
+      <Modal open={!!unreceiveRow} onClose={() => setUnreceiveRow(null)} title="Unreceive Purchase">
+        {unreceiveRow && (
           <div className="space-y-4">
             <p className="text-sm text-zinc-300">
-              Delete <span className="font-medium text-zinc-100">{deleteRow.purchase_id}</span>
-              {deleteRow.card_name ? ` — ${deleteRow.card_name}` : ''}?
+              Revert <span className="font-medium text-zinc-100">{unreceiveRow.purchase_id}</span>
+              {unreceiveRow.card_name ? ` — ${unreceiveRow.card_name}` : ''} back to Ordered?
             </p>
-            <p className="text-xs text-zinc-500">This will permanently remove the purchase record and cannot be undone.</p>
+            <p className="text-xs text-zinc-500">
+              The purchase record stays. Status flips from Received to Ordered, so it leaves the inspection
+              queue and reappears on the Purchases page where you can mark it Received again or cancel it.
+            </p>
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" size="sm" onClick={() => setDeleteRow(null)}>Keep</Button>
-              <Button size="sm" className="bg-red-600 hover:bg-red-500" onClick={() => deleteMut.mutate(deleteRow.id)}>
-                Delete
+              <Button variant="ghost" size="sm" onClick={() => setUnreceiveRow(null)}>Keep</Button>
+              <Button size="sm" className="bg-amber-600 hover:bg-amber-500" disabled={unreceiveMut.isPending} onClick={() => unreceiveMut.mutate(unreceiveRow.id)}>
+                {unreceiveMut.isPending ? 'Reverting…' : 'Unreceive'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Revert confirmation */}
+      <Modal open={!!revertRow} onClose={() => setRevertRow(null)} title="Revert to Needs Inspection">
+        {revertRow && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-300">
+              Revert <span className="font-medium text-zinc-100">{revertRow.purchase_id}</span>
+              {revertRow.card_name ? ` — ${revertRow.card_name}` : ''}?
+            </p>
+            <p className="text-xs text-zinc-500">
+              This will delete the {revertRow.inspected_count} inspection line{revertRow.inspected_count === 1 ? '' : 's'} on this purchase
+              and put it back in the &ldquo;Needs Inspection&rdquo; queue. Cards that have already been submitted to grading,
+              graded, or sold cannot be reverted this way — handle those individually first.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setRevertRow(null)}>Keep</Button>
+              <Button size="sm" className="bg-amber-600 hover:bg-amber-500" disabled={revertMut.isPending} onClick={() => revertMut.mutate(revertRow.id)}>
+                {revertMut.isPending ? 'Reverting…' : 'Revert'}
               </Button>
             </div>
           </div>

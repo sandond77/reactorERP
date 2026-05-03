@@ -215,7 +215,6 @@ export const JP_SETS: SetEntry[] = [
   { code: 'PCG9',  names: ['offense and defense of the furthest ends', 'delta species jp', 'pcg9'] },
   { code: 'PCG10', names: ['world champions pack', 'wcp', 'pcg10'] },
   { code: 'PCG-P', names: ['pcg promo', 'pcg-p promo', 'pcg-p'] },
-  { code: 'PCG-P', names: ['pcg promo', 'pcg-p promo', 'pcg-p'] },
   // Diamond & Pearl
   { code: 'DP1',  names: ['diamond collection', 'dp1'] },
   { code: 'DP2',  names: ['pearl collection', 'dp2'] },

@@ -130,6 +130,10 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
   const inputCls = 'w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500';
 
   async function handleSubmit() {
+    if (!unnumbered && !form.card_number.trim()) {
+      setError('Card number required (or tick "no card # (unnumbered)")');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
