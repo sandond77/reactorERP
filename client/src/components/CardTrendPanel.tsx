@@ -252,9 +252,20 @@ function TrendChart({ data, view, showTrendLine }: { data: TrendData; view: Pric
         />
         <Tooltip
           cursor={{ strokeDasharray: '3 3', stroke: '#52525b' }}
-          contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 12 }}
-          formatter={(value) => [formatCurrency(Math.round((value as number) * 100)), '']}
-          labelFormatter={(label) => formatDate(new Date(label).toISOString())}
+          content={({ active, payload }) => {
+            if (!active || !payload?.length) return null;
+            // Recharts emits one entry per axis for Scatter; pick the one that has the row data
+            const item = payload.find(p => p.payload && typeof p.payload.x === 'number' && typeof p.payload.y === 'number');
+            if (!item) return null;
+            const { x, y, series } = item.payload as { x: number; y: number; series?: string };
+            return (
+              <div className="bg-zinc-900 border border-zinc-700 rounded-md px-2.5 py-1.5 text-xs shadow-lg">
+                <div className="text-zinc-500">{formatDate(new Date(x).toISOString())}</div>
+                <div className="text-zinc-100 font-medium mt-0.5">{formatCurrency(Math.round(y * 100))}</div>
+                {series && <div className="text-zinc-500 text-[10px] mt-0.5">{series}</div>}
+              </div>
+            );
+          }}
         />
         {allSeriesKeys.map((s, i) => (
           <Scatter
