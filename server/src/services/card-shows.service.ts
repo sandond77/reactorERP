@@ -4,15 +4,15 @@ import { logAudit } from '../utils/audit';
 
 /**
  * Auto-link platform='card_show' sales that have no card_show_id to a card_shows
- * row by matching DATE(sold_at) = show_date. Skips sales whose order_details_link
- * points at eBay (so an eBay sale that happened to fall on a show date doesn't get
- * mis-attributed). Idempotent — safe to call repeatedly.
+ * row by matching DATE(sold_at) within the show's date range
+ * (show_date through end_date inclusive — multi-day shows). Skips sales whose
+ * order_details_link looks like an eBay URL. Idempotent.
  *
- * Optionally scoped to a single show_date when called right after createCardShow,
- * so we only update sales for that specific date instead of scanning the user's
- * full sales history.
+ * Optionally scoped to a single show row when called right after
+ * createCardShow / updateCardShow so we only touch sales for that show's date
+ * range instead of scanning the user's full sales history.
  */
-export async function backfillCardShowLinks(userId: string, opts?: { showDate?: Date }) {
+export async function backfillCardShowLinks(userId: string, opts?: { showId?: string }) {
   const result = await sql<{ id: string }>`
     UPDATE sales s
     SET card_show_id = cs.id
@@ -21,9 +21,9 @@ export async function backfillCardShowLinks(userId: string, opts?: { showDate?: 
       AND cs.user_id = ${userId}
       AND s.platform = 'card_show'
       AND s.card_show_id IS NULL
-      AND DATE(s.sold_at) = cs.show_date
+      AND DATE(s.sold_at) BETWEEN cs.show_date AND COALESCE(cs.end_date, cs.show_date)
       AND (s.order_details_link IS NULL OR s.order_details_link NOT ILIKE '%ebay.%')
-      ${opts?.showDate ? sql`AND DATE(s.sold_at) = ${opts.showDate}` : sql``}
+      ${opts?.showId ? sql`AND cs.id = ${opts.showId}` : sql``}
     RETURNING s.id
   `.execute(db);
   return Number(result.numAffectedRows ?? 0);
@@ -66,8 +66,8 @@ export async function createCardShow(userId: string, data: {
     .executeTakeFirstOrThrow();
 
   await logAudit(userId, 'card_shows', row.id, 'created', null, row);
-  // Link any past unassigned card_show sales that fell on this date
-  await backfillCardShowLinks(userId, { showDate: row.show_date as unknown as Date });
+  // Link any past unassigned card_show sales that fell within this show's date range
+  await backfillCardShowLinks(userId, { showId: row.id });
   return row;
 }
 
@@ -105,8 +105,8 @@ export async function updateCardShow(userId: string, id: string, data: {
     .executeTakeFirst();
 
   if (updated) await logAudit(userId, 'card_shows', id, 'updated', existing ?? null, updated);
-  if (updated && data.show_date !== undefined) {
-    await backfillCardShowLinks(userId, { showDate: updated.show_date as unknown as Date });
+  if (updated && (data.show_date !== undefined || data.end_date !== undefined || data.num_days !== undefined)) {
+    await backfillCardShowLinks(userId, { showId: updated.id });
   }
   return updated;
 }

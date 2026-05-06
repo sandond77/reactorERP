@@ -86,7 +86,16 @@ export async function getPnlReport(
       .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
       .leftJoin('card_shows as cs', 'cs.id', 's.card_show_id')
       .select([
-        sql<string>`COALESCE(cs.name || ' (' || TO_CHAR(cs.show_date, 'Mon DD, YYYY') || ')', 'Unassigned (no show linked)')`.as('label'),
+        sql<string>`COALESCE(
+          cs.name || ' (' ||
+            CASE
+              WHEN cs.end_date IS NOT NULL AND cs.end_date <> cs.show_date
+                THEN TO_CHAR(cs.show_date, 'Mon DD') || '–' || TO_CHAR(cs.end_date, 'Mon DD, YYYY')
+              ELSE TO_CHAR(cs.show_date, 'Mon DD, YYYY')
+            END
+          || ')',
+          'Unassigned (no show linked)'
+        )`.as('label'),
         sql<string | null>`cs.id::text`.as('show_id'),
         sql<string | null>`cs.location`.as('show_location'),
         sql<number>`COUNT(*)::int`.as('num_sales'),
