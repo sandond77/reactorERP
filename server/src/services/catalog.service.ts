@@ -581,7 +581,7 @@ export async function reassignCatalogRow(userId: string, params: {
       AND ci.catalog_id = ${params.old_catalog_id}
       AND LOWER(TRIM(COALESCE(ci.card_name_override, ''))) = LOWER(TRIM(${params.card_name ?? ''}))
       AND sd.company = ${params.company}
-      AND (${params.grade} IS NULL AND sd.grade IS NULL OR sd.grade = ${params.grade})
+      AND sd.grade IS NOT DISTINCT FROM ${params.grade}::int
   `.execute(db);
   return { updated: Number(result.numAffectedRows ?? 0) };
 }
