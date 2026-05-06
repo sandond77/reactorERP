@@ -8,6 +8,7 @@ import { createRawPurchase } from '../raw-purchases.service';
 import { createExpense } from '../expenses.service';
 import { recordSale } from '../sales.service';
 import { lookupSetCode, lookupSetName, generatePartNumber, EN_SETS, JP_SETS } from '../../utils/set-codes';
+import { backfillCardShowLinks } from '../card-shows.service';
 import type { GradingCompany, ListingPlatform } from '../../types/db';
 
 function parseDate(raw: string | undefined): Date | null {
@@ -304,6 +305,12 @@ export async function executeImport(
       break;
     default:
       result = await executeLegacyCardsImport(userId, rows, mapping);
+  }
+
+  // After any import that may have created sales, link unassigned card_show sales
+  // to existing card_shows by date. Idempotent.
+  if (record.import_type === 'graded' || record.import_type === 'bulk_sale' || !record.import_type) {
+    try { await backfillCardShowLinks(userId); } catch { /* defensive — don't fail the import */ }
   }
 
   const finalStatus = result.errorLog.length > 0 && result.importedCount === 0 ? 'failed' : 'completed';
