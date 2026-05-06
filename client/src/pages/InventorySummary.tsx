@@ -182,7 +182,8 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
       if (isNew) {
         if (!form.set_name || !form.language) { setError('Set name and language are required.'); setSaving(false); return; }
         const result = await api.post('/catalog/link-by-name', {
-          card_name:   form.card_name,
+          match_card_name: row.card_name ?? form.card_name,  // original name used to find existing instances
+          card_name:   form.card_name,                        // possibly cleaned-up name for the catalog row
           game:        form.game,
           set_name:    form.set_name,
           set_code:    form.set_code || null,
@@ -1456,6 +1457,7 @@ export function InventorySummary() {
   const [fCompany, setFCompany] = useState<string[] | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEmpty, setShowEmpty] = useState(false);
+  const [showUnlinked, setShowUnlinked] = useState(false);
   const [editPart, setEditPart] = useState<SummaryRow | null>(null);
   const [reassignRow, setReassignRow] = useState<ReassignTarget | null>(null);
   const MINS = {
@@ -1503,7 +1505,8 @@ export function InventorySummary() {
     enabled: showEmpty,
   });
 
-  const rows = showEmpty ? (emptyData?.data ?? []) : (summaryData?.data ?? []);
+  const rawRows = showEmpty ? (emptyData?.data ?? []) : (summaryData?.data ?? []);
+  const rows = showUnlinked ? rawRows.filter(r => !r.catalog_id) : rawRows;
   const isLoading = showEmpty ? emptyLoading : summaryLoading;
 
   // Derive filter options from data
@@ -1618,6 +1621,8 @@ export function InventorySummary() {
             <p className="text-xs text-zinc-500 mt-0.5">
               {showEmpty
                 ? `${sortedKeys.length.toLocaleString()} catalog entries with no inventory`
+                : showUnlinked
+                ? `${totalCards.toLocaleString()} unlinked card${totalCards === 1 ? '' : 's'} · ${sortedKeys.length.toLocaleString()} unique`
                 : `${totalCards.toLocaleString()} cards · ${sortedKeys.length.toLocaleString()} unique parts`}
             </p>
           )}
@@ -1643,8 +1648,11 @@ export function InventorySummary() {
               </button>
             ))}
           </div>
-          <Button size="sm" variant={showEmpty ? 'primary' : 'secondary'} onClick={() => setShowEmpty(v => !v)}>
+          <Button size="sm" variant={showEmpty ? 'primary' : 'secondary'} onClick={() => { setShowEmpty(v => !v); setShowUnlinked(false); setPage(1); }}>
             {showEmpty ? 'In Inventory' : 'Show Empty'}
+          </Button>
+          <Button size="sm" variant={showUnlinked ? 'primary' : 'secondary'} onClick={() => { setShowUnlinked(v => !v); setShowEmpty(false); setPage(1); }}>
+            {showUnlinked ? 'In Inventory' : 'Show Unlinked'}
           </Button>
           <input
             type="text"

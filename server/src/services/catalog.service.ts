@@ -594,7 +594,9 @@ export async function deleteCatalogCard(userId: string, id: string) {
   await db.deleteFrom('card_catalog').where('id', '=', id).where('user_id', '=', userId).execute();
 }
 
-export async function linkUnlinkedByCardName(userId: string, cardName: string, params: {
+export async function linkUnlinkedByCardName(userId: string, params: {
+  match_card_name: string;  // existing card_instances.card_name_override to match (the original messy name)
+  card_name: string;        // canonical name for the catalog row (may be a cleaned-up edit)
   game: string;
   sku?: string | null;
   set_name: string;
@@ -620,7 +622,7 @@ export async function linkUnlinkedByCardName(userId: string, cardName: string, p
   const existingByName = !existingBySku
     ? await db.selectFrom('card_catalog').select('id')
         .where('user_id', '=', userId)
-        .where('card_name', '=', cardName)
+        .where('card_name', '=', params.card_name)
         .$if(!!params.set_code, q => q.where('set_code', '=', params.set_code!))
         .executeTakeFirst()
     : null;
@@ -635,7 +637,7 @@ export async function linkUnlinkedByCardName(userId: string, cardName: string, p
       user_id: userId,
       game: params.game,
       sku: effectiveSku ?? null,
-      card_name: cardName,
+      card_name: params.card_name,
       set_name: params.set_name,
       set_code: params.set_code ?? null,
       card_number: params.card_number ?? null,
@@ -646,12 +648,16 @@ export async function linkUnlinkedByCardName(userId: string, cardName: string, p
     catalogId = result.id;
   }
 
+  // Match instances by their original (pre-edit) name. If the edit changed the name,
+  // also rewrite card_name_override to the clean value so display picks up the new name.
+  const renameOverride = params.card_name !== params.match_card_name;
   const linkResult = await sql`
     UPDATE card_instances
     SET catalog_id = ${catalogId}
+      ${renameOverride ? sql`, card_name_override = ${params.card_name}` : sql``}
     WHERE user_id = ${userId}
       AND catalog_id IS NULL
-      AND LOWER(TRIM(card_name_override)) = LOWER(TRIM(${cardName}))
+      AND LOWER(TRIM(card_name_override)) = LOWER(TRIM(${params.match_card_name}))
   `.execute(db);
 
   return { catalog_id: catalogId, linked_count: Number(linkResult.numAffectedRows ?? 0) };

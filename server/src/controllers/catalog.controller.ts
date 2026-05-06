@@ -58,11 +58,16 @@ export async function reassignRow(req: Request, res: Response, next: NextFunctio
 
 export async function linkByName(req: Request, res: Response, next: NextFunction) {
   try {
-    const { card_name, game, sku, set_name, set_code, card_number, language, rarity, variant } = req.body;
+    const { card_name, match_card_name, game, sku, set_name, set_code, card_number, language, rarity, variant } = req.body;
     if (!card_name || !set_name || !language) {
       return res.status(400).json({ error: 'card_name, set_name, and language are required' });
     }
-    const result = await linkUnlinkedByCardName(req.dataUserId, card_name, { game: game ?? 'pokemon', sku, set_name, set_code, card_number, language, rarity, variant });
+    const result = await linkUnlinkedByCardName(req.dataUserId, {
+      match_card_name: match_card_name ?? card_name,
+      card_name,
+      game: game ?? 'pokemon',
+      sku, set_name, set_code, card_number, language, rarity, variant,
+    });
     res.status(201).json(result);
   } catch (err: any) {
     if (err?.code === '23505') return res.status(409).json({ error: 'A catalog entry with this SKU already exists.' });
