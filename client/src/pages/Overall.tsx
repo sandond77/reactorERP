@@ -10,6 +10,7 @@ import { SlabDetailModal } from '../components/inventory/SlabDetailModal';
 import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { AddToCardShowModal } from '../components/inventory/AddToCardShowModal';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { invalidateResources } from '../lib/query-invalidation';
 
 interface SlabRow {
   id: string;
@@ -457,7 +458,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
         <SlabDetailModal slab={selectedSlab} onClose={() => setSelectedSlab(null)} />
       )}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Slab">
-        <AddSlabForm onSuccess={() => { setAddOpen(false); qc.invalidateQueries({ queryKey: ['overall'] }); }} />
+        <AddSlabForm onSuccess={() => { setAddOpen(false); invalidateResources(qc, ['slabs']); }} />
       </Modal>
       <Modal open={addToCardShowOpen} onClose={() => setAddToCardShowOpen(false)} title="Add to Card Show" className="max-w-5xl">
         <AddToCardShowModal onSuccess={() => setAddToCardShowOpen(false)} />

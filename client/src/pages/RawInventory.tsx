@@ -8,6 +8,7 @@ import { AddCardForm } from '../components/inventory/AddCardForm';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { formatCurrency } from '../lib/utils';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { invalidateResources } from '../lib/query-invalidation';
 import type { CardGroup } from '../lib/card-inventory';
 import { instForSale, instToGrade, instGrading, instSold, groupKey, num } from '../lib/card-inventory';
 
@@ -114,7 +115,7 @@ export function RawInventory() {
   }
 
   const hasActiveFilters = (fSet !== null && fSet.length > 0) || !!debouncedSearch;
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['raw-inventory-grouped'] });
+  const invalidate = () => invalidateResources(qc, ['cards']);
   const sh = { sortCol, sortDir, onSort: handleSort };
 
   return (

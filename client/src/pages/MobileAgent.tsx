@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Bot, Send, Camera, ImageIcon, X, Loader2, LogOut } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { api } from '../lib/api';
+import { invalidateResources, type Resource } from '../lib/query-invalidation';
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const ACCEPTED_TYPES = [...IMAGE_TYPES, 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].join(',');
@@ -39,16 +40,6 @@ const STORAGE_KEY = 'reactor_agent_messages';
 const MAX_STORED = 40;
 const MAX_ATTACHMENTS = 5;
 
-const RESOURCE_QUERY_KEYS: Record<string, string[]> = {
-  sales:        ['sales', 'sale-filter-options', 'sales-summary', 'audit-log'],
-  slabs:        ['inventory-slabs', 'card-name-search', 'card-copies', 'audit-log'],
-  cards:        ['raw-overall', 'raw-inventory-grouped', 'raw-flat-filter-options', 'card-picker-grading', 'audit-log'],
-  raw_purchases:['raw-overall', 'raw-inventory-grouped', 'audit-log'],
-  grading:      ['grading-batches', 'grading-batch', 'grading-subs', 'grading-sub-detail', 'audit-log'],
-  listings:     ['listings', 'listing-filter-options', 'audit-log'],
-  trades:       ['trades', 'audit-log'],
-  expenses:     ['expenses', 'audit-log'],
-};
 
 const SUGGESTIONS: { label: string; prompt: string }[] = [
   { label: '📦  Add a raw card purchase',        prompt: 'I want to log a new raw card purchase' },
@@ -130,9 +121,7 @@ export function MobileAgent() {
   }
 
   function invalidateMutated(mutated: string[]) {
-    const keys = new Set<string>();
-    mutated.forEach(r => (RESOURCE_QUERY_KEYS[r] ?? []).forEach(k => keys.add(k)));
-    keys.forEach(k => qc.invalidateQueries({ queryKey: [k] }));
+    invalidateResources(qc, mutated as Resource[]);
   }
 
   async function send() {

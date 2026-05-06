@@ -9,6 +9,7 @@ import { loadFilters, saveFilters } from '../lib/filter-store';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { AddCardForm } from '../components/inventory/AddCardForm';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { invalidateResources } from '../lib/query-invalidation';
 import { instForSale, instToGrade, instGrading, instSold, groupKey, num } from '../lib/card-inventory';
 import type { CardGroup } from '../lib/card-inventory';
 
@@ -458,18 +459,18 @@ export function RawOverall() {
         <CardDetailModal
           cardId={selectedRow.id}
           onClose={() => setSelectedRow(null)}
-          onDelete={() => { setSelectedRow(null); qc.invalidateQueries({ queryKey: ['raw-overall'] }); }}
+          onDelete={() => { setSelectedRow(null); invalidateResources(qc, ['cards']); }}
         />
       )}
       {selectedId && (
         <CardDetailModal
           cardId={selectedId}
           onClose={() => setSelectedId(null)}
-          onDelete={() => { setSelectedId(null); qc.invalidateQueries({ queryKey: ['raw-inventory-grouped'] }); }}
+          onDelete={() => { setSelectedId(null); invalidateResources(qc, ['cards']); }}
         />
       )}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Card">
-        <AddCardForm onSuccess={() => { setAddOpen(false); qc.invalidateQueries({ queryKey: ['raw-overall', 'raw-inventory-grouped'] }); }} />
+        <AddCardForm onSuccess={() => { setAddOpen(false); invalidateResources(qc, ['cards']); }} />
       </Modal>
 
       {!isSummary && data && (

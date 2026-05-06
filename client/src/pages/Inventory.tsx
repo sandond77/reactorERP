@@ -8,6 +8,7 @@ import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { invalidateResources } from '../lib/query-invalidation';
 
 interface SlabRow {
   id: string;
@@ -370,7 +371,7 @@ export function Inventory() {
 
       {/* Modals */}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Slab">
-        <AddSlabForm onSuccess={() => { setAddOpen(false); qc.invalidateQueries({ queryKey: ['inventory-slabs'] }); }} />
+        <AddSlabForm onSuccess={() => { setAddOpen(false); invalidateResources(qc, ['slabs']); }} />
       </Modal>
 
       {selectedId && (
