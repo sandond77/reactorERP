@@ -79,14 +79,15 @@ export async function getPnlReport(
       .orderBy('ci.card_game')
       .execute()) as Row[];
   } else if (channel === 'card_show') {
-    // Group by individual card show event — only shows with a linked card_show record
+    // Group by individual card show event. LEFT JOIN so card_show platform sales with
+    // no card_show_id (imported before shows existed) still show up under "Unassigned".
     rows = (await db
       .selectFrom('sales as s')
       .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
-      .innerJoin('card_shows as cs', 'cs.id', 's.card_show_id')
+      .leftJoin('card_shows as cs', 'cs.id', 's.card_show_id')
       .select([
-        sql<string>`cs.name || ' (' || TO_CHAR(cs.show_date, 'Mon DD, YYYY') || ')'`.as('label'),
-        sql<string>`cs.id::text`.as('show_id'),
+        sql<string>`COALESCE(cs.name || ' (' || TO_CHAR(cs.show_date, 'Mon DD, YYYY') || ')', 'Unassigned (no show linked)')`.as('label'),
+        sql<string | null>`cs.id::text`.as('show_id'),
         sql<string | null>`cs.location`.as('show_location'),
         sql<number>`COUNT(*)::int`.as('num_sales'),
         sql<number>`SUM(s.sale_price)::int`.as('total_revenue'),
@@ -96,12 +97,13 @@ export async function getPnlReport(
         sql<number>`SUM(s.net_proceeds - COALESCE(s.total_cost_basis, 0))::int`.as('total_profit'),
       ])
       .where('s.user_id', '=', userId)
+      .where('s.platform', '=', 'card_show')
       .$if(from != null, (qb) => qb.where('s.sold_at', '>=', from!))
       .$if(to != null, (qb) => qb.where('s.sold_at', '<=', to!))
       .$if(cardType === 'graded', (qb) => qb.where(sql<boolean>`EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`))
       .$if(cardType === 'ungraded', (qb) => qb.where(sql<boolean>`NOT EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`))
       .groupBy(['cs.id', 'cs.name', 'cs.show_date', 'cs.location'])
-      .orderBy('cs.show_date', 'desc')
+      .orderBy(sql`cs.show_date DESC NULLS LAST`)
       .execute()) as Row[];
   } else {
     rows = (await db
