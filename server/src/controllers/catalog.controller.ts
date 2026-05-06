@@ -88,7 +88,12 @@ export async function updateCard(req: Request, res: Response, next: NextFunction
     const { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language } = req.body;
     await updateCatalogCard(req.dataUserId, id, { game, sku, card_name, set_name, set_code, card_number, rarity, variant, language });
     res.json({ ok: true });
-  } catch (err) { next(err); }
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      return res.status(409).json({ error: 'A different part number already exists with this Set + Card #. Use Reassign to merge the cards into that part instead.' });
+    }
+    next(err);
+  }
 }
 
 export async function deleteCard(req: Request, res: Response, next: NextFunction) {
