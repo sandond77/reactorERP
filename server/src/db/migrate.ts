@@ -51,14 +51,25 @@ async function migrate() {
       const raw = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
       const downIdx = raw.search(/^-- Down\b/im);
       const sql = downIdx === -1 ? raw : raw.slice(0, downIdx).trim();
-      await client.query('BEGIN');
+
+      // Some statements (ALTER TYPE ADD VALUE, CREATE INDEX CONCURRENTLY, etc.)
+      // can't run inside a transaction. Migration authors opt out by including
+      // "-- @no-transaction" at the top of the file.
+      const noTx = /^[\t ]*--[\t ]*@no-transaction\b/im.test(sql);
+
       try {
-        await client.query(sql);
-        await client.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
-        await client.query('COMMIT');
-        console.log(`  done  ${file}`);
+        if (noTx) {
+          await client.query(sql);
+          await client.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
+        } else {
+          await client.query('BEGIN');
+          await client.query(sql);
+          await client.query('INSERT INTO _migrations (name) VALUES ($1)', [file]);
+          await client.query('COMMIT');
+        }
+        console.log(`  done  ${file}${noTx ? ' (no-tx)' : ''}`);
       } catch (err) {
-        await client.query('ROLLBACK');
+        if (!noTx) await client.query('ROLLBACK').catch(() => {});
         console.error(`  FAIL  ${file}:`, err);
         process.exit(1);
       }
