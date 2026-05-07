@@ -32,7 +32,7 @@ export type ListingStatus = 'active' | 'sold' | 'expired' | 'cancelled';
 
 export type ImportStatus = 'pending' | 'processing' | 'completed' | 'failed';
 
-export type RawPurchaseType = 'raw' | 'bulk';
+export type RawPurchaseType = 'raw' | 'bulk' | 'legacy';
 export type RawPurchaseStatus = 'ordered' | 'received' | 'cancelled';
 
 export type UserPlan = 'free' | 'pro' | 'enterprise';
