@@ -39,12 +39,15 @@ function PartNumberField({
   const [results, setResults] = useState<CatalogMatch[]>([]);
   const [open, setOpen] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [manualQuery, setManualQuery] = useState('');
+  const [manualResults, setManualResults] = useState<CatalogMatch[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const debounceRef2 = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debounceRef3 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hasSearchTerms = !!(form.card_name || form.set_name || form.card_number);
 
-  // Search using all three card fields whenever they change
+  // Search using all three card fields whenever they change (auto-match)
   useEffect(() => {
     if (debounceRef2.current) clearTimeout(debounceRef2.current);
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -60,6 +63,18 @@ function PartNumberField({
     }, 350);
     return () => { if (debounceRef2.current) clearTimeout(debounceRef2.current); };
   }, [form.card_name, form.set_name, form.card_number, form.language, hasSearchTerms]);
+
+  // Manual free-form search — runs against /catalog/search?q= when the user types
+  useEffect(() => {
+    if (debounceRef3.current) clearTimeout(debounceRef3.current);
+    if (manualQuery.trim().length < 2) { setManualResults([]); return; }
+    debounceRef3.current = setTimeout(() => {
+      api.get('/catalog/search', { params: { q: manualQuery.trim(), limit: 12 } })
+        .then((r) => setManualResults(r.data.data as CatalogMatch[]))
+        .catch(() => setManualResults([]));
+    }, 250);
+    return () => { if (debounceRef3.current) clearTimeout(debounceRef3.current); };
+  }, [manualQuery]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -102,19 +117,40 @@ function PartNumberField({
       {/* Dropdown */}
       {open && !catalogMatch && (
         <div className="mt-1 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl overflow-hidden z-20 relative">
-          {results.length > 0 ? (
-            results.map((s) => (
-              <button key={s.id} type="button"
-                onClick={() => { onSelect(s); setOpen(false); }}
-                className="w-full px-3 py-2 text-left flex items-center gap-3 hover:bg-zinc-800/60 transition-colors border-b border-zinc-800/50 last:border-0">
-                <span className="font-mono text-xs text-indigo-300 shrink-0">{s.sku ?? '—'}</span>
-                <span className="text-zinc-300 text-xs truncate">{s.card_name}</span>
-                <span className="text-zinc-500 text-[10px] shrink-0 ml-auto">{s.set_name}{s.card_number ? ` · #${s.card_number}` : ''}</span>
-              </button>
-            ))
-          ) : (
-            <p className="px-3 py-2 text-xs text-zinc-500 italic">No catalog entries found</p>
-          )}
+          {/* Manual search */}
+          <div className="px-2 py-1.5 border-b border-zinc-800/60 bg-zinc-900/60">
+            <input
+              type="text"
+              value={manualQuery}
+              onChange={(e) => setManualQuery(e.target.value)}
+              placeholder="Search part #, card name, or set…"
+              className="w-full px-2 py-1 text-xs bg-zinc-950 border border-zinc-800 rounded text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+              autoFocus
+            />
+          </div>
+
+          {/* Results — prefer manual search when user is typing */}
+          {(() => {
+            const showing = manualQuery.trim().length >= 2 ? manualResults : results;
+            const isManual = manualQuery.trim().length >= 2;
+            if (showing.length > 0) {
+              return showing.map((s) => (
+                <button key={s.id} type="button"
+                  onClick={() => { onSelect(s); setOpen(false); setManualQuery(''); }}
+                  className="w-full px-3 py-2 text-left flex items-center gap-3 hover:bg-zinc-800/60 transition-colors border-b border-zinc-800/50 last:border-0">
+                  <span className="font-mono text-xs text-indigo-300 shrink-0">{s.sku ?? '—'}</span>
+                  <span className="text-zinc-300 text-xs truncate">{s.card_name}</span>
+                  <span className="text-zinc-500 text-[10px] shrink-0 ml-auto">{s.set_name}{s.card_number ? ` · #${s.card_number}` : ''}</span>
+                </button>
+              ));
+            }
+            return (
+              <p className="px-3 py-2 text-xs text-zinc-500 italic">
+                {isManual ? 'No matches for that query' : 'No catalog entries found'}
+              </p>
+            );
+          })()}
+
           <button type="button"
             onClick={() => { setOpen(false); setShowAddModal(true); }}
             className="w-full px-3 py-2 text-left flex items-center gap-1.5 text-xs text-indigo-400 hover:text-indigo-300 hover:bg-zinc-800/40 transition-colors border-t border-zinc-700/60">
