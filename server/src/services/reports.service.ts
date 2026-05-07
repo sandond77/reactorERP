@@ -718,27 +718,76 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
 export async function getCardShowBreakdown(userId: string, showId: string) {
   const slabCheck = sql<boolean>`EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`;
 
-  const result = await db
+  const aggSelect = [
+    sql<number>`COUNT(*) FILTER (WHERE ${slabCheck})::int`.as('slab_count'),
+    sql<number>`COALESCE(SUM(s.sale_price) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_revenue'),
+    sql<number>`0::int`.as('slab_fees'),
+    sql<number>`COALESCE(SUM(s.net_proceeds) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_net'),
+    sql<number>`COALESCE(SUM(COALESCE(s.total_cost_basis, 0)) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_cost'),
+    sql<number>`COUNT(*) FILTER (WHERE NOT ${slabCheck})::int`.as('raw_count'),
+    sql<number>`COALESCE(SUM(s.sale_price) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_revenue'),
+    sql<number>`0::int`.as('raw_fees'),
+    sql<number>`COALESCE(SUM(s.net_proceeds) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_net'),
+    sql<number>`COALESCE(SUM(COALESCE(s.total_cost_basis, 0)) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_cost'),
+  ];
+
+  const total = await db
     .selectFrom('sales as s')
     .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
     .innerJoin('card_shows as cs', 'cs.id', 's.card_show_id')
-    .select([
-      sql<number>`COUNT(*) FILTER (WHERE ${slabCheck})::int`.as('slab_count'),
-      sql<number>`COALESCE(SUM(s.sale_price) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_revenue'),
-      sql<number>`0::int`.as('slab_fees'),
-      sql<number>`COALESCE(SUM(s.net_proceeds) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_net'),
-      sql<number>`COALESCE(SUM(COALESCE(s.total_cost_basis, 0)) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_cost'),
-      sql<number>`COUNT(*) FILTER (WHERE NOT ${slabCheck})::int`.as('raw_count'),
-      sql<number>`COALESCE(SUM(s.sale_price) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_revenue'),
-      sql<number>`0::int`.as('raw_fees'),
-      sql<number>`COALESCE(SUM(s.net_proceeds) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_net'),
-      sql<number>`COALESCE(SUM(COALESCE(s.total_cost_basis, 0)) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_cost'),
-    ])
+    .select(aggSelect)
     .where('s.user_id', '=', userId)
     .where('s.card_show_id', '=', showId)
     .executeTakeFirstOrThrow();
 
-  return result;
+  // Per-day breakdown — only returned when the show spans more than one day
+  const showRow = await db
+    .selectFrom('card_shows')
+    .select(['show_date', 'end_date', 'num_days'])
+    .where('id', '=', showId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+
+  const isMultiDay = !!showRow && (
+    (showRow.num_days ?? 1) > 1 ||
+    (showRow.end_date && showRow.show_date && (showRow.end_date as unknown as Date).toString() !== (showRow.show_date as unknown as Date).toString())
+  );
+
+  let days: Array<{ day_number: number; show_date: string; slab_count: number; slab_revenue: number; slab_fees: number; slab_net: number; slab_cost: number; raw_count: number; raw_revenue: number; raw_fees: number; raw_net: number; raw_cost: number }> = [];
+
+  if (isMultiDay) {
+    const dayRows = await db
+      .selectFrom('sales as s')
+      .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
+      .innerJoin('card_shows as cs', 'cs.id', 's.card_show_id')
+      .select([
+        sql<string>`(s.sold_at AT TIME ZONE 'UTC')::date::text`.as('show_date'),
+        ...aggSelect,
+      ])
+      .where('s.user_id', '=', userId)
+      .where('s.card_show_id', '=', showId)
+      .groupBy(sql`(s.sold_at AT TIME ZONE 'UTC')::date`)
+      .orderBy(sql`(s.sold_at AT TIME ZONE 'UTC')::date`, 'asc')
+      .execute();
+
+    days = dayRows.map((r, i) => ({
+      day_number: i + 1,
+      show_date: r.show_date,
+      slab_count: r.slab_count,
+      slab_revenue: r.slab_revenue,
+      slab_fees: r.slab_fees,
+      slab_net: r.slab_net,
+      slab_cost: r.slab_cost,
+      raw_count: r.raw_count,
+      raw_revenue: r.raw_revenue,
+      raw_fees: r.raw_fees,
+      raw_net: r.raw_net,
+      raw_cost: r.raw_cost,
+    }));
+  }
+
+  // Keep the top-level fields for backward compat with current consumers
+  return { ...total, days };
 }
 
 export async function cardTrendSearch(userId: string, q: string) {

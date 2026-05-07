@@ -21,7 +21,7 @@ interface PnlRow {
   total_profit: number;
 }
 
-interface CardShowBreakdown {
+interface CardShowAggregates {
   slab_count: number;
   slab_revenue: number;
   slab_fees: number;
@@ -32,6 +32,10 @@ interface CardShowBreakdown {
   raw_fees: number;
   raw_net: number;
   raw_cost: number;
+}
+
+interface CardShowBreakdown extends CardShowAggregates {
+  days: Array<CardShowAggregates & { day_number: number; show_date: string }>;
 }
 
 interface YearRow {
@@ -71,6 +75,65 @@ function pct(a: number, b: number) {
   return ((a / b) * 100).toFixed(1) + '%';
 }
 
+function BreakdownPanel({ heading, agg }: { heading: string; agg: CardShowAggregates }) {
+  const slabCount  = Number(agg.slab_count);
+  const rawCount   = Number(agg.raw_count);
+  const slabRev    = Number(agg.slab_revenue);
+  const slabCost   = Number(agg.slab_cost);
+  const slabNet    = Number(agg.slab_net);
+  const rawRev     = Number(agg.raw_revenue);
+  const rawCost    = Number(agg.raw_cost);
+  const rawNet     = Number(agg.raw_net);
+  const slabProfit = slabNet - slabCost;
+  const rawProfit  = rawNet  - rawCost;
+  const totalCount = slabCount + rawCount;
+  const stat = (label: string, value: string) => (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] text-zinc-600 uppercase tracking-wide">{label}</span>
+      <span className="text-xs font-medium text-zinc-300">{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest">{heading}</p>
+      <div className="flex">
+        <div className="flex-1 space-y-1.5">
+          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Graded</p>
+          <div className="flex gap-6">
+            {stat('# Slabs Sold', String(slabCount))}
+            {stat('Gross', formatCurrency(slabRev))}
+            {stat('Slab Cost', formatCurrency(slabCost))}
+            {stat('Net', formatCurrency(slabProfit))}
+          </div>
+        </div>
+        <div className="w-px self-stretch bg-zinc-800 mx-6" />
+        <div className="flex-1 space-y-1.5">
+          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Ungraded</p>
+          <div className="flex gap-6">
+            {stat('# Cards Sold', String(rawCount))}
+            {stat('Gross Raw', formatCurrency(rawRev))}
+            {stat('Raw Cost', formatCurrency(rawCost))}
+            {stat('Net Raw', formatCurrency(rawProfit))}
+          </div>
+        </div>
+        <div className="w-px self-stretch bg-zinc-800 mx-6" />
+        <div className="flex-1 space-y-1.5">
+          <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Stats</p>
+          <div className="flex gap-6">
+            {stat('Slab ROI %', pct(slabProfit, slabCost))}
+            {stat('Raw ROI %', pct(rawProfit, rawCost))}
+            {stat('Slab % Profit', pct(slabProfit, slabProfit + rawProfit))}
+            {stat('Raw % Profit', pct(rawProfit, slabProfit + rawProfit))}
+            {stat('% Slabs', pct(slabCount, totalCount))}
+            {stat('% Raw', pct(rawCount, totalCount))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CardShowBreakdownRow({ showId, colSpan }: { showId: string; colSpan: number }) {
   const { data, isLoading } = useQuery<CardShowBreakdown>({
     queryKey: ['card-show-breakdown', showId],
@@ -84,62 +147,23 @@ function CardShowBreakdownRow({ showId, colSpan }: { showId: string; colSpan: nu
   }
   if (!data) return null;
 
-  const slabCount  = Number(data.slab_count);
-  const rawCount   = Number(data.raw_count);
-  const slabRev    = Number(data.slab_revenue);
-  const slabCost   = Number(data.slab_cost);
-  const slabNet    = Number(data.slab_net);
-  const rawRev     = Number(data.raw_revenue);
-  const rawCost    = Number(data.raw_cost);
-  const rawNet     = Number(data.raw_net);
-  const slabProfit = slabNet - slabCost;
-  const rawProfit  = rawNet  - rawCost;
-  const totalCount = slabCount + rawCount;
-  const stat = (label: string, value: string) => (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] text-zinc-600 uppercase tracking-wide">{label}</span>
-      <span className="text-xs font-medium text-zinc-300">{value}</span>
-    </div>
-  );
+  const days = data.days ?? [];
+  const isMultiDay = days.length > 1;
+
+  function dayLabel(day: { day_number: number; show_date: string }) {
+    const date = new Date(day.show_date + 'T00:00:00Z');
+    const formatted = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    return `Day ${day.day_number} — ${formatted}`;
+  }
 
   return (
     <tr className="bg-zinc-900/60">
       <td colSpan={colSpan} className="pb-4 pt-2 pl-8 pr-4">
-        <div className="space-y-3">
-          {/* Graded | Ungraded | Percentages all in one row */}
-          <div className="flex">
-            <div className="flex-1 space-y-1.5">
-              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Graded</p>
-              <div className="flex gap-6">
-                {stat('# Slabs Sold', String(slabCount))}
-                {stat('Gross', formatCurrency(slabRev))}
-                {stat('Slab Cost', formatCurrency(slabCost))}
-                {stat('Net', formatCurrency(slabProfit))}
-              </div>
-            </div>
-            <div className="w-px self-stretch bg-zinc-800 mx-6" />
-            <div className="flex-1 space-y-1.5">
-              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Ungraded</p>
-              <div className="flex gap-6">
-                {stat('# Cards Sold', String(rawCount))}
-                {stat('Gross Raw', formatCurrency(rawRev))}
-                {stat('Raw Cost', formatCurrency(rawCost))}
-                {stat('Net Raw', formatCurrency(rawProfit))}
-              </div>
-            </div>
-            <div className="w-px self-stretch bg-zinc-800 mx-6" />
-            <div className="flex-1 space-y-1.5">
-              <p className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Stats</p>
-              <div className="flex gap-6">
-                {stat('Slab ROI %', pct(slabProfit, slabCost))}
-                {stat('Raw ROI %', pct(rawProfit, rawCost))}
-                {stat('Slab % Profit', pct(slabProfit, slabProfit + rawProfit))}
-                {stat('Raw % Profit', pct(rawProfit, slabProfit + rawProfit))}
-                {stat('% Slabs', pct(slabCount, totalCount))}
-                {stat('% Raw', pct(rawCount, totalCount))}
-              </div>
-            </div>
-          </div>
+        <div className="space-y-5">
+          {isMultiDay && days.map(d => (
+            <BreakdownPanel key={d.day_number} heading={dayLabel(d)} agg={d} />
+          ))}
+          <BreakdownPanel heading={isMultiDay ? 'Total' : ''} agg={data} />
         </div>
       </td>
     </tr>
