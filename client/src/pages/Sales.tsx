@@ -1748,10 +1748,10 @@ export function Sales() {
           </div>
           <input
             type="text"
-            placeholder="Search card…"
+            placeholder="Card, cert, SKU, RP-#, order #…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-52"
+            className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-64"
           />
           <Button size="sm" onClick={() => setShowAddModal(true)}>
             <Plus size={14} /> Record Sale

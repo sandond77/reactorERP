@@ -138,15 +138,24 @@ export async function listSales(
     .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .leftJoin('raw_purchases as rp_search', 'rp_search.id', 'ci.raw_purchase_id')
     .where('s.user_id', '=', userId)
     .$if(filters.platforms !== undefined, (qb) =>
       filters.platforms!.length === 0
         ? qb.where(sql<boolean>`1=0` as any)
         : qb.where('s.platform', 'in', filters.platforms! as any)
     )
-    .$if(!!filters.search, (qb) => qb.where(
-      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', `%${filters.search}%`
-    ))
+    .$if(!!filters.search, (qb) => {
+      const q = `%${filters.search}%`;
+      return qb.where((eb) => eb.or([
+        eb(sql<string>`COALESCE(ci.card_name_override, cc.card_name)`, 'ilike', q),
+        eb(sql<string>`sd.cert_number`, 'ilike', q),
+        eb(sql<string>`rp_search.purchase_id`, 'ilike', q),
+        eb(sql<string>`cc.sku`, 'ilike', q),
+        eb(sql<string>`s.unique_id`, 'ilike', q),
+        eb(sql<string>`s.unique_id_2`, 'ilike', q),
+      ]));
+    })
     .$if(!!filters.from, (qb) => qb.where('s.sold_at', '>=', filters.from!))
     .$if(!!filters.to, (qb) => qb.where('s.sold_at', '<=', filters.to!))
     .$if(!!filters.soldDates?.length, (qb) => qb.where(sql<boolean>`(s.sold_at AT TIME ZONE 'UTC')::date IN (${sql.join(filters.soldDates!.map((v) => sql`${v}::date`))})` as any))
