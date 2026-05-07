@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Plus, ChevronLeft, Trash2, Pencil, ImagePlus, X } from 'lucide-react';
 import { api } from '../../lib/api';
@@ -13,6 +13,21 @@ import { useLocations } from '../../hooks/useLocations';
 // ── Inspection line form ──────────────────────────────────────────────────────
 
 type LineImages = { front?: File; back?: File };
+
+interface SlabPickerResult {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  cert_number: string | null;
+  grade: number | null;
+  grade_label: string | null;
+  company: string | null;
+  raw_purchase_id: string | null;
+  status?: string;
+  purchase_cost?: number;  // existing cost basis on the slab (cents)
+  currency?: string;
+}
 
 function InspectionLineForm({
   purchase,
@@ -44,6 +59,45 @@ function InspectionLineForm({
   });
   const { locations: rawLocations, allLocations } = useLocations('raw');
 
+  // Slab picker (only used when decision === 'already_graded') — multi-select
+  const [slabSearch, setSlabSearch] = useState('');
+  const [debouncedSlabSearch, setDebouncedSlabSearch] = useState('');
+  // When editing an existing already_graded line, pre-populate with the current slab
+  const editingBackLinkId: string | null = initial?.decision === 'already_graded' && initial?.id ? initial.id : null;
+  const [pickedSlabs, setPickedSlabs] = useState<SlabPickerResult[]>(() => {
+    if (initial?.decision === 'already_graded' && initial?.id) {
+      return [{
+        id: initial.id,
+        card_name: initial.card_name ?? null,
+        set_name: initial.set_name ?? null,
+        card_number: initial.card_number ?? null,
+        cert_number: initial.cert_number ?? null,
+        grade: initial.grade ?? null,
+        grade_label: initial.grade_label ?? null,
+        company: initial.company ?? null,
+        raw_purchase_id: null,
+      }];
+    }
+    return [];
+  });
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSlabSearch(slabSearch), 250);
+    return () => clearTimeout(t);
+  }, [slabSearch]);
+
+  const { data: slabResults = [], isFetching: searchingSlabs } = useQuery<SlabPickerResult[]>({
+    queryKey: ['slab-picker', debouncedSlabSearch],
+    queryFn: () => api.get('/cards', { params: { search: debouncedSlabSearch, status: 'graded,sold', purchase_type: 'pre_graded', limit: 12 } })
+      .then(r => (r.data?.data ?? r.data ?? []) as SlabPickerResult[]),
+    enabled: form.decision === 'already_graded' && debouncedSlabSearch.trim().length >= 2,
+  });
+
+  function toggleSlab(s: SlabPickerResult) {
+    setPickedSlabs(prev => prev.some(p => p.id === s.id)
+      ? prev.filter(p => p.id !== s.id)
+      : [...prev, s]);
+  }
+
   function set(k: string, v: unknown) { setForm((f) => ({ ...f, [k]: v })); }
 
   const [qtyError, setQtyError] = useState('');
@@ -66,6 +120,21 @@ function InspectionLineForm({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (form.decision === 'already_graded') {
+      const targetQty = parseInt(form.quantity) || 0;
+      if (targetQty < 1) { toast.error('Quantity must be at least 1'); return; }
+      if (targetQty > maxQuantity) { setQtyError(`Max ${maxQuantity} remaining`); return; }
+      if (pickedSlabs.length !== targetQty) {
+        toast.error(`Pick exactly ${targetQty} slab${targetQty === 1 ? '' : 's'} (currently picked: ${pickedSlabs.length})`);
+        return;
+      }
+      onSave({
+        _back_link: true,
+        slab_ids: pickedSlabs.map(s => s.id),
+        _replace_slab_id: editingBackLinkId ?? undefined,
+      }, {});
+      return;
+    }
     const qty = parseInt(form.quantity) || 1;
     if (qty > maxQuantity) {
       setQtyError(`Max ${maxQuantity} remaining`);
@@ -99,32 +168,115 @@ function InspectionLineForm({
           <select value={form.decision} onChange={(e) => set('decision', e.target.value)} className={inp}>
             <option value="sell_raw">Sell Raw</option>
             <option value="grade">Grade</option>
+            <option value="already_graded">Already Graded</option>
           </select>
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4">
-        <div>
-          <label className={label}>
-            Quantity
-            {qtyError && <span className="ml-1 text-xs text-red-400">{qtyError}</span>}
-          </label>
-          <input type="number" min="1" max={maxQuantity} value={form.quantity}
-            onChange={(e) => { set('quantity', e.target.value); setQtyError(''); }}
-            className={`${inp} ${qtyError ? 'border-red-500/60' : ''}`} />
-          <p className="text-[10px] text-zinc-600 mt-0.5">{maxQuantity} remaining</p>
+
+      {form.decision === 'already_graded' ? (
+        <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+          <p className="text-xs text-zinc-500">
+            Back-link existing slabs to this lot. Set how many cards from this lot were already graded, then pick that many slabs.
+            Existing cost basis on each slab is left as-is — only lineage is added.
+          </p>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={label}>
+                Quantity
+                {qtyError && <span className="ml-1 text-xs text-red-400">{qtyError}</span>}
+              </label>
+              <input type="number" min="1" max={maxQuantity} value={form.quantity}
+                onChange={(e) => { set('quantity', e.target.value); setQtyError(''); }}
+                className={`${inp} ${qtyError ? 'border-red-500/60' : ''}`} />
+              <p className="text-[10px] text-zinc-600 mt-0.5">{maxQuantity} remaining in lot</p>
+            </div>
+            <div className="self-end">
+              <p className={`text-xs ${pickedSlabs.length === (parseInt(form.quantity) || 0) ? 'text-green-400' : 'text-yellow-400'}`}>
+                Picked {pickedSlabs.length} / {parseInt(form.quantity) || 0} slab{(parseInt(form.quantity) || 0) === 1 ? '' : 's'}
+              </p>
+            </div>
+          </div>
+
+          {/* Picked slabs */}
+          {pickedSlabs.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] uppercase tracking-wide text-zinc-500">Linked slabs</p>
+              {pickedSlabs.map(s => (
+                <div key={s.id} className="flex items-center justify-between bg-zinc-900 border border-green-700/50 rounded-lg px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-mono text-green-300">{s.cert_number ?? '(no cert)'} · {s.company} {s.grade_label ?? s.grade ?? ''}</div>
+                    <div className="text-sm text-zinc-200 truncate">{s.card_name ?? '—'}</div>
+                    <div className="text-[10px] text-zinc-500 truncate">{s.set_name ?? '—'}{s.card_number ? ` · #${s.card_number}` : ''}</div>
+                    {s.raw_purchase_id && <div className="text-[10px] text-yellow-400 mt-0.5">⚠ already linked to another lot — will be reassigned</div>}
+                  </div>
+                  <button type="button" onClick={() => toggleSlab(s)}
+                    className="text-xs text-zinc-500 hover:text-red-400 shrink-0 ml-2">Remove</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Search */}
+          <div className="relative">
+            <input type="text" value={slabSearch} onChange={(e) => setSlabSearch(e.target.value)}
+              placeholder="Search by cert # or card name…"
+              className={inp} />
+            {debouncedSlabSearch.trim().length >= 2 && (
+              <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl divide-y divide-zinc-800">
+                {searchingSlabs ? (
+                  <div className="px-3 py-2 text-xs text-zinc-500">Searching…</div>
+                ) : slabResults.length === 0 ? (
+                  <div className="px-3 py-2 text-xs text-zinc-500">No graded slabs match.</div>
+                ) : slabResults.map(s => {
+                  const picked = pickedSlabs.some(p => p.id === s.id);
+                  return (
+                    <button key={s.id} type="button" onClick={() => toggleSlab(s)}
+                      className={`w-full text-left px-3 py-2 transition-colors ${picked ? 'bg-indigo-600/20' : 'hover:bg-zinc-800/60'}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-xs text-indigo-300">{s.cert_number ?? '(no cert)'}{picked ? ' ✓' : ''}</span>
+                        <span className="text-[10px] text-zinc-500">
+                          {s.company} {s.grade_label ?? s.grade ?? ''}
+                          {s.status === 'sold' && <span className="ml-1 text-zinc-600">· sold</span>}
+                          {s.purchase_cost != null && s.purchase_cost > 0 && (
+                            <span className="ml-1 text-zinc-600">· {formatCurrency(s.purchase_cost, s.currency ?? 'USD')}</span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="text-xs text-zinc-200 truncate">{s.card_name ?? '—'}</div>
+                      <div className="text-[10px] text-zinc-500 truncate">{s.set_name ?? '—'}{s.card_number ? ` · #${s.card_number}` : ''}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
-        <div>
-          <label className={label}>Cost / Card (USD)</label>
-          <input type="number" step="0.01" value={form.purchase_cost} onChange={(e) => set('purchase_cost', e.target.value)} className={inp} />
+      ) : (
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <label className={label}>
+              Quantity
+              {qtyError && <span className="ml-1 text-xs text-red-400">{qtyError}</span>}
+            </label>
+            <input type="number" min="1" max={maxQuantity} value={form.quantity}
+              onChange={(e) => { set('quantity', e.target.value); setQtyError(''); }}
+              className={`${inp} ${qtyError ? 'border-red-500/60' : ''}`} />
+            <p className="text-[10px] text-zinc-600 mt-0.5">{maxQuantity} remaining</p>
+          </div>
+          <div>
+            <label className={label}>Cost / Card (USD)</label>
+            <input type="number" step="0.01" value={form.purchase_cost} onChange={(e) => set('purchase_cost', e.target.value)} className={inp} />
+          </div>
+          <div>
+            <label className={label}>Currency</label>
+            <select value={form.currency} onChange={(e) => set('currency', e.target.value)} className={inp}>
+              <option value="USD">USD</option>
+              <option value="JPY">JPY</option>
+            </select>
+          </div>
         </div>
-        <div>
-          <label className={label}>Currency</label>
-          <select value={form.currency} onChange={(e) => set('currency', e.target.value)} className={inp}>
-            <option value="USD">USD</option>
-            <option value="JPY">JPY</option>
-          </select>
-        </div>
-      </div>
+      )}
       <div>
         <label className={label}>Notes</label>
         <input value={form.notes} onChange={(e) => set('notes', e.target.value)} className={inp} />
@@ -210,6 +362,17 @@ export function InspectionPanel({
 
   const addMut = useMutation({
     mutationFn: async ({ body, images }: { body: Record<string, unknown>; images: LineImages }) => {
+      // Sentinel: this is an "Already Graded" back-link, not a normal inspection line
+      if (body._back_link) {
+        // Edit/swap flow — unlink the original slab first, then add new picks.
+        // (No-op if the user re-picked the same slab as before.)
+        const replaceId = body._replace_slab_id as string | undefined;
+        const newIds = body.slab_ids as string[];
+        if (replaceId && !newIds.includes(replaceId)) {
+          await api.delete(`/raw-purchases/${purchase.id}/back-link-slab/${replaceId}`).catch(() => {});
+        }
+        return api.post(`/raw-purchases/${purchase.id}/back-link-slab`, { slab_ids: newIds }).then((r) => r.data);
+      }
       const card = await api.post(`/raw-purchases/${purchase.id}/lines`, body).then((r) => r.data);
       const cardId = card?.id;
       if (cardId) {
@@ -222,7 +385,7 @@ export function InspectionPanel({
       return card;
     },
     onSuccess: () => { invalidate(); setAddLineOpen(false); toast.success('Line added'); },
-    onError: () => toast.error('Failed to add line'),
+    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to add line'),
   });
 
   const updateMut = useMutation({
@@ -236,6 +399,16 @@ export function InspectionPanel({
     mutationFn: (cardId: string) => api.delete(`/raw-purchases/${purchase.id}/lines/${cardId}`),
     onSuccess: () => { invalidate(); toast.success('Removed'); },
     onError: () => toast.error('Failed to remove'),
+  });
+
+  const unlinkMut = useMutation({
+    mutationFn: (slabId: string) => api.delete(`/raw-purchases/${purchase.id}/back-link-slab/${slabId}`),
+    onSuccess: () => {
+      invalidate();
+      qc.invalidateQueries({ queryKey: ['slab-picker'] });   // picker results may have included the now-unlinked slab
+      toast.success('Back-link removed (slab kept)');
+    },
+    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to unlink'),
   });
 
   const allocated = data?.cards.reduce((s, c) => s + c.quantity, 0) ?? 0;
@@ -314,15 +487,26 @@ export function InspectionPanel({
                     No inspection lines yet. Add one to allocate cards.
                   </td>
                 </tr>
-              ) : data.cards.map((line) => (
+              ) : data.cards.map((line) => {
+                const isAlreadyGraded = line.decision === 'already_graded';
+                return (
                 <tr key={line.id} className="hover:bg-zinc-800/25 transition-colors">
-                  <td className="px-4 py-2 text-zinc-400 font-mono">{line.part_number ?? '—'}</td>
+                  <td className="px-4 py-2 text-zinc-400 font-mono">
+                    {line.part_number ?? '—'}
+                    {isAlreadyGraded && line.cert_number && (
+                      <div className="text-[10px] text-zinc-500 mt-0.5 font-mono">
+                        cert {line.cert_number}{line.company || line.grade_label || line.grade ? ` · ${line.company ?? ''} ${line.grade_label ?? line.grade ?? ''}` : ''}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-zinc-300">{line.condition ?? '—'}</td>
                   <td className="px-4 py-2">
                     {line.decision ? (
                       <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
                         line.decision === 'grade'
                           ? 'bg-indigo-500/15 text-indigo-300'
+                          : line.decision === 'already_graded'
+                          ? 'bg-yellow-500/15 text-yellow-300'
                           : 'bg-emerald-500/15 text-emerald-300'
                       }`}>
                         {DECISION_LABELS[line.decision]}
@@ -334,16 +518,21 @@ export function InspectionPanel({
                   <td className="px-4 py-2 text-zinc-500 max-w-[200px] truncate">{line.notes ?? '—'}</td>
                   <td className="px-4 py-2">
                     <div className="flex items-center gap-2 justify-end">
-                      <button onClick={() => setEditLine(line)} className="text-zinc-600 hover:text-zinc-300 transition-colors">
+                      <button onClick={() => setEditLine(line)} className="text-zinc-600 hover:text-zinc-300 transition-colors"
+                        title={isAlreadyGraded ? 'Reselect linked slab' : 'Edit line'}>
                         <Pencil size={13} />
                       </button>
-                      <button onClick={() => deleteMut.mutate(line.id)} className="text-zinc-600 hover:text-red-400 transition-colors">
+                      <button
+                        onClick={() => isAlreadyGraded ? unlinkMut.mutate(line.id) : deleteMut.mutate(line.id)}
+                        className="text-zinc-600 hover:text-red-400 transition-colors"
+                        title={isAlreadyGraded ? 'Remove back-link (slab stays)' : 'Delete line'}>
                         <Trash2 size={13} />
                       </button>
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         )}
@@ -358,14 +547,21 @@ export function InspectionPanel({
         />
       </Modal>
 
-      <Modal open={!!editLine} onClose={() => setEditLine(null)} title="Edit Inspection Line">
+      <Modal open={!!editLine} onClose={() => setEditLine(null)} title={editLine?.decision === 'already_graded' ? 'Reselect Linked Slab' : 'Edit Inspection Line'}>
         {editLine && (
           <InspectionLineForm
             purchase={purchase}
             initial={editLine}
             maxQuantity={remaining + editLine.quantity}
             showImages={false}
-            onSave={(body) => updateMut.mutate({ cardId: editLine.id, body })}
+            onSave={(body) => {
+              if (body._back_link) {
+                addMut.mutate({ body, images: {} });
+                setEditLine(null);
+              } else {
+                updateMut.mutate({ cardId: editLine.id, body });
+              }
+            }}
             onClose={() => setEditLine(null)}
           />
         )}

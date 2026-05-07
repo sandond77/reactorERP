@@ -113,6 +113,29 @@ export async function unreceive(req: Request, res: Response) {
   }
 }
 
+export async function backLinkSlab(req: Request, res: Response) {
+  try {
+    const ids: string[] = Array.isArray(req.body?.slab_ids)
+      ? req.body.slab_ids.map(String)
+      : req.body?.slab_id ? [String(req.body.slab_id)] : [];
+    if (ids.length === 0) return res.status(400).json({ error: 'slab_id or slab_ids required' });
+    const result = await svc.backLinkSlabsToLot(req.dataUserId, req.params['id'] as string, ids);
+    res.json(result);
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message ?? String(err) });
+  }
+}
+
+export async function unlinkSlab(req: Request, res: Response) {
+  try {
+    const slabId = req.params['slabId'] as string;
+    await svc.unlinkBackLinkedSlab(req.dataUserId, slabId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message ?? String(err) });
+  }
+}
+
 export async function uploadReceipt(req: Request, res: Response) {
   try {
     if (!req.file) return res.status(400).json({ error: 'No image file provided' });

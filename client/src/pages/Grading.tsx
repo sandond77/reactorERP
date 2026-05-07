@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, ArrowLeft, Loader2, Trash2 } from 'lucide-react';
+import { Plus, ArrowLeft, Loader2, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -167,6 +167,29 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
 // ── Add Card Modal ───────────────────────────────────────────────────────────
 
 function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => void }) {
+  const [mode, setMode] = useState<'inventory' | 'legacy'>('inventory');
+
+  return (
+    <div className="space-y-3">
+      <div className="inline-flex rounded-md bg-zinc-900 border border-zinc-800 p-0.5">
+        {([
+          { key: 'inventory', label: 'From Inventory' },
+          { key: 'legacy',    label: 'Legacy (no lot)' },
+        ] as const).map(t => (
+          <button key={t.key} type="button" onClick={() => setMode(t.key)}
+            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${mode === t.key ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {mode === 'inventory'
+        ? <AddCardFromInventory batchId={batchId} onClose={onClose} />
+        : <AddCardLegacy        batchId={batchId} onClose={onClose} />}
+    </div>
+  );
+}
+
+function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [search, setSearch]                 = useState('');
   const [debounced, setDebounced]           = useState('');
@@ -296,6 +319,246 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
         <Button type="submit" disabled={saving || !selected}>
+          {saving && <Loader2 size={14} className="animate-spin" />}
+          Add to Batch
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// ── Legacy Add (no raw lot) ───────────────────────────────────────────────────
+
+interface CatalogSearchResult {
+  id: string;
+  sku: string | null;
+  card_name: string;
+  set_name: string;
+  set_code: string | null;
+  card_number: string | null;
+  language: string;
+}
+
+function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    card_name: '',
+    set_name: '',
+    card_number: '',
+    language: 'EN',
+    condition: 'NM',
+    quantity: '1',
+    purchase_cost: '0',
+    expected_grade: '',
+    estimated_value: '',
+  });
+  const [searchLabel, setSearchLabel] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [pickedCatalog, setPickedCatalog] = useState<CatalogSearchResult | null>(null);
+  const [creatingPart, setCreatingPart] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm(prev => ({ ...prev, [k]: e.target.value }));
+
+  // Debounce the search input
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchLabel), 250);
+    return () => clearTimeout(t);
+  }, [searchLabel]);
+
+  const { data: matches = [], isFetching: searching } = useQuery<CatalogSearchResult[]>({
+    queryKey: ['catalog-search-legacy', debouncedSearch],
+    queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 8 } }).then(r => r.data.data),
+    enabled: debouncedSearch.trim().length >= 2 && !pickedCatalog,
+  });
+
+  function pickMatch(m: CatalogSearchResult) {
+    setPickedCatalog(m);
+    setForm(prev => ({
+      ...prev,
+      card_name: m.card_name,
+      set_name: m.set_name,
+      card_number: m.card_number ?? prev.card_number,
+      language: m.language ?? prev.language,
+    }));
+    setSearchLabel(m.sku ?? m.card_name);
+  }
+
+  function clearPick() {
+    setPickedCatalog(null);
+    setSearchLabel('');
+  }
+
+  async function generatePart() {
+    if (!form.card_name.trim() || !form.set_name.trim()) {
+      toast.error('Card name and set name required to generate a part number');
+      return;
+    }
+    setCreatingPart(true);
+    try {
+      const res = await api.post('/catalog', {
+        game: 'pokemon',
+        card_name: form.card_name.trim(),
+        set_name: form.set_name.trim(),
+        card_number: form.card_number.trim() || null,
+        language: form.language,
+      });
+      const created = res.data?.data ?? res.data;
+      const newPick: CatalogSearchResult = {
+        id: created.id,
+        sku: created.sku ?? null,
+        card_name: created.card_name,
+        set_name: created.set_name,
+        set_code: created.set_code ?? null,
+        card_number: created.card_number ?? null,
+        language: created.language,
+      };
+      setPickedCatalog(newPick);
+      setSearchLabel(newPick.sku ?? newPick.card_name);
+      toast.success('Part number created');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to create part number');
+    } finally {
+      setCreatingPart(false);
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.card_name.trim()) { toast.error('Card name is required'); return; }
+    const qtyNum = parseInt(form.quantity);
+    if (!qtyNum || qtyNum < 1) { toast.error('Quantity must be at least 1'); return; }
+    setSaving(true);
+    try {
+      await api.post(`/grading-subs/${batchId}/items/legacy`, {
+        card_name:       form.card_name.trim(),
+        set_name:        form.set_name.trim() || null,
+        card_number:     form.card_number.trim() || null,
+        language:        form.language,
+        condition:       form.condition || null,
+        quantity:        qtyNum,
+        purchase_cost:   form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
+        expected_grade:  form.expected_grade ? parseFloat(form.expected_grade) : undefined,
+        estimated_value: form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
+        catalog_id:      pickedCatalog?.id,
+      });
+      toast.success('Legacy card added to batch');
+      qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
+      onClose();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to add legacy card');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const noSpinner = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <p className="text-xs text-zinc-500 leading-relaxed">
+        For cards you owned before tracking purchases in Reactor. Search to find or generate a part number,
+        then fill in the rest. A backdated raw purchase lot is auto-created so cost basis stays accurate.
+      </p>
+
+      {/* Part number search */}
+      <div>
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">Part Number</label>
+        <div className="relative">
+          <input
+            type="text"
+            value={searchLabel}
+            onChange={(e) => { setSearchLabel(e.target.value); if (pickedCatalog) setPickedCatalog(null); }}
+            placeholder="Search by part #, card name, or set…"
+            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+          />
+          {/* Search results dropdown */}
+          {!pickedCatalog && debouncedSearch.trim().length >= 2 && (
+            <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl divide-y divide-zinc-800">
+              {searching ? (
+                <div className="px-3 py-2 text-xs text-zinc-500">Searching…</div>
+              ) : matches.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-zinc-500">
+                  No matching part number. Fill in fields below and click <span className="text-yellow-400">Generate part</span>.
+                </div>
+              ) : matches.map(m => (
+                <button key={m.id} type="button" onClick={() => pickMatch(m)}
+                  className="w-full text-left px-3 py-2 hover:bg-zinc-800/60 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-mono text-xs text-indigo-300">{m.sku ?? '(no sku)'}</span>
+                    <span className="text-[10px] text-zinc-500">{m.language}</span>
+                  </div>
+                  <div className="text-xs text-zinc-200 truncate">{m.card_name}</div>
+                  <div className="text-[10px] text-zinc-500 truncate">{m.set_name}{m.card_number ? ` · #${m.card_number}` : ''}</div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Selected part number badge */}
+      {pickedCatalog ? (
+        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm border bg-green-950/40 border-green-800/50">
+          <div className="flex items-center gap-2 min-w-0">
+            <CheckCircle size={14} className="text-green-400 shrink-0" />
+            <span className="font-mono text-xs text-zinc-200 shrink-0">{pickedCatalog.sku ?? '(no sku)'}</span>
+            <span className="text-xs text-zinc-400 truncate">{pickedCatalog.card_name} · {pickedCatalog.set_name}</span>
+          </div>
+          <button type="button" onClick={clearPick} className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0 ml-2">Clear</button>
+        </div>
+      ) : (form.card_name.trim() && form.set_name.trim()) ? (
+        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm border bg-yellow-950/40 border-yellow-700/50">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={14} className="text-yellow-400 shrink-0" />
+            <span className="text-xs text-yellow-400">No part number assigned — generate one from the fields below?</span>
+          </div>
+          <button
+            type="button"
+            onClick={generatePart}
+            disabled={creatingPart}
+            className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
+          >
+            {creatingPart ? 'Creating…' : 'Generate part'}
+          </button>
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Card Name *" value={form.card_name} onChange={set('card_name')} placeholder="e.g. Charizard" />
+        <Input label="Set Name"   value={form.set_name}  onChange={set('set_name')}  placeholder="e.g. Base Set" />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Input label="Card #"     value={form.card_number} onChange={set('card_number')} placeholder="4" />
+        <div>
+          <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">Language</label>
+          <select value={form.language} onChange={set('language')}
+            className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500">
+            <option value="EN">EN</option>
+            <option value="JP">JP</option>
+            <option value="KR">KR</option>
+            <option value="ZH-TW">ZH-TW</option>
+            <option value="ZH-CN">ZH-CN</option>
+          </select>
+        </div>
+        <Input label="Condition" value={form.condition} onChange={set('condition')} placeholder="NM" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Quantity *" type="number" min="1" value={form.quantity} onChange={set('quantity')} className={noSpinner} />
+        <Input label="Cost / Card (USD)" type="number" step="0.01" min="0" value={form.purchase_cost} onChange={set('purchase_cost')} placeholder="0.00" className={noSpinner} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800">
+        <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
+          value={form.expected_grade} onChange={set('expected_grade')} className={noSpinner} />
+        <Input label="Est. Value / Card" type="number" step="0.01" min="0" placeholder="0.00"
+          value={form.estimated_value} onChange={set('estimated_value')} className={noSpinner} />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="submit" disabled={saving || !form.card_name.trim()}>
           {saving && <Loader2 size={14} className="animate-spin" />}
           Add to Batch
         </Button>

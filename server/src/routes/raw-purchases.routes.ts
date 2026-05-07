@@ -31,5 +31,11 @@ router.delete('/:id/lines/:cardId',    ctrl.deleteLine);
 router.post('/:id/revert-inspection',  ctrl.revertInspection);
 // Unreceive: flip status received → ordered (only if no inspection lines exist)
 router.post('/:id/unreceive',          ctrl.unreceive);
+// Back-link an existing slab (card_instances row with status='graded') to this lot.
+// Used during manual legacy migration when the slab is already in Reactor and
+// we don't want to re-grade it through inspect → submit → return.
+router.post('/:id/back-link-slab',     ctrl.backLinkSlab);
+// Remove a slab's back-link to a lot (sets raw_purchase_id NULL — keeps slab)
+router.delete('/:id/back-link-slab/:slabId', ctrl.unlinkSlab);
 
 export default router;

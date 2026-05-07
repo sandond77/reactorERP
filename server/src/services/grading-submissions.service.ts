@@ -255,6 +255,121 @@ export async function addItem(userId: string, batchId: string, input: AddItemInp
   return item;
 }
 
+export interface AddLegacyItemInput {
+  card_name: string;
+  set_name?: string | null;
+  card_number?: string | null;
+  language: string;
+  condition?: string | null;
+  quantity?: number;
+  purchase_cost?: number;       // in cents, defaults to 0 (user has no purchase record)
+  expected_grade?: number;
+  estimated_value?: number;     // in cents
+  catalog_id?: string;          // if client already picked or generated a part number
+}
+
+/**
+ * Create a card_instance for a card the user owned before tracking purchases
+ * in Reactor, and add it directly to a grading batch. To keep accounting
+ * balanced, this also creates a backdated `raw_purchases` lot so the per-
+ * part-number aggregates show "1 raw acquired (consumed) + 1 graded" once
+ * the slab returns, rather than a graded slab with no raw provenance.
+ *
+ * catalog_id is intentionally left NULL here — the resolver runs at
+ * processReturn time, so the part number lives on the slab once verified.
+ */
+export async function addLegacyItem(userId: string, batchId: string, input: AddLegacyItemInput) {
+  const batch = await db
+    .selectFrom('grading_batches')
+    .select('id')
+    .where('id', '=', batchId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!batch) throw new Error('Batch not found');
+
+  // Phantom raw lot — represents the (untracked) original acquisition. This
+  // makes inventory math balance: when the slab returns, the lot is the
+  // historical record of "where this raw came from".
+  const { createRawPurchase } = await import('./raw-purchases.service');
+  const qty = input.quantity ?? 1;
+  const perCardCost = input.purchase_cost ?? 0;
+  const lot = await createRawPurchase(userId, {
+    type: 'legacy',
+    source: 'Legacy (pre-Reactor)',
+    language: input.language,
+    card_name: input.card_name,
+    set_name: input.set_name ?? undefined,
+    card_number: input.card_number ?? undefined,
+    total_cost_usd: perCardCost * qty,
+    card_count: qty,
+    status: 'received',
+    purchased_at: new Date().toISOString(),
+    received_at: new Date().toISOString(),
+    notes: 'Auto-created from legacy grading submission',
+  });
+
+  // If the client already picked or generated a part number, use it directly.
+  // Otherwise fall back to the resolver (same path as every other raw card).
+  let catalogId: string | null = input.catalog_id ?? null;
+  if (!catalogId) {
+    const { createCatalogResolver } = await import('./import/import.service');
+    const { getOrCreateCatalogId } = await createCatalogResolver(userId);
+    try {
+      catalogId = await getOrCreateCatalogId(
+        input.card_name,
+        input.set_name ?? null,
+        input.card_number ?? null,
+        input.language,
+        0,
+      );
+    } catch { /* unlinked is fine; user can resolve later */ }
+  }
+
+  const maxRow = await db
+    .selectFrom('grading_batch_items')
+    .select(db.fn.max('line_item_num').as('max_num'))
+    .where('batch_id', '=', batchId)
+    .executeTakeFirst();
+  const lineItemNum = (maxRow?.max_num ?? 0) + 1;
+
+  const ci = await db
+    .insertInto('card_instances')
+    .values({
+      user_id: userId,
+      catalog_id: catalogId,
+      card_name_override: input.card_name,
+      set_name_override: input.set_name ?? null,
+      card_number_override: input.card_number ?? null,
+      card_game: 'pokemon',
+      language: input.language,
+      purchase_type: 'raw',
+      status: 'grading_submitted',
+      quantity: qty,
+      purchase_cost: perCardCost,
+      currency: 'USD',
+      condition: input.condition ?? null,
+      raw_purchase_id: lot.id,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  const item = await db
+    .insertInto('grading_batch_items')
+    .values({
+      batch_id: batchId,
+      card_instance_id: ci.id,
+      line_item_num: lineItemNum,
+      quantity: qty,
+      expected_grade: input.expected_grade ?? null,
+      estimated_value: input.estimated_value ?? null,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  await logAudit(userId, 'card_instances', ci.id, 'created', null, ci);
+  return { card_instance: ci, batch_item: item, raw_purchase: lot };
+}
+
 export interface UpdateItemInput {
   quantity?: number;
   expected_grade?: number | null;
@@ -307,6 +422,17 @@ export async function processReturn(userId: string, batchId: string, input: Proc
     .executeTakeFirst();
   if (!batch) return null;
 
+  // Lazy-load the catalog resolver — only constructed when needed, but reused
+  // across all items in the batch.
+  let cachedResolver: ((cardName: string, setName: string | null, cardNum: string | null, lang: string, idx: number) => Promise<string | null>) | null = null;
+  async function resolveLazy(): Promise<typeof cachedResolver> {
+    if (cachedResolver) return cachedResolver;
+    const { createCatalogResolver } = await import('./import/import.service');
+    const { getOrCreateCatalogId } = await createCatalogResolver(userId);
+    cachedResolver = getOrCreateCatalogId;
+    return cachedResolver;
+  }
+
   for (const item of input.items) {
     const batchItem = await db
       .selectFrom('grading_batch_items')
@@ -324,11 +450,31 @@ export async function processReturn(userId: string, batchId: string, input: Proc
       .executeTakeFirst();
     if (!original) continue;
 
+    // If the source raw had no catalog_id (legacy adds skip resolution at submit
+    // time), try to resolve now that the slab is real. The card name on the
+    // returned slab may have been corrected too, so prefer item.card_name_override.
+    let resolvedCatalogId: string | null = original.catalog_id;
+    if (!resolvedCatalogId) {
+      const cardName = item.card_name_override ?? original.card_name_override;
+      if (cardName) {
+        try {
+          const resolve = await resolveLazy();
+          resolvedCatalogId = await resolve!(
+            cardName,
+            original.set_name_override,
+            original.card_number_override,
+            original.language,
+            0,
+          );
+        } catch { /* fall through unlinked */ }
+      }
+    }
+
     const newInstance = await db
       .insertInto('card_instances')
       .values({
         user_id:              userId,
-        catalog_id:           original.catalog_id,
+        catalog_id:           resolvedCatalogId,
         card_name_override:   item.card_name_override ?? original.card_name_override,
         set_name_override:    original.set_name_override,
         card_number_override: original.card_number_override,

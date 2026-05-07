@@ -42,6 +42,12 @@ export async function addItem(req: Request, res: Response, next: NextFunction) {
   } catch (err) { next(err); }
 }
 
+export async function addLegacyItem(req: Request, res: Response, next: NextFunction) {
+  try {
+    res.status(201).json(await svc.addLegacyItem(req.dataUserId, req.params['id'] as string, req.body));
+  } catch (err) { next(err); }
+}
+
 export async function updateItem(req: Request, res: Response, next: NextFunction) {
   try {
     const item = await svc.updateItem(req.dataUserId, req.params['itemId'] as string, req.body);

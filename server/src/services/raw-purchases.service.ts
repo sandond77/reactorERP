@@ -58,8 +58,113 @@ export interface UpdateRawPurchaseInput extends Partial<CreateRawPurchaseInput> 
 
 // ── Purchase ID generation ────────────────────────────────────────────────────
 
+/**
+ * Back-link an existing graded slab to a raw_purchases lot. Used when
+ * manually migrating legacy data where the slab was imported separately
+ * but originated from a raw lot we're now adding. Prevents the
+ * "lot exists, but no card_instances" limbo state and avoids the
+ * double-count of running the slab through the inspect → grade → return
+ * pipeline a second time.
+ *
+ * Sets card_instances.raw_purchase_id on the slab. Optionally also updates
+ * purchase_cost on the slab (the per-card cost from the lot) for cost-basis
+ * traceability — left as-is by default.
+ */
+/** Remove the back-link from a slab — sets raw_purchase_id and decision to NULL.
+ *  Does NOT delete the slab itself. Use when the user wants to disassociate a
+ *  back-linked slab from its lot (e.g., wrong slab was picked).
+ */
+export async function unlinkBackLinkedSlab(userId: string, slabId: string) {
+  const before = await db.selectFrom('card_instances')
+    .selectAll()
+    .where('id', '=', slabId)
+    .where('user_id', '=', userId)
+    .where('decision', '=', 'already_graded')
+    .executeTakeFirst();
+  if (!before) return;
+
+  const after = await db.updateTable('card_instances')
+    .set({ raw_purchase_id: null, decision: null, updated_at: new Date() })
+    .where('id', '=', slabId)
+    .where('user_id', '=', userId)
+    .where('decision', '=', 'already_graded')   // safety: only unlink already-graded back-links
+    .returningAll()
+    .executeTakeFirst();
+
+  if (after) await logAudit(userId, 'card_instances', slabId, 'updated', before, after);
+}
+
+export async function backLinkSlabsToLot(userId: string, lotId: string, slabIds: string[]) {
+  if (!slabIds.length) throw new Error('At least one slab id required');
+
+  const lot = await db.selectFrom('raw_purchases')
+    .select(['id', 'card_count', 'total_cost_usd'])
+    .where('id', '=', lotId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!lot) throw new Error('Raw purchase lot not found');
+
+  const slabs = await db.selectFrom('card_instances as ci')
+    .innerJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .select(['ci.id', 'ci.quantity', 'ci.status', 'ci.raw_purchase_id', 'ci.purchase_cost'])
+    .where('ci.id', 'in', slabIds)
+    .where('ci.user_id', '=', userId)
+    .execute();
+  if (slabs.length !== slabIds.length) throw new Error('One or more slabs not found');
+  // Allow graded and sold slabs — sold slabs are real, just no longer in inventory
+  for (const s of slabs) {
+    if (s.status !== 'graded' && s.status !== 'sold') {
+      throw new Error(`Card ${s.id} is not a graded slab (status=${s.status})`);
+    }
+  }
+
+  // Check remaining qty on the lot
+  const usedRow = await sql<{ total: number }>`
+    SELECT COALESCE(SUM(quantity), 0)::int AS total
+    FROM card_instances
+    WHERE raw_purchase_id = ${lotId} AND user_id = ${userId}
+  `.execute(db);
+  const used = Number(usedRow.rows[0].total);
+  const remaining = lot.card_count - used;
+  const incomingQty = slabs.reduce((s, x) => s + x.quantity, 0);
+  if (incomingQty > remaining) {
+    throw new Error(`Only ${remaining} card${remaining === 1 ? '' : 's'} remaining in lot — cannot back-link ${slabs.length} slab${slabs.length === 1 ? '' : 's'} (qty ${incomingQty})`);
+  }
+
+  // Update lineage on every slab. For slabs with no existing cost basis (edge case
+  // where the slab was imported with $0), backfill with the lot's per-card cost so
+  // P&L isn't underreported. Slabs that already have a cost basis are left alone.
+  const perCardCost = (lot.total_cost_usd && lot.card_count > 0)
+    ? Math.round(lot.total_cost_usd / lot.card_count)
+    : 0;
+
+  let backfilled = 0;
+  for (const s of slabs) {
+    const before = await db.selectFrom('card_instances').selectAll()
+      .where('id', '=', s.id).where('user_id', '=', userId).executeTakeFirst();
+    const update: Record<string, unknown> = {
+      raw_purchase_id: lotId,
+      decision: 'already_graded',
+      updated_at: new Date(),
+    };
+    if ((s.purchase_cost ?? 0) === 0 && perCardCost > 0) {
+      update.purchase_cost = perCardCost;
+      backfilled++;
+    }
+    const after = await db.updateTable('card_instances')
+      .set(update)
+      .where('id', '=', s.id)
+      .where('user_id', '=', userId)
+      .returningAll()
+      .executeTakeFirst();
+    if (before && after) await logAudit(userId, 'card_instances', s.id, 'updated', before, after);
+  }
+
+  return { ok: true, lotId, linked: slabs.length, total_qty: incomingQty, cost_backfilled: backfilled };
+}
+
 async function nextPurchaseId(userId: string, type: RawPurchaseType, year: number): Promise<string> {
-  const letter = type === 'raw' ? 'R' : 'B';
+  const letter = type === 'raw' ? 'R' : type === 'bulk' ? 'B' : 'L';
 
   // Upsert sequence row and return the incremented value atomically
   const result = await sql<{ next_seq: number }>`
@@ -232,6 +337,7 @@ export async function getRawPurchase(userId: string, id: string) {
   const cards = await db
     .selectFrom('card_instances as ci')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .select([
       'ci.id',
       'ci.status',
@@ -245,6 +351,10 @@ export async function getRawPurchase(userId: string, id: string) {
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
       sql<string | null>`COALESCE(cc.sku, CASE WHEN ci.catalog_id IS NOT NULL AND cc.set_code IS NOT NULL THEN 'PKMN-' || UPPER(ci.language) || '-' || UPPER(cc.set_code) ELSE NULL END)`.as('part_number'),
+      sql<string | null>`sd.cert_number::text`.as('cert_number'),
+      sql<string | null>`sd.grade_label`.as('grade_label'),
+      sql<number | null>`sd.grade`.as('grade'),
+      sql<string | null>`sd.company`.as('company'),
     ])
     .where('ci.raw_purchase_id', '=', id)
     .where('ci.user_id', '=', userId)

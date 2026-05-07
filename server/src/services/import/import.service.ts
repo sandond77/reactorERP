@@ -338,7 +338,7 @@ export async function executeImport(
 
 // ── Catalog Resolver Factory ──────────────────────────────────────────────────
 
-async function createCatalogResolver(
+export async function createCatalogResolver(
   userId: string,
   languageOverrides?: Record<number, string>,
   catalogOverrides?: Record<string, CatalogOverride>

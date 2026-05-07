@@ -1,6 +1,6 @@
 export type PurchaseType = 'raw' | 'bulk';
 export type PurchaseStatus = 'ordered' | 'received' | 'cancelled';
-export type Decision = 'sell_raw' | 'grade';
+export type Decision = 'sell_raw' | 'grade' | 'already_graded';
 
 export interface PurchaseRow {
   id: string;
@@ -42,6 +42,10 @@ export interface InspectionLine {
   currency: string;
   status: string;
   notes: string | null;
+  cert_number?: string | null;
+  grade_label?: string | null;
+  grade?: number | null;
+  company?: string | null;
 }
 
 export interface PurchaseDetail extends PurchaseRow {
@@ -51,8 +55,9 @@ export interface PurchaseDetail extends PurchaseRow {
 export const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
 
 export const DECISION_LABELS: Record<Decision, string> = {
-  sell_raw: 'Sell Raw',
-  grade: 'Grade',
+  sell_raw:       'Sell Raw',
+  grade:          'Grade',
+  already_graded: 'Already Graded',
 };
 
 export const STATUS_COLORS: Record<PurchaseStatus, string> = {
