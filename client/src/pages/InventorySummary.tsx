@@ -557,7 +557,7 @@ function GameSelect({ value, onChange, className, onGameAdded }: { value: string
 
 // ── Set Code Manager ─────────────────────────────────────────────────────────
 
-interface StaticSet { game: string; language: string; set_code: string; names: string[]; era?: string }
+interface StaticSet { id?: string; game: string; language: string; set_code: string; names: string[]; era?: string; is_seeded?: boolean }
 interface DbAlias { id: string; language: string; game: string; set_code: string; alias: string; set_name: string | null }
 
 function SetCodeModal({ set: s, allAliases, onClose }: { set: StaticSet; allAliases: DbAlias[]; onClose: () => void }) {
@@ -568,6 +568,39 @@ function SetCodeModal({ set: s, allAliases, onClose }: { set: StaticSet; allAlia
   const [deleteSteps, setDeleteSteps] = useState<Record<string, number>>({});
   const [deleteAllStep, setDeleteAllStep] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // Editable built-in name + aliases (uses new /sets/codes/:id endpoint)
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState(s.names[0] ?? '');
+  const [editAliasesText, setEditAliasesText] = useState((s.names ?? []).slice(1).join(', '));
+  const [savingName, setSavingName] = useState(false);
+
+  async function handleSaveBuiltIn() {
+    if (!s.id) { setError('This entry is not yet editable. Try refreshing.'); return; }
+    if (!editName.trim()) { setError('Set name is required.'); return; }
+    setSavingName(true);
+    setError(null);
+    try {
+      const aliasArr = editAliasesText.split(',').map(t => t.trim()).filter(Boolean);
+      await api.patch(`/sets/codes/${s.id}`, { set_name: editName.trim(), aliases: aliasArr });
+      qc.invalidateQueries({ queryKey: ['set-codes-static'] });
+      setEditing(false);
+    } catch { setError('Failed to save.'); }
+    finally { setSavingName(false); }
+  }
+
+  async function handleResetBuiltIn() {
+    if (!s.id) return;
+    setSavingName(true);
+    try {
+      const r = await api.post(`/sets/codes/${s.id}/reset`).then(x => x.data);
+      qc.invalidateQueries({ queryKey: ['set-codes-static'] });
+      setEditName(r?.set_name ?? '');
+      setEditAliasesText(((r?.aliases ?? []) as string[]).join(', '));
+      setEditing(false);
+    } catch { setError('Failed to reset.'); }
+    finally { setSavingName(false); }
+  }
 
   async function handleAdd() {
     if (!newAlias.trim()) return;
@@ -610,12 +643,41 @@ function SetCodeModal({ set: s, allAliases, onClose }: { set: StaticSet; allAlia
         <p className="text-xs text-zinc-500 mb-4">{s.language === 'EN' ? 'English' : 'Japanese'}</p>
 
         <div className="mb-4">
-          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Built-in Names</p>
-          <div className="flex flex-wrap gap-1.5">
-            {s.names.map((n, i) => (
-              <span key={i} className="px-2 py-0.5 bg-zinc-800 text-zinc-400 text-xs rounded">{n}</span>
-            ))}
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Set Name & Aliases</p>
+            {!editing ? (
+              <button onClick={() => setEditing(true)} className="text-xs text-indigo-400 hover:text-indigo-300">Edit</button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <button onClick={handleResetBuiltIn} disabled={savingName} className="text-xs text-amber-400 hover:text-amber-300 disabled:opacity-50">Reset</button>
+                <button onClick={() => { setEditing(false); setEditName(s.names[0] ?? ''); setEditAliasesText((s.names ?? []).slice(1).join(', ')); }} className="text-xs text-zinc-400 hover:text-zinc-200">Cancel</button>
+                <button onClick={handleSaveBuiltIn} disabled={savingName || !editName.trim()} className="text-xs text-indigo-400 hover:text-indigo-300 font-medium disabled:opacity-50">{savingName ? 'Saving…' : 'Save'}</button>
+              </div>
+            )}
           </div>
+          {editing ? (
+            <div className="space-y-2">
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                placeholder="Primary set name"
+                className="w-full px-3 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+              />
+              <input
+                value={editAliasesText}
+                onChange={(e) => setEditAliasesText(e.target.value)}
+                placeholder="Aliases (comma-separated)"
+                className="w-full px-3 py-1.5 text-xs bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+              />
+              <p className="text-[10px] text-zinc-600">Reset restores this entry to the seeded defaults.</p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {s.names.map((n, i) => (
+                <span key={i} className={`px-2 py-0.5 text-xs rounded ${i === 0 ? 'bg-zinc-700 text-zinc-200' : 'bg-zinc-800 text-zinc-400'}`}>{n}</span>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="mb-4">

@@ -483,6 +483,21 @@ export interface Database {
   grading_batch_sequences: GradingBatchSequencesTable;
   card_shows: CardShowsTable;
   alert_overrides: AlertOverridesTable;
+  set_codes: SetCodesTable;
+}
+
+export interface SetCodesTable {
+  id: Generated<string>;
+  user_id: string;
+  game: Generated<string>;
+  language: string;
+  set_code: string;
+  set_name: string;
+  era: string | null;
+  aliases: Generated<string[]>;
+  is_seeded: Generated<boolean>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
 }
 
 export interface AlertOverridesTable {

@@ -3,6 +3,7 @@ import { db } from '../config/database';
 import { z } from 'zod';
 import { EN_SETS, JP_SETS } from '../utils/set-codes';
 import { requireAuth } from '../middleware/auth';
+import * as setCodesSvc from '../services/set-codes.service';
 
 export const setsRouter = Router();
 
@@ -42,11 +43,72 @@ function deriveEra(code: string, language: 'EN' | 'JP'): string {
   }
 }
 
-// GET /sets/codes — return all static set definitions (EN + JP)
-setsRouter.get('/codes', (_req, res) => {
-  const en = EN_SETS.map(s => ({ game: 'pokemon', language: 'EN', set_code: s.code, names: s.names, era: deriveEra(s.code, 'EN') }));
-  const jp = JP_SETS.map(s => ({ game: 'pokemon', language: 'JP', set_code: s.code, names: s.names, era: deriveEra(s.code, 'JP') }));
-  res.json([...en, ...jp]);
+// GET /sets/codes — per-user set codes (seeded from EN_SETS/JP_SETS on first request)
+setsRouter.get('/codes', async (req, res, next) => {
+  try {
+    const { en, jp } = await setCodesSvc.listSetCodesForUser(req.dataUserId);
+    // Shape matches the previous static endpoint so existing dropdowns keep working:
+    // { game, language, set_code, names: [primary, ...aliases], era, id, is_seeded }
+    const toRow = (e: any, language: string) => ({
+      id: e.id,
+      game: 'pokemon',
+      language,
+      set_code: e.set_code,
+      names: [e.set_name, ...(e.aliases ?? [])],
+      era: e.era,
+      is_seeded: e.is_seeded,
+    });
+    res.json([...en.map(e => toRow(e, 'EN')), ...jp.map(e => toRow(e, 'JP'))]);
+  } catch (err) { next(err); }
+});
+
+// PATCH /sets/codes/:id — update a set's name, code, era, or aliases
+const setCodeSchema = z.object({
+  set_name: z.string().min(1).max(200).optional(),
+  set_code: z.string().min(1).max(50).optional(),
+  era: z.string().max(100).nullable().optional(),
+  aliases: z.array(z.string().min(1).max(200)).optional(),
+});
+setsRouter.patch('/codes/:id', async (req, res, next) => {
+  try {
+    const data = setCodeSchema.parse(req.body);
+    const row = await setCodesSvc.updateSetCodeForUser(req.dataUserId, req.params.id, data);
+    if (!row) return res.status(404).json({ error: 'Set code not found' });
+    res.json(row);
+  } catch (err) { next(err); }
+});
+
+// POST /sets/codes — add a new (non-seeded) set code
+const newSetCodeSchema = z.object({
+  language: z.string().min(1).max(10).transform(s => s.toUpperCase().trim()),
+  set_code: z.string().min(1).max(50).transform(s => s.trim()),
+  set_name: z.string().min(1).max(200),
+  era: z.string().max(100).nullable().optional(),
+  aliases: z.array(z.string().min(1).max(200)).optional(),
+});
+setsRouter.post('/codes', async (req, res, next) => {
+  try {
+    const data = newSetCodeSchema.parse(req.body);
+    const row = await setCodesSvc.createSetCodeForUser(req.dataUserId, data);
+    res.status(201).json(row);
+  } catch (err) { next(err); }
+});
+
+// DELETE /sets/codes/:id — only non-seeded entries can be deleted
+setsRouter.delete('/codes/:id', async (req, res, next) => {
+  try {
+    await setCodesSvc.deleteSetCodeForUser(req.dataUserId, req.params.id);
+    res.status(204).end();
+  } catch (err) { next(err); }
+});
+
+// POST /sets/codes/:id/reset — restore a seeded entry to its original name + aliases
+setsRouter.post('/codes/:id/reset', async (req, res, next) => {
+  try {
+    const row = await setCodesSvc.resetSetCodeForUser(req.dataUserId, req.params.id);
+    if (!row) return res.status(404).json({ error: 'Seeded entry not found' });
+    res.json(row);
+  } catch (err) { next(err); }
 });
 
 // GET /sets/aliases — list aliases for this org
