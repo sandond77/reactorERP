@@ -46,12 +46,16 @@ function PartNumberField({
   const debounceRef3 = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hasSearchTerms = !!(form.card_name || form.set_name || form.card_number);
+  // True after the user explicitly clears a match — prevents the auto-pick
+  // effect from immediately re-selecting the same single result.
+  const [skipAutoPick, setSkipAutoPick] = useState(false);
 
   // Search using all three card fields whenever they change (auto-match)
   useEffect(() => {
     if (debounceRef2.current) clearTimeout(debounceRef2.current);
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!hasSearchTerms) { setResults([]); return; }
+    setSkipAutoPick(false);   // form fields changed — auto-pick allowed again
     debounceRef2.current = setTimeout(() => {
       const params: Record<string, string> = { language: form.language };
       if (form.card_name)   params.card_name   = form.card_name;
@@ -63,6 +67,15 @@ function PartNumberField({
     }, 350);
     return () => { if (debounceRef2.current) clearTimeout(debounceRef2.current); };
   }, [form.card_name, form.set_name, form.card_number, form.language, hasSearchTerms]);
+
+  // Auto-pick when a single result comes back and nothing is currently locked in.
+  // Saves users who fill the form fields and hit Save without clicking the dropdown.
+  useEffect(() => {
+    if (catalogMatch || skipAutoPick) return;
+    if (results.length === 1) {
+      onSelect(results[0]);
+    }
+  }, [results, catalogMatch, skipAutoPick, onSelect]);
 
   // Manual free-form search — runs against /catalog/search?q= when the user types
   useEffect(() => {
@@ -99,7 +112,7 @@ function PartNumberField({
         <div className={`${inp} flex items-center gap-2 border-emerald-700/60`}>
           <span className="text-emerald-400 font-mono text-xs">{catalogMatch.sku ?? '—'}</span>
           <span className="text-zinc-600 text-[10px]">· {catalogMatch.card_name}</span>
-          <button type="button" onClick={() => { onClear(); setOpen(true); }} className="ml-auto text-zinc-600 hover:text-zinc-400">
+          <button type="button" onClick={() => { onClear(); setSkipAutoPick(true); setOpen(true); }} className="ml-auto text-zinc-600 hover:text-zinc-400">
             <X size={12} />
           </button>
         </div>
