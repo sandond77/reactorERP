@@ -98,7 +98,7 @@ function PartNumberField({
         // Locked-in match
         <div className={`${inp} flex items-center gap-2 border-emerald-700/60`}>
           <span className="text-emerald-400 font-mono text-xs">{catalogMatch.sku ?? '—'}</span>
-          <span className="text-zinc-600 text-[10px]">· {catalogMatch.set_name}</span>
+          <span className="text-zinc-600 text-[10px]">· {catalogMatch.card_name}</span>
           <button type="button" onClick={() => { onClear(); setOpen(true); }} className="ml-auto text-zinc-600 hover:text-zinc-400">
             <X size={12} />
           </button>
