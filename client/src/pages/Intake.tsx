@@ -958,6 +958,7 @@ type SortDir = 'asc' | 'desc';
 const INTAKE_FILTER_DEFAULTS = {
   search:  '',
   fType:   null as PurchaseType | null,
+  fStatus: null as 'ordered' | 'received' | 'cancelled' | null,
   sortCol: null as string | null,
   sortDir: 'desc' as SortDir,
 };
@@ -969,6 +970,7 @@ export function Intake() {
   const [search, setSearch]             = useState(saved.search);
   const [debouncedSearch, setDebounced] = useState(saved.search);
   const [fType, setFType]               = useState<PurchaseType | null>(saved.fType);
+  const [fStatus, setFStatus]           = useState<'ordered' | 'received' | 'cancelled' | null>(saved.fStatus ?? null);
   const [sortCol, setSortCol]           = useState<string | null>(saved.sortCol);
   const [sortDir, setSortDir]           = useState<SortDir>(saved.sortDir);
   const [addOpen, setAddOpen]           = useState(false);
@@ -1017,8 +1019,8 @@ export function Intake() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('intake', { search, fType, sortCol, sortDir });
-  }, [search, fType, sortCol, sortDir]);
+    saveFilters('intake', { search, fType, fStatus, sortCol, sortDir });
+  }, [search, fType, fStatus, sortCol, sortDir]);
 
   function handleSort(col: string) {
     if (sortCol === col) setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
@@ -1031,6 +1033,7 @@ export function Intake() {
     pageSize: 50,
     search:   debouncedSearch || undefined,
     type:     fType ?? undefined,
+    status:   fStatus ?? undefined,
     sort_by:  sortCol ?? undefined,
     sort_dir: sortDir,
   };
@@ -1084,8 +1087,8 @@ export function Intake() {
     onError: () => toast.error('Failed to delete'),
   });
 
-  const hasActiveFilters = !!debouncedSearch || fType !== null;
-  function clearFilters() { setSearch(''); setFType(null); setPage(1); }
+  const hasActiveFilters = !!debouncedSearch || fType !== null || fStatus !== null;
+  function clearFilters() { setSearch(''); setFType(null); setFStatus(null); setPage(1); }
 
   const sh = { sortCol, sortDir, onSort: handleSort };
 
@@ -1109,6 +1112,19 @@ export function Intake() {
               <button key={t} onClick={() => { setFType(t); setPage(1); }}
                 className={`px-3 py-1 text-xs rounded-md text-xs font-medium transition-colors capitalize ${fType === t ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 {t}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-1 border-l border-zinc-800 pl-3">
+            {([
+              { val: null,         label: 'Any status' },
+              { val: 'ordered',    label: 'Not Received' },
+              { val: 'received',   label: 'Received' },
+              { val: 'cancelled',  label: 'Cancelled' },
+            ] as const).map(s => (
+              <button key={String(s.val)} onClick={() => { setFStatus(s.val as any); setPage(1); }}
+                className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${fStatus === s.val ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {s.label}
               </button>
             ))}
           </div>
