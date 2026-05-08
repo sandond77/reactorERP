@@ -220,6 +220,7 @@ export async function listRawPurchases(
     .leftJoin('card_instances as ci', (join) =>
       join.onRef('ci.raw_purchase_id', '=', 'rp.id')
     )
+    .leftJoin('card_catalog as cc', 'cc.id', 'rp.catalog_id')
     .select([
       'rp.id',
       'rp.purchase_id',
@@ -228,6 +229,7 @@ export async function listRawPurchases(
       'rp.order_number',
       'rp.language',
       'rp.catalog_id',
+      sql<string | null>`cc.sku`.as('catalog_sku'),
       'rp.card_name',
       'rp.set_name',
       'rp.card_number',
@@ -246,7 +248,7 @@ export async function listRawPurchases(
       sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'grade' THEN ci.quantity END), 0)`.as('grade_count'),
     ])
     .where('rp.user_id', '=', userId)
-    .groupBy('rp.id')
+    .groupBy(['rp.id', 'cc.sku'])
     .orderBy(sql.raw(`${sortExpr} ${dir} NULLS LAST`))
     .orderBy('rp.purchase_id', 'desc');
 
@@ -288,7 +290,7 @@ export async function listRawPurchases(
           .where('rp.user_id', '=', userId)
           .where('rp.status', '=', 'received')
           .$if(!!type, (q) => q.where('rp.type', '=', type!))
-          .groupBy('rp.id')
+          .groupBy(['rp.id'])
           .having(inspectionDoneSide
             ? sql<boolean>`COALESCE(SUM(ci.quantity), 0) >= rp.card_count`
             : sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`)

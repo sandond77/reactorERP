@@ -220,7 +220,16 @@ function PurchaseForm({
     notes:          initial?.notes ?? '',
   });
 
-  const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(null);
+  const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(
+    initial?.catalog_id ? {
+      id: initial.catalog_id,
+      sku: (initial as { catalog_sku?: string | null })?.catalog_sku ?? null,
+      card_name: initial.card_name ?? '',
+      set_name: initial.set_name ?? '',
+      card_number: initial.card_number ?? null,
+      language: initial.language ?? 'EN',
+    } : null
+  );
   const [catalogId, setCatalogId] = useState<string | null>(initial?.catalog_id ?? null);
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(initial?.receipt_url ?? null);

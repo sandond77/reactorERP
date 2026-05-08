@@ -21,6 +21,7 @@ export interface PurchaseRow {
   purchased_at: string | null;
   received_at: string | null;
   catalog_id: string | null;
+  catalog_sku?: string | null;
   reserved: boolean;
   notes: string | null;
   receipt_url: string | null;
