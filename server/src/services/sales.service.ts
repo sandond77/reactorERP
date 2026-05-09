@@ -36,13 +36,30 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
 
   const totalCostBasis = await computeCostBasis(input.card_instance_id);
 
+  // Auto-resolve card_show_id by sale date when platform=card_show and the
+  // caller didn't pass one. Same matching rule as backfillCardShowLinks but
+  // applied at insert time so single-sale paths (agent record_sale, etc.)
+  // pick up the show without waiting for a later backfill.
+  let resolvedCardShowId = input.card_show_id ?? null;
+  if (!resolvedCardShowId && input.platform === 'card_show') {
+    const soldAt = input.sold_at ?? new Date();
+    const match = await db
+      .selectFrom('card_shows')
+      .select('id')
+      .where('user_id', '=', userId)
+      .where(sql<boolean>`DATE(${soldAt}) BETWEEN show_date AND COALESCE(end_date, show_date)`)
+      .limit(1)
+      .executeTakeFirst();
+    if (match) resolvedCardShowId = match.id;
+  }
+
   const sale = await db
     .insertInto('sales')
     .values({
       user_id: userId,
       card_instance_id: input.card_instance_id,
       listing_id: input.listing_id ?? null,
-      card_show_id: input.card_show_id ?? null,
+      card_show_id: resolvedCardShowId,
       platform: input.platform,
       sale_price: input.sale_price,
       platform_fees: input.platform_fees ?? 0,

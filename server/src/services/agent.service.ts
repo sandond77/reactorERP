@@ -630,7 +630,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'record_sale',
-    description: 'Record a sale for a card. Use list_inventory first to find the card_instance_id. Sale price and fees are in dollars (e.g. 150.00).',
+    description: 'Record a sale for a card. Use list_inventory first to find the card_instance_id. Sale price and fees are in dollars (e.g. 150.00). For card_show platform, the show is auto-resolved from sold_at if no card_show_id is provided.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -642,6 +642,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
         sold_at: { type: 'string', description: 'Sale date in YYYY-MM-DD format (default today)' },
         unique_id: { type: 'string', description: 'Order number or transaction ID from the platform' },
+        card_show_id: { type: 'string', description: 'UUID of the card show event (optional; only for platform=card_show)' },
       },
       required: ['card_instance_id', 'platform', 'sale_price'],
     },
@@ -1180,8 +1181,8 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   }
 
   if (toolName === 'record_sale') {
-    const { card_instance_id, platform, sale_price, platform_fees, shipping_cost, currency, sold_at, unique_id } =
-      toolInput as { card_instance_id: string; platform: string; sale_price: number; platform_fees?: number; shipping_cost?: number; currency?: string; sold_at?: string; unique_id?: string };
+    const { card_instance_id, platform, sale_price, platform_fees, shipping_cost, currency, sold_at, unique_id, card_show_id } =
+      toolInput as { card_instance_id: string; platform: string; sale_price: number; platform_fees?: number; shipping_cost?: number; currency?: string; sold_at?: string; unique_id?: string; card_show_id?: string };
     const sale = await recordSale(userId, {
       card_instance_id,
       platform: platform as any,
@@ -1191,6 +1192,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       currency: currency ?? 'USD',
       sold_at: sold_at ? new Date(sold_at) : new Date(),
       unique_id: unique_id ?? undefined,
+      card_show_id: card_show_id ?? undefined,
     });
     return { success: true, sale_id: sale.id, net_proceeds_usd: ((sale.net_proceeds ?? 0) / 100).toFixed(2) };
   }
