@@ -175,9 +175,10 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
                 <div className="flex items-center justify-end">
                   <span className="text-sm text-zinc-500 mr-1.5">$</span>
                   <input
-                    type="number" min="0" step="0.01"
+                    type="text"
+                    inputMode="decimal"
                     value={card.card_show_price_input}
-                    onChange={(e) => updatePrice(card.id, e.target.value)}
+                    onChange={(e) => updatePrice(card.id, e.target.value.replace(/[^\d.]/g, ''))}
                     className="w-24 px-2.5 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 text-right focus:outline-none focus:border-indigo-500"
                     placeholder="0.00"
                   />

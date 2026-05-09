@@ -455,7 +455,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
       </div>
 
       {selectedSlab && (
-        <SlabDetailModal slab={selectedSlab} onClose={() => setSelectedSlab(null)} />
+        <SlabDetailModal slab={selectedSlab} onClose={() => setSelectedSlab(null)} cardShowMode={cardShowMode} />
       )}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Slab">
         <AddSlabForm onSuccess={() => { setAddOpen(false); invalidateResources(qc, ['slabs']); }} />

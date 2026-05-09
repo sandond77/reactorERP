@@ -11,7 +11,36 @@ export interface CreateLocationInput {
   parent_id?: string | null;
 }
 
+/**
+ * Ensure the user has a "Card Show" root location. Auto-seeded on first read so
+ * every user always sees it. Returns the location id.
+ */
+export async function ensureCardShowLocation(userId: string): Promise<string> {
+  const existing = await db.selectFrom('locations')
+    .select('id')
+    .where('user_id', '=', userId)
+    .where('is_card_show', '=', true)
+    .where('parent_id', 'is', null)
+    .executeTakeFirst();
+  if (existing) return existing.id;
+
+  const created = await db.insertInto('locations')
+    .values({
+      user_id: userId,
+      parent_id: null,
+      name: 'Card Show',
+      card_type: 'both',
+      is_card_show: true,
+      is_container: false,
+      notes: null,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  return created.id;
+}
+
 export async function listLocations(userId: string) {
+  await ensureCardShowLocation(userId);
   const rows = await sql<{
     id: string;
     parent_id: string | null;
@@ -110,8 +139,15 @@ export async function updateLocation(userId: string, locationId: string, input: 
 }
 
 export async function deleteLocation(userId: string, locationId: string) {
-  const loc = await db.selectFrom('locations').select('id').where('id', '=', locationId).where('user_id', '=', userId).executeTakeFirst();
+  const loc = await db.selectFrom('locations')
+    .select(['id', 'is_card_show', 'parent_id'])
+    .where('id', '=', locationId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
   if (!loc) throw new Error('Location not found');
+  if (loc.is_card_show && loc.parent_id === null) {
+    throw new Error('The Card Show root location cannot be deleted');
+  }
 
   // Unassign all cards from this location before deleting
   await db.updateTable('card_instances')

@@ -215,6 +215,7 @@ function LocationNodeRow({ node, allLocations, onEdit, onDelete, onAddChild, onS
   const hasChildren = node.children.length > 0;
   const indent = node.depth * 24;
   const canAddChild = node.depth < 4;
+  const isCardShowRoot = node.is_card_show && node.parent_id === null;
 
   // Containers can't hold cards directly — show rolled-up totals from descendants instead
   const displayTotal = node.is_container ? node.rollup_total : node.total_count;
@@ -311,10 +312,12 @@ function LocationNodeRow({ node, allLocations, onEdit, onDelete, onAddChild, onS
               className="p-1.5 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-700 transition-colors">
               <Pencil size={13} />
             </button>
-            <button onClick={() => onDelete(node)}
-              className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-colors">
-              <Trash2 size={13} />
-            </button>
+            {!isCardShowRoot && (
+              <button onClick={() => onDelete(node)}
+                className="p-1.5 rounded text-zinc-500 hover:text-red-400 hover:bg-red-400/10 transition-colors">
+                <Trash2 size={13} />
+              </button>
+            )}
           </div>
         </td>
       </tr>

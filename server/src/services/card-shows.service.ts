@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { ensureCardShowLocation } from './locations.service';
 
 /**
  * Auto-link platform='card_show' sales that have no card_show_id to a card_shows
@@ -113,6 +114,7 @@ export async function updateCardShow(userId: string, id: string, data: {
 
 export async function addCardsToCardShow(userId: string, cards: { id: string; card_show_price: number }[]) {
   const now = new Date();
+  const cardShowLocationId = await ensureCardShowLocation(userId);
   for (const { id, card_show_price } of cards) {
     const existing = await db
       .selectFrom('card_instances')
@@ -121,14 +123,44 @@ export async function addCardsToCardShow(userId: string, cards: { id: string; ca
       .where('user_id', '=', userId)
       .executeTakeFirst();
     if (!existing || existing.is_personal_collection) continue;
+    // Only auto-assign location if the card isn't already in a card-show location
+    // (root or sub). Preserves any sub-location the user has manually set.
+    let nextLocationId: string | null = existing.location_id;
+    if (existing.location_id) {
+      const currentLoc = await db.selectFrom('locations')
+        .select(['id', 'is_card_show', 'parent_id'])
+        .where('id', '=', existing.location_id)
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
+      const isInCardShowTree = currentLoc?.is_card_show
+        || (currentLoc?.parent_id != null && await isUnderCardShow(userId, currentLoc.parent_id, cardShowLocationId));
+      if (!isInCardShowTree) nextLocationId = cardShowLocationId;
+    } else {
+      nextLocationId = cardShowLocationId;
+    }
     await db
       .updateTable('card_instances')
-      .set({ is_card_show: true, card_show_added_at: now, card_show_price })
+      .set({ is_card_show: true, card_show_added_at: now, card_show_price, location_id: nextLocationId })
       .where('id', '=', id)
       .where('user_id', '=', userId)
       .execute();
-    await logAudit(userId, 'card_instances', id, 'updated', existing, { ...existing, is_card_show: true, card_show_price });
+    await logAudit(userId, 'card_instances', id, 'updated', existing, { ...existing, is_card_show: true, card_show_price, location_id: nextLocationId });
   }
+}
+
+async function isUnderCardShow(userId: string, locationId: string, cardShowRootId: string): Promise<boolean> {
+  let currentId: string | null = locationId;
+  while (currentId) {
+    if (currentId === cardShowRootId) return true;
+    const row: { parent_id: string | null } | undefined = await db.selectFrom('locations')
+      .select('parent_id')
+      .where('id', '=', currentId)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!row) return false;
+    currentId = row.parent_id;
+  }
+  return false;
 }
 
 export async function deleteCardShow(userId: string, id: string) {

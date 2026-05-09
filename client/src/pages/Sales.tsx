@@ -265,11 +265,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const copies = (platform === 'ebay' && listedOnly) ? allCopies.filter(c => c.is_listed) : allCopies;
   const listedCount = allCopies.filter(c => c.is_listed).length;
 
-  // Auto-select first copy in filtered list (FIFO) — only on the copies step
+  // Auto-select first copy in filtered list (FIFO) — only on the copies step.
+  // Use functional setState so we don't clobber a user's manual click on every
+  // render (copies is a fresh array ref each render).
   useEffect(() => {
     if (step !== 'copies') return;
-    setSelectedCard(copies.length > 0 ? copies[0] : null);
-  }, [copies, listedOnly, step]);
+    setSelectedCard(prev => {
+      if (prev && copies.some(c => c.id === prev.id)) return prev;
+      return copies.length > 0 ? copies[0] : null;
+    });
+  }, [copies, step]);
 
 
   async function handleSubmit(e: React.FormEvent) {

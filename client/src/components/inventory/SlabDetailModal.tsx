@@ -49,6 +49,7 @@ interface SlabRow {
   location_name: string | null;
   location_id: string | null;
   is_card_show: boolean;
+  card_show_price?: number | null;
   is_personal_collection: boolean;
 }
 
@@ -56,6 +57,7 @@ interface Props {
   slab: SlabRow;
   onClose: () => void;
   onDeleted?: () => void;
+  cardShowMode?: boolean;
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -83,7 +85,7 @@ function MoneyRow({ label, value, color }: { label: string; value: number | null
 const inputCls = 'w-full px-2.5 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500';
 const noSpinner = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
 
-export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
+export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false }: Props) {
   const qc = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -94,6 +96,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
   const [editGradeLabel,   setEditGradeLabel]   = useState('');
   const [editGrade,        setEditGrade]        = useState('');
   const [editGradingCost,  setEditGradingCost]  = useState('');
+  const [editCsPrice,      setEditCsPrice]      = useState('');
   const [editNotes,        setEditNotes]        = useState('');
   const [editLocationId,   setEditLocationId]   = useState<string>('');
   const [editPersonal,     setEditPersonal]     = useState(false);
@@ -106,6 +109,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
     setEditGradeLabel(slab.grade_label ?? '');
     setEditGrade(slab.numeric_grade != null ? String(slab.numeric_grade) : '');
     setEditGradingCost(slab.grading_cost ? String(slab.grading_cost / 100) : '');
+    setEditCsPrice(slab.card_show_price != null ? (slab.card_show_price / 100).toFixed(2) : '');
     setEditNotes(slab.notes ?? '');
     setEditLocationId(slab.location_id ?? '');
     setEditPersonal(slab.is_personal_collection);
@@ -114,16 +118,19 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      await api.patch(`/cards/${slab.id}`, {
-        card_name_override:  editName || undefined,
-        notes:               editNotes || null,
-        slab_cert_number:    editCert ? Number(editCert) : null,
-        slab_grade:          editGrade ? parseFloat(editGrade) : null,
-        slab_grade_label:    editGradeLabel || null,
-        slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : null,
-        is_personal_collection: editPersonal,
-      });
-      if (editLocationId !== (slab.location_id ?? '')) {
+      const body: Record<string, unknown> = cardShowMode
+        ? { card_show_price: editCsPrice ? Math.round(parseFloat(editCsPrice) * 100) : null }
+        : {
+            card_name_override:  editName || undefined,
+            notes:               editNotes || null,
+            slab_cert_number:    editCert ? Number(editCert) : null,
+            slab_grade:          editGrade ? parseFloat(editGrade) : null,
+            slab_grade_label:    editGradeLabel || null,
+            slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : null,
+            is_personal_collection: editPersonal,
+          };
+      await api.patch(`/cards/${slab.id}`, body);
+      if (!cardShowMode && editLocationId !== (slab.location_id ?? '')) {
         await api.post('/locations/assign', {
           card_instance_id: slab.id,
           location_id: editLocationId || null,
@@ -150,6 +157,20 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
     onError: () => toast.error('Failed to delete'),
   });
 
+  const removeFromShowMut = useMutation({
+    mutationFn: async () => {
+      await api.patch(`/cards/${slab.id}`, { is_card_show: false, card_show_price: null });
+      await api.post('/locations/assign', { card_instance_id: slab.id, location_id: null });
+    },
+    onSuccess: () => {
+      toast.success('Removed from card show');
+      qc.invalidateQueries({ queryKey: ['overall'] });
+      onDeleted?.();
+      onClose();
+    },
+    onError: () => toast.error('Failed to remove'),
+  });
+
   const costBasis = slab.raw_cost + slab.grading_cost;
   const net = slab.after_ebay != null ? slab.after_ebay - costBasis : null;
   const roi = slab.roi_pct != null
@@ -167,65 +188,79 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
           <div className="space-y-4">
             <div>
               <p className="text-xs text-zinc-500 uppercase tracking-wide font-medium mb-2">Card</p>
-              <div className="space-y-2">
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Card Name</label>
-                  <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={inputCls} />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
+              {cardShowMode ? (
+                <div className="space-y-3">
+                  <p className="text-xs text-zinc-500">
+                    Only the card show price is editable here. To change card details, edit from <span className="text-zinc-300">Overall Slabs</span>.
+                  </p>
                   <div>
-                    <label className="block text-xs text-zinc-500 mb-1">Cert #</label>
-                    <input type="text" value={editCert} onChange={(e) => setEditCert(e.target.value)} className={inputCls} />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-zinc-500 mb-1">Grade</label>
-                    <input type="number" step="0.5" min="1" max="10" value={editGrade}
-                      onChange={(e) => setEditGrade(e.target.value)}
-                      className={`${inputCls} ${noSpinner}`} />
+                    <label className="block text-xs text-zinc-500 mb-1">Card Show Price (USD)</label>
+                    <input type="text" inputMode="decimal" value={editCsPrice}
+                      onChange={(e) => setEditCsPrice(e.target.value.replace(/[^\d.]/g, ''))}
+                      placeholder="0.00" className={inputCls} autoFocus />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Grade Label</label>
-                  <input type="text" value={editGradeLabel} onChange={(e) => setEditGradeLabel(e.target.value)}
-                    placeholder="e.g. NEAR MINT-MINT 8" className={inputCls} />
+              ) : (
+                <div className="space-y-2">
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Card Name</label>
+                    <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className={inputCls} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs text-zinc-500 mb-1">Cert #</label>
+                      <input type="text" value={editCert} onChange={(e) => setEditCert(e.target.value)} className={inputCls} />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-zinc-500 mb-1">Grade</label>
+                      <input type="number" step="0.5" min="1" max="10" value={editGrade}
+                        onChange={(e) => setEditGrade(e.target.value)}
+                        className={`${inputCls} ${noSpinner}`} />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Grade Label</label>
+                    <input type="text" value={editGradeLabel} onChange={(e) => setEditGradeLabel(e.target.value)}
+                      placeholder="e.g. NEAR MINT-MINT 8" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Grading Cost (USD)</label>
+                    <input type="number" step="0.01" min="0" value={editGradingCost}
+                      onChange={(e) => setEditGradingCost(e.target.value)}
+                      placeholder="0.00" className={`${inputCls} ${noSpinner}`} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Notes</label>
+                    <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
+                      placeholder="Optional notes…" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-zinc-500 mb-1">Location</label>
+                    {gradedLocations.length > 0 ? (
+                      <select value={editLocationId} onChange={(e) => setEditLocationId(e.target.value)} className={inputCls}>
+                        <option value="">— No location —</option>
+                        {gradedLocations.map(l => {
+                          const parent = l.parent_id ? allLocations.find(p => p.id === l.parent_id) : null;
+                          return (
+                            <option key={l.id} value={l.id}>{parent ? `${parent.name} › ${l.name}` : l.name}</option>
+                          );
+                        })}
+                      </select>
+                    ) : (
+                      <p className="text-xs text-zinc-600 py-1">No locations set up yet. Add locations in Settings.</p>
+                    )}
+                  </div>
+                  <label className="flex items-center gap-2.5 cursor-pointer py-1">
+                    <input
+                      type="checkbox"
+                      checked={editPersonal}
+                      onChange={(e) => setEditPersonal(e.target.checked)}
+                      className="accent-indigo-500"
+                    />
+                    <span className="text-xs text-zinc-300">Personal collection (not for sale)</span>
+                  </label>
                 </div>
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Grading Cost (USD)</label>
-                  <input type="number" step="0.01" min="0" value={editGradingCost}
-                    onChange={(e) => setEditGradingCost(e.target.value)}
-                    placeholder="0.00" className={`${inputCls} ${noSpinner}`} />
-                </div>
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Notes</label>
-                  <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
-                    placeholder="Optional notes…" className={inputCls} />
-                </div>
-                <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Location</label>
-                  {gradedLocations.length > 0 ? (
-                    <select value={editLocationId} onChange={(e) => setEditLocationId(e.target.value)} className={inputCls}>
-                      <option value="">— No location —</option>
-                      {gradedLocations.map(l => {
-                        const parent = l.parent_id ? allLocations.find(p => p.id === l.parent_id) : null;
-                        return (
-                          <option key={l.id} value={l.id}>{parent ? `${parent.name} › ${l.name}` : l.name}</option>
-                        );
-                      })}
-                    </select>
-                  ) : (
-                    <p className="text-xs text-zinc-600 py-1">No locations set up yet. Add locations in Settings.</p>
-                  )}
-                </div>
-                <label className="flex items-center gap-2.5 cursor-pointer py-1">
-                  <input
-                    type="checkbox"
-                    checked={editPersonal}
-                    onChange={(e) => setEditPersonal(e.target.checked)}
-                    className="accent-indigo-500"
-                  />
-                  <span className="text-xs text-zinc-300">Personal collection (not for sale)</span>
-                </label>
-              </div>
+              )}
             </div>
           </div>
         ) : (
@@ -346,16 +381,20 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
             {!editing && (
               confirmDelete ? (
                 <div className="flex items-center gap-2">
-                  <span className="text-sm text-red-300">Permanently delete?</span>
+                  <span className="text-sm text-red-300">
+                    {cardShowMode ? 'Remove from card show?' : 'Permanently delete?'}
+                  </span>
                   <Button size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Cancel</Button>
                   <Button
                     size="sm"
                     className="bg-red-600 hover:bg-red-500 text-white border-0"
-                    disabled={deleteMut.isPending}
-                    onClick={() => deleteMut.mutate()}
+                    disabled={cardShowMode ? removeFromShowMut.isPending : deleteMut.isPending}
+                    onClick={() => (cardShowMode ? removeFromShowMut : deleteMut).mutate()}
                   >
                     <Trash2 size={13} />
-                    {deleteMut.isPending ? 'Deleting…' : 'Delete'}
+                    {cardShowMode
+                      ? (removeFromShowMut.isPending ? 'Removing…' : 'Remove')
+                      : (deleteMut.isPending ? 'Deleting…' : 'Delete')}
                   </Button>
                 </div>
               ) : (
@@ -364,7 +403,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted }: Props) {
                   className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-red-400 transition-colors"
                 >
                   <Trash2 size={13} />
-                  Delete
+                  {cardShowMode ? 'Remove from Card Show' : 'Delete'}
                 </button>
               )
             )}
