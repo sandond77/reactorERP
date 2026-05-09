@@ -126,20 +126,30 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
 
     const images: agentService.AgentImage[] = await Promise.all(
       imageFiles.map(async (file) => {
-        // Single resize pass (client no longer downsizes). Higher cap +
-        // higher quality preserves the small text on PSA labels and
-        // stickers that the previous 2400/92 pipeline was destroying.
-        const original = sharp(file.buffer);
-        const meta = await original.metadata();
-        const resized = await original
-          .resize(4000, 4000, { fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' })
-          .jpeg({ quality: 95 })
-          .toBuffer();
-        const out = await sharp(resized).metadata();
+        // Anthropic vision rejects images over 5MB raw. We aim for ~3.5MB
+        // worst-case to leave headroom. Single resize pass with sharp's
+        // lanczos3 kernel, then progressively drop quality if the encode
+        // is still too large for a particularly detailed photo.
+        const ANTHROPIC_MAX_BYTES = 4_500_000;
+        const meta = await sharp(file.buffer).metadata();
+        const qualities = [92, 88, 82, 75];
+        let resized: Buffer | null = null;
+        let usedQuality = qualities[0];
+        for (const q of qualities) {
+          const buf = await sharp(file.buffer)
+            .resize(3200, 3200, { fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' })
+            .jpeg({ quality: q, mozjpeg: true })
+            .toBuffer();
+          resized = buf;
+          usedQuality = q;
+          if (buf.length <= ANTHROPIC_MAX_BYTES) break;
+        }
+        const finalBuf = resized!;
+        const out = await sharp(finalBuf).metadata();
         console.log(`[agent.chat] image ${file.originalname ?? '(unnamed)'}: ` +
           `${meta.width}x${meta.height} (${file.size} bytes) → ` +
-          `${out.width}x${out.height} (${resized.length} bytes)`);
-        return { base64: resized.toString('base64'), mediaType: 'image/jpeg' as const };
+          `${out.width}x${out.height} (${finalBuf.length} bytes, q=${usedQuality})`);
+        return { base64: finalBuf.toString('base64'), mediaType: 'image/jpeg' as const };
       })
     );
 
