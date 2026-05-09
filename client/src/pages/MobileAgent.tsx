@@ -8,10 +8,13 @@ import { invalidateResources, type Resource } from '../lib/query-invalidation';
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const ACCEPTED_TYPES = [...IMAGE_TYPES, 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].join(',');
 
-// Bumped from 1600/0.85 — bulk shots with many cert numbers in frame need
-// the extra pixels for the vision model to OCR small text reliably.
-const MAX_IMAGE_PX = 2400;
-const IMAGE_QUALITY = 0.92;
+// We deliberately do NOT downsize agent uploads on the client anymore — the
+// canvas-based resize was a second compression pass that wrecked OCR
+// accuracy on bulk slab photos. Resize/compression now happens server-side
+// only (sharp + lanczos3, single pass). Phone JPEGs are typically 3-5MB
+// which fits comfortably under the server's 30MB multer cap.
+const MAX_IMAGE_PX = 5000;     // effectively no-op for normal phone shots
+const IMAGE_QUALITY = 0.98;
 
 function resizeImage(file: File): Promise<File> {
   return new Promise((resolve) => {

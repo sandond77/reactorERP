@@ -126,10 +126,19 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
 
     const images: agentService.AgentImage[] = await Promise.all(
       imageFiles.map(async (file) => {
-        const resized = await sharp(file.buffer)
-          .resize(2400, 2400, { fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 92 })
+        // Single resize pass (client no longer downsizes). Higher cap +
+        // higher quality preserves the small text on PSA labels and
+        // stickers that the previous 2400/92 pipeline was destroying.
+        const original = sharp(file.buffer);
+        const meta = await original.metadata();
+        const resized = await original
+          .resize(4000, 4000, { fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' })
+          .jpeg({ quality: 95 })
           .toBuffer();
+        const out = await sharp(resized).metadata();
+        console.log(`[agent.chat] image ${file.originalname ?? '(unnamed)'}: ` +
+          `${meta.width}x${meta.height} (${file.size} bytes) → ` +
+          `${out.width}x${out.height} (${resized.length} bytes)`);
         return { base64: resized.toString('base64'), mediaType: 'image/jpeg' as const };
       })
     );

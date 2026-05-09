@@ -1789,6 +1789,7 @@ record_trade: outgoing_cards [{card_instance_id, trade_value}], incoming_cards [
 
 IMAGE HANDLING:
 - Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Then call lookup_catalog using the SHORT card name (e.g. "Gengar") or set name (e.g. "Dark Phantasma") or card number (e.g. "074") — NOT the full PSA-format string. If lookup_catalog returns an established_name, use that exactly as card_name_override. Only construct a PSA-format name when lookup_catalog finds NO match.
+- NEVER GUESS CERT NUMBERS. If a cert number is blurry, partially obscured, glare-covered, or you have any uncertainty about even one digit, do NOT write a number. Instead: tell the user which cert(s) you can't read confidently (describe the card by name/grade/sticker price for disambiguation) and ask them to confirm or type the digits. A wrong cert number causes silent data corruption that's expensive to fix later. Same rule for sticker prices and any other small numeric label text — confirm rather than guess. Reading 9 of 10 certs and asking about the 10th is the correct outcome, not a failure.
 - Card photo (raw): read card name, set, number, language. Ask for condition and decision.
 - Receipt/invoice: extract all fields, show summary, confirm before creating records.
 - After creating a card from an image, do NOT ask about saving the image — the cert link provides access to the card.
@@ -1973,7 +1974,7 @@ Return a JSON object:
 Only return the JSON object, no other text.`;
 
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: 'claude-sonnet-4-6',
     max_tokens: 512,
     messages: [{
       role: 'user',
@@ -2025,7 +2026,7 @@ Return a JSON object:
 Only return the JSON object, no other text.`;
 
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: 'claude-sonnet-4-6',
     max_tokens: 512,
     messages: [{
       role: 'user',
