@@ -1,15 +1,34 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
 import { SetCombobox, useMergedSets } from './SetCombobox';
 
-const GAMES = [
-  { value: 'pokemon',   label: 'Pokémon' },
-  { value: 'one_piece', label: 'One Piece' },
-  { value: 'old_maid',  label: 'Old Maid' },
-];
+interface CardGame {
+  id: string;
+  name: string;
+  abbreviation: string | null;
+}
+
+const GAME_LABELS: Record<string, string> = {
+  pokemon: 'Pokémon',
+  one_piece: 'One Piece',
+  old_maid: 'Old Maid',
+  'weiss-schwarz': 'Weiss Schwarz',
+  weiss_schwarz: 'Weiss Schwarz',
+  weiss: 'Weiss Schwarz',
+};
+
+function gameLabel(name: string): string {
+  return GAME_LABELS[name.toLowerCase()] ?? name.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function fallbackPrefix(game: string): string {
+  if (!game) return 'PKMN';
+  const cleaned = game.replace(/[^a-zA-Z0-9]/g, '');
+  return cleaned.slice(0, 4).toUpperCase() || 'PKMN';
+}
 
 export interface CreatedPart {
   id: string;
@@ -73,6 +92,13 @@ const LANGUAGES = [
 
 export function AddPartModal({ onClose, onCreated, prefill }: Props) {
   const queryClient = useQueryClient();
+  const { data: gamesData } = useQuery<{ data: CardGame[] }>({
+    queryKey: ['card-games'],
+    queryFn: () => api.get('/card-games').then(r => r.data),
+    staleTime: 5 * 60 * 1000,
+  });
+  const games = gamesData?.data ?? [];
+  const gamePrefixes = new Map(games.map(g => [g.name.toLowerCase(), g.abbreviation || fallbackPrefix(g.name)]));
   const [form, setForm] = useState({
     game:        'pokemon',
     sku:         '',
@@ -113,8 +139,8 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
 
   function autoSku(game: string, lang: string, setCode: string, cardNum: string, isUnnumbered: boolean) {
     if (!setCode && !cardNum) return '';
-    const prefix = game === 'one_piece' ? 'OP' : game === 'old_maid' ? 'OM' : 'PKMN';
-    if (isUnnumbered) return ''; // unnumbered cards leave sku null at the server
+    const prefix = gamePrefixes.get(game.toLowerCase()) ?? fallbackPrefix(game);
+    if (isUnnumbered) return '';
     return [prefix, lang.toUpperCase(), setCode.toUpperCase(), cardNum.toUpperCase()].filter(Boolean).join('-');
   }
 
@@ -186,7 +212,9 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Card Game</label>
               <select value={form.game} onChange={field('game')} className={inputCls}>
-                {GAMES.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                {games.length === 0
+                  ? <option value="pokemon">Pokémon</option>
+                  : games.map(g => <option key={g.id} value={g.name}>{gameLabel(g.name)}</option>)}
               </select>
             </div>
             <div>

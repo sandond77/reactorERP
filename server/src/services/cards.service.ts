@@ -222,7 +222,8 @@ export async function listCardsGroupedByPart(
         cc.sku,
         CASE
           WHEN ci.catalog_id IS NOT NULL AND cc.set_code IS NOT NULL
-            THEN 'PKMN-' || UPPER(ci.language) || '-' || UPPER(cc.set_code)
+            THEN COALESCE((SELECT abbreviation FROM card_games WHERE LOWER(name) = LOWER(cc.game)), 'PKMN')
+                 || '-' || UPPER(ci.language) || '-' || UPPER(cc.set_code)
           ELSE NULL
         END
       )`.as('sku'),
@@ -732,7 +733,8 @@ export async function listRawFlat(
         cc.sku,
         CASE
           WHEN ci.catalog_id IS NOT NULL AND cc.set_code IS NOT NULL
-            THEN 'PKMN-' || UPPER(ci.language) || '-' || UPPER(cc.set_code)
+            THEN COALESCE((SELECT abbreviation FROM card_games WHERE LOWER(name) = LOWER(cc.game)), 'PKMN')
+                 || '-' || UPPER(ci.language) || '-' || UPPER(cc.set_code)
           ELSE NULL
         END
       )                                                   AS sku,

@@ -3,6 +3,7 @@ import { db } from '../config/database';
 import { recordSale } from './sales.service';
 import { createCard } from './cards.service';
 import { createRawPurchase } from './raw-purchases.service';
+import { ensureCardShowLocation } from './locations.service';
 import { logAudit } from '../utils/audit';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
@@ -234,14 +235,35 @@ export async function deleteTrade(userId: string, tradeId: string) {
     .where('trade_id', '=', tradeId)
     .execute();
 
-  // Rollback each outgoing sale
+  // Rollback each outgoing sale and restore the card to its pre-trade state.
+  // recordSale clears location_id but leaves is_card_show/card_show_price
+  // intact, so for cards that were on the card show table before the trade we
+  // can detect that and re-attach them to the user's Card Show root location.
+  const cardShowLocId = await ensureCardShowLocation(userId);
   await Promise.all(sales.map(async (sale) => {
-    // Determine what status to restore — check if card has slab_details
+    const card = await db.selectFrom('card_instances')
+      .select(['id', 'decision', 'is_card_show', 'location_id'])
+      .where('id', '=', sale.card_instance_id)
+      .executeTakeFirst();
     const hasSlab = await db.selectFrom('slab_details').select('id').where('card_instance_id', '=', sale.card_instance_id).executeTakeFirst();
-    const restoreStatus = hasSlab ? 'graded' : 'purchased_raw';
+    // Status restore: graded slab → graded; otherwise infer from decision +
+    // listing/card-show flags. Cards that were listed or in card show before
+    // the sale should land back at raw_for_sale rather than purchased_raw.
+    let restoreStatus: 'graded' | 'raw_for_sale' | 'inspected' | 'purchased_raw';
+    if (hasSlab) restoreStatus = 'graded';
+    else if (card?.decision === 'sell_raw' || card?.is_card_show || sale.listing_id) restoreStatus = 'raw_for_sale';
+    else if (card?.decision === 'grade') restoreStatus = 'inspected';
+    else restoreStatus = 'purchased_raw';
+
+    // Restore Card Show location for cards that were flagged is_card_show.
+    // (recordSale wipes location_id but not the flag, so this is the cue.)
+    const restoreLocationId = card?.is_card_show && !card.location_id ? cardShowLocId : card?.location_id ?? null;
 
     await db.deleteFrom('sales').where('id', '=', sale.id).execute();
-    await db.updateTable('card_instances').set({ status: restoreStatus, trade_id: null }).where('id', '=', sale.card_instance_id).execute();
+    await db.updateTable('card_instances')
+      .set({ status: restoreStatus, trade_id: null, location_id: restoreLocationId })
+      .where('id', '=', sale.card_instance_id)
+      .execute();
     if (sale.listing_id) {
       await db.updateTable('listings').set({ listing_status: 'active', sold_at: null }).where('id', '=', sale.listing_id).execute();
     }
@@ -252,6 +274,14 @@ export async function deleteTrade(userId: string, tradeId: string) {
     .selectAll()
     .where('trade_id', '=', tradeId)
     .execute();
+
+  // Capture the raw_purchases rows that were created for the incoming cards.
+  // createTrade creates a 1:1 raw_purchases row (source='trade') per incoming
+  // raw card so each card has a lot. Those need to go too — otherwise they
+  // appear as ghost lots in the Purchases view after delete.
+  const rawPurchaseIds = incomingCards
+    .map(c => c.raw_purchase_id)
+    .filter((v): v is string => !!v);
 
   // Clear FK on ALL card_instances referencing this trade
   await db.updateTable('card_instances')
@@ -265,6 +295,23 @@ export async function deleteTrade(userId: string, tradeId: string) {
       await logAudit(card.user_id, 'card_instances', card.id, 'deleted', card, null);
     }
     await db.deleteFrom('card_instances').where('id', 'in', incomingCards.map(c => c.id)).execute();
+  }
+
+  // Delete trade-source raw_purchases rows that no longer have any cards
+  // attached. (Guarded on source='trade' so we never touch real raw lots even
+  // if data drift somehow shared a raw_purchase_id between a trade and a real
+  // purchase.)
+  if (rawPurchaseIds.length > 0) {
+    await db.deleteFrom('raw_purchases')
+      .where('id', 'in', rawPurchaseIds)
+      .where('user_id', '=', userId)
+      .where('source', '=', 'trade')
+      .where(({ not, exists, selectFrom }) => not(exists(
+        selectFrom('card_instances')
+          .select('id')
+          .whereRef('card_instances.raw_purchase_id', '=', 'raw_purchases.id'),
+      )))
+      .execute();
   }
 
   const tradeSnap = await db.selectFrom('trades').selectAll().where('id', '=', tradeId).executeTakeFirst();

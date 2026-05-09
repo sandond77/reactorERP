@@ -92,9 +92,24 @@ export function generateSku(params: {
   cardNumber: string;
   rarity?: string | null;
   variant?: string | null;
+  gamePrefix?: string;
 }): string {
   const lang = params.language.toUpperCase() === 'JPN' ? 'JP' : params.language.toUpperCase() as 'EN' | 'JP';
-  return generatePartNumber(lang, params.setCode, params.cardNumber);
+  return generatePartNumber(lang, params.setCode, params.cardNumber, params.gamePrefix ?? 'PKMN');
+}
+
+/**
+ * Resolve the SKU prefix for a game. Reads card_games.abbreviation; falls
+ * back to 'PKMN' when no row exists or no abbreviation is set (preserves
+ * legacy behavior).
+ */
+export async function getGamePrefix(game: string | null | undefined): Promise<string> {
+  if (!game) return 'PKMN';
+  const row = await db.selectFrom('card_games')
+    .select('abbreviation')
+    .where(sql`LOWER(name)`, '=', game.toLowerCase())
+    .executeTakeFirst();
+  return row?.abbreviation ?? 'PKMN';
 }
 
 // ── TCGdex API types ─────────────────────────────────────────────────────────

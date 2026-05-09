@@ -493,11 +493,13 @@ export async function buildLookupWithDbAliases(
 
 /**
  * Generate a part number (SKU) given parsed card fields.
+ * `gamePrefix` defaults to 'PKMN' for backwards compatibility but should be
+ * passed as the game's abbreviation (from `card_games.abbreviation`) for any
+ * non-Pokémon catalog rows.
  */
-export function generatePartNumber(language: string, setCode: string, cardNumber: string): string {
+export function generatePartNumber(language: string, setCode: string, cardNumber: string, gamePrefix: string = 'PKMN'): string {
   const rawNum = cardNumber.split('/')[0].trim();
   const digitsOnly = rawNum.replace(/[^0-9]/g, '');
-  // If the value has digits, zero-pad them; otherwise use it as a reference name (e.g. "GENGAR")
   const paddedNum = digitsOnly ? digitsOnly.padStart(3, '0') : rawNum.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return `PKMN-${language}-${setCode}-${paddedNum}`;
+  return `${gamePrefix}-${language}-${setCode}-${paddedNum}`;
 }

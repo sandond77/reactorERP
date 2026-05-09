@@ -8,6 +8,7 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { formatDate } from '../lib/utils';
+import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
 import toast from 'react-hot-toast';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -110,8 +111,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [autoFilling, setAutoFilling] = useState(false);
   const [catalogId, setCatalogId] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, any> } | null>(null);
+  const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(null);
   const [cardName, setCardName] = useState('');
   const [setName, setSetName] = useState('');
   const [cardNumber, setCardNumber] = useState('');
@@ -167,8 +167,20 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
         if (s.card_number) setCardNumber(s.card_number);
         if (s.rarity) setRarity(s.rarity);
         if (s.language) setLanguage(s.language === 'JP' ? 'JP' : 'EN');
-        setCatalogId(s.catalog_id ?? null);
-        setPartNumber({ sku: s.sku ?? null, exists: !!s.catalog_exists, catalogData: s });
+        if (s.catalog_id && s.catalog_exists) {
+          setCatalogId(s.catalog_id);
+          setCatalogMatch({
+            id: s.catalog_id,
+            sku: s.sku ?? null,
+            card_name: s.catalog_card_name ?? s.card_name ?? '',
+            set_name: s.set_name ?? '',
+            card_number: s.card_number ?? null,
+            language: s.language === 'JP' ? 'JP' : 'EN',
+          });
+        } else {
+          setCatalogId(null);
+          setCatalogMatch(null);
+        }
       }
       if (pg) {
         const validCompanies = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'];
@@ -211,7 +223,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
       slab_grade_label: type === 'graded' ? (gradeLabel || undefined) : undefined,
       slab_cert_number: type === 'graded' ? (certNumber || undefined) : undefined,
     });
-    setGradingLabel(''); clearImage(); setCatalogId(null); setPartNumber(null);
+    setGradingLabel(''); clearImage(); setCatalogId(null); setCatalogMatch(null);
     setCardName(''); setSetName(''); setCardNumber(''); setRarity('');
     setLanguage('EN'); setCondition(''); setDecision('sell_raw');
     setMarketValue(''); setCurrency('USD'); setCompany(''); setGradeLabel(''); setCertNumber('');
@@ -284,13 +296,14 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
         <Input label="Rarity" placeholder="e.g. Holo" value={rarity} onChange={(e) => setRarity(e.target.value)} />
       </div>
 
-      {partNumber && (
-        <div className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm border ${partNumber.exists ? 'bg-green-950/40 border-green-800/50' : 'bg-yellow-950/40 border-yellow-700/50'}`}>
-          {partNumber.exists ? <CheckCircle size={14} className="text-green-400 shrink-0" /> : <AlertCircle size={14} className="text-yellow-400 shrink-0" />}
-          {partNumber.sku ? <span className="font-mono text-xs text-zinc-200">{partNumber.sku}</span> : <span className="text-xs text-zinc-400 italic">No part number</span>}
-          <span className={`text-xs ${partNumber.exists ? 'text-green-500' : 'text-yellow-500'}`}>{partNumber.exists ? 'Part exists' : 'New part'}</span>
-        </div>
-      )}
+      <PartNumberField
+        form={{ card_name: cardName, set_name: setName, card_number: cardNumber, language }}
+        catalogMatch={catalogMatch}
+        catalogId={catalogId}
+        onSelect={(m) => { setCatalogMatch(m); setCatalogId(m.id); }}
+        onClear={() => { setCatalogMatch(null); setCatalogId(null); }}
+      />
+
 
       {type === 'raw' ? (
         <div className="grid grid-cols-2 gap-2">

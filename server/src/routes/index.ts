@@ -21,6 +21,7 @@ import { reorderRouter } from './reorder.routes';
 import { gradeMoreRouter } from './grade-more.routes';
 import { alertOverridesRouter } from './alert-overrides.routes';
 import { orgRouter } from './org.routes';
+import { cardGamesRouter } from './card-games.routes';
 
 export const apiRouter = Router();
 
@@ -65,3 +66,4 @@ apiRouter.use('/reorder', reorderRouter);
 apiRouter.use('/grade-more', gradeMoreRouter);
 apiRouter.use('/alerts', alertOverridesRouter);
 apiRouter.use('/org', orgRouter);
+apiRouter.use('/card-games', cardGamesRouter);

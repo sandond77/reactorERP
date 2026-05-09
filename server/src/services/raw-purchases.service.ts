@@ -352,7 +352,7 @@ export async function getRawPurchase(userId: string, id: string) {
       sql<string>`COALESCE(cc.card_name, ci.card_name_override)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
-      sql<string | null>`COALESCE(cc.sku, CASE WHEN ci.catalog_id IS NOT NULL AND cc.set_code IS NOT NULL THEN 'PKMN-' || UPPER(ci.language) || '-' || UPPER(cc.set_code) ELSE NULL END)`.as('part_number'),
+      sql<string | null>`COALESCE(cc.sku, CASE WHEN ci.catalog_id IS NOT NULL AND cc.set_code IS NOT NULL THEN COALESCE((SELECT abbreviation FROM card_games WHERE LOWER(name) = LOWER(cc.game)), 'PKMN') || '-' || UPPER(ci.language) || '-' || UPPER(cc.set_code) ELSE NULL END)`.as('part_number'),
       sql<string | null>`sd.cert_number::text`.as('cert_number'),
       sql<string | null>`sd.grade_label`.as('grade_label'),
       sql<number | null>`sd.grade`.as('grade'),
