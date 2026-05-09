@@ -35,6 +35,8 @@ interface Sale {
   grading_cost: number | null;
   listed_price: number | null;
   order_details_link: string | null;
+  card_show_id: string | null;
+  card_show_name: string | null;
 }
 
 interface SaleFilterOptions {
@@ -1680,7 +1682,7 @@ export function Sales() {
     after_ebay:   colMinWidth('After Fees',    true,  false),
     net:          colMinWidth('Net',           true,  false),
   };
-  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 155), card: Math.max(MINS.card, 460), sale_method: Math.max(MINS.sale_method, 140), link: 50, raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
+  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 155), card: Math.max(MINS.card, 460), sale_method: Math.max(MINS.sale_method, 200), link: 50, raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
@@ -1805,6 +1807,11 @@ export function Sales() {
                   </td>
                   <td className="px-3 py-2">
                     <span className="text-xs text-zinc-400">{platformLabel(sale.platform)}</span>
+                    {sale.platform === 'card_show' && sale.card_show_name && (
+                      <p className="text-[10px] text-zinc-500 mt-0.5 whitespace-normal break-words leading-snug">
+                        {sale.card_show_name}
+                      </p>
+                    )}
                   </td>
                   <td className="px-2 py-2 text-center">
                     {sale.order_details_link && (

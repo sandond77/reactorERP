@@ -171,6 +171,7 @@ export async function listSales(
   const data = await baseQuery()
     .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
     .leftJoin('listings as l', 'l.id', 's.listing_id')
+    .leftJoin('card_shows as csh', 'csh.id', 's.card_show_id')
     .select([
       's.id',
       's.platform',
@@ -185,6 +186,8 @@ export async function listSales(
       's.order_details_link',
       sql<string>`(s.sold_at AT TIME ZONE 'UTC')::date`.as('sold_at'),
       's.created_at',
+      's.card_show_id',
+      'csh.name as card_show_name',
       'ci.id as card_instance_id',
       'ci.purchase_cost as raw_cost',
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
