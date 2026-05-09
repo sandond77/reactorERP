@@ -40,8 +40,8 @@ export async function autoFill(req: Request, res: Response, next: NextFunction) 
     let imageBuffer = req.file?.buffer;
     if (imageBuffer) {
       imageBuffer = await sharp(imageBuffer)
-        .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-        .jpeg({ quality: 85 })
+        .resize(2400, 2400, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 92 })
         .toBuffer();
     }
     const imageBase64 = imageBuffer?.toString('base64');
@@ -63,7 +63,10 @@ const chatSchema = z.object({
   messages: z.array(
     z.object({
       role: z.enum(['user', 'assistant']),
-      content: z.string().max(10000),
+      // Assistant replies that list many cards can comfortably exceed 10k
+      // chars; cap is mostly to prevent runaway abuse, not to constrain
+      // legitimate AI output.
+      content: z.string().max(100000),
     }).superRefine((msg, ctx) => {
       if (msg.role === 'user' && msg.content.length > 600) {
         ctx.addIssue({ code: 'too_big', maximum: 600, type: 'string', inclusive: true, exact: false, message: 'User message must be 600 characters or less' });
@@ -124,8 +127,8 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
     const images: agentService.AgentImage[] = await Promise.all(
       imageFiles.map(async (file) => {
         const resized = await sharp(file.buffer)
-          .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-          .jpeg({ quality: 85 })
+          .resize(2400, 2400, { fit: 'inside', withoutEnlargement: true })
+          .jpeg({ quality: 92 })
           .toBuffer();
         return { base64: resized.toString('base64'), mediaType: 'image/jpeg' as const };
       })
@@ -150,6 +153,14 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
     if (err?.status === 529 || err?.error?.error?.type === 'overloaded_error') {
       return res.status(503).json({ data: { reply: "Anthropic's API is currently overloaded. Please try again in a moment." } });
     }
+    // Schema rejection (oversized prior message, too many turns, etc.) — give
+    // the user a concrete reason instead of a 500.
+    if (err?.name === 'ZodError') {
+      const first = err.issues?.[0];
+      const reason = first?.message ?? 'Message validation failed';
+      return res.status(400).json({ data: { reply: `Couldn't process that request: ${reason}. Try clearing the chat and starting fresh.` } });
+    }
+    console.error('[agent.chat] error:', err);
     next(err);
   }
 }

@@ -1494,6 +1494,61 @@ export interface AgentImage {
 // Persist images across multi-turn conversations (image sent in turn 1, card created in turn 2+)
 const pendingImages = new Map<string, AgentImage[]>();
 
+/**
+ * Trim long conversations down to a budget and replace dropped turns with a
+ * Haiku-generated summary. Keeps the user in flow without manual chat clears
+ * and meaningfully reduces per-turn Anthropic token spend on long sessions.
+ */
+async function trimAndSummarize(
+  messages: AgentChatMessage[],
+): Promise<{ messages: AgentChatMessage[]; summary: string | null }> {
+  const TOTAL_CHAR_BUDGET   = 30_000;   // ~7.5k tokens; well below context window
+  const KEEP_RECENT_MSGS    = 10;       // never trim the last N messages
+
+  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  if (totalChars <= TOTAL_CHAR_BUDGET || messages.length <= KEEP_RECENT_MSGS) {
+    return { messages, summary: null };
+  }
+
+  // Trim oldest messages in pairs (one user + one assistant turn) until either
+  // we're under budget or we'd dip into the protected recent window.
+  const recent = messages.slice(-KEEP_RECENT_MSGS);
+  const older  = messages.slice(0, -KEEP_RECENT_MSGS);
+  let kept     = [...older];
+  const dropped: AgentChatMessage[] = [];
+  let charSum  = totalChars;
+  while (charSum > TOTAL_CHAR_BUDGET && kept.length > 0) {
+    const m = kept.shift()!;
+    dropped.push(m);
+    charSum -= m.content.length;
+  }
+  if (dropped.length === 0) return { messages, summary: null };
+
+  // Summarize what we dropped via Haiku — cheap (~$0.002 per call) and lets
+  // the agent reference earlier context without re-sending the whole history.
+  const transcript = dropped
+    .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+    .join('\n\n');
+  let summary: string | null = null;
+  try {
+    const res = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 250,
+      messages: [{
+        role: 'user',
+        content: `Summarize this earlier conversation excerpt in 1-3 short sentences. Capture decisions made, cards/IDs mentioned, and any open questions. No preamble — just the summary.\n\n${transcript}`,
+      }],
+    });
+    const text = res.content.find((b) => b.type === 'text')?.text ?? '';
+    summary = text.trim() || null;
+  } catch {
+    // Summarization failure is non-fatal — we just drop the older context.
+    summary = null;
+  }
+
+  return { messages: [...kept, ...recent], summary };
+}
+
 async function saveImageToCards(userId: string, cardIds: string[], images: AgentImage[]) {
   if (!images.length) return;
   try {
@@ -1544,6 +1599,13 @@ export async function chatWithAgent(
   if (!onTopic) {
     return { reply: 'I can only help with trading card inventory, purchases, sales, grading, and expenses. Please ask something related to your card collection or business.', mutated: [] };
   }
+
+  // Trim + compact older turns when the conversation gets long. The summary
+  // (if any) gets injected into the system prompt below so the agent still
+  // has context for what was discussed earlier.
+  const trimmed = await trimAndSummarize(messages);
+  messages = trimmed.messages;
+  const earlierContextSummary = trimmed.summary;
 
   const now = new Date();
   const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -1734,7 +1796,7 @@ FORMATTING:
 - Card lists: name | status | condition | grade+cert (if graded) | cost basis | location
 
 Current inventory snapshot:
-${JSON.stringify(summary, null, 2)}`;
+${JSON.stringify(summary, null, 2)}${earlierContextSummary ? `\n\n=== EARLIER IN THIS CONVERSATION ===\n${earlierContextSummary}\n(Older turns were compacted to keep this chat efficient. Treat the summary above as authoritative for what happened before the messages shown.)` : ''}`;
 
   const apiMessages: Anthropic.MessageParam[] = messages.map((m, i) => {
     const isLastUser = i === messages.length - 1 && m.role === 'user';

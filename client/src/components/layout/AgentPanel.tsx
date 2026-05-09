@@ -126,8 +126,10 @@ export function AgentPanel() {
       const { data } = await api.post('/agent/chat', { messages: newMessages.map(({ role, content }) => ({ role, content })) });
       setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply, timestamp: new Date().toISOString() }]);
       if (data.data.mutated?.length) invalidateMutated(data.data.mutated);
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.' }]);
+    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const serverReply = (err as any)?.response?.data?.data?.reply;
+      setMessages(prev => [...prev, { role: 'assistant', content: serverReply ?? 'Something went wrong. Try again.' }]);
     } finally {
       setLoading(false);
     }
@@ -159,8 +161,10 @@ export function AgentPanel() {
       const { data } = await api.post('/agent/chat', form);
       setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply, timestamp: new Date().toISOString() }]);
       if (data.data.mutated?.length) invalidateMutated(data.data.mutated);
-    } catch {
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Try again.', timestamp: new Date().toISOString() }]);
+    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const serverReply = (err as any)?.response?.data?.data?.reply;
+      setMessages(prev => [...prev, { role: 'assistant', content: serverReply ?? 'Something went wrong. Try again.', timestamp: new Date().toISOString() }]);
     } finally {
       setLoading(false);
     }

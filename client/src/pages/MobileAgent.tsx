@@ -8,8 +8,10 @@ import { invalidateResources, type Resource } from '../lib/query-invalidation';
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const ACCEPTED_TYPES = [...IMAGE_TYPES, 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].join(',');
 
-const MAX_IMAGE_PX = 1600;
-const IMAGE_QUALITY = 0.85;
+// Bumped from 1600/0.85 — bulk shots with many cert numbers in frame need
+// the extra pixels for the vision model to OCR small text reliably.
+const MAX_IMAGE_PX = 2400;
+const IMAGE_QUALITY = 0.92;
 
 function resizeImage(file: File): Promise<File> {
   return new Promise((resolve) => {
@@ -156,10 +158,14 @@ export function MobileAgent() {
         timestamp: new Date().toISOString(),
       }]);
       if (data.data.mutated?.length) invalidateMutated(data.data.mutated);
-    } catch {
+    } catch (err) {
+      // Server returns a friendly reply for some failures (overload,
+      // validation) — render that if present instead of the generic toast.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const serverReply = (err as any)?.response?.data?.data?.reply;
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: 'Something went wrong. Try again.',
+        content: serverReply ?? 'Something went wrong. Try again.',
         timestamp: new Date().toISOString(),
       }]);
     } finally {
