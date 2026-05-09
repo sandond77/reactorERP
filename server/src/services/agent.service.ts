@@ -94,7 +94,7 @@ Return a JSON object with this exact structure:
 Only return the JSON object, no other text.`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-7',
     max_tokens: 2048,
     system: systemPrompt,
     messages: [
@@ -386,7 +386,7 @@ async function extractCardInfoFromImage(
 ): Promise<ImageExtractionResult | null> {
   const setCodeRef = buildSetCodeReference();
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-7',
     max_tokens: 768,
     messages: [
       {
@@ -1838,10 +1838,13 @@ ${JSON.stringify(summary, null, 2)}${earlierContextSummary ? `\n\n=== EARLIER IN
   // Track which resource types were mutated so client can invalidate caches
   const mutatedResources = new Set<string>();
 
-  // Agentic loop — run until end_turn or no more tool calls
+  // Agentic loop — run until end_turn or no more tool calls.
+  // Use Opus when the conversation has images (OCR-critical) and Sonnet
+  // otherwise — text-only follow-ups don't need the upgrade.
+  const loopModel = hasImages ? 'claude-opus-4-7' : 'claude-sonnet-4-6';
   for (let i = 0; i < 8; i++) {
     const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: loopModel,
       max_tokens: 2048,
       system: systemPrompt,
       tools: AGENT_TOOLS,
@@ -1974,7 +1977,7 @@ Return a JSON object:
 Only return the JSON object, no other text.`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-7',
     max_tokens: 512,
     messages: [{
       role: 'user',
@@ -2026,7 +2029,7 @@ Return a JSON object:
 Only return the JSON object, no other text.`;
 
   const response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
+    model: 'claude-opus-4-7',
     max_tokens: 512,
     messages: [{
       role: 'user',
