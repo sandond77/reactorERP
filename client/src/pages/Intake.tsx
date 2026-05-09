@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, X, PackageCheck, Ban, ChevronDown, ImagePlus, Sparkles, Loader2 } from 'lucide-react';
+import { Plus, X, PackageCheck, Ban, ImagePlus, Sparkles, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
-import { AddPartModal } from '../components/catalog/AddPartModal';
 import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
 import { SetCombobox, useMergedSets } from '../components/catalog/SetCombobox';
 import { Button } from '../components/ui/Button';

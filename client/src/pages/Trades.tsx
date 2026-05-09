@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocations } from '../hooks/useLocations';
-import { Plus, X, Loader2, Sparkles, CheckCircle, AlertCircle, ChevronRight, ArrowRightLeft, Upload, Pencil, Trash2 } from 'lucide-react';
+import { Plus, X, Loader2, Sparkles, ChevronRight, ArrowRightLeft, Upload, Pencil, Trash2 } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
