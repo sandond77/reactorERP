@@ -190,10 +190,12 @@ export async function createSetCodeForUser(userId: string, input: {
 }
 
 export async function deleteSetCodeForUser(userId: string, id: string) {
+  // Allow deleting either user-defined or seeded entries (some seeded data is
+  // wrong — e.g. JP BW10 doesn't exist). Reseed via the static arrays only fires
+  // when a user has zero rows, so deletes won't be silently restored.
   await db.deleteFrom('set_codes')
     .where('id', '=', id)
     .where('user_id', '=', userId)
-    .where('is_seeded', '=', false)   // safety: don't allow deleting seeded entries
     .execute();
   invalidate(userId);
 }

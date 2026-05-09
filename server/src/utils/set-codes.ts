@@ -250,7 +250,6 @@ export const JP_SETS: SetEntry[] = [
   { code: 'BW8',   names: ['thunder knuckle', 'bw8'] },
   { code: 'BW8R',   names: ['spiral force', 'bw8r'] },
   { code: 'BW9',    names: ['megalo cannon', 'bw9'] },
-  { code: 'BW10',   names: ['double crisis jp', 'bw10'] },
   { code: 'BW-SHC', names: ['shiny collection', 'bw shiny collection'] },
   { code: 'BW-DS',  names: ['dragon selection'] },
   { code: 'BW-EB',  names: ['ex battle boost', 'bw ex battle boost'] },
