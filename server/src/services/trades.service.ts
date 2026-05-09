@@ -75,6 +75,29 @@ export async function createTrade(userId: string, input: CreateTradeInput) {
     .returningAll()
     .executeTakeFirstOrThrow();
 
+  // The trade row + sales/cards underneath aren't wrapped in a SQL transaction
+  // (each downstream service calls `db` directly), so if any incoming card
+  // fails partway we'd leave outgoing cards sold with no trade to delete.
+  // Catch failures and run the same teardown deleteTrade does so the user can
+  // retry cleanly.
+  try {
+    return await createTradeInner(userId, input, trade, tradeLabel);
+  } catch (err) {
+    try {
+      await deleteTrade(userId, trade.id);
+    } catch {
+      // best-effort cleanup; surface the original error
+    }
+    throw err;
+  }
+}
+
+async function createTradeInner(
+  userId: string,
+  input: CreateTradeInput,
+  trade: { id: string },
+  tradeLabel: string,
+) {
   const soldAt = input.trade_date ? new Date(input.trade_date) : undefined;
 
   // Distribute cash_from_customer proportionally across outgoing card sales
@@ -118,7 +141,11 @@ export async function createTrade(userId: string, input: CreateTradeInput) {
         card_name: item.card_name_override,
         set_name: item.set_name_override,
         card_number: item.card_number_override,
-        total_cost_usd: item.purchase_cost_cents / 100,
+        // raw_purchases.total_cost_usd is stored as integer cents
+        // (matches every other call site). Previously this divided by 100
+        // which sent a non-integer to an integer column and the whole trade
+        // failed with the outgoing cards already marked sold.
+        total_cost_usd: item.purchase_cost_cents,
         card_count: 1,
         status: 'received',
         purchased_at: soldAt?.toISOString(),
