@@ -1580,12 +1580,22 @@ export async function chatWithAgent(
   spreadsheetText?: string,
   actorName?: string,
 ): Promise<{ reply: string; mutated: string[] }> {
+  const hasFreshImages = !!(images?.length);
+  // Detect a fresh conversation (user cleared chat) — drop any stale
+  // pending images so we don't re-attach an image from a previous thread.
+  if (!hasFreshImages && messages.length <= 1) {
+    pendingImages.delete(userId);
+  }
   // Store new images for this user so save_images can retrieve them later
   if (images?.length) pendingImages.set(userId, images);
-  // Only attach images to the API request when freshly uploaded this turn — don't re-send pending
-  // images from a prior turn or the agent will re-read the receipt/photo and create duplicate records
-  const hasImages = !!(images?.length);
+  // Re-attach pending images on follow-up turns so the agent can answer
+  // questions like "parse the cert" or "what's the price on the sticker"
+  // without forcing a re-upload. The system prompt explicitly warns the
+  // agent not to create new records from a re-shown image — only act on
+  // explicit user requests — to preserve the original duplicate-prevention
+  // intent.
   const sessionImages = pendingImages.get(userId);
+  const hasImages = hasFreshImages || !!sessionImages?.length;
 
   // Pre-screen + inventory summary in parallel to avoid sequential round trips
   const lastUserMessage = [...messages].reverse().find((m) => m.role === 'user');
@@ -1784,6 +1794,8 @@ IMAGE HANDLING:
 - After creating a card from an image, do NOT ask about saving the image — the cert link provides access to the card.
 - After creating an expense from a receipt image, you MAY ask the user once if they want the receipt saved. If they say yes, call save_images with record_type="expense" and the expense's display ID (e.g. "2026E3") in record_ids — do NOT call record_expense again to obtain a new internal_id.
 - If a prior assistant message in the history says a record was already created (expense, card, sale, listing, etc.), treat it as already done. Never re-run the same write tool to "redo" what was already reported — the duplicate cannot be undone automatically.
+- IMPORTANT — context persistence: tool results (list_inventory, lookup_catalog, etc.) are NOT included in history on later turns. So whenever you identify a card from an image OR a tool result, you MUST restate the key identifiers in your TEXT reply: cert number (for slabs), card name, card_instance_id (when known from list_inventory), and any prices read from stickers. Treat your own text reply as durable memory for the next turn.
+- Re-shown images: an image uploaded in a prior turn may still be visible to you in this conversation (the server re-attaches it for reference). You may use it to answer questions like "parse the cert" or "what does the sticker say". You MUST NOT use a re-shown image as the trigger to create a new record — only act on the user's explicit current text request. If a prior assistant message already reports a record was created from this image, that record stands; do not re-create it.
 
 SPREADSHEET HANDLING:
 - Data appears in <spreadsheet> tags. Parse header row for column mapping.
