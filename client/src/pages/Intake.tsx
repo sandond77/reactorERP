@@ -592,6 +592,14 @@ function PurchaseForm({
                         <span className="text-green-400">{sku}</span>
                         {!li.card_number && <span className="font-sans text-[9px] text-zinc-500">(no #)</span>}
                         <span title="Matches existing catalog entry" className="text-green-400 font-sans text-[9px]">✓</span>
+                        <button
+                          type="button"
+                          onClick={() => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, catalog_id: null } : x))}
+                          title="Clear catalog match"
+                          className="ml-auto text-zinc-600 hover:text-zinc-300 transition-colors"
+                        >
+                          <X size={10} />
+                        </button>
                       </>
                     ) : sku && (li.card_number || li.unnumbered) ? (
                       <button

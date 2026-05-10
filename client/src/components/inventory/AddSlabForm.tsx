@@ -310,27 +310,37 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
 
       {partNumber && (
         <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm border ${partNumber.exists ? 'bg-green-950/40 border-green-800/50' : 'bg-yellow-950/40 border-yellow-700/50'}`}>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             {partNumber.exists
               ? <CheckCircle size={14} className="text-green-400 shrink-0" />
               : <AlertCircle size={14} className="text-yellow-400 shrink-0" />}
             {partNumber.sku
-              ? <span className="font-mono text-xs text-zinc-200">{partNumber.sku}</span>
+              ? <span className="font-mono text-xs text-zinc-200 truncate">{partNumber.sku}</span>
               : <span className="text-xs text-zinc-400 italic">Part number unknown</span>}
-            <span className={`text-xs ${partNumber.exists ? 'text-green-500' : 'text-yellow-500'}`}>
+            <span className={`text-xs ${partNumber.exists ? 'text-green-500' : 'text-yellow-500'} shrink-0`}>
               {partNumber.exists ? 'Part exists' : partNumber.sku ? 'New part — not in catalog' : 'No part found'}
             </span>
           </div>
-          {!partNumber.exists && (
+          <div className="flex items-center gap-3 shrink-0">
+            {!partNumber.exists && (
+              <button
+                type="button"
+                onClick={createCatalogEntry}
+                disabled={creatingPart || !partNumber.sku}
+                className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
+              >
+                {creatingPart ? 'Creating…' : 'Create part'}
+              </button>
+            )}
             <button
               type="button"
-              onClick={createCatalogEntry}
-              disabled={creatingPart || !partNumber.sku}
-              className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
+              onClick={() => { setPartNumber(null); setCreatedCatalogId(null); }}
+              title="Clear part number match"
+              className="text-zinc-600 hover:text-zinc-300 transition-colors"
             >
-              {creatingPart ? 'Creating…' : 'Create part'}
+              <X size={12} />
             </button>
-          )}
+          </div>
         </div>
       )}
 

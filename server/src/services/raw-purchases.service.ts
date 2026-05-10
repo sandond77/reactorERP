@@ -232,9 +232,12 @@ export async function listRawPurchases(
       'rp.language',
       'rp.catalog_id',
       sql<string | null>`cc.sku`.as('catalog_sku'),
-      'rp.card_name',
-      'rp.set_name',
-      'rp.card_number',
+      // Fall back to the catalog row when raw_purchases has its own field
+      // empty (typical for mass-imported rows that matched a catalog entry —
+      // import didn't bother to copy the name/set/# since the catalog has it).
+      sql<string | null>`COALESCE(rp.card_name,   cc.card_name)`.as('card_name'),
+      sql<string | null>`COALESCE(rp.set_name,    cc.set_name)`.as('set_name'),
+      sql<string | null>`COALESCE(rp.card_number, cc.card_number)`.as('card_number'),
       'rp.total_cost_yen',
       'rp.fx_rate',
       'rp.total_cost_usd',
@@ -250,7 +253,7 @@ export async function listRawPurchases(
       sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'grade' THEN ci.quantity END), 0)`.as('grade_count'),
     ])
     .where('rp.user_id', '=', userId)
-    .groupBy(['rp.id', 'cc.sku'])
+    .groupBy(['rp.id', 'cc.sku', 'cc.card_name', 'cc.set_name', 'cc.card_number'])
     .orderBy(sql.raw(
       // purchase_id needs the direction applied to BOTH sub-expressions so
       // year and tail sort the same way.
@@ -334,14 +337,29 @@ export async function listRawPurchases(
 }
 
 export async function getRawPurchase(userId: string, id: string) {
-  const purchase = await db
-    .selectFrom('raw_purchases')
-    .selectAll()
-    .where('id', '=', id)
-    .where('user_id', '=', userId)
+  const row = await db
+    .selectFrom('raw_purchases as rp')
+    .leftJoin('card_catalog as cc', 'cc.id', 'rp.catalog_id')
+    .selectAll('rp')
+    .where('rp.id', '=', id)
+    .where('rp.user_id', '=', userId)
+    .select([
+      sql<string | null>`cc.sku`.as('catalog_sku'),
+      sql<string | null>`COALESCE(rp.card_name,   cc.card_name)`.as('coalesced_card_name'),
+      sql<string | null>`COALESCE(rp.set_name,    cc.set_name)`.as('coalesced_set_name'),
+      sql<string | null>`COALESCE(rp.card_number, cc.card_number)`.as('coalesced_card_number'),
+    ])
     .executeTakeFirst();
 
-  if (!purchase) return null;
+  if (!row) return null;
+  // Surface the catalog-fallback values under the canonical names the UI
+  // already reads.
+  const purchase = {
+    ...row,
+    card_name: row.coalesced_card_name ?? row.card_name ?? null,
+    set_name: row.coalesced_set_name ?? row.set_name ?? null,
+    card_number: row.coalesced_card_number ?? row.card_number ?? null,
+  };
 
   // Cards linked to this purchase
   const cards = await db
