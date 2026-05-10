@@ -873,7 +873,7 @@ export function Intake() {
   const { rz, totalWidth } = useColWidths({
     pid:       Math.max(MINS.pid,       110),
     type:      Math.max(MINS.type,       80),
-    card:      Math.max(MINS.card,      280),
+    card:      Math.max(MINS.card,      400),
     source:    Math.max(MINS.source,    120),
     order:     Math.max(MINS.order,     140),
     lang:      Math.max(MINS.lang,       70),
@@ -1050,9 +1050,9 @@ export function Intake() {
                   <td className="px-4 py-2">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium capitalize ${TYPE_COLORS[row.type]}`}>{row.type}</span>
                   </td>
-                  <td className="px-4 py-2">
-                    <p className="text-zinc-200 truncate">{row.card_name ?? '—'}</p>
-                    {row.set_name && <p className="text-[10px] text-zinc-500 whitespace-normal break-words leading-tight">{row.set_name}{row.card_number ? ` · #${row.card_number}` : ''}</p>}
+                  <td className="px-4 py-2 align-top">
+                    <p className="text-zinc-200 whitespace-normal break-words leading-snug">{row.card_name ?? '—'}</p>
+                    {row.set_name && <p className="text-[10px] text-zinc-500 whitespace-normal break-words leading-tight mt-0.5">{row.set_name}{row.card_number ? ` · #${row.card_number}` : ''}</p>}
                   </td>
                   <td className="px-4 py-2 text-zinc-400">{row.source ?? '—'}</td>
                   <td className="px-4 py-2 text-zinc-400 font-mono text-[10px]">{row.order_number ?? '—'}</td>
