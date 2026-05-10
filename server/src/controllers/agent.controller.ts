@@ -72,7 +72,12 @@ const chatSchema = z.object({
         ctx.addIssue({ code: 'too_big', maximum: 600, type: 'string', inclusive: true, exact: false, message: 'User message must be 600 characters or less' });
       }
     })
-  ).min(1).max(40),
+  )
+  // Loose upper bound just to prevent absurd payloads. Conversation length
+  // is actually controlled by trimAndSummarize in agent.service.ts, which
+  // drops oldest turns and replaces them with a Haiku summary as the chat
+  // grows. The user shouldn't ever need to clear the chat manually.
+  .min(1).max(500),
 });
 
 function parseSpreadsheet(file: Express.Multer.File): string {

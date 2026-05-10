@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
 import { SetCombobox, useMergedSets } from './SetCombobox';
+
+const ADD_GAME_SENTINEL = '__add_new_game__';
 
 interface CardGame {
   id: string;
@@ -113,7 +115,24 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
   const [unnumbered, setUnnumbered] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [addingGame, setAddingGame] = useState(false);
+  const [newGameName, setNewGameName] = useState('');
+  const [newGameAbbrev, setNewGameAbbrev] = useState('');
   const setOptions = useMergedSets(form.language);
+
+  // Recompute the auto-SKU once the /card-games query lands. Without this,
+  // the modal opens before the games list arrives, autoSku falls back to
+  // fallbackPrefix() (e.g. "POKE" for "pokemon"), and the SKU stays stuck
+  // on the wrong prefix even after the canonical abbreviation ("PKMN") is
+  // available.
+  useEffect(() => {
+    if (games.length === 0) return;
+    setForm((prev) => ({
+      ...prev,
+      sku: autoSku(prev.game, prev.language, prev.set_code, prev.card_number, unnumbered),
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [games.length]);
 
   async function handleAddNewSet() {
     const code = form.set_code.trim();
@@ -211,11 +230,89 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Card Game</label>
-              <select value={form.game} onChange={field('game')} className={inputCls}>
+              <select
+                value={form.game}
+                onChange={(e) => {
+                  if (e.target.value === ADD_GAME_SENTINEL) {
+                    setAddingGame(true);
+                    setNewGameName('');
+                    setNewGameAbbrev('');
+                    return;
+                  }
+                  field('game')(e);
+                }}
+                className={inputCls}
+              >
                 {games.length === 0
                   ? <option value="pokemon">Pokémon</option>
                   : games.map(g => <option key={g.id} value={g.name}>{gameLabel(g.name)}</option>)}
+                <option value={ADD_GAME_SENTINEL}>+ Add new game…</option>
               </select>
+              {addingGame && (
+                <div className="mt-2 rounded-lg border border-zinc-700 bg-zinc-900/60 p-3 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Game name (e.g. Black Clover)"
+                    value={newGameName}
+                    onChange={(e) => setNewGameName(e.target.value)}
+                    className={inputCls}
+                    autoFocus
+                  />
+                  <input
+                    type="text"
+                    placeholder="SKU prefix (e.g. BC)"
+                    value={newGameAbbrev}
+                    onChange={(e) => setNewGameAbbrev(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6))}
+                    className={inputCls}
+                    maxLength={6}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setAddingGame(false)}
+                      className="text-xs text-zinc-500 hover:text-zinc-300"
+                    >
+                      Cancel
+                    </button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!newGameName.trim() || !newGameAbbrev.trim()}
+                      onClick={async () => {
+                        try {
+                          const res = await api.post('/card-games', {
+                            name: newGameName.trim(),
+                            abbreviation: newGameAbbrev.trim(),
+                          });
+                          const created = res.data?.data;
+                          await queryClient.invalidateQueries({ queryKey: ['card-games'] });
+                          if (created?.name) {
+                            setForm((prev) => {
+                              const next = { ...prev, game: created.name };
+                              next.sku = [
+                                created.abbreviation || fallbackPrefix(created.name),
+                                prev.language.toUpperCase(),
+                                prev.set_code.toUpperCase(),
+                                prev.card_number.toUpperCase(),
+                              ].filter(Boolean).join('-');
+                              return next;
+                            });
+                          }
+                          setAddingGame(false);
+                        } catch (err: unknown) {
+                          const msg = err && typeof err === 'object' && 'response' in err
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                            ? (err as any).response?.data?.error ?? 'Failed to add game.'
+                            : 'Failed to add game.';
+                          setError(msg);
+                        }
+                      }}
+                    >
+                      Add game
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-xs text-zinc-400 mb-1">Language</label>
