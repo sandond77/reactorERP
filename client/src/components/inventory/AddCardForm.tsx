@@ -9,6 +9,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { useLocations } from '../../hooks/useLocations';
+import { AddPartModal } from '../catalog/AddPartModal';
 
 const schema = z.object({
   card_name_override: z.string().min(1, 'Card name required'),
@@ -41,7 +42,7 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const [catalogId, setCatalogId] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, any> } | null>(null);
-  const [creatingPart, setCreatingPart] = useState(false);
+  const [showCreatePartModal, setShowCreatePartModal] = useState(false);
   const [unnumbered, setUnnumbered] = useState(false);
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
@@ -143,41 +144,11 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
     }
   }, [setValue]);
 
-  const createCatalogEntry = async () => {
-    if (!partNumber?.catalogData) return;
-    const s = partNumber.catalogData;
-    const cardNumber = (getValues('card_number_override') ?? '').trim() || (s.card_number ?? '');
-    const cardName   = (getValues('card_name_override') ?? '').trim() || (s.card_name ?? '');
-    const setName    = (getValues('set_name_override')  ?? '').trim() || (s.set_name  ?? '');
-    const language   = getValues('language') || s.language || 'EN';
-    if (!unnumbered && !cardNumber) {
-      toast.error('Card number required (or tick "no card #" to create unnumbered)');
-      return;
-    }
-    if (!cardName) { toast.error('Card name required'); return; }
-    if (!setName)  { toast.error('Set name required');  return; }
-    setCreatingPart(true);
-    try {
-      await api.post('/catalog', {
-        game: getValues('card_game') || 'pokemon',
-        sku: unnumbered ? null : partNumber.sku,
-        card_name: cardName,
-        set_name: setName,
-        set_code: s.set_code ?? null,
-        card_number: unnumbered ? null : (cardNumber || null),
-        language,
-        rarity: getValues('rarity') || s.rarity || null,
-      });
-      setPartNumber((p) => p ? { ...p, exists: true } : p);
-      toast.success('Part number created');
-    } catch (err) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const reason = (err as any)?.response?.data?.error;
-      toast.error(reason ? `Failed to create part: ${reason}` : 'Failed to create part number');
-    } finally {
-      setCreatingPart(false);
-    }
-  };
+  // Opens AddPartModal so the user can review/edit the SKU + set code +
+  // game/language before commit. Same flow used by Intake Edit Purchase
+  // (PartNumberField) and Trades — single source of truth for "create
+  // catalog entry" instead of three duplicated inline POSTs.
+  const openCreatePart = () => setShowCreatePartModal(true);
 
   function pickImage(side: 'front' | 'back', file: File) {
     const url = URL.createObjectURL(file);
@@ -294,11 +265,11 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
             {!partNumber.exists && (
               <button
                 type="button"
-                onClick={createCatalogEntry}
-                disabled={creatingPart || !partNumber.catalogData?.card_name}
+                onClick={openCreatePart}
+                disabled={!partNumber.catalogData?.card_name}
                 className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
               >
-                {creatingPart ? 'Creating…' : 'Create part'}
+                Create part
               </button>
             )}
             <button
@@ -432,6 +403,38 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
           Add Card
         </Button>
       </div>
+
+      {showCreatePartModal && (
+        <AddPartModal
+          prefill={{
+            card_name:   getValues('card_name_override') || partNumber?.catalogData?.card_name,
+            set_name:    getValues('set_name_override')  || partNumber?.catalogData?.set_name,
+            card_number: getValues('card_number_override') || partNumber?.catalogData?.card_number,
+            language:    getValues('language') || partNumber?.catalogData?.language || 'EN',
+          }}
+          onClose={() => setShowCreatePartModal(false)}
+          onCreated={(part) => {
+            setShowCreatePartModal(false);
+            setCatalogId(part.id);
+            setPartNumber({
+              sku: part.sku,
+              exists: true,
+              catalogData: {
+                ...partNumber?.catalogData,
+                card_name: part.card_name,
+                set_name: part.set_name,
+                card_number: part.card_number ?? '',
+                language: part.language,
+              },
+            });
+            // Mirror the modal's choices back to the form so submit uses them
+            if (part.card_name)   setValue('card_name_override', part.card_name);
+            if (part.set_name)    setValue('set_name_override',  part.set_name);
+            if (part.card_number) setValue('card_number_override', part.card_number);
+            toast.success('Part number created');
+          }}
+        />
+      )}
     </form>
   );
 }

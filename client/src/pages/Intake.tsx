@@ -3,6 +3,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Plus, X, PackageCheck, Ban, ImagePlus, Sparkles, Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
+import { AddPartModal, type CreatedPart } from '../components/catalog/AddPartModal';
 import { SetCombobox, useMergedSets } from '../components/catalog/SetCombobox';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -83,6 +84,7 @@ function PurchaseForm({
   const [parsingReceipt, setParsingReceipt] = useState(false);
   const [uploadKind, setUploadKind] = useState<'receipt' | 'card'>('receipt');
   const [lineItems, setLineItems] = useState<LineItem[] | null>(null);
+  const [createPartLineIdx, setCreatePartLineIdx] = useState<number | null>(null);
   const [lineCurrency, setLineCurrency] = useState<'JPY' | 'USD'>('JPY');
   const [singleUnnumbered, setSingleUnnumbered] = useState(false);
   const setOptions = useMergedSets(form.language);
@@ -111,38 +113,32 @@ function PurchaseForm({
     }
   }
 
-  async function createPartForLine(idx: number) {
+  // Open AddPartModal for a line item — same modal Edit Purchase + Trades
+  // use, so user gets the SKU preview / set-code / game / language UI
+  // instead of a silent direct POST.
+  function openCreatePartForLine(idx: number) {
     const li = lineItems?.[idx];
     if (!li) return;
     if (!li.card_number && !li.unnumbered) {
       toast.error('Tick "no #" first to create an unnumbered part');
       return;
     }
-    // Unnumbered cards share PKMN-LANG-CODE so we leave sku null and let the catalog
-    // key on (set_code, card_name, language) instead, mirroring the server import path.
-    const sku = li.card_number ? buildPartNumber(form.language, li.set_code, li.card_number) : null;
-    try {
-      const res = await api.post('/catalog', {
-        game:        'pokemon',
-        sku,
-        card_name:   li.card_name,
-        set_name:    li.set_name,
-        set_code:    li.set_code || null,
-        card_number: li.card_number || null,
-        language:    form.language,
-      });
-      const newId = res.data?.id ?? res.data?.data?.id;
-      if (!newId) throw new Error('No id returned');
-      setLineItems((arr) => arr!.map((x, j) => j === idx ? { ...x, catalog_id: newId } : x));
-      qcLocal.invalidateQueries({ queryKey: ['inventory-summary'] });
-      toast.success(`Created part ${sku ?? li.card_name}`);
-    } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'response' in err
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (err as any).response?.data?.error ?? 'Failed to create part'
-        : 'Failed to create part';
-      toast.error(msg);
-    }
+    setCreatePartLineIdx(idx);
+  }
+
+  function handlePartCreated(part: CreatedPart) {
+    if (createPartLineIdx === null) return;
+    const idx = createPartLineIdx;
+    setLineItems((arr) => arr!.map((x, j) => j === idx ? {
+      ...x,
+      catalog_id: part.id,
+      card_name: part.card_name || x.card_name,
+      set_name: part.set_name  || x.set_name,
+      card_number: part.card_number ?? x.card_number,
+    } : x));
+    qcLocal.invalidateQueries({ queryKey: ['inventory-summary'] });
+    setCreatePartLineIdx(null);
+    toast.success(`Created part ${part.sku ?? part.card_name}`);
   }
 
   async function autoFill() {
@@ -604,7 +600,7 @@ function PurchaseForm({
                     ) : sku && (li.card_number || li.unnumbered) ? (
                       <button
                         type="button"
-                        onClick={() => createPartForLine(i)}
+                        onClick={() => openCreatePartForLine(i)}
                         className="text-[10px] font-sans text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5"
                         title={li.card_number ? `Create new catalog entry: ${sku}` : `Create unnumbered catalog entry: ${sku} (${li.card_name})`}>
                         <Plus size={10} /> Create part {!li.card_number && <span className="text-zinc-500">(no #)</span>}
@@ -746,6 +742,22 @@ function PurchaseForm({
           <Button type="submit" size="sm">Save</Button>
         </div>
       </div>
+
+      {createPartLineIdx !== null && lineItems?.[createPartLineIdx] && (() => {
+        const li = lineItems[createPartLineIdx];
+        return (
+          <AddPartModal
+            prefill={{
+              card_name:   li.card_name,
+              set_name:    li.set_name,
+              card_number: li.unnumbered ? undefined : li.card_number,
+              language:    form.language,
+            }}
+            onClose={() => setCreatePartLineIdx(null)}
+            onCreated={handlePartCreated}
+          />
+        );
+      })()}
     </form>
   );
 }
