@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -58,6 +58,60 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const purchaseType = watch('purchase_type');
   const purchaseCost = watch('purchase_cost');
   const quantity = watch('quantity');
+
+  // Auto-detect part number from manual entry. Matches PartNumberField's
+  // behavior: debounced /catalog/search whenever the user types name/set/#,
+  // auto-pick a single match, otherwise leave partNumber null so the
+  // existing badge UI can decide what to show. Only runs when the user is
+  // typing manually — autoFill() sets partNumber directly and we shouldn't
+  // override that.
+  const watchedName   = watch('card_name_override');
+  const watchedSet    = watch('set_name_override');
+  const watchedNumber = watch('card_number_override');
+  const watchedLang   = watch('language');
+  useEffect(() => {
+    if (autoFilling) return;
+    const name = (watchedName ?? '').trim();
+    const set  = (watchedSet  ?? '').trim();
+    const num  = (watchedNumber ?? '').trim();
+    if (!name && !set && !num) { setPartNumber(null); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const params: Record<string, string> = { language: watchedLang || 'EN' };
+        if (name) params.card_name   = name;
+        if (set)  params.set_name    = set;
+        if (num)  params.card_number = num;
+        const res = await api.get('/catalog/search', { params });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const matches = (res.data?.data ?? []) as Array<any>;
+        if (cancelled) return;
+        if (matches.length === 1) {
+          const m = matches[0];
+          setCatalogId(m.id);
+          setPartNumber({ sku: m.sku ?? null, exists: true, catalogData: m });
+        } else if (matches.length === 0 && num) {
+          // No match but the user has enough info to potentially create a
+          // new part — show the badge in "new part" state. catalogData
+          // carries set_name + card_name + language so createCatalogEntry
+          // has the values it needs (set_code may still be missing).
+          setCatalogId(null);
+          setPartNumber({
+            sku: null,
+            exists: false,
+            catalogData: { card_name: name, set_name: set, card_number: num, language: watchedLang || 'EN' },
+          });
+        } else {
+          // Multiple matches — clear so the user knows more disambiguation
+          // is needed. (No multi-pick UI in this form yet.)
+          setPartNumber(null);
+        }
+      } catch {
+        if (!cancelled) setPartNumber(null);
+      }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [watchedName, watchedSet, watchedNumber, watchedLang, autoFilling]);
   const isBulk = purchaseType === 'bulk';
   const costPerCard = isBulk && quantity > 1 && purchaseCost > 0
     ? (purchaseCost / quantity).toFixed(2)
@@ -91,28 +145,35 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
 
   const createCatalogEntry = async () => {
     if (!partNumber?.catalogData) return;
-    const cardNumber = (getValues('card_number_override') ?? '').trim();
+    const s = partNumber.catalogData;
+    const cardNumber = (getValues('card_number_override') ?? '').trim() || (s.card_number ?? '');
+    const cardName   = (getValues('card_name_override') ?? '').trim() || (s.card_name ?? '');
+    const setName    = (getValues('set_name_override')  ?? '').trim() || (s.set_name  ?? '');
+    const language   = getValues('language') || s.language || 'EN';
     if (!unnumbered && !cardNumber) {
       toast.error('Card number required (or tick "no card #" to create unnumbered)');
       return;
     }
+    if (!cardName) { toast.error('Card name required'); return; }
+    if (!setName)  { toast.error('Set name required');  return; }
     setCreatingPart(true);
     try {
-      const s = partNumber.catalogData;
       await api.post('/catalog', {
-        game: 'pokemon',
+        game: getValues('card_game') || 'pokemon',
         sku: unnumbered ? null : partNumber.sku,
-        card_name: s.card_name,
-        set_name: s.set_name,
+        card_name: cardName,
+        set_name: setName,
         set_code: s.set_code ?? null,
-        card_number: unnumbered ? null : (s.card_number ?? null),
-        language: s.language ?? 'EN',
+        card_number: unnumbered ? null : (cardNumber || null),
+        language,
         rarity: getValues('rarity') || s.rarity || null,
       });
       setPartNumber((p) => p ? { ...p, exists: true } : p);
       toast.success('Part number created');
-    } catch {
-      toast.error('Failed to create part number');
+    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const reason = (err as any)?.response?.data?.error;
+      toast.error(reason ? `Failed to create part: ${reason}` : 'Failed to create part number');
     } finally {
       setCreatingPart(false);
     }
@@ -234,7 +295,7 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
               <button
                 type="button"
                 onClick={createCatalogEntry}
-                disabled={creatingPart || !partNumber.sku}
+                disabled={creatingPart || !partNumber.catalogData?.card_name}
                 className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
               >
                 {creatingPart ? 'Creating…' : 'Create part'}

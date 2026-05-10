@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -58,6 +58,51 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
 
   const watchedCompany = watch('slab_company');
   const watchedCert = watch('slab_cert_number');
+
+  // Auto-detect part number from manual entry — debounced /catalog/search
+  // when the user types name/set/#. Mirrors the logic in AddCardForm so
+  // manual entry surfaces the same Create-part badge as autoFill().
+  const watchedName   = watch('card_name_override');
+  const watchedSet    = watch('set_name_override');
+  const watchedNumber = watch('card_number_override');
+  const watchedLang   = watch('language');
+  useEffect(() => {
+    if (autoFilling) return;
+    const name = (watchedName ?? '').trim();
+    const set  = (watchedSet  ?? '').trim();
+    const num  = (watchedNumber ?? '').trim();
+    if (!name && !set && !num) { setPartNumber(null); return; }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        const params: Record<string, string> = { language: watchedLang || 'EN' };
+        if (name) params.card_name   = name;
+        if (set)  params.set_name    = set;
+        if (num)  params.card_number = num;
+        const res = await api.get('/catalog/search', { params });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const matches = (res.data?.data ?? []) as Array<any>;
+        if (cancelled) return;
+        if (matches.length === 1) {
+          const m = matches[0];
+          setCreatedCatalogId(m.id);
+          setPartNumber({ sku: m.sku ?? null, exists: true, catalogData: m });
+        } else if (matches.length === 0 && num) {
+          setCreatedCatalogId(null);
+          setPartNumber({
+            sku: null,
+            exists: false,
+            catalogData: { card_name: name, set_name: set, card_number: num, language: watchedLang || 'EN' } as Record<string, string>,
+          });
+        } else {
+          setPartNumber(null);
+        }
+      } catch {
+        if (!cancelled) setPartNumber(null);
+      }
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [watchedName, watchedSet, watchedNumber, watchedLang, autoFilling]);
 
   const handleImageSelect = (file: File) => {
     setImageFile(file);
@@ -326,7 +371,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
               <button
                 type="button"
                 onClick={createCatalogEntry}
-                disabled={creatingPart || !partNumber.sku}
+                disabled={creatingPart || !partNumber.catalogData?.card_name}
                 className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
               >
                 {creatingPart ? 'Creating…' : 'Create part'}
