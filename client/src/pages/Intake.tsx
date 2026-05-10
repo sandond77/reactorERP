@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, X, PackageCheck, Ban, ImagePlus, Sparkles, Loader2 } from 'lucide-react';
+import { Plus, X, PackageCheck, Ban, ImagePlus, Sparkles, Loader2, RotateCcw } from 'lucide-react';
 import { api } from '../lib/api';
 import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
 import { AddPartModal, type CreatedPart } from '../components/catalog/AddPartModal';
@@ -852,6 +852,7 @@ export function Intake() {
   const [editRow, setEditRow]           = useState<PurchaseRow | null>(null);
   const [receiveRow, setReceiveRow]     = useState<PurchaseRow | null>(null);
   const [cancelRow, setCancelRow]       = useState<PurchaseRow | null>(null);
+  const [unreceiveRow, setUnreceiveRow] = useState<PurchaseRow | null>(null);
   const [deleteRow, setDeleteRow]       = useState<PurchaseRow | null>(null);
 
   const MINS = {
@@ -953,6 +954,12 @@ export function Intake() {
     mutationFn: (id: string) => api.patch(`/raw-purchases/${id}`, { status: 'cancelled', received_at: null }),
     onSuccess: () => { invalidate(); setCancelRow(null); toast.success('Purchase cancelled'); },
     onError: () => toast.error('Failed to cancel'),
+  });
+
+  const unreceiveMut = useMutation({
+    mutationFn: (id: string) => api.post(`/raw-purchases/${id}/unreceive`).then(r => r.data),
+    onSuccess: () => { invalidate(); setUnreceiveRow(null); toast.success('Reverted to Ordered'); },
+    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to unreceive'),
   });
 
   const deleteMut = useMutation({
@@ -1095,6 +1102,14 @@ export function Intake() {
                         </button>
                       </div>
                     )}
+                    {row.status === 'received' && row.inspected_count === 0 && (
+                      <button
+                        onClick={() => setUnreceiveRow(row)}
+                        title="Unreceive — flip back to Ordered status"
+                        className="p-1 rounded text-zinc-600 hover:text-amber-400 hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
+                        <RotateCcw size={14} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -1189,6 +1204,28 @@ export function Intake() {
               <Button variant="ghost" size="sm" onClick={() => setCancelRow(null)}>Keep</Button>
               <Button size="sm" className="bg-red-600 hover:bg-red-500" onClick={() => cancelMut.mutate(cancelRow.id)}>
                 Cancel Purchase
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Unreceive confirmation */}
+      <Modal open={!!unreceiveRow} onClose={() => setUnreceiveRow(null)} title="Unreceive Purchase">
+        {unreceiveRow && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-300">
+              Revert <span className="font-medium text-zinc-100">{unreceiveRow.purchase_id}</span>
+              {unreceiveRow.card_name ? ` — ${unreceiveRow.card_name}` : ''} back to Ordered?
+            </p>
+            <p className="text-xs text-zinc-500">
+              The purchase record stays. Status flips from Received to Ordered, and the received date is cleared.
+              You can mark it Received again later or cancel it.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setUnreceiveRow(null)}>Keep</Button>
+              <Button size="sm" className="bg-amber-600 hover:bg-amber-500" disabled={unreceiveMut.isPending} onClick={() => unreceiveMut.mutate(unreceiveRow.id)}>
+                {unreceiveMut.isPending ? 'Reverting…' : 'Unreceive'}
               </Button>
             </div>
           </div>
