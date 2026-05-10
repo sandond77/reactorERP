@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../config/database';
+import { sql } from 'kysely';
 import { z } from 'zod';
 import { EN_SETS, JP_SETS } from '../utils/set-codes';
 import { requireAuth } from '../middleware/auth';
@@ -254,13 +255,13 @@ setsRouter.post('/games', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// PUT /sets/games/:id — update a game (cascades name change to related tables)
+// PUT /sets/games/:id — update a game (cascades name + abbreviation changes)
 setsRouter.put('/games/:id', async (req, res, next) => {
   try {
     const { name, abbreviation, languages } = gameSchema.parse(req.body);
     const existing = await db
       .selectFrom('card_games')
-      .select('name')
+      .select(['name', 'abbreviation'])
       .where('id', '=', req.params.id)
       .executeTakeFirst();
     const row = await db
@@ -275,6 +276,19 @@ setsRouter.put('/games/:id', async (req, res, next) => {
         db.updateTable('card_catalog').set({ game: name }).where('game', '=', existing.name).execute(),
         db.updateTable('pokemon_set_aliases').set({ game: name }).where('game', '=', existing.name).execute(),
       ]);
+    }
+    // Rewrite any card_catalog.sku rows whose prefix doesn't match the new
+    // abbreviation. Catches both abbreviation edits and historical drift
+    // for this game (e.g. catalog rows created before an abbreviation was set).
+    if (abbreviation) {
+      await sql`
+        UPDATE card_catalog
+           SET sku = ${abbreviation} || SUBSTRING(sku FROM POSITION('-' IN sku))
+         WHERE game = ${name}
+           AND sku IS NOT NULL
+           AND POSITION('-' IN sku) > 0
+           AND sku NOT LIKE ${abbreviation + '-%'}
+      `.execute(db);
     }
     res.json(row);
   } catch (err) { next(err); }

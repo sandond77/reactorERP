@@ -285,19 +285,23 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                             abbreviation: newGameAbbrev.trim(),
                           });
                           const created = res.data?.data;
-                          await queryClient.invalidateQueries({ queryKey: ['card-games'] });
-                          if (created?.name) {
-                            setForm((prev) => {
-                              const next = { ...prev, game: created.name };
-                              next.sku = [
-                                created.abbreviation || fallbackPrefix(created.name),
-                                prev.language.toUpperCase(),
-                                prev.set_code.toUpperCase(),
-                                prev.card_number.toUpperCase(),
-                              ].filter(Boolean).join('-');
-                              return next;
-                            });
-                          }
+                          if (!created?.name) throw new Error('No game returned');
+                          // Wait for the refetch to complete BEFORE we update
+                          // form.game, so the dropdown has an <option> for
+                          // the new game when React re-renders. Otherwise
+                          // value can fall through to a stale option and the
+                          // catalog row ends up tagged with the wrong game.
+                          await queryClient.refetchQueries({ queryKey: ['card-games'] });
+                          setForm((prev) => {
+                            const next = { ...prev, game: created.name };
+                            next.sku = [
+                              created.abbreviation || fallbackPrefix(created.name),
+                              prev.language.toUpperCase(),
+                              prev.set_code.toUpperCase(),
+                              prev.card_number.toUpperCase(),
+                            ].filter(Boolean).join('-');
+                            return next;
+                          });
                           setAddingGame(false);
                         } catch (err: unknown) {
                           const msg = err && typeof err === 'object' && 'response' in err

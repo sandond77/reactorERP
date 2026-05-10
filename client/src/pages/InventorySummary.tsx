@@ -1133,9 +1133,10 @@ function GamesManager() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-zinc-800/60 text-zinc-400 text-xs uppercase tracking-wide">
-              <th className="px-4 py-2.5 text-left w-[30%]">Card Game</th>
-              <th className="px-4 py-2.5 text-left w-[70%]">Sets by Language (# of Registered Sets)</th>
-              <th className="px-4 py-2.5 w-32 shrink-0"></th>
+              <th className="px-4 py-2.5 text-left w-[25%]">Card Game</th>
+              <th className="px-4 py-2.5 text-left w-[15%]">Abbreviation</th>
+              <th className="px-4 py-2.5 text-left w-[60%]">Sets by Language (# of Registered Sets)</th>
+              <th className="px-4 py-2.5 w-40 shrink-0"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
@@ -1149,9 +1150,13 @@ function GamesManager() {
                   className="hover:bg-zinc-800/30 transition-colors cursor-pointer"
                 >
                   <td className="px-4 py-3 font-medium text-zinc-100 capitalize">{g.name.replace(/_/g, ' ')}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-zinc-300">
+                    {g.abbreviation ?? <span className="text-zinc-600 italic font-sans">not set</span>}
+                  </td>
                   <td className="px-4 py-3 text-zinc-400 text-xs">{langSummary(g.name)}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 justify-end">
+                    <div className="flex items-center gap-3 justify-end">
+                      <span className="text-xs text-indigo-400/80 hover:text-indigo-300 transition-colors">Edit</span>
                       {canDelete && (
                         <button
                           onClick={(e) => { e.stopPropagation(); deleteMut.mutate(g.id!); }}
