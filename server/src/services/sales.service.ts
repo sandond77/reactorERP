@@ -53,12 +53,30 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
     if (match) resolvedCardShowId = match.id;
   }
 
+  // Auto-resolve listing_id when the caller didn't pass one but the card has
+  // an active listing. Without this, agent-recorded sales lose their link to
+  // the listing — listed_price shows as "—" in the Sales table and the
+  // listing row stays `active` even though the card is now sold.
+  let resolvedListingId = input.listing_id ?? null;
+  if (!resolvedListingId) {
+    const activeListing = await db
+      .selectFrom('listings')
+      .select('id')
+      .where('card_instance_id', '=', input.card_instance_id)
+      .where('user_id', '=', userId)
+      .where('listing_status', '=', 'active')
+      .orderBy('created_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    if (activeListing) resolvedListingId = activeListing.id;
+  }
+
   const sale = await db
     .insertInto('sales')
     .values({
       user_id: userId,
       card_instance_id: input.card_instance_id,
-      listing_id: input.listing_id ?? null,
+      listing_id: resolvedListingId,
       card_show_id: resolvedCardShowId,
       platform: input.platform,
       sale_price: input.sale_price,
@@ -80,11 +98,11 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
     .where('id', '=', input.card_instance_id)
     .execute();
 
-  if (input.listing_id) {
+  if (resolvedListingId) {
     await db
       .updateTable('listings')
       .set({ listing_status: 'sold', sold_at: sale.sold_at })
-      .where('id', '=', input.listing_id)
+      .where('id', '=', resolvedListingId)
       .execute();
   }
 
@@ -216,7 +234,9 @@ export async function listSales(
       'sd.cert_number',
       'sd.grading_cost',
       'rp.purchase_id as raw_purchase_label',
-      'l.list_price as listed_price',
+      // For card_show sales the "asking price" is the sticker price on the
+      // card, not the eBay list price. Show whichever matches the platform.
+      sql<number | null>`CASE WHEN s.platform = 'card_show' THEN ci.card_show_price ELSE l.list_price END`.as('listed_price'),
       sql<number>`(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`.as('profit'),
     ])
     .orderBy(sql.raw(SALES_SORT_COLS[sortBy ?? ''] ?? 's.sold_at'), sortDir ?? 'desc')

@@ -166,7 +166,7 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
             {selectedList.map((card) => (
               <div key={card.id} className="grid grid-cols-[1fr_8rem_10rem_2.5rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-center">
                 <div className="min-w-0">
-                  <p className="text-sm text-zinc-100 truncate font-medium">{card.card_name ?? '—'}</p>
+                  <p className="text-sm text-zinc-100 font-medium whitespace-normal break-words leading-snug">{card.card_name ?? '—'}</p>
                   <p className="text-xs text-zinc-500 mt-0.5">{card.label}</p>
                 </div>
                 <span className="text-sm text-zinc-400 text-right block">
