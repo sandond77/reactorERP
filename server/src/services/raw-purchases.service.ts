@@ -182,7 +182,9 @@ async function nextPurchaseId(userId: string, type: RawPurchaseType, year: numbe
 // ── Queries ───────────────────────────────────────────────────────────────────
 
 const RAW_PURCHASES_SORT_COLS: Record<string, string> = {
-  purchase_id:     'rp.purchase_id',
+  // purchase_id is a string like "2026R99" — sort by year + numeric tail so
+  // R9 lands between R8 and R10, not after R89.
+  purchase_id:     `(SUBSTRING(rp.purchase_id FROM '^\\d+'))::int, NULLIF(SUBSTRING(rp.purchase_id FROM '\\d+$'), '')::int`,
   type:            'rp.type',
   card_name:       'rp.card_name',
   source:          'rp.source',
@@ -249,7 +251,13 @@ export async function listRawPurchases(
     ])
     .where('rp.user_id', '=', userId)
     .groupBy(['rp.id', 'cc.sku'])
-    .orderBy(sql.raw(`${sortExpr} ${dir} NULLS LAST`))
+    .orderBy(sql.raw(
+      // purchase_id needs the direction applied to BOTH sub-expressions so
+      // year and tail sort the same way.
+      sortBy === 'purchase_id'
+        ? `(SUBSTRING(rp.purchase_id FROM '^\\d+'))::int ${dir} NULLS LAST, NULLIF(SUBSTRING(rp.purchase_id FROM '\\d+$'), '')::int ${dir} NULLS LAST`
+        : `${sortExpr} ${dir} NULLS LAST`
+    ))
     .orderBy('rp.purchase_id', 'desc');
 
   if (type) query = query.where('rp.type', '=', type);

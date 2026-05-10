@@ -219,10 +219,9 @@ export const JP_SETS: SetEntry[] = [
   { code: 'DP1',  names: ['diamond collection', 'dp1'] },
   { code: 'DP2',  names: ['pearl collection', 'dp2'] },
   { code: 'DP3',  names: ['shining darkness', 'dp3'] },
-  { code: 'DP4',  names: ['time-space creation', 'time space creation', 'dp4'] },
+  { code: 'DP4',  names: ['moonlit pursuit', 'dawn dash', 'moonlit pursuit dawn dash', 'dp4'] },
   { code: 'DP5',  names: ['temple of anger', 'cry from the mysterious', 'dp5'] },
-  { code: 'DP6',  names: ['clash at summit', 'dp6'] },
-  { code: 'DP7',  names: ['offense and defense', 'dp7'] },
+  { code: 'DP6',  names: ['intense fight in the destroyed sky', 'destroyed sky', 'dp6'] },
   { code: 'DP-P', names: ['dp promo', 'dp-p promo', 'dp-p'] },
   // Platinum (DPt era JP)
   { code: 'DPt1', names: ["galactic's conquest", 'galactic conquest', 'dpt1', 'pl1 jp'] },
@@ -230,11 +229,10 @@ export const JP_SETS: SetEntry[] = [
   { code: 'DPt3', names: ['beat of the frontier', 'dpt3'] },
   { code: 'DPt4', names: ['advent of arceus', 'arceus jp', 'dpt4'] },
   // HGSS
-  { code: 'L1',   names: ['heartgold collection', 'heartgold jp', 'hgss1'] },
-  { code: 'L2',   names: ['soulsilver collection', 'soulsilver jp', 'hgss2'] },
-  { code: 'L3',   names: ['lost link', 'hgss3'] },
-  { code: 'L4',   names: ['reviving legends', 'reviving legend', 'hgss4'] },
-  { code: 'HGSS5', names: ['clash at the summit jp'] },
+  { code: 'L1',   names: ['heart gold and soul silver', 'heart gold soul silver', 'hgss jp', 'hgss1'] },
+  { code: 'L2',   names: ['reviving legends', 'reviving legend', 'hgss2'] },
+  { code: 'L3',   names: ['clash at the summit', 'clash at the summit jp', 'hgss3'] },
+  { code: 'LL',   names: ['lost link', 'lost link jp', 'hgss-ll'] },
   // Black & White
   { code: 'BW1',   names: ['black collection', 'bw1'] },
   { code: 'BW1W',  names: ['white collection', 'bw1w'] },
