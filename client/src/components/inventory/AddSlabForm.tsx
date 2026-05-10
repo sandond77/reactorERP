@@ -92,10 +92,15 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       const pg = data.data?.parsed_grade;
       const parsedCert: string | undefined = data.data?.parsed_cert;
       if (s) {
-        // Card name: only fill if the part exists and we have an established name from inventory
-        // If part is new, leave blank — user pastes from grading company cert page
+        // Card name: prefer the established catalog name when one exists,
+        // otherwise fall back to the AI-parsed name so the user has
+        // something to refine. (Previously left blank for new parts which
+        // caused Create Part to 400 if the user clicked it before manually
+        // pasting the cert-page name.)
         if (s.catalog_exists && s.catalog_card_name) {
           setValue('card_name_override', s.catalog_card_name);
+        } else if (s.card_name) {
+          setValue('card_name_override', s.card_name);
         }
         if (s.set_name) setValue('set_name_override', s.set_name);
         if (s.card_number) setValue('card_number_override', s.card_number);
@@ -125,29 +130,36 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
 
   const createCatalogEntry = async () => {
     if (!partNumber?.catalogData) return;
+    const s = partNumber.catalogData;
     const cardNumber = (getValues('card_number_override') ?? '').trim();
+    const cardName = (getValues('card_name_override') ?? '').trim() || s.card_name || '';
+    const setName  = (getValues('set_name_override')  ?? '').trim() || s.set_name  || '';
+    const language = getValues('language') || s.language || 'EN';
     if (!unnumbered && !cardNumber) {
       toast.error('Card number required (or tick "no card #" to create unnumbered)');
       return;
     }
+    if (!cardName) { toast.error('Card name required'); return; }
+    if (!setName)  { toast.error('Set name required');  return; }
     setCreatingPart(true);
     try {
-      const s = partNumber.catalogData;
       const res = await api.post('/catalog', {
         game: getValues('card_game') || 'pokemon',
         sku: unnumbered ? null : partNumber.sku,
-        card_name: getValues('card_name_override'),
-        set_name: getValues('set_name_override'),
+        card_name: cardName,
+        set_name: setName,
         set_code: s.set_code ?? null,
-        card_number: unnumbered ? null : (getValues('card_number_override') || s.card_number || null),
-        language: getValues('language') || s.language || 'EN',
+        card_number: unnumbered ? null : (cardNumber || s.card_number || null),
+        language,
         rarity: getValues('rarity') || s.rarity || null,
       });
       setCreatedCatalogId(res.data.id);
       setPartNumber((p) => p ? { ...p, exists: true } : p);
       toast.success('Part number created');
-    } catch {
-      toast.error('Failed to create part number');
+    } catch (err) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const reason = (err as any)?.response?.data?.error;
+      toast.error(reason ? `Failed to create part: ${reason}` : 'Failed to create part number');
     } finally {
       setCreatingPart(false);
     }
@@ -225,7 +237,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
             type="text"
             value={gradingLabel}
             onChange={(e) => { setGradingLabel(e.target.value); if (imageFile) clearImage(); }}
-            placeholder="or paste scanned PSA image URL"
+            placeholder="or paste card name from PSA label"
             disabled={!!imageFile}
             className="flex-1 rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors disabled:opacity-40"
           />
