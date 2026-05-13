@@ -14,6 +14,7 @@
 **Listings**
 - Bulk sale "Find All Cards in Listing" now works for set listings — added `GET /listings/by-url/all` so one eBay URL resolves every slab tied to that set (was previously called by the client but never existed on the server, so set sales via URL always toasted "Could not find listing")
 - Record Set per-card search supports cert numbers (backend was already cert-aware via `fuzzyNameClause`; placeholder now reads "Search card name or cert #…")
+- Record Set cert search auto-selects the matching slab — when the query is all digits and resolves to exactly one available slab, skip the name → cert two-step and pick it directly. Name searches keep the existing grouped-name → cert-picker flow.
 
 ### Fixes
 
