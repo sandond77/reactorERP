@@ -118,11 +118,14 @@ function InspectionLineForm({
     else { if (backPreview) URL.revokeObjectURL(backPreview); setBackFile(null); setBackPreview(null); if (backRef.current) backRef.current.value = ''; }
   }
 
+  // Ref guards against rapid double-clicks: state batching means a second
+  // click in the same tick still sees `submitting=false` in its closure.
+  const submittingRef = useRef(false);
   const [submitting, setSubmitting] = useState(false);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (submitting) return;
+    if (submittingRef.current) return;
     if (form.decision === 'already_graded') {
       const targetQty = parseInt(form.quantity) || 0;
       if (targetQty < 1) { toast.error('Quantity must be at least 1'); return; }
@@ -131,6 +134,7 @@ function InspectionLineForm({
         toast.error(`Pick exactly ${targetQty} slab${targetQty === 1 ? '' : 's'} (currently picked: ${pickedSlabs.length})`);
         return;
       }
+      submittingRef.current = true;
       setSubmitting(true);
       onSave({
         _back_link: true,
@@ -144,6 +148,7 @@ function InspectionLineForm({
       setQtyError(`Max ${maxQuantity} remaining`);
       return;
     }
+    submittingRef.current = true;
     setSubmitting(true);
     onSave({
       condition:     form.condition,
