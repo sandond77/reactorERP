@@ -118,8 +118,11 @@ function InspectionLineForm({
     else { if (backPreview) URL.revokeObjectURL(backPreview); setBackFile(null); setBackPreview(null); if (backRef.current) backRef.current.value = ''; }
   }
 
+  const [submitting, setSubmitting] = useState(false);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submitting) return;
     if (form.decision === 'already_graded') {
       const targetQty = parseInt(form.quantity) || 0;
       if (targetQty < 1) { toast.error('Quantity must be at least 1'); return; }
@@ -128,6 +131,7 @@ function InspectionLineForm({
         toast.error(`Pick exactly ${targetQty} slab${targetQty === 1 ? '' : 's'} (currently picked: ${pickedSlabs.length})`);
         return;
       }
+      setSubmitting(true);
       onSave({
         _back_link: true,
         slab_ids: pickedSlabs.map(s => s.id),
@@ -140,6 +144,7 @@ function InspectionLineForm({
       setQtyError(`Max ${maxQuantity} remaining`);
       return;
     }
+    setSubmitting(true);
     onSave({
       condition:     form.condition,
       decision:      form.decision,
@@ -331,7 +336,7 @@ function InspectionLineForm({
       )}
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-        <Button type="submit" size="sm">Save</Button>
+        <Button type="submit" size="sm" disabled={submitting}>{submitting ? 'Saving…' : 'Save'}</Button>
       </div>
     </form>
   );
@@ -392,7 +397,7 @@ export function InspectionPanel({
     mutationFn: ({ cardId, body }: { cardId: string; body: Record<string, unknown> }) =>
       api.patch(`/raw-purchases/${purchase.id}/lines/${cardId}`, body).then((r) => r.data),
     onSuccess: () => { invalidate(); setEditLine(null); toast.success('Updated'); },
-    onError: () => toast.error('Failed to update'),
+    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to update'),
   });
 
   const deleteMut = useMutation({

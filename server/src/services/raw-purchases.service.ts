@@ -531,7 +531,22 @@ export async function addInspectionLine(
     .where('user_id', '=', userId)
     .executeTakeFirst();
 
-  if (!purchase) throw new Error('Purchase not found');
+  if (!purchase) throw new AppError(404, 'Purchase not found');
+
+  // Block over-allocation: existing inspection-line quantities + this new line
+  // must not exceed the purchase's card_count.
+  const usedRow = await sql<{ total: number }>`
+    SELECT COALESCE(SUM(quantity), 0)::int AS total
+    FROM card_instances
+    WHERE raw_purchase_id = ${purchaseId} AND user_id = ${userId}
+  `.execute(db);
+  const used = Number(usedRow.rows[0].total);
+  const remaining = purchase.card_count - used;
+  if (input.quantity > remaining) {
+    throw new AppError(409,
+      `Can't add ${input.quantity} — only ${remaining} of ${purchase.card_count} card${purchase.card_count === 1 ? '' : 's'} remain unallocated on this purchase.`
+    );
+  }
 
   const status = input.decision === 'sell_raw' ? 'raw_for_sale' : 'inspected';
 
@@ -569,6 +584,34 @@ export async function updateInspectionLine(
   input: Partial<InspectionLineInput>
 ) {
   const existing = await db.selectFrom('card_instances').selectAll().where('id', '=', cardInstanceId).where('user_id', '=', userId).executeTakeFirst();
+
+  // Block over-allocation when quantity is increasing on a row tied to a
+  // raw purchase. Sum the other lines and require that other_total + new_qty
+  // ≤ purchase.card_count.
+  if (input.quantity !== undefined && existing?.raw_purchase_id) {
+    const purchase = await db
+      .selectFrom('raw_purchases')
+      .select(['card_count'])
+      .where('id', '=', existing.raw_purchase_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (purchase) {
+      const otherRow = await sql<{ total: number }>`
+        SELECT COALESCE(SUM(quantity), 0)::int AS total
+        FROM card_instances
+        WHERE raw_purchase_id = ${existing.raw_purchase_id}
+          AND user_id = ${userId}
+          AND id != ${cardInstanceId}
+      `.execute(db);
+      const otherTotal = Number(otherRow.rows[0].total);
+      if (otherTotal + input.quantity > purchase.card_count) {
+        const remaining = purchase.card_count - otherTotal;
+        throw new AppError(409,
+          `Can't set quantity to ${input.quantity} — only ${remaining} of ${purchase.card_count} card${purchase.card_count === 1 ? '' : 's'} remain unallocated on this purchase.`
+        );
+      }
+    }
+  }
 
   const update: Record<string, unknown> = {};
   if (input.condition !== undefined)     update.condition = input.condition;

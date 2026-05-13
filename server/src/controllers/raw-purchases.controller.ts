@@ -1,4 +1,4 @@
-import type { Request, Response } from 'express';
+import type { Request, Response, NextFunction } from 'express';
 import * as svc from '../services/raw-purchases.service';
 import { saveReceiptImage } from '../utils/save-receipt';
 
@@ -65,22 +65,22 @@ export async function remove(req: Request, res: Response) {
   }
 }
 
-export async function addLine(req: Request, res: Response) {
+export async function addLine(req: Request, res: Response, next: NextFunction) {
   try {
     const card = await svc.addInspectionLine(req.dataUserId, req.params['id'] as string, req.body);
     res.status(201).json(card);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    next(err);
   }
 }
 
-export async function updateLine(req: Request, res: Response) {
+export async function updateLine(req: Request, res: Response, next: NextFunction) {
   try {
     const card = await svc.updateInspectionLine(req.dataUserId, req.params['cardId'] as string, req.body);
     if (!card) return res.status(404).json({ error: 'Not found' });
     res.json(card);
   } catch (err) {
-    res.status(500).json({ error: String(err) });
+    next(err);
   }
 }
 
