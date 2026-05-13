@@ -143,19 +143,19 @@ function SetSlotRow({
       }, new Map<string, number>())).filter(([n, c]) => n && c > 0)
     : [];
 
-  // Auto-select when the user typed an exact cert number that resolves to a
-  // single available slab. Skip the name → cert dance entirely.
+  // Auto-select when the user is searching by cert (all-digit query) and the
+  // backend resolves it to exactly one available slab. Skip the name → cert
+  // two-step entirely.
   useEffect(() => {
     if (slot.cardName || slot.slab || !searchData) return;
     const q = debounced.trim();
     if (!/^\d+$/.test(q)) return;
-    const exact = searchData.data.find(s =>
-      s.cert_number === q &&
-      !s.is_card_show && !s.is_listed && !s.is_personal_collection &&
-      !takenIds.has(s.id)
+    const available = searchData.data.filter(s =>
+      !s.is_card_show && !s.is_listed && !s.is_personal_collection && !takenIds.has(s.id)
     );
-    if (exact) {
-      onUpdate({ cardName: exact.card_name ?? '', slab: exact });
+    if (available.length === 1) {
+      const only = available[0];
+      onUpdate({ cardName: only.card_name ?? '', slab: only });
       setSearch('');
     }
   }, [searchData, debounced, slot.cardName, slot.slab, takenIds, onUpdate]);
