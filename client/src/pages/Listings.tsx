@@ -492,10 +492,10 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
           <div className="rounded-lg border border-zinc-700 overflow-hidden">
             {uniqueCardNames.map(([name, count]) => (
               <button key={name} type="button"
-                className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors"
+                className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-start justify-between gap-3 transition-colors"
                 onClick={() => { setSelectedCardName(name); setQty(1); setStep('quantity'); }}>
-                <span className="text-sm text-zinc-200 truncate">{name}</span>
-                <span className="shrink-0 text-[10px] text-zinc-500 font-mono tabular-nums">{count} unsold</span>
+                <span className="text-sm text-zinc-200 break-words leading-snug">{name}</span>
+                <span className="shrink-0 text-[10px] text-zinc-500 font-mono tabular-nums mt-0.5">{count} unsold</span>
               </button>
             ))}
           </div>
@@ -1454,7 +1454,7 @@ export function Listings() {
         </div>
       )}
 
-      <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="Record Listing" className="max-w-2xl">
+      <Modal open={showAddModal} onClose={() => setShowAddModal(false)} title="Record Listing" className="max-w-3xl">
         <AddListingModal onClose={() => setShowAddModal(false)} />
       </Modal>
 

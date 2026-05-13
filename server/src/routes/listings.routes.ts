@@ -3,6 +3,8 @@ import { requireAuth } from '../middleware/auth';
 import * as listingsService from '../services/listings.service';
 import { z } from 'zod';
 import { toCents } from '../utils/cents';
+import { db } from '../config/database';
+import { sql } from 'kysely';
 
 export const listingsRouter = Router();
 
@@ -41,41 +43,54 @@ const createListingSchema = z.object({
   listing_group_name: z.string().optional(),
 });
 
+function buildByUrlQuery(userId: string, url: string) {
+  return db
+    .selectFrom('listings as l')
+    .innerJoin('card_instances as ci', 'ci.id', 'l.card_instance_id')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
+    .select([
+      'ci.id',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
+      'sd.cert_number',
+      'sd.grade_label',
+      'sd.grade as numeric_grade',
+      'sd.company',
+      'ci.currency',
+      'ci.condition',
+      'ci.purchased_at as raw_purchase_date',
+      'rp.purchase_id as raw_purchase_label',
+      'l.list_price as listed_price',
+      'l.id as listing_id',
+      sql<boolean>`true`.as('is_listed'),
+      sql<boolean>`false`.as('is_personal_collection'),
+    ])
+    .where('l.user_id', '=', userId)
+    .where('l.ebay_listing_url', '=', url)
+    .where('l.listing_status', '=', 'active');
+}
+
 listingsRouter.get('/by-url', requireAuth, async (req, res, next) => {
   try {
     const url = typeof req.query.url === 'string' ? req.query.url : null;
     if (!url) { res.status(400).json({ error: 'url required' }); return; }
-    const { db } = await import('../config/database');
-    const { sql } = await import('kysely');
-    const row = await db
-      .selectFrom('listings as l')
-      .innerJoin('card_instances as ci', 'ci.id', 'l.card_instance_id')
-      .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
-      .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
-      .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
-      .select([
-        'ci.id',
-        sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
-        sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
-        'sd.cert_number',
-        'sd.grade_label',
-        'sd.grade as numeric_grade',
-        'sd.company',
-        'ci.currency',
-        'ci.condition',
-        'ci.purchased_at as raw_purchase_date',
-        'rp.purchase_id as raw_purchase_label',
-        'l.list_price as listed_price',
-        'l.id as listing_id',
-        sql<boolean>`true`.as('is_listed'),
-        sql<boolean>`false`.as('is_personal_collection'),
-      ])
-      .where('l.user_id', '=', req.user!.id)
-      .where('l.ebay_listing_url', '=', url)
-      .where('l.listing_status', '=', 'active')
-      .executeTakeFirst();
+    const row = await buildByUrlQuery(req.user!.id, url).executeTakeFirst();
     if (!row) { res.status(404).json({ error: 'No active listing found for that URL' }); return; }
     res.json({ data: row });
+  } catch (err) { next(err); }
+});
+
+// Returns every active listing sharing the URL — for set/group listings where
+// one eBay URL maps to multiple card_instances.
+listingsRouter.get('/by-url/all', requireAuth, async (req, res, next) => {
+  try {
+    const url = typeof req.query.url === 'string' ? req.query.url : null;
+    if (!url) { res.status(400).json({ error: 'url required' }); return; }
+    const rows = await buildByUrlQuery(req.user!.id, url).execute();
+    if (!rows.length) { res.status(404).json({ error: 'No active listings found for that URL' }); return; }
+    res.json({ data: rows });
   } catch (err) { next(err); }
 });
 
