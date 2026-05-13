@@ -188,7 +188,7 @@ function SetSlotRow({
           <>
             <div className="relative">
               <input
-                type="text" placeholder="Search card name…" value={search}
+                type="text" placeholder="Search card name or cert #…" value={search}
                 onChange={(e) => setSearch(e.target.value)} autoFocus={index === 0}
                 className="w-full px-2.5 py-1.5 text-xs bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
               />
