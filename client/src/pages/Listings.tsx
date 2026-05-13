@@ -136,19 +136,12 @@ function SetSlotRow({
     enabled: !!slot.cardName && !slot.slab,
   });
 
-  // Slabs that are actually selectable for a new set listing: not already
-  // listed, not at a card show, not in personal collection, and not already
-  // claimed by another slot in this same set.
-  const availableSearchSlabs = (searchData?.data ?? []).filter(s =>
-    !s.is_card_show && !s.is_listed && !s.is_personal_collection && !takenIds.has(s.id)
-  );
-
-  const uniqueNames = Array.from(
-    availableSearchSlabs.reduce((m, s) => {
-      m.set(s.card_name ?? '', (m.get(s.card_name ?? '') ?? 0) + 1);
-      return m;
-    }, new Map<string, number>())
-  ).filter(([n, c]) => n && c > 0);
+  const uniqueNames = searchData
+    ? Array.from(searchData.data.reduce((m, s) => {
+        if (!s.is_card_show) m.set(s.card_name ?? '', (m.get(s.card_name ?? '') ?? 0) + 1);
+        return m;
+      }, new Map<string, number>())).filter(([n, c]) => n && c > 0)
+    : [];
 
   // Auto-select when the user is searching by cert (all-digit query) and the
   // backend resolves it to exactly one available slab. Skip the name → cert
@@ -157,12 +150,15 @@ function SetSlotRow({
     if (slot.cardName || slot.slab || !searchData) return;
     const q = debounced.trim();
     if (!/^\d+$/.test(q)) return;
-    if (availableSearchSlabs.length === 1) {
-      const only = availableSearchSlabs[0];
+    const available = searchData.data.filter(s =>
+      !s.is_card_show && !s.is_listed && !s.is_personal_collection && !takenIds.has(s.id)
+    );
+    if (available.length === 1) {
+      const only = available[0];
       onUpdate({ cardName: only.card_name ?? '', slab: only });
       setSearch('');
     }
-  }, [searchData, debounced, slot.cardName, slot.slab, availableSearchSlabs, onUpdate]);
+  }, [searchData, debounced, slot.cardName, slot.slab, takenIds, onUpdate]);
 
   const copies = (copiesData?.data ?? []).filter(
     c => c.card_name === slot.cardName && !c.is_listed && !c.is_card_show && !c.is_personal_collection
