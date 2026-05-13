@@ -124,8 +124,8 @@ export async function listSlabs(
 
   const companyIn    = filterCompanies === undefined ? sql`` : filterCompanies.length ? sql`AND sd.company     IN (${sql.join(filterCompanies.map((v) => sql.val(v)))})` : sql`AND 1=0`;
   const gradeIn      = filterGrades    === undefined ? sql`` : filterGrades.length    ? sql`AND sd.grade_label IN (${sql.join(filterGrades.map((v) => sql.val(v)))})` : sql`AND 1=0`;
-  const listedCond   = isListed === 'yes' ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id)`
-                     : isListed === 'no'  ? sql`AND NOT EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id)`
+  const listedCond   = isListed === 'yes' ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.listing_status = 'active')`
+                     : isListed === 'no'  ? sql`AND NOT EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND l2.listing_status = 'active')`
                      : sql``;
   const cardShowCond = isCardShow === 'yes' ? sql`AND ci.is_card_show = true`
                      : isCardShow === 'no'  ? sql`AND ci.is_card_show = false`
@@ -240,7 +240,8 @@ export async function listSlabs(
     LEFT JOIN LATERAL (
       SELECT id, list_price, platform, ebay_listing_url, listed_at
       FROM listings
-      WHERE card_instance_id = ci.id ORDER BY created_at DESC LIMIT 1
+      WHERE card_instance_id = ci.id AND listing_status = 'active'
+      ORDER BY created_at DESC LIMIT 1
     ) l ON true
     LEFT JOIN LATERAL (
       SELECT sale_price, platform, platform_fees, shipping_cost, sold_at, order_details_link
