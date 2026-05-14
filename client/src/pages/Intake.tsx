@@ -853,6 +853,7 @@ export function Intake() {
   const [receiveRow, setReceiveRow]     = useState<PurchaseRow | null>(null);
   const [cancelRow, setCancelRow]       = useState<PurchaseRow | null>(null);
   const [unreceiveRow, setUnreceiveRow] = useState<PurchaseRow | null>(null);
+  const [uncancelRow, setUncancelRow]   = useState<PurchaseRow | null>(null);
   const [deleteRow, setDeleteRow]       = useState<PurchaseRow | null>(null);
 
   const MINS = {
@@ -960,6 +961,12 @@ export function Intake() {
     mutationFn: (id: string) => api.post(`/raw-purchases/${id}/unreceive`).then(r => r.data),
     onSuccess: () => { invalidate(); setUnreceiveRow(null); toast.success('Reverted to Ordered'); },
     onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to unreceive'),
+  });
+
+  const uncancelMut = useMutation({
+    mutationFn: (id: string) => api.patch(`/raw-purchases/${id}`, { status: 'ordered' }).then(r => r.data),
+    onSuccess: () => { invalidate(); setUncancelRow(null); toast.success('Reverted to Ordered'); },
+    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to revert'),
   });
 
   const deleteMut = useMutation({
@@ -1110,6 +1117,14 @@ export function Intake() {
                         <RotateCcw size={14} />
                       </button>
                     )}
+                    {row.status === 'cancelled' && (
+                      <button
+                        onClick={() => setUncancelRow(row)}
+                        title="Uncancel — flip back to Ordered status"
+                        className="p-1 rounded text-zinc-600 hover:text-amber-400 hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100">
+                        <RotateCcw size={14} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -1226,6 +1241,27 @@ export function Intake() {
               <Button variant="ghost" size="sm" onClick={() => setUnreceiveRow(null)}>Keep</Button>
               <Button size="sm" className="bg-amber-600 hover:bg-amber-500" disabled={unreceiveMut.isPending} onClick={() => unreceiveMut.mutate(unreceiveRow.id)}>
                 {unreceiveMut.isPending ? 'Reverting…' : 'Unreceive'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Uncancel confirmation */}
+      <Modal open={!!uncancelRow} onClose={() => setUncancelRow(null)} title="Uncancel Purchase">
+        {uncancelRow && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-300">
+              Revert <span className="font-medium text-zinc-100">{uncancelRow.purchase_id}</span>
+              {uncancelRow.card_name ? ` — ${uncancelRow.card_name}` : ''} back to Ordered?
+            </p>
+            <p className="text-xs text-zinc-500">
+              Status flips from Cancelled to Ordered. You can mark it Received once it actually arrives.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setUncancelRow(null)}>Keep</Button>
+              <Button size="sm" className="bg-amber-600 hover:bg-amber-500" disabled={uncancelMut.isPending} onClick={() => uncancelMut.mutate(uncancelRow.id)}>
+                {uncancelMut.isPending ? 'Reverting…' : 'Uncancel'}
               </Button>
             </div>
           </div>

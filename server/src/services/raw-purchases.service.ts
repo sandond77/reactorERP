@@ -532,6 +532,9 @@ export async function addInspectionLine(
     .executeTakeFirst();
 
   if (!purchase) throw new AppError(404, 'Purchase not found');
+  if (purchase.status === 'cancelled') {
+    throw new AppError(409, `Can't add a line to a cancelled purchase. Revert it to Ordered first.`);
+  }
 
   // Block over-allocation: existing inspection-line quantities + this new line
   // must not exceed the purchase's card_count.
