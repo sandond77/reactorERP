@@ -9,7 +9,7 @@ import { Button } from '../ui/Button';
 import { formatCurrency, formatDate, STATUS_LABELS, STATUS_COLORS } from '../../lib/utils';
 import { useLocations } from '../../hooks/useLocations';
 
-const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
+const CONDITIONS = ['NM', 'NM-', 'LP+', 'LP', 'LP-', 'MP+', 'MP', 'MP-', 'HP', 'DMG'];
 
 interface CardDetailModalProps {
   cardId: string;

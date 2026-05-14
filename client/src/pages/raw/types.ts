@@ -53,7 +53,7 @@ export interface PurchaseDetail extends PurchaseRow {
   cards: InspectionLine[];
 }
 
-export const CONDITIONS = ['NM', 'LP', 'MP', 'HP', 'DMG'];
+export const CONDITIONS = ['NM', 'NM-', 'LP+', 'LP', 'LP-', 'MP+', 'MP', 'MP-', 'HP', 'DMG'];
 
 export const DECISION_LABELS: Record<Decision, string> = {
   sell_raw:       'Sell Raw',

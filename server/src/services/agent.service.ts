@@ -555,7 +555,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         quantity: { type: 'number', description: 'Number of copies' },
         purchase_cost: { type: 'number', description: 'Cost per card in cents (e.g. 1000 = $10.00)' },
         currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency for purchase_cost' },
-        condition: { type: 'string', enum: ['NM', 'LP', 'MP', 'HP', 'DMG'], description: 'Card condition — required, must come from user' },
+        condition: { type: 'string', enum: ['NM', 'NM-', 'LP+', 'LP', 'LP-', 'MP+', 'MP', 'MP-', 'HP', 'DMG'], description: 'Card condition — required, must come from user' },
         decision: { type: 'string', enum: ['grade', 'sell_raw'], description: 'Intent for this card: grade (send to grading) or sell_raw (sell as-is) — required, must come from user' },
         language: { type: 'string', enum: ['JP', 'EN', 'KR'], description: 'Card language' },
         notes: { type: 'string', description: 'Notes about this specific card' },
@@ -682,7 +682,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
         card_instance_id: { type: 'string', description: 'UUID of the card instance (from list_inventory)' },
         status: { type: 'string', enum: ['purchased_raw', 'inspected', 'grading_submitted', 'graded', 'raw_for_sale', 'lost_damaged'], description: 'New status to transition to' },
         decision: { type: 'string', enum: ['grade', 'sell_raw'], description: 'Intent: grade or sell raw' },
-        condition: { type: 'string', enum: ['NM', 'LP', 'MP', 'HP', 'DMG'], description: 'Card condition (required for inspection)' },
+        condition: { type: 'string', enum: ['NM', 'NM-', 'LP+', 'LP', 'LP-', 'MP+', 'MP', 'MP-', 'HP', 'DMG'], description: 'Card condition (required for inspection)' },
         notes: { type: 'string', description: 'Notes about the card' },
       },
       required: ['card_instance_id'],
@@ -874,7 +874,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
             properties: {
               card_name: { type: 'string', description: 'Card name' },
               set_name: { type: 'string', description: 'Set name' },
-              condition: { type: 'string', enum: ['NM', 'LP', 'MP', 'HP', 'DMG'], description: 'Card condition (for raw cards)' },
+              condition: { type: 'string', enum: ['NM', 'NM-', 'LP+', 'LP', 'LP-', 'MP+', 'MP', 'MP-', 'HP', 'DMG'], description: 'Card condition (for raw cards)' },
               decision: { type: 'string', enum: ['sell_raw', 'grade'], description: 'Intent for this card' },
               purchase_cost: { type: 'number', description: 'Trade credit value in dollars' },
               currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
@@ -1649,7 +1649,7 @@ STATUS MEANINGS:
 - sold: completed sale, removed from active inventory
 - lost_damaged: written off
 
-CONDITIONS: NM (Near Mint) | LP (Lightly Played) | MP (Moderately Played) | HP (Heavily Played) | DMG (Damaged)
+CONDITIONS: NM (Near Mint) | NM- | LP+ | LP (Lightly Played) | LP- | MP+ | MP (Moderately Played) | MP- | HP (Heavily Played) | DMG (Damaged)
 DECISIONS: sell_raw (sell ungraded) | grade (send to grading company)
 
 COST BASIS:
