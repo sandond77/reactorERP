@@ -76,6 +76,9 @@ export function Inspection() {
     search:           debouncedSearch || undefined,
     inspection_state: stateTab === 'all' ? undefined : stateTab,
     type:             fType ?? undefined,
+    // Inspection page never deals with cancelled lots — reversion happens
+    // on the Purchases page.
+    exclude_cancelled: true,
   };
 
   const { data, isLoading } = useQuery<{ data: PurchaseRow[]; total: number; totalPages: number }>({

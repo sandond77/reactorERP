@@ -203,6 +203,7 @@ export async function listRawPurchases(
   filters: {
     type?: RawPurchaseType;
     status?: RawPurchaseStatus;
+    exclude_cancelled?: boolean;
     needs_inspection?: boolean;
     inspection_state?: 'needs' | 'done';
     search?: string;
@@ -212,7 +213,7 @@ export async function listRawPurchases(
     sortDir?: 'asc' | 'desc';
   } = {}
 ) {
-  const { type, status, needs_inspection, inspection_state, search, page = 1, pageSize = 50, sortBy, sortDir } = filters;
+  const { type, status, exclude_cancelled, needs_inspection, inspection_state, search, page = 1, pageSize = 50, sortBy, sortDir } = filters;
   const offset = (page - 1) * pageSize;
   const sortExpr = RAW_PURCHASES_SORT_COLS[sortBy ?? ''] ?? 'rp.purchased_at';
   const dir = sortDir === 'asc' ? 'asc' : 'desc';
@@ -265,6 +266,7 @@ export async function listRawPurchases(
 
   if (type) query = query.where('rp.type', '=', type);
   if (status) query = query.where('rp.status', '=', status);
+  if (exclude_cancelled) query = query.where('rp.status', '!=', 'cancelled');
   if (needs_inspection || inspection_state === 'needs') {
     query = query
       .where('rp.status', '=', 'received')

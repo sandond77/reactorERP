@@ -13,6 +13,7 @@ export async function list(req: Request, res: Response) {
     const result = await svc.listRawPurchases(userId, {
       type: req.query.type as any,
       status: req.query.status as any,
+      exclude_cancelled: req.query.exclude_cancelled === 'true',
       needs_inspection: req.query.needs_inspection === 'true',
       inspection_state,
       search: Array.isArray(req.query.search) ? req.query.search[0] as string : req.query.search as string | undefined,
