@@ -1,5 +1,25 @@
 # Reactor — Changelog
 
+## May 13, 2026
+
+### Features
+
+**Inspection**
+- New condition grades available everywhere a condition is picked: **NM-, LP+, LP-, MP+, MP-** (slotted between the existing NM / LP / MP / HP / DMG tiers). DB column is plain text, so no migration required — also wired into the AI agent's tool schemas and prompt.
+
+### Fixes
+
+**Inspection**
+- Over-allocation guard on inspection lines — `addInspectionLine` and `updateInspectionLine` now reject any input that would push the sum of allocated quantities above the purchase's `card_count`. Returns a 409 with the exact remaining capacity. Previously you could allocate 13 cards against a 12-card lot with no pushback.
+- Rapid double-click on the Save button in the Add/Edit Inspection Line modal no longer double-adds. The submit guard now lives in a ref so a second click in the same tick short-circuits synchronously (React state batching meant the previous state-based guard didn't catch this).
+- Toast error messages for Add/Update Line now surface the actual server error (e.g. the over-allocation 409) instead of generic "Failed to update". The raw-purchases controller forwards errors through the error middleware so AppError status codes reach the client intact.
+
+**Listings / Sales**
+- Slab `is_listed` and the "Listed?" filter now only count **active** listings. Historical sold/cancelled listings no longer make a card report as listed, and the slab search no longer hands back a stale `listing_id` that could route a sale to the wrong listing row.
+- Yanked the Record Set cert-auto-select feature added on May 12 — its all-digit guard tripped on partial cert prefixes as you typed, picking the wrong slab and clearing your input. Record Set search now reverts to the original name → cert two-step.
+
+---
+
 ## May 10–12, 2026
 
 ### Features
@@ -14,7 +34,6 @@
 **Listings**
 - Bulk sale "Find All Cards in Listing" now works for set listings — added `GET /listings/by-url/all` so one eBay URL resolves every slab tied to that set (was previously called by the client but never existed on the server, so set sales via URL always toasted "Could not find listing")
 - Record Set per-card search supports cert numbers (backend was already cert-aware via `fuzzyNameClause`; placeholder now reads "Search card name or cert #…")
-- Record Set cert search auto-selects the matching slab — when the query is all digits and resolves to exactly one available slab, skip the name → cert two-step and pick it directly. Name searches keep the existing grouped-name → cert-picker flow.
 
 ### Fixes
 
