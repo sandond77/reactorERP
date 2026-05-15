@@ -440,15 +440,15 @@ export async function getInventorySummary(userId: string) {
       sd.company,
       sd.grade,
       sd.grade_label,
-      COUNT(*)::int                                                  AS qty_total,
-      COUNT(*) FILTER (WHERE ci.status != 'sold')::int               AS qty_unsold,
-      COUNT(*) FILTER (WHERE ci.status = 'sold')::int                AS qty_sold,
-      SUM(ci.purchase_cost + sd.grading_cost)::int AS total_cost,
-      AVG(ci.purchase_cost + sd.grading_cost)::int AS avg_cost,
-      COUNT(*) FILTER (WHERE l.id IS NOT NULL)::int   AS qty_listed,
+      COALESCE(SUM(ci.quantity), 0)::int                                                    AS qty_total,
+      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status != 'sold'), 0)::int                  AS qty_unsold,
+      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'sold'), 0)::int                   AS qty_sold,
+      SUM(ci.purchase_cost + COALESCE(sd.grading_cost, 0))::int                              AS total_cost,
+      AVG(ci.purchase_cost + COALESCE(sd.grading_cost, 0))::int                              AS avg_cost,
+      COUNT(*) FILTER (WHERE l.id IS NOT NULL)::int                                          AS qty_listed,
       ci.catalog_id
     FROM card_instances ci
-    INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+    LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     LEFT JOIN LATERAL (
       SELECT id FROM listings
