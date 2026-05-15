@@ -473,6 +473,42 @@ export async function updateRawPurchase(
     .returningAll()
     .executeTakeFirst();
   if (updated) await logAudit(userId, 'raw_purchases', id, 'updated', existing, updated);
+
+  // Backfill child card_instances when the purchase newly gets a catalog_id
+  // or when the override fields get filled in. Inspection lines snapshot
+  // these from the parent purchase at add-time; without backfill, lines
+  // created before the parent had a part # stay disconnected and show
+  // "—" in Part # columns. Only fills NULL fields — won't overwrite values
+  // the user set on the individual line.
+  if (updated && existing) {
+    const fill: Record<string, unknown> = {};
+    if (input.catalog_id !== undefined && existing.catalog_id == null && updated.catalog_id != null) {
+      fill.catalog_id = updated.catalog_id;
+    }
+    if (input.card_name !== undefined && updated.card_name != null) {
+      fill.card_name_override = updated.card_name;
+    }
+    if (input.set_name !== undefined && updated.set_name != null) {
+      fill.set_name_override = updated.set_name;
+    }
+    if (input.card_number !== undefined && updated.card_number != null) {
+      fill.card_number_override = updated.card_number;
+    }
+    if (Object.keys(fill).length > 0) {
+      // Only touch rows where the corresponding column is currently NULL,
+      // so user edits on individual lines aren't blown away.
+      for (const [col, val] of Object.entries(fill)) {
+        await db
+          .updateTable('card_instances')
+          .set({ [col]: val })
+          .where('raw_purchase_id', '=', id)
+          .where('user_id', '=', userId)
+          .where(col as any, 'is', null)
+          .execute();
+      }
+    }
+  }
+
   return updated;
 }
 
