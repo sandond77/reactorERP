@@ -633,16 +633,14 @@ export async function searchCatalog(userId: string, params: {
   // Convert "1996 charizard" → "%1996%charizard%" so multi-word queries work
   const qPattern = q ? '%' + q.trim().split(/\s+/).join('%') + '%' : null;
 
-  // Token-based filters: each word in the user's query must appear somewhere
-  // in the target column(s). Avoids over-narrowing when the autofill returns
-  // a partial label ("Tag Team All Stars") that isn't a contiguous substring
-  // of the catalog name ("Tag Team GX All Stars").
-  const cardNameTokens = (card_name ?? '').trim().split(/\s+/).filter(Boolean);
-  const setTokens      = (set_name  ?? '').trim().split(/\s+/).filter(Boolean);
-
-  const cardNameClauses = cardNameTokens.map(t => sql`AND card_name ILIKE ${'%' + t + '%'}`);
-  // Each token must hit set_name OR set_code (so typing "sm12a" in set field works).
-  const setClauses      = setTokens.map(t => sql`AND (set_name ILIKE ${'%' + t + '%'} OR set_code ILIKE ${'%' + t + '%'})`);
+  // Tokenize set-name only: each word must appear somewhere in set_name or
+  // set_code. Lets "Tag Team All Stars" match "Tag Team GX All Stars" and
+  // also lets typing a set code (e.g. "sm12a") resolve to the right rows.
+  // card_name stays as a plain substring match because autofill often returns
+  // a long label ("2019 POKEMON JAPANESE …") that would never tokenize-match
+  // a short catalog name.
+  const setTokens = (set_name ?? '').trim().split(/\s+/).filter(Boolean);
+  const setClauses = setTokens.map(t => sql`AND (set_name ILIKE ${'%' + t + '%'} OR set_code ILIKE ${'%' + t + '%'})`);
 
   const rows = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string }>`
     SELECT id, sku, card_name, set_name, set_code, card_number, language
@@ -650,7 +648,7 @@ export async function searchCatalog(userId: string, params: {
     WHERE user_id = ${userId}
       AND game = 'pokemon'
       ${qPattern ? sql`AND (card_name ILIKE ${qPattern} OR sku ILIKE ${qPattern})` : sql``}
-      ${cardNameClauses.length ? sql.join(cardNameClauses, sql` `) : sql``}
+      ${card_name ? sql`AND card_name ILIKE ${'%' + card_name + '%'}` : sql``}
       ${setClauses.length ? sql.join(setClauses, sql` `) : sql``}
       ${card_number ? sql`AND LTRIM(card_number, '0') = LTRIM(${card_number.split('/')[0].trim()}, '0')` : sql``}
       ${language  ? sql`AND language = ${language.toUpperCase()}` : sql``}
