@@ -1577,9 +1577,9 @@ export function InventorySummary() {
   const isLoading = showEmpty ? emptyLoading : summaryLoading;
 
   // Derive filter options from data
-  const languageOptions = [...new Set(rows.map((r) => r.language))].sort();
+  const languageOptions = [...new Set(rows.map((r) => r.language).filter(Boolean) as string[])].sort();
   const rarityOptions = [...new Set(rows.map((r) => r.rarity).filter(Boolean) as string[])].sort();
-  const companyOptions = [...new Set(rows.map((r) => r.company))].sort();
+  const companyOptions = [...new Set(rows.map((r) => r.company).filter(Boolean) as string[])].sort();
 
   // Filter by search + column filters
   const filtered = rows.filter((r) => {
