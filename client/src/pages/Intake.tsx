@@ -790,8 +790,14 @@ function ReceiveModal({
 
   function set(k: string, v: string) { setForm((f) => ({ ...f, [k]: v })); }
 
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     onSave({
       order_number: form.order_number || undefined,
       received_at:  form.received_at,
@@ -828,7 +834,7 @@ function ReceiveModal({
 
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-        <Button type="submit" size="sm">Mark Received</Button>
+        <Button type="submit" size="sm" disabled={submitting}>{submitting ? 'Saving…' : 'Mark Received'}</Button>
       </div>
     </form>
   );
