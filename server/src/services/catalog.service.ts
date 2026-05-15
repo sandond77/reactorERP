@@ -633,14 +633,25 @@ export async function searchCatalog(userId: string, params: {
   // Convert "1996 charizard" → "%1996%charizard%" so multi-word queries work
   const qPattern = q ? '%' + q.trim().split(/\s+/).join('%') + '%' : null;
 
+  // Token-based filters: each word in the user's query must appear somewhere
+  // in the target column(s). Avoids over-narrowing when the autofill returns
+  // a partial label ("Tag Team All Stars") that isn't a contiguous substring
+  // of the catalog name ("Tag Team GX All Stars").
+  const cardNameTokens = (card_name ?? '').trim().split(/\s+/).filter(Boolean);
+  const setTokens      = (set_name  ?? '').trim().split(/\s+/).filter(Boolean);
+
+  const cardNameClauses = cardNameTokens.map(t => sql`AND card_name ILIKE ${'%' + t + '%'}`);
+  // Each token must hit set_name OR set_code (so typing "sm12a" in set field works).
+  const setClauses      = setTokens.map(t => sql`AND (set_name ILIKE ${'%' + t + '%'} OR set_code ILIKE ${'%' + t + '%'})`);
+
   const rows = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string }>`
     SELECT id, sku, card_name, set_name, set_code, card_number, language
     FROM card_catalog
     WHERE user_id = ${userId}
       AND game = 'pokemon'
       ${qPattern ? sql`AND (card_name ILIKE ${qPattern} OR sku ILIKE ${qPattern})` : sql``}
-      ${card_name ? sql`AND card_name ILIKE ${'%' + card_name + '%'}` : sql``}
-      ${set_name  ? sql`AND set_name  ILIKE ${'%' + set_name  + '%'}` : sql``}
+      ${cardNameClauses.length ? sql.join(cardNameClauses, sql` `) : sql``}
+      ${setClauses.length ? sql.join(setClauses, sql` `) : sql``}
       ${card_number ? sql`AND LTRIM(card_number, '0') = LTRIM(${card_number.split('/')[0].trim()}, '0')` : sql``}
       ${language  ? sql`AND language = ${language.toUpperCase()}` : sql``}
     ORDER BY card_name, set_name
