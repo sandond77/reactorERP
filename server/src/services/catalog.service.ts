@@ -428,111 +428,50 @@ export async function getInventorySummary(userId: string) {
     qty_listed: number;
     catalog_id: string | null;
   }>`
-    WITH pending AS (
-      -- Unallocated lot quantity per catalog_id: cards bought but no
-      -- inspection line yet. Excludes cancelled lots.
-      SELECT
-        rp.catalog_id,
-        SUM(rp.card_count - COALESCE(alloc.qty, 0))::int AS qty_pending
-      FROM raw_purchases rp
-      LEFT JOIN (
-        SELECT raw_purchase_id, SUM(quantity)::int AS qty
-        FROM card_instances
-        WHERE user_id = ${userId}
-        GROUP BY raw_purchase_id
-      ) alloc ON alloc.raw_purchase_id = rp.id
-      WHERE rp.user_id = ${userId}
-        AND rp.status != 'cancelled'
-        AND rp.catalog_id IS NOT NULL
-      GROUP BY rp.catalog_id
-      HAVING SUM(rp.card_count - COALESCE(alloc.qty, 0)) > 0
-    ),
-    instance_rows AS (
-      SELECT
-        COALESCE(cc.game, 'pokemon')                     AS game,
-        cc.sku,
-        COALESCE(ci.card_name_override, cc.card_name)   AS card_name,
-        COALESCE(cc.set_name,  ci.set_name_override)    AS set_name,
-        cc.set_code,
-        COALESCE(cc.card_number, ci.card_number_override) AS card_number,
-        cc.rarity,
-        cc.variant,
-        COALESCE(cc.language, ci.language)              AS language,
-        sd.company,
-        sd.grade,
-        sd.grade_label,
-        COALESCE(SUM(ci.quantity), 0)::int                                                    AS qty_total,
-        COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status != 'sold'), 0)::int                  AS qty_unsold,
-        COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'sold'), 0)::int                   AS qty_sold,
-        SUM(ci.purchase_cost + COALESCE(sd.grading_cost, 0))::int                              AS total_cost,
-        AVG(ci.purchase_cost + COALESCE(sd.grading_cost, 0))::int                              AS avg_cost,
-        COUNT(*) FILTER (WHERE l.id IS NOT NULL)::int                                          AS qty_listed,
-        ci.catalog_id
-      FROM card_instances ci
-      LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
-      LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
-      LEFT JOIN LATERAL (
-        SELECT id FROM listings
-        WHERE card_instance_id = ci.id
-          AND listing_status = 'active'
-        ORDER BY created_at DESC LIMIT 1
-      ) l ON true
-      WHERE ci.user_id = ${userId}
-      GROUP BY
-        cc.game,
-        cc.sku, cc.card_name, ci.card_name_override,
-        cc.set_name, ci.set_name_override,
-        cc.set_code, cc.card_number, ci.card_number_override,
-        cc.rarity, cc.variant, cc.language, ci.language,
-        sd.company, sd.grade, sd.grade_label,
-        ci.catalog_id
-    ),
-    pending_only_rows AS (
-      -- Catalog entries that have pending lot allocations but zero inspected
-      -- card_instances yet. Surface them as a synthetic row so the part
-      -- doesn't disappear from the Part Numbers manager.
-      SELECT
-        cc.game,
-        cc.sku,
-        cc.card_name,
-        cc.set_name,
-        cc.set_code,
-        cc.card_number,
-        cc.rarity,
-        cc.variant,
-        cc.language,
-        NULL::text  AS company,
-        NULL::int   AS grade,
-        NULL::text  AS grade_label,
-        0::int      AS qty_total,
-        0::int      AS qty_unsold,
-        0::int      AS qty_sold,
-        NULL::int   AS total_cost,
-        NULL::int   AS avg_cost,
-        0::int      AS qty_listed,
-        cc.id       AS catalog_id
-      FROM card_catalog cc
-      INNER JOIN pending p ON p.catalog_id = cc.id
-      WHERE cc.user_id = ${userId}
-        AND NOT EXISTS (
-          SELECT 1 FROM card_instances ci
-          WHERE ci.catalog_id = cc.id AND ci.user_id = ${userId}
-        )
-    )
     SELECT
-      r.*,
-      COALESCE(p.qty_pending, 0) AS qty_pending
-    FROM (
-      SELECT * FROM instance_rows
-      UNION ALL
-      SELECT * FROM pending_only_rows
-    ) r
-    LEFT JOIN pending p ON p.catalog_id = r.catalog_id
+      COALESCE(cc.game, 'pokemon')                     AS game,
+      cc.sku,
+      COALESCE(ci.card_name_override, cc.card_name)   AS card_name,
+      COALESCE(cc.set_name,  ci.set_name_override)    AS set_name,
+      cc.set_code,
+      COALESCE(cc.card_number, ci.card_number_override) AS card_number,
+      cc.rarity,
+      cc.variant,
+      COALESCE(cc.language, ci.language)              AS language,
+      sd.company,
+      sd.grade,
+      sd.grade_label,
+      COALESCE(SUM(ci.quantity), 0)::int                                                    AS qty_total,
+      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status != 'sold'), 0)::int                  AS qty_unsold,
+      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'sold'), 0)::int                   AS qty_sold,
+      0::int                                                                                 AS qty_pending,
+      SUM(ci.purchase_cost + COALESCE(sd.grading_cost, 0))::int                              AS total_cost,
+      AVG(ci.purchase_cost + COALESCE(sd.grading_cost, 0))::int                              AS avg_cost,
+      COUNT(*) FILTER (WHERE l.id IS NOT NULL)::int                                          AS qty_listed,
+      ci.catalog_id
+    FROM card_instances ci
+    LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    LEFT JOIN LATERAL (
+      SELECT id FROM listings
+      WHERE card_instance_id = ci.id
+        AND listing_status = 'active'
+      ORDER BY created_at DESC LIMIT 1
+    ) l ON true
+    WHERE ci.user_id = ${userId}
+    GROUP BY
+      cc.game,
+      cc.sku, cc.card_name, ci.card_name_override,
+      cc.set_name, ci.set_name_override,
+      cc.set_code, cc.card_number, ci.card_number_override,
+      cc.rarity, cc.variant, cc.language, ci.language,
+      sd.company, sd.grade, sd.grade_label,
+      ci.catalog_id
     ORDER BY
-      r.sku NULLS LAST,
-      r.card_name,
-      r.company,
-      r.grade DESC NULLS LAST
+      cc.sku NULLS LAST,
+      card_name,
+      sd.company,
+      sd.grade DESC NULLS LAST
   `.execute(db);
 
   return rows.rows;
