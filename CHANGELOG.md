@@ -1,5 +1,28 @@
 # Reactor — Changelog
 
+## May 14, 2026
+
+### Features
+
+**Purchases**
+- **Uncancel button** for cancelled rows on the Purchases page — hover-reveal `RotateCcw` icon flips the purchase back to Ordered. Same UX pattern as the Unreceive button. A mistakenly-cancelled purchase isn't dead-ended anymore.
+
+**Add Card / Add Slab consistency**
+- Add Card (raw) now uses the shared **`PartNumberField`** component — same auto-detect + manual search dropdown + inline "Create new part #" flow that Intake's Add Purchase, Trades' Add Incoming Card, and Edit Purchase already had. You can now type a partial card name and pick from a catalog dropdown instead of having to fill in name/set/# perfectly to trigger auto-match.
+
+### Fixes
+
+**Inspection / Purchases**
+- Cancelled purchases no longer appear on the Inspection page (any tab). The All tab used to leak them in because no status filter was applied — added an explicit `exclude_cancelled` filter that Inspection always passes.
+- `addInspectionLine` now rejects with a clear 409 when the parent purchase is `cancelled`. Previously a cancelled lot still accepted inspection lines silently.
+
+**Forms — double-submit prevention**
+- **Add Purchase** Save button now has a ref-based double-click guard (same as the Inspection Add Line modal). Ref mutates synchronously so a rapid second click can't double-add before React renders the disabled state.
+- **Mark Received** form got the same ref-based guard.
+- Audited the rest of the app's submit buttons; everything else (Add Slab, Add Card, Sales, Grading, Listings, Expenses, Locations) was already disable-on-submit. SubReturns "Review & Process" just opens a review modal — the real Confirm Return inside is already isPending-disabled.
+
+---
+
 ## May 13, 2026
 
 ### Features
