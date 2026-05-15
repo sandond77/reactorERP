@@ -49,7 +49,7 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const frontRef = useRef<HTMLInputElement>(null);
   const backRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { register, handleSubmit, setValue, getValues, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
     defaultValues: { card_game: 'pokemon', language: 'EN', purchase_type: 'raw', quantity: 1, currency: 'USD' },
   });
