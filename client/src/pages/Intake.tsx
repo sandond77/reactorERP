@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Plus, X, PackageCheck, Ban, ImagePlus, Sparkles, Loader2, RotateCcw } from 'lucide-react';
 import { api } from '../lib/api';
@@ -327,8 +327,14 @@ function PurchaseForm({
     return e;
   }
 
+  // Ref-based guard: rapid double-clicks both see the stale state value in
+  // their closures before the re-render lands. Ref mutates synchronously.
+  const submittingRef = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (submittingRef.current) return;
     const errs = validate();
     if (Object.keys(errs).length) {
       setErrors(errs);
@@ -336,6 +342,9 @@ function PurchaseForm({
       toast.error(firstMsg);
       return;
     }
+
+    submittingRef.current = true;
+    setSubmitting(true);
 
     if (lineItems && lineItems.length > 0) {
       const fxRate = parseFloat(form.fx_rate);
@@ -739,7 +748,7 @@ function PurchaseForm({
         )}
         <div className={`flex gap-2 ${onDelete ? '' : 'ml-auto'}`}>
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-          <Button type="submit" size="sm">Save</Button>
+          <Button type="submit" size="sm" disabled={submitting}>{submitting ? 'Saving…' : 'Save'}</Button>
         </div>
       </div>
 

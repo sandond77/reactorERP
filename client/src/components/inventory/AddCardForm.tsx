@@ -1,15 +1,15 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Sparkles, Loader2, CheckCircle, AlertCircle, ImagePlus, X } from 'lucide-react';
+import { Sparkles, Loader2, ImagePlus, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { useLocations } from '../../hooks/useLocations';
-import { AddPartModal } from '../catalog/AddPartModal';
+import { PartNumberField, type CatalogMatch } from '../catalog/PartNumberField';
 
 const schema = z.object({
   card_name_override: z.string().min(1, 'Card name required'),
@@ -40,9 +40,7 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const [searchLabel, setSearchLabel] = useState('');
   const [autoFilling, setAutoFilling] = useState(false);
   const [catalogId, setCatalogId] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, any> } | null>(null);
-  const [showCreatePartModal, setShowCreatePartModal] = useState(false);
+  const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(null);
   const [unnumbered, setUnnumbered] = useState(false);
   const [frontFile, setFrontFile] = useState<File | null>(null);
   const [backFile, setBackFile] = useState<File | null>(null);
@@ -60,59 +58,12 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const purchaseCost = watch('purchase_cost');
   const quantity = watch('quantity');
 
-  // Auto-detect part number from manual entry. Matches PartNumberField's
-  // behavior: debounced /catalog/search whenever the user types name/set/#,
-  // auto-pick a single match, otherwise leave partNumber null so the
-  // existing badge UI can decide what to show. Only runs when the user is
-  // typing manually — autoFill() sets partNumber directly and we shouldn't
-  // override that.
-  const watchedName   = watch('card_name_override');
-  const watchedSet    = watch('set_name_override');
-  const watchedNumber = watch('card_number_override');
-  const watchedLang   = watch('language');
-  useEffect(() => {
-    if (autoFilling) return;
-    const name = (watchedName ?? '').trim();
-    const set  = (watchedSet  ?? '').trim();
-    const num  = (watchedNumber ?? '').trim();
-    if (!name && !set && !num) { setPartNumber(null); return; }
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      try {
-        const params: Record<string, string> = { language: watchedLang || 'EN' };
-        if (name) params.card_name   = name;
-        if (set)  params.set_name    = set;
-        if (num)  params.card_number = num;
-        const res = await api.get('/catalog/search', { params });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const matches = (res.data?.data ?? []) as Array<any>;
-        if (cancelled) return;
-        if (matches.length === 1) {
-          const m = matches[0];
-          setCatalogId(m.id);
-          setPartNumber({ sku: m.sku ?? null, exists: true, catalogData: m });
-        } else if (matches.length === 0 && num) {
-          // No match but the user has enough info to potentially create a
-          // new part — show the badge in "new part" state. catalogData
-          // carries set_name + card_name + language so createCatalogEntry
-          // has the values it needs (set_code may still be missing).
-          setCatalogId(null);
-          setPartNumber({
-            sku: null,
-            exists: false,
-            catalogData: { card_name: name, set_name: set, card_number: num, language: watchedLang || 'EN' },
-          });
-        } else {
-          // Multiple matches — clear so the user knows more disambiguation
-          // is needed. (No multi-pick UI in this form yet.)
-          setPartNumber(null);
-        }
-      } catch {
-        if (!cancelled) setPartNumber(null);
-      }
-    }, 350);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [watchedName, watchedSet, watchedNumber, watchedLang, autoFilling]);
+  // PartNumberField watches these form values directly and runs its own
+  // debounced /catalog/search + auto-pick + manual search dropdown.
+  const watchedName   = watch('card_name_override') ?? '';
+  const watchedSet    = watch('set_name_override') ?? '';
+  const watchedNumber = watch('card_number_override') ?? '';
+  const watchedLang   = watch('language') ?? 'EN';
   const isBulk = purchaseType === 'bulk';
   const costPerCard = isBulk && quantity > 1 && purchaseCost > 0
     ? (purchaseCost / quantity).toFixed(2)
@@ -131,8 +82,20 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
         if (s.card_number) setValue('card_number_override', s.card_number);
         if (s.rarity) setValue('rarity', s.rarity);
         if (s.language) setValue('language', s.language === 'JP' ? 'JP' : 'EN');
-        setCatalogId(s.catalog_id ?? null);
-        setPartNumber({ sku: s.sku ?? null, exists: !!s.catalog_exists, catalogData: s });
+        if (s.catalog_exists && s.catalog_id) {
+          setCatalogId(s.catalog_id);
+          setCatalogMatch({
+            id: s.catalog_id,
+            sku: s.sku ?? null,
+            card_name: s.catalog_card_name || s.card_name || '',
+            set_name: s.set_name ?? '',
+            card_number: s.card_number ?? null,
+            language: s.language === 'JP' ? 'JP' : 'EN',
+          });
+        } else {
+          setCatalogId(null);
+          setCatalogMatch(null);
+        }
         toast.success('Auto-filled from card database');
       } else {
         toast('No match found — fill manually', { icon: '🔍' });
@@ -143,12 +106,6 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
       setAutoFilling(false);
     }
   }, [setValue]);
-
-  // Opens AddPartModal so the user can review/edit the SKU + set code +
-  // game/language before commit. Same flow used by Intake Edit Purchase
-  // (PartNumberField) and Trades — single source of truth for "create
-  // catalog entry" instead of three duplicated inline POSTs.
-  const openCreatePart = () => setShowCreatePartModal(true);
 
   function pickImage(side: 'front' | 'back', file: File) {
     const url = URL.createObjectURL(file);
@@ -209,19 +166,12 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
         </button>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <Input
-          label="Card Name"
-          placeholder="e.g. 1996 Pokemon Japanese Basic 6 Charizard-Holo"
-          {...register('card_name_override')}
-          error={errors.card_name_override?.message}
-        />
-        {partNumber && !partNumber.exists && (
-          <p className="text-xs text-yellow-500/80 leading-snug">
-            New part — enter the established card name
-          </p>
-        )}
-      </div>
+      <Input
+        label="Card Name"
+        placeholder="e.g. 1996 Pokemon Japanese Basic 6 Charizard-Holo"
+        {...register('card_name_override')}
+        error={errors.card_name_override?.message}
+      />
 
       <div className="grid grid-cols-3 gap-3">
         <Input label="Set Name" placeholder="e.g. Base Set" {...register('set_name_override')} />
@@ -248,41 +198,21 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
         <Input label="Rarity" placeholder="e.g. Holo" {...register('rarity')} />
       </div>
 
-      {partNumber && (
-        <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm border ${partNumber.exists ? 'bg-green-950/40 border-green-800/50' : 'bg-yellow-950/40 border-yellow-700/50'}`}>
-          <div className="flex items-center gap-2 min-w-0">
-            {partNumber.exists
-              ? <CheckCircle size={14} className="text-green-400 shrink-0" />
-              : <AlertCircle size={14} className="text-yellow-400 shrink-0" />}
-            {partNumber.sku
-              ? <span className="font-mono text-xs text-zinc-200 truncate">{partNumber.sku}</span>
-              : <span className="text-xs text-zinc-400 italic">Part number unknown</span>}
-            <span className={`text-xs ${partNumber.exists ? 'text-green-500' : 'text-yellow-500'} shrink-0`}>
-              {partNumber.exists ? 'Part exists' : partNumber.sku ? 'New part — not in catalog' : 'No part found'}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            {!partNumber.exists && (
-              <button
-                type="button"
-                onClick={openCreatePart}
-                disabled={!partNumber.catalogData?.card_name}
-                className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
-              >
-                Create part
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setPartNumber(null)}
-              title="Clear part number match"
-              className="text-zinc-600 hover:text-zinc-300 transition-colors"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        </div>
-      )}
+      <PartNumberField
+        form={{ card_name: watchedName, set_name: watchedSet, card_number: watchedNumber, language: watchedLang }}
+        catalogMatch={catalogMatch}
+        catalogId={catalogId}
+        onSelect={(m) => {
+          setCatalogMatch(m);
+          setCatalogId(m.id);
+          // Fill any missing form fields from the picked catalog row
+          if (!watchedName && m.card_name) setValue('card_name_override', m.card_name);
+          if (!watchedSet && m.set_name) setValue('set_name_override', m.set_name);
+          if (!watchedNumber && m.card_number) setValue('card_number_override', m.card_number);
+          if (m.language) setValue('language', m.language === 'JP' ? 'JP' : 'EN');
+        }}
+        onClear={() => { setCatalogMatch(null); setCatalogId(null); }}
+      />
 
       <div className="grid grid-cols-2 gap-3">
         <Select label="Game" {...register('card_game')}>
@@ -404,37 +334,6 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
         </Button>
       </div>
 
-      {showCreatePartModal && (
-        <AddPartModal
-          prefill={{
-            card_name:   getValues('card_name_override') || partNumber?.catalogData?.card_name,
-            set_name:    getValues('set_name_override')  || partNumber?.catalogData?.set_name,
-            card_number: getValues('card_number_override') || partNumber?.catalogData?.card_number,
-            language:    getValues('language') || partNumber?.catalogData?.language || 'EN',
-          }}
-          onClose={() => setShowCreatePartModal(false)}
-          onCreated={(part) => {
-            setShowCreatePartModal(false);
-            setCatalogId(part.id);
-            setPartNumber({
-              sku: part.sku,
-              exists: true,
-              catalogData: {
-                ...partNumber?.catalogData,
-                card_name: part.card_name,
-                set_name: part.set_name,
-                card_number: part.card_number ?? '',
-                language: part.language,
-              },
-            });
-            // Mirror the modal's choices back to the form so submit uses them
-            if (part.card_name)   setValue('card_name_override', part.card_name);
-            if (part.set_name)    setValue('set_name_override',  part.set_name);
-            if (part.card_number) setValue('card_number_override', part.card_number);
-            toast.success('Part number created');
-          }}
-        />
-      )}
     </form>
   );
 }
