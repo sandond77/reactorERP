@@ -1,5 +1,36 @@
 # Reactor — Changelog
 
+## May 15, 2026
+
+### Features
+
+**Part Numbers manager**
+- Now **counts raw cards** in Total/Unsold/Sold — previously it was inner-joined to `slab_details`, hiding every raw `card_instance` from the page. Raw rows aggregate under a single "no grade / no company" row per part number.
+
+**Catalog / Set codes**
+- **Standardized set code format** to "generation - set" everywhere. EN promo codes `PROMO-XY`, `PROMO-BW`, `PROMO-HGSS`, `PROMO-DP`, `PROMO-EX`, `PROMO-WOTC` renamed to `XY-P`, `BW-P`, `HGSS-P`, `DP-P`, `EX-P`, `WOTC-P` (consistent with `SV-P`, `SWSH-P`, `SM-P`). Migration 049 rewrites existing `card_catalog.set_code` and `sku` rows, dedup'ing first when both the old and new code already exist.
+- **Mega era carved out** — JP M-series sets (M1L, M1S, M2, M2a, M3, M4, M5, Mbg) now show under their own *Mega Series Era* group in the Set Codes manager, separate from Scarlet & Violet. EN side gets *Mega Evolution Era*.
+
+### Fixes
+
+**Part # search (Intake/Add Card/Edit Purchase)**
+- **`card_number` over-narrowing** — exact-equality match meant "051" wouldn't find a catalog row stored as "51". Now strips leading zeros on both sides.
+- **Set name over-narrowing** — substring match meant "Tag Team All Stars" wouldn't match "Tag Team GX All Stars". Now tokenized: each word in the set field must appear in `set_name` *or* `set_code`. As a side effect, typing a set code (`sm12a`) into the Set Name field also resolves.
+
+**Purchase → inspection-line backfill**
+- Editing a purchase and saving now **propagates `catalog_id`, `card_name`, `set_name`, and `card_number`** down to any child inspection lines whose corresponding column is still NULL. Runs on every save (not just when those fields change) so a re-save fixes lines created before the parent had a part #.
+
+**Inspection page**
+- **Sort headers actually sort** — the click handler was hardcoded to a no-op; clicking did nothing. Now wires `sortCol`/`sortDir`/`handleSort` matching the Purchases page pattern, persists to filter-store, threads through to the server.
+
+**Part Numbers manager crash**
+- Page no longer crashes with `Cannot read properties of null (reading 'toLowerCase')` when raw rows are present — `companyOptions` / `languageOptions` now strip nulls before going into the filter dropdown.
+
+### Migrations
+- `049_rename_en_promo_set_codes` — renames `PROMO-XX` set codes to `XX-P` in both `set_codes` and `card_catalog`, plus rewrites `card_catalog.sku` prefixes. Deletes collisions first so the rename can't trip the unique constraint.
+
+---
+
 ## May 14, 2026
 
 ### Features
