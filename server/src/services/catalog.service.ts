@@ -595,6 +595,26 @@ export async function searchCatalog(userId: string, params: {
     LIMIT ${limit}
   `.execute(db);
 
+  // Fallback: if the set filter knocked out all matches but we have
+  // card_name + card_number (usually distinctive enough), retry without
+  // set_name. This rescues cases where the autofill returned a set label
+  // that doesn't exist in the user's catalog (e.g. "Legendary Holo
+  // Collection" when the row is stored as "Legendary Shine Collection").
+  if (rows.rows.length === 0 && setClauses.length > 0 && card_name && card_number) {
+    const retry = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string }>`
+      SELECT id, sku, card_name, set_name, set_code, card_number, language
+      FROM card_catalog
+      WHERE user_id = ${userId}
+        AND game = 'pokemon'
+        AND card_name ILIKE ${'%' + card_name + '%'}
+        AND LTRIM(card_number, '0') = LTRIM(${card_number.split('/')[0].trim()}, '0')
+        ${language ? sql`AND language = ${language.toUpperCase()}` : sql``}
+      ORDER BY card_name, set_name
+      LIMIT ${limit}
+    `.execute(db);
+    return retry.rows;
+  }
+
   return rows.rows;
 }
 
