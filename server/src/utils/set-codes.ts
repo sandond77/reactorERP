@@ -266,7 +266,7 @@ export const JP_SETS: SetEntry[] = [
   { code: 'XY12',     names: ['cruel traitor'] },
   { code: 'XY-CP2',   names: ['legendary shine collection', 'cp2'] },
   { code: 'XY-CP3',   names: ['pokekyun collection', 'cp3'] },
-  { code: 'XY-CP4',   names: ['hyper metal chain deck', 'cp4'] },
+  { code: 'XY-CP4',   names: ['champions premium pack', 'cp4'] },
   { code: 'XY-CP5',   names: ['mythical & legendary dream shine collection', 'cp5'] },
   { code: 'XY-CP6',   names: ['20th anniversary', 'cp6'] },
   { code: 'XY-P',    names: ['xy promo jp', 'xy-p promo', 'xy-p'] },
