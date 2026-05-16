@@ -5,7 +5,7 @@ import axios from 'axios';
 import { sql } from 'kysely';
 import { env } from '../config/env';
 import { db } from '../config/database';
-import { lookupSetCode, generatePartNumber, EN_SETS, JP_SETS } from '../utils/set-codes';
+import { lookupSetCode, lookupSetName, generatePartNumber, EN_SETS, JP_SETS } from '../utils/set-codes';
 import { auditContext } from '../utils/audit-context';
 import { normalizeGradeLabel } from '../utils/grade-labels';
 import { createRawPurchase, saveReceiptUrl as saveRawPurchaseReceiptUrl } from './raw-purchases.service';
@@ -279,7 +279,17 @@ async function enrichWithSku(userId: string, suggestions: CardInfoResult[]): Pro
         row = await q.limit(1).executeTakeFirst() ?? undefined;
       }
     }
-    if (!row) return { ...s, sku, catalog_exists: false };
+    // Canonicalize set_name + return resolved set_code so the form fills in
+    // with the seeded values, not whatever the AI hallucinated. Fixes cases
+    // like CP2 → AI returns "Legendary Holo Collection" but the catalog row
+    // uses "Legendary Shine Collection" (canonical JP name).
+    const canonicalSetName = lookupSetName(lang, setCode) ?? s.set_name;
+    const enriched = {
+      ...s,
+      set_code: setCode,
+      set_name: canonicalSetName,
+    };
+    if (!row) return { ...enriched, sku, catalog_exists: false };
     // Use the established card name from an existing inventory entry for this SKU
     const established = await db
       .selectFrom('card_instances')
@@ -291,7 +301,7 @@ async function enrichWithSku(userId: string, suggestions: CardInfoResult[]): Pro
       .executeTakeFirst();
     const catalog_card_name = established?.card_name_override ?? row.card_name ?? undefined;
     const resolvedSku = row.sku ?? sku;
-    return { ...s, sku: resolvedSku, catalog_id: row.id, catalog_exists: true, catalog_card_name };
+    return { ...enriched, sku: resolvedSku, catalog_id: row.id, catalog_exists: true, catalog_card_name };
   }));
 }
 
