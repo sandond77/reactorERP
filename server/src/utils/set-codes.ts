@@ -163,12 +163,12 @@ export const EN_SETS: SetEntry[] = [
   { code: 'SV-P',    names: ['scarlet & violet promo', 'scarlet & violet promos', 'sv promo', 'sv promos', 'sv black star promo', 'sv black star promos'] },
   { code: 'SWSH-P',  names: ['sword & shield promo', 'sword & shield promos', 'swsh promo', 'swsh promos', 'swsh black star promo', 'swsh black star promos', 'sword shield promo'] },
   { code: 'SM-P',    names: ['sun & moon promo', 'sun & moon promos', 'sm promo', 'sm promos', 'sm black star promo', 'sm black star promos'] },
-  { code: 'PROMO-XY',   names: ['xy promo', 'xy promos', 'xy black star promo', 'xy black star promos', 'xy-p'] },
-  { code: 'PROMO-BW',   names: ['bw promo', 'bw promos', 'bw black star promo', 'bw black star promos', 'black white promo', 'bw-p'] },
-  { code: 'PROMO-HGSS', names: ['hgss promo', 'hgss promos', 'heartgold soulsilver promo', 'hs promo', 'hs-p'] },
-  { code: 'PROMO-DP',   names: ['dp promo', 'dp promos', 'dp black star promo', 'dp-p'] },
-  { code: 'PROMO-EX',   names: ['ex promo en', 'ex black star promo en', 'wotc ex promo'] },
-  { code: 'PROMO-WOTC', names: ['wotc black star promo', 'wotc promos', 'wotc promo', 'wizards black star promo', 'wotc-p'] },
+  { code: 'XY-P',   names: ['xy promo', 'xy promos', 'xy black star promo', 'xy black star promos', 'xy-p'] },
+  { code: 'BW-P',   names: ['bw promo', 'bw promos', 'bw black star promo', 'bw black star promos', 'black white promo', 'bw-p'] },
+  { code: 'HGSS-P', names: ['hgss promo', 'hgss promos', 'heartgold soulsilver promo', 'hs promo', 'hs-p'] },
+  { code: 'DP-P',   names: ['dp promo', 'dp promos', 'dp black star promo', 'dp-p'] },
+  { code: 'EX-P',   names: ['ex promo en', 'ex black star promo en', 'wotc ex promo'] },
+  { code: 'WOTC-P', names: ['wotc black star promo', 'wotc promos', 'wotc promo', 'wizards black star promo', 'wotc-p'] },
 ];
 
 // ── Japanese sets ─────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ function deriveEra(code: string, lang: 'EN' | 'JP'): string {
     if (/^SM/.test(code)) return 'Sun & Moon';
     if (/^SWSH/.test(code)) return 'Sword & Shield';
     if (/^SV/.test(code)) return 'Scarlet & Violet';
+    if (/^M\d|^Mb/i.test(code)) return 'Mega Evolution Era';
     return 'Other';
   }
   // JP
@@ -30,7 +31,8 @@ function deriveEra(code: string, lang: 'EN' | 'JP'): string {
   if (/^(XY)/.test(code)) return 'XY';
   if (/^(SM|S0)/.test(code)) return 'Sun & Moon';
   if (/^(S\d|S-P)/.test(code)) return 'Sword & Shield';
-  if (/^(SV|M\d|Cl|Sv|Mb)/i.test(code)) return 'Scarlet & Violet';
+  if (/^M\d|^Mb/i.test(code)) return 'Mega Series Era';
+  if (/^(SV|Cl|Sv)/i.test(code)) return 'Scarlet & Violet';
   return 'Other';
 }
 
