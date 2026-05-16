@@ -13,11 +13,14 @@ import { Modal } from '../components/ui/Modal';
 import toast from 'react-hot-toast';
 
 type InspectionState = 'needs' | 'done' | 'all';
+type SortDir = 'asc' | 'desc';
 
 const DEFAULTS = {
   search: '',
   fType:  null as PurchaseType | null,
   state:  'needs' as InspectionState,
+  sortCol: null as string | null,
+  sortDir: 'desc' as SortDir,
 };
 
 export function Inspection() {
@@ -31,6 +34,14 @@ export function Inspection() {
   const [drillRow, setDrillRow]       = useState<PurchaseRow | null>(null);
   const [revertRow, setRevertRow]     = useState<PurchaseRow | null>(null);
   const [unreceiveRow, setUnreceiveRow] = useState<PurchaseRow | null>(null);
+  const [sortCol, setSortCol]         = useState<string | null>(saved.sortCol);
+  const [sortDir, setSortDir]         = useState<SortDir>(saved.sortDir);
+
+  function handleSort(col: string) {
+    if (sortCol === col) setSortDir((d) => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('desc'); }
+    setPage(1);
+  }
 
   const MINS = {
     pid:     colMinWidth('ID',         true, false),
@@ -67,8 +78,8 @@ export function Inspection() {
   }, [search]);
 
   useEffect(() => {
-    saveFilters('inspection', { search, fType, state: stateTab });
-  }, [search, fType, stateTab]);
+    saveFilters('inspection', { search, fType, state: stateTab, sortCol, sortDir });
+  }, [search, fType, stateTab, sortCol, sortDir]);
 
   const params = {
     page,
@@ -76,6 +87,8 @@ export function Inspection() {
     search:           debouncedSearch || undefined,
     inspection_state: stateTab === 'all' ? undefined : stateTab,
     type:             fType ?? undefined,
+    sort_by:          sortCol ?? undefined,
+    sort_dir:         sortDir,
     // Inspection page never deals with cancelled lots — reversion happens
     // on the Purchases page.
     exclude_cancelled: true,
@@ -107,7 +120,7 @@ export function Inspection() {
   const hasActiveFilters = !!debouncedSearch || fType !== null;
   function clearFilters() { setSearch(''); setFType(null); setPage(1); }
 
-  const sh = { sortCol: null, sortDir: 'asc' as const, onSort: () => {} };
+  const sh = { sortCol, sortDir, onSort: handleSort };
 
   if (drillRow) {
     return <InspectionPanel purchase={drillRow} onClose={() => setDrillRow(null)} />;
