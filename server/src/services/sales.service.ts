@@ -20,12 +20,15 @@ export interface RecordSaleInput {
   unique_id?: string;
   unique_id_2?: string;
   sold_at?: Date;
+  /** Partial-sale quantity for raw lots with quantity > 1. Omit (or pass the
+   *  full row quantity) to mark the whole instance sold. */
+  quantity?: number;
 }
 
 export async function recordSale(userId: string, input: RecordSaleInput) {
   const card = await db
     .selectFrom('card_instances')
-    .select(['id', 'status', 'is_personal_collection'])
+    .selectAll()
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
     .executeTakeFirst();
@@ -34,7 +37,55 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
   if (card.status === 'sold') throw new AppError(409, 'Card already marked as sold');
   if (card.is_personal_collection) throw new AppError(400, 'Personal collection cards cannot be sold. Remove from personal collection first.');
 
-  const totalCostBasis = await computeCostBasis(input.card_instance_id);
+  // Partial-sale split: if caller asked to sell fewer cards than the row holds,
+  // shave the sold qty off the source row and insert a sibling "sold" row that
+  // the sale will reference. Avoids the old behavior of marking a whole stack
+  // sold when only one copy went out.
+  const sellQty = input.quantity ?? card.quantity;
+  if (sellQty < 1) throw new AppError(400, 'Sale quantity must be at least 1');
+  if (sellQty > card.quantity) throw new AppError(409, `Only ${card.quantity} of these in inventory; can't sell ${sellQty}`);
+
+  let saleCardInstanceId = input.card_instance_id;
+  let isSplit = false;
+  if (sellQty < card.quantity) {
+    isSplit = true;
+    // Shave the sold qty off the source row
+    await db
+      .updateTable('card_instances')
+      .set({ quantity: card.quantity - sellQty })
+      .where('id', '=', input.card_instance_id)
+      .execute();
+    // Insert a sibling sold row with the same identity + the per-card cost basis.
+    // Copy every field we care about so reports/cost calcs see the same data.
+    const sibling = await db
+      .insertInto('card_instances')
+      .values({
+        user_id: userId,
+        catalog_id: card.catalog_id,
+        raw_purchase_id: card.raw_purchase_id,
+        purchase_type: card.purchase_type,
+        card_game: card.card_game,
+        status: 'sold',
+        decision: card.decision,
+        condition: card.condition,
+        quantity: sellQty,
+        purchase_cost: card.purchase_cost,
+        currency: card.currency,
+        language: card.language,
+        card_name_override: card.card_name_override,
+        set_name_override: card.set_name_override,
+        card_number_override: card.card_number_override,
+        location_id: null,
+        notes: card.notes,
+        purchased_at: card.purchased_at,
+        is_personal_collection: card.is_personal_collection,
+      } as any)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    saleCardInstanceId = sibling.id;
+  }
+
+  const totalCostBasis = await computeCostBasis(saleCardInstanceId);
 
   // Auto-resolve card_show_id by sale date when platform=card_show and the
   // caller didn't pass one. Same matching rule as backfillCardShowLinks but
@@ -75,7 +126,7 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
     .insertInto('sales')
     .values({
       user_id: userId,
-      card_instance_id: input.card_instance_id,
+      card_instance_id: saleCardInstanceId,
       listing_id: resolvedListingId,
       card_show_id: resolvedCardShowId,
       platform: input.platform,
@@ -92,11 +143,15 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
     .returningAll()
     .executeTakeFirstOrThrow();
 
-  await db
-    .updateTable('card_instances')
-    .set({ status: 'sold', location_id: null })
-    .where('id', '=', input.card_instance_id)
-    .execute();
+  // Only set status='sold' on the original row when we DIDN'T split it. The
+  // split-off sibling was inserted with status='sold' already.
+  if (!isSplit) {
+    await db
+      .updateTable('card_instances')
+      .set({ status: 'sold', location_id: null })
+      .where('id', '=', input.card_instance_id)
+      .execute();
+  }
 
   if (resolvedListingId) {
     await db

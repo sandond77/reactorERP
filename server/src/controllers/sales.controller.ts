@@ -62,6 +62,7 @@ const recordSaleSchema = z.object({
   unique_id: z.string().optional(),
   unique_id_2: z.string().optional(),
   sold_at: z.string().optional().transform((v) => v ? new Date(v) : undefined),
+  quantity: z.coerce.number().int().positive().optional(),
 });
 
 export async function recordSale(req: Request, res: Response, next: NextFunction) {

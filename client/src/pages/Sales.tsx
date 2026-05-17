@@ -160,6 +160,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [cardShowId, setCardShowId] = useState<string>('');
   const [showArchived, setShowArchived] = useState(false);
   const [strikePrice, setStrikePrice] = useState('');
+  const [rawSaleQty, setRawSaleQty] = useState('1');
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
   const [notes, setNotes] = useState('');
@@ -284,6 +285,15 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const cardId = saleMode === 'raw' ? selectedRawCard?.id : selectedCard?.id;
     if (!cardId) { toast.error('Select a card'); return; }
     if (!strikePrice) { toast.error('Enter a strike price'); return; }
+    // Raw lots can carry quantity > 1; validate the user-entered qty.
+    let qtyToSell: number | undefined;
+    if (saleMode === 'raw' && selectedRawCard) {
+      const max = selectedRawCard.quantity;
+      const qty = parseInt(rawSaleQty || '1', 10);
+      if (!Number.isFinite(qty) || qty < 1) { toast.error('Quantity must be at least 1'); return; }
+      if (qty > max) { toast.error(`Only ${max} of these in inventory; can't sell ${qty}`); return; }
+      qtyToSell = qty;
+    }
     const strikeCents = Math.round(parseFloat(strikePrice) * 100);
     const earningsCents = platform === 'ebay' && orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : strikeCents;
     const feesCents = Math.max(0, strikeCents - earningsCents);
@@ -301,6 +311,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         unique_id: platform === 'ebay' ? (orderNumber || undefined) : undefined,
         unique_id_2: notes || undefined,
         order_details_link: platform === 'ebay' ? (ebayLink || undefined) : undefined,
+        quantity: qtyToSell,
       });
       toast.success('Sale recorded!');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -757,7 +768,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       <div className="relative">
         <Input
           label={saleMode === 'graded' ? 'Cert # or Card Name' : 'Purchase ID or Card Name'}
-          placeholder={saleMode === 'graded' ? 'e.g. 12345678 or Charizard…' : 'e.g. RP-2024-001 or Charizard…'}
+          placeholder={saleMode === 'graded' ? 'e.g. 12345678 or Charizard…' : 'e.g. 2026R117 or Charizard…'}
           value={saleMode === 'graded' ? cardSearch : rawSearch}
           onChange={(e) => saleMode === 'graded' ? setCardSearch(e.target.value) : setRawSearch(e.target.value)}
           autoFocus autoComplete="off"
@@ -850,6 +861,18 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             <div className="flex items-center gap-2">
               <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
               <span className="text-sm text-zinc-300">{selectedRawCard.location_name}</span>
+            </div>
+          )}
+          {selectedRawCard.quantity > 1 && (
+            <div className="flex items-center gap-2 border-t border-zinc-700/50 pt-2">
+              <label className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">Sell qty</label>
+              <input
+                type="number" min={1} max={selectedRawCard.quantity}
+                value={rawSaleQty}
+                onChange={(e) => setRawSaleQty(e.target.value)}
+                className="w-20 px-2 py-1 text-sm bg-zinc-900 border border-zinc-700 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              />
+              <span className="text-[11px] text-zinc-500">of {selectedRawCard.quantity} in this lot</span>
             </div>
           )}
         </div>
