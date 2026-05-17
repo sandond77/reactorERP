@@ -144,7 +144,7 @@ export function RawOverall() {
     sku:               Math.max(MINS.sku,               190),
     card_name:         Math.max(MINS.card_name,          500),
     condition:         Math.max(MINS.condition,           90),
-    qty:               Math.max(MINS.qty,                  60),
+    qty:               Math.max(MINS.qty,                 170),
     is_listed:         Math.max(MINS.is_listed,           80),
     listed_price:      Math.max(MINS.listed_price,        80),
     listing:           Math.max(MINS.listing,             55),
