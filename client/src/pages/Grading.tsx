@@ -140,7 +140,7 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Input label="Submitted Date" type="date" value={submittedAt} onChange={(e) => setSubmittedAt(e.target.value)} />
-        <Input label="Grading Cost Per Card (USD)" type="number" step="0.01" min="0" placeholder="0.00"
+        <Input label="Grading Cost Per Card (USD)" type="text" inputMode="decimal" placeholder="0.00"
           value={costPerCard} onChange={(e) => setCostPerCard(e.target.value)} />
       </div>
       <div>
@@ -309,7 +309,7 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
             <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
               value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)}
               className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-            <Input label="Est. Value / Card" type="number" step="0.01" min="0" placeholder="0.00"
+            <Input label="Est. Value / Card" type="text" inputMode="decimal" placeholder="0.00"
               value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)}
               className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
           </div>
@@ -546,13 +546,13 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
 
       <div className="grid grid-cols-2 gap-3">
         <Input label="Quantity *" type="number" min="1" value={form.quantity} onChange={set('quantity')} className={noSpinner} />
-        <Input label="Cost / Card (USD)" type="number" step="0.01" min="0" value={form.purchase_cost} onChange={set('purchase_cost')} placeholder="0.00" className={noSpinner} />
+        <Input label="Cost / Card (USD)" type="text" inputMode="decimal" value={form.purchase_cost} onChange={set('purchase_cost')} placeholder="0.00" className={noSpinner} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800">
         <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
           value={form.expected_grade} onChange={set('expected_grade')} className={noSpinner} />
-        <Input label="Est. Value / Card" type="number" step="0.01" min="0" placeholder="0.00"
+        <Input label="Est. Value / Card" type="text" inputMode="decimal" placeholder="0.00"
           value={form.estimated_value} onChange={set('estimated_value')} className={noSpinner} />
       </div>
 
@@ -615,7 +615,7 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
         </div>
         <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
           value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)} className={noSpinner} />
-        <Input label="Est. Value / Card" type="number" step="0.01" min="0" placeholder="0.00"
+        <Input label="Est. Value / Card" type="text" inputMode="decimal" placeholder="0.00"
           value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)} className={noSpinner} />
       </div>
       <div className="flex justify-end gap-2 pt-1">
@@ -725,7 +725,7 @@ function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void 
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Input label="Submitted Date" type="date" value={submittedAt} onChange={(e) => setSubmittedAt(e.target.value)} />
-        <Input label="Grading Cost Per Card (USD)" type="number" step="0.01" min="0" placeholder="0.00"
+        <Input label="Grading Cost Per Card (USD)" type="text" inputMode="decimal" placeholder="0.00"
           value={costPerCard} onChange={(e) => setCostPerCard(e.target.value)} />
       </div>
       <Input

@@ -276,7 +276,7 @@ function InspectionLineForm({
           </div>
           <div>
             <label className={label}>Cost / Card (USD)</label>
-            <input type="number" step="0.01" value={form.purchase_cost} onChange={(e) => set('purchase_cost', e.target.value)} className={inp} />
+            <input type="text" inputMode="decimal" value={form.purchase_cost} onChange={(e) => set('purchase_cost', e.target.value)} className={inp} />
           </div>
           <div>
             <label className={label}>Currency</label>

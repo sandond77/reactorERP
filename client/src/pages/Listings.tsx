@@ -850,7 +850,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Input label={listingMode === 'set' ? 'Set Price (total)' : 'List Price'} type="number" step="0.01" min="0" placeholder="0.00"
+        <Input label={listingMode === 'set' ? 'Set Price (total)' : 'List Price'} type="text" inputMode="decimal" placeholder="0.00"
           value={price} onChange={(e) => setPrice(e.target.value)} />
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Listed Date</label>
@@ -1028,7 +1028,7 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
         )}
       </div>
 
-      <Input label={isSet ? 'Set Price (total)' : 'List Price'} type="number" step="0.01" min="0" placeholder="0.00"
+      <Input label={isSet ? 'Set Price (total)' : 'List Price'} type="text" inputMode="decimal" placeholder="0.00"
         value={price} onChange={(e) => setPrice(e.target.value)} />
 
       <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">

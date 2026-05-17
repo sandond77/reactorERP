@@ -989,16 +989,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         return platform === 'ebay' ? (
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
-              <Input label={strikeLabel} type="number" step="0.01" min="0" placeholder="0.00"
+              <Input label={strikeLabel} type="text" inputMode="decimal" placeholder="0.00"
                 value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
               {perCard && <p className="text-[11px] text-zinc-500">≈ ${perCard} per card</p>}
             </div>
-            <Input label="Order Earnings (After Fees)" type="number" step="0.01" min="0" placeholder="0.00"
+            <Input label="Order Earnings (After Fees)" type="text" inputMode="decimal" placeholder="0.00"
               value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
           </div>
         ) : (
           <div className="flex flex-col gap-1">
-            <Input label={strikeLabel} type="number" step="0.01" min="0" placeholder="0.00"
+            <Input label={strikeLabel} type="text" inputMode="decimal" placeholder="0.00"
               value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
             {perCard && <p className="text-[11px] text-zinc-500">≈ ${perCard} per card</p>}
           </div>
@@ -1191,14 +1191,18 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       <div className="flex items-center gap-1 shrink-0">
                         <span className={cn('text-xs', missingPrice ? 'text-amber-500' : 'text-zinc-500')}>$</span>
                         <input
-                          type="number" step="0.01" min="0"
+                          type="text" inputMode="decimal"
                           value={item.sticker_price_input}
                           placeholder="Required"
                           onChange={(e) => {
-                            const val = e.target.value;
+                            // Allow only digits + a single decimal point. Avoids
+                            // browser number-input quirks (scroll-wheel snap,
+                            // step-rounding) that previously turned 175 into
+                            // 174.98 on the CS Price field.
+                            const val = e.target.value.replace(/[^0-9.]/g, '');
                             setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, sticker_price_input: val, final_price_input: val } : c));
                           }}
-                          className={cn('w-20 text-xs bg-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none [appearance:textfield]', missingPrice ? 'border border-amber-600/60 placeholder:text-amber-700' : 'border border-zinc-600 focus:border-indigo-500')}
+                          className={cn('w-20 text-xs bg-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none', missingPrice ? 'border border-amber-600/60 placeholder:text-amber-700' : 'border border-zinc-600 focus:border-indigo-500')}
                         />
                       </div>
                     )}
@@ -1265,9 +1269,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             <div className="p-3 bg-zinc-800/50 border border-zinc-700 rounded-lg">
               <p className="text-xs font-medium text-zinc-400 mb-2">Set Listing Totals — split evenly across {n} card{n !== 1 ? 's' : ''}</p>
               <div className="grid grid-cols-2 gap-3">
-                <Input label="Total Strike Price" type="number" step="0.01" min="0" placeholder="0.00"
+                <Input label="Total Strike Price" type="text" inputMode="decimal" placeholder="0.00"
                   value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
-                <Input label="Total After Fees" type="number" step="0.01" min="0" placeholder="0.00"
+                <Input label="Total After Fees" type="text" inputMode="decimal" placeholder="0.00"
                   value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
               </div>
               {strikePrice && (
@@ -1342,18 +1346,18 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   <>
                     <div className="flex items-center justify-end gap-0.5">
                       <span className="text-zinc-600 text-xs">$</span>
-                      <input type="number" step="0.01" min="0"
+                      <input type="text" inputMode="decimal"
                         value={item.sticker_price_input}
-                        onChange={(e) => updateReviewField(item.id, 'sticker_price_input', e.target.value)}
-                        className="w-16 text-xs bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300 text-right focus:outline-none focus:border-indigo-500 [appearance:textfield]"
+                        onChange={(e) => updateReviewField(item.id, 'sticker_price_input', e.target.value.replace(/[^0-9.]/g, ''))}
+                        className="w-16 text-xs bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300 text-right focus:outline-none focus:border-indigo-500"
                       />
                     </div>
                     <div className="flex items-center justify-end gap-0.5">
                       <span className="text-zinc-600 text-xs">$</span>
-                      <input type="number" step="0.01" min="0"
+                      <input type="text" inputMode="decimal"
                         value={item.final_price_input}
-                        onChange={(e) => updateReviewField(item.id, 'final_price_input', e.target.value)}
-                        className="w-16 text-xs bg-zinc-800 border border-indigo-600/60 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500 [appearance:textfield]"
+                        onChange={(e) => updateReviewField(item.id, 'final_price_input', e.target.value.replace(/[^0-9.]/g, ''))}
+                        className="w-16 text-xs bg-zinc-800 border border-indigo-600/60 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500"
                       />
                     </div>
                     <p className={cn('text-xs text-right tabular-nums', discountPct > 0 ? 'text-amber-400' : 'text-zinc-600')}>
@@ -1644,11 +1648,11 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       </div>
       {platform === 'ebay' ? (
         <div className="grid grid-cols-2 gap-3">
-          <Input label="Strike Price" type="number" step="0.01" min="0" value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
-          <Input label="Order Earnings (After Fees)" type="number" step="0.01" min="0" value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
+          <Input label="Strike Price" type="text" inputMode="decimal" value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+          <Input label="Order Earnings (After Fees)" type="text" inputMode="decimal" value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
         </div>
       ) : (
-        <Input label="Strike Price" type="number" step="0.01" min="0" value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+        <Input label="Strike Price" type="text" inputMode="decimal" value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
       )}
       {platform === 'ebay' && (
         <>

@@ -225,7 +225,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
                   </div>
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Grading Cost (USD)</label>
-                    <input type="number" step="0.01" min="0" value={editGradingCost}
+                    <input type="text" inputMode="decimal" value={editGradingCost}
                       onChange={(e) => setEditGradingCost(e.target.value)}
                       placeholder="0.00" className={`${inputCls} ${noSpinner}`} />
                   </div>

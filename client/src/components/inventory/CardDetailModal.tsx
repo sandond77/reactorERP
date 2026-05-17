@@ -207,7 +207,7 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Cost (USD)</label>
                     <input
-                      type="number" step="0.01" min="0" value={editCost}
+                      type="text" inputMode="decimal" value={editCost}
                       onChange={(e) => setEditCost(e.target.value)}
                       placeholder="0.00"
                       className={inputCls + ' [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'}

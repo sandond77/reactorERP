@@ -629,7 +629,7 @@ function PurchaseForm({
                   <input type="number" min="1" value={li.quantity}
                     onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))}
                     className={`col-span-1 ${inp} ${errors[`line_${i}_qty`] ? 'border-red-500/60' : ''}`} />
-                  <input type="number" step="0.01" value={li.cost}
+                  <input type="text" inputMode="decimal" value={li.cost}
                     onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, cost: e.target.value } : x))}
                     className={`col-span-2 ${inp} ${errors[`line_${i}_cost`] ? 'border-red-500/60' : ''}`} />
                   <select value={li.type}
@@ -725,7 +725,7 @@ function PurchaseForm({
             </div>
             <div>
               <label className={lbl}>Total Cost (USD)</label>
-              <input type="number" step="0.01" value={form.total_cost_usd}
+              <input type="text" inputMode="decimal" value={form.total_cost_usd}
                 onChange={(e) => { set('total_cost_usd', e.target.value); setErrors((p) => ({ ...p, cost: '' })); }}
                 placeholder="80.27" className={`${inp} ${errors.cost ? 'border-red-500/60' : ''}`} />
             </div>

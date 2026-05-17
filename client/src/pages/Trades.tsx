@@ -330,7 +330,7 @@ function TradeCardForm({ onAdd, tradePercent }: { onAdd: (data: IncomingCardData
 
       <div className="grid grid-cols-3 gap-2">
         <div className="col-span-2 space-y-1">
-          <Input label="Market Value ($)" type="number" step="0.01" min="0" placeholder="0.00"
+          <Input label="Market Value ($)" type="text" inputMode="decimal" placeholder="0.00"
             value={marketValue} onChange={(e) => setMarketValue(e.target.value)} />
           {tradeCredit !== null && (
             <p className="text-[11px] text-zinc-500">
@@ -544,7 +544,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <span className="text-xs text-zinc-500">$</span>
-                <input type="number" step="0.01" min="0" placeholder="0.00" value={e.value}
+                <input type="text" inputMode="decimal" placeholder="0.00" value={e.value}
                   onChange={(ev) => updateOut(e.uid, ev.target.value)}
                   className="w-20 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
                 <button type="button" onClick={() => setOutgoing(prev => prev.filter(x => x.uid !== e.uid))} className="text-zinc-600 hover:text-zinc-400 ml-1">
@@ -561,7 +561,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-xs text-zinc-500">$</span>
-              <input type="number" step="0.01" min="0" placeholder="0.00" value={cashToCustomer}
+              <input type="text" inputMode="decimal" placeholder="0.00" value={cashToCustomer}
                 onChange={(e) => setCashToCustomer(e.target.value)}
                 className="w-20 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
               <span className="w-[13px] ml-1" />
@@ -626,7 +626,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-xs text-zinc-500">$</span>
-              <input type="number" step="0.01" min="0" placeholder="0.00" value={cashFromCustomer}
+              <input type="text" inputMode="decimal" placeholder="0.00" value={cashFromCustomer}
                 onChange={(e) => setCashFromCustomer(e.target.value)}
                 className="w-20 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
               <span className="w-[13px] ml-1" />
