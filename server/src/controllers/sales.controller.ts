@@ -81,6 +81,7 @@ export async function recordBulkSale(req: Request, res: Response, next: NextFunc
         listing_id: z.string().uuid().optional(),
         sale_price: z.number().int().positive(),
         platform_fees: z.number().int().nonnegative().default(0),
+        quantity: z.coerce.number().int().positive().optional(),
       })).min(1),
       platform: z.enum(['ebay', 'card_show', 'tcgplayer', 'facebook', 'instagram', 'local', 'other']),
       card_show_id: z.string().uuid().optional(),

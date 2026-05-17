@@ -21,6 +21,8 @@ interface RawRow {
   set_name: string | null;
   card_number: string | null;
   condition: string | null;
+  quantity: number;
+  status: string;
   is_listed: boolean;
   listed_price: number | null;
   listing_url: string | null;
@@ -121,6 +123,7 @@ export function RawOverall() {
     sku:               colMinWidth('Part #',        true,  false),
     card_name:         colMinWidth('Card',          true,  false),
     condition:         colMinWidth('Condition',     true,  true),
+    qty:               colMinWidth('Qty',           true,  false),
     is_listed:         colMinWidth('Listed?',       true,  true),
     listed_price:      colMinWidth('Listed',        true,  false),
     listing:           colMinWidth('Link',          false, false),
@@ -141,6 +144,7 @@ export function RawOverall() {
     sku:               Math.max(MINS.sku,               190),
     card_name:         Math.max(MINS.card_name,          500),
     condition:         Math.max(MINS.condition,           90),
+    qty:               Math.max(MINS.qty,                  60),
     is_listed:         Math.max(MINS.is_listed,           80),
     listed_price:      Math.max(MINS.listed_price,        80),
     listing:           Math.max(MINS.listing,             55),
@@ -475,6 +479,7 @@ export function RawOverall() {
                 <ColHeader label="Part #"           col="sku"                {...sh} {...rz('sku')}               minWidth={MINS.sku} />
                 <ColHeader label="ID"               col="raw_purchase_label" {...sh} {...rz('id')}               minWidth={MINS.id} />
                 <ColHeader label="Card"             col="card_name"          {...sh} {...rz('card_name')}         minWidth={MINS.card_name} />
+                <ColHeader label="Qty"              col="quantity"           {...sh} {...rz('qty')}               minWidth={MINS.qty} align="right" />
                 <ColHeader label="Condition"        col="condition"          {...sh} {...rz('condition')}         minWidth={MINS.condition}
                   filterOptions={filterOptions?.conditions} filterSelected={fCondition} onFilterChange={(v) => { setFCondition(v); setPage(1); }} />
                 <ColHeader label="Location"                                  {...sh} {...rz('location')}          minWidth={MINS.location} />
@@ -501,12 +506,15 @@ export function RawOverall() {
             </thead>
             <tbody>
               {!data?.data.length ? (
-                <tr><td colSpan={17} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
+                <tr><td colSpan={18} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
               ) : data.data.map((row) => (
                 <tr key={row.id} onClick={() => setSelectedRow(row)} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
                   <td className="px-3 py-1 font-mono text-[11px] text-zinc-400">{row.sku ?? '—'}</td>
                   <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
                   <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
+                  <td className="px-3 py-1 text-right tabular-nums">
+                    <span className={row.status === 'sold' ? 'text-rose-400/80' : 'text-zinc-300'}>{row.quantity}</span>
+                  </td>
                   <td className="px-3 py-1 text-zinc-300">{row.condition ?? ''}</td>
                   <td className="px-3 py-1 text-zinc-400 truncate" title={row.location_name ?? ''}>{row.location_name ?? ''}</td>
                   <td className="px-3 py-1 text-center">

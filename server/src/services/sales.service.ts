@@ -167,7 +167,7 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
 
 export async function recordBulkSale(
   userId: string,
-  items: Array<{ card_instance_id: string; listing_id?: string; sale_price: number; platform_fees?: number }>,
+  items: Array<{ card_instance_id: string; listing_id?: string; sale_price: number; platform_fees?: number; quantity?: number }>,
   shared: {
     platform: ListingPlatform;
     card_show_id?: string;
@@ -178,6 +178,37 @@ export async function recordBulkSale(
     unique_id_2?: string;
   }
 ) {
+  // Pre-flight: surface every already-sold card up front instead of failing
+  // mid-loop and leaving the batch partially committed. Tells the user
+  // exactly which cards to remove from the cart on retry.
+  const sourceCards = await db
+    .selectFrom('card_instances as ci')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .select([
+      'ci.id',
+      'ci.status',
+      'ci.is_personal_collection',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      'sd.cert_number',
+    ])
+    .where('ci.user_id', '=', userId)
+    .where('ci.id', 'in', items.map((i) => i.card_instance_id))
+    .execute();
+  const byId = new Map(sourceCards.map((c) => [c.id, c]));
+  const blocked: string[] = [];
+  for (const it of items) {
+    const c = byId.get(it.card_instance_id);
+    if (!c) { blocked.push(`Unknown card (${it.card_instance_id.slice(0, 8)}…)`); continue; }
+    if (c.status === 'sold') {
+      const label = c.card_name ?? (c.cert_number ? `cert #${c.cert_number}` : `card ${it.card_instance_id.slice(0, 8)}…`);
+      blocked.push(label);
+    }
+  }
+  if (blocked.length) {
+    throw new AppError(409, `${blocked.length} card${blocked.length === 1 ? '' : 's'} already sold — remove from cart: ${blocked.slice(0, 5).join(', ')}${blocked.length > 5 ? '…' : ''}`);
+  }
+
   const sales = [];
   for (const item of items) {
     const sale = await recordSale(userId, {
@@ -192,6 +223,7 @@ export async function recordBulkSale(
       currency: shared.currency,
       sold_at: shared.sold_at,
       unique_id_2: shared.unique_id_2,
+      quantity: item.quantity,
     });
     sales.push(sale);
   }
@@ -283,6 +315,7 @@ export async function listSales(
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       'ci.card_game',
+      'ci.condition',
       'sd.grade',
       'sd.grade_label',
       'sd.company as grading_company',

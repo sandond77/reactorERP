@@ -27,6 +27,7 @@ interface Sale {
   grade: number | null;
   grade_label: string | null;
   grading_company: string | null;
+  condition: string | null;
   cert_number: string | null;
   raw_purchase_label: string | null;
   unique_id: string | null;
@@ -103,6 +104,10 @@ interface BulkCartItem {
   sticker_price_input: string;  // raw string
   final_price_input: string;    // raw string, used at submit
   card_type: 'graded' | 'raw';
+  /** For raw lots: how many cards from this lot to sell (defaults to 1). */
+  quantity: number;
+  /** Source lot quantity — cap for the qty input. Always 1 for graded. */
+  lot_quantity: number;
 }
 
 interface RawCardShowResult {
@@ -112,6 +117,7 @@ interface RawCardShowResult {
   condition: string | null;
   card_show_price: number | null;
   raw_purchase_label: string | null;
+  quantity: number;
 }
 
 // ── Record Sale Modal ─────────────────────────────────────────────────────────
@@ -365,6 +371,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           sticker_price_input: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '',
           final_price_input: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '',
           card_type: r.cert_number ? 'graded' : 'raw',
+          quantity: 1,
+          // URL-lookup path doesn't return the source lot quantity; default to
+          // 1 (the lookup is per-listing, which is usually one card anyway).
+          lot_quantity: 1,
         }));
       if (!newItems.length) { toast('All cards from that URL are already in the cart'); return; }
       setBulkCart(prev => [...prev, ...newItems]);
@@ -857,9 +867,13 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <p className="text-[11px] text-zinc-500 mt-0.5">
                 {selectedRawCard.set_name}{selectedRawCard.card_number ? ` · ${selectedRawCard.card_number}` : ''}
                 {selectedRawCard.condition ? <span className="ml-2 font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{selectedRawCard.condition}</span> : ''}
-                {platform === 'card_show' && selectedRawCard.card_show_price
+                {/* Always surface the existing reference price (CS sticker /
+                    eBay list) regardless of the platform the sale is being
+                    recorded against — helps the user compare strike vs ask. */}
+                {selectedRawCard.card_show_price
                   ? <span className="ml-2 text-zinc-400">CS Price: {formatCurrency(selectedRawCard.card_show_price, selectedRawCard.currency)}</span>
-                  : platform === 'ebay' && selectedRawCard.listed_price
+                  : null}
+                {selectedRawCard.listed_price
                   ? <span className="ml-2 text-zinc-400">Listed: {formatCurrency(selectedRawCard.listed_price, selectedRawCard.currency)}</span>
                   : null}
               </p>
@@ -1116,6 +1130,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       sticker_price_input: stickerStr,
                       final_price_input: finalStr,
                       card_type: 'graded',
+                      quantity: 1,
+                      lot_quantity: 1,
                     }]);
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
@@ -1151,6 +1167,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       sticker_price_input: rawStickerStr,
                       final_price_input: rawFinalStr,
                       card_type: 'raw',
+                      quantity: 1,
+                      lot_quantity: r.quantity || 1,
                     }]);
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
@@ -1177,6 +1195,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <div className="max-h-[360px] overflow-y-auto">
               {bulkCart.map((item, i) => {
                 const missingPrice = !item.sticker_price_input || parseFloat(item.sticker_price_input) <= 0;
+                const qtyInvalid = item.quantity < 1 || item.quantity > item.lot_quantity;
+                const showQty = item.card_type === 'raw' && item.lot_quantity > 1;
                 return (
                   <div key={item.id} className="flex items-start gap-3 px-3 py-2 border-b border-zinc-700/40 last:border-0">
                     <div className="flex-1 min-w-0">
@@ -1187,6 +1207,23 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                           : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
                       </p>
                     </div>
+                    {showQty && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Qty</span>
+                        <input
+                          type="text" inputMode="numeric"
+                          value={String(item.quantity)}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value.replace(/[^0-9]/g, ''), 10);
+                            const next = Number.isFinite(val) ? val : 1;
+                            setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, quantity: Math.max(1, next) } : c));
+                          }}
+                          className={cn('w-12 text-xs bg-zinc-800 rounded px-2 py-1 text-zinc-200 text-right focus:outline-none', qtyInvalid ? 'border border-amber-600/60' : 'border border-zinc-600 focus:border-indigo-500')}
+                          title={`${item.lot_quantity} in this lot`}
+                        />
+                        <span className="text-[10px] text-zinc-500">/ {item.lot_quantity}</span>
+                      </div>
+                    )}
                     {!bulkIsEbay && (
                       <div className="flex items-center gap-1 shrink-0">
                         <span className={cn('text-xs', missingPrice ? 'text-amber-500' : 'text-zinc-500')}>$</span>
@@ -1219,9 +1256,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               {!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0) && (
                 <p className="text-xs text-amber-500">Enter a sticker price for each card</p>
               )}
+              {bulkCart.some(i => i.quantity < 1 || i.quantity > i.lot_quantity) && (
+                <p className="text-xs text-amber-500">Each qty must be between 1 and the lot size</p>
+              )}
               <div className="ml-auto">
                 <Button type="button"
-                  disabled={bulkCart.length === 0 || (!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0))}
+                  disabled={
+                    bulkCart.length === 0
+                    || (!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0))
+                    || bulkCart.some(i => i.quantity < 1 || i.quantity > i.lot_quantity)
+                  }
                   onClick={() => setStep('bulk-review')}>
                   Review Sale →
                 </Button>
@@ -1473,6 +1517,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             listing_id: item.listing_id,
             sale_price: item.final_price,
             platform_fees: item.platform_fees,
+            quantity: item.quantity > 1 ? item.quantity : undefined,
           })),
           platform: isEbaySet ? 'ebay' : 'card_show',
           card_show_id: isEbaySet ? undefined : (cardShowId || undefined),
@@ -1728,6 +1773,7 @@ export function Sales() {
     date:         colMinWidth('Date Sold',     true,  true),
     cert:         colMinWidth('Cert / ID', true, false),
     card:         colMinWidth('Card',          true,  false),
+    grade_cond:   colMinWidth('Grade / Cond.', true, false),
     sale_method:  colMinWidth('Sale Method',   true,  true),
     link:         50,
     raw_cost:     colMinWidth('Raw Cost',      true,  false),
@@ -1737,7 +1783,7 @@ export function Sales() {
     after_ebay:   colMinWidth('After Fees',    true,  false),
     net:          colMinWidth('Net',           true,  false),
   };
-  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 155), card: Math.max(MINS.card, 460), sale_method: Math.max(MINS.sale_method, 200), link: 50, raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
+  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 155), card: Math.max(MINS.card, 460), grade_cond: Math.max(MINS.grade_cond, 130), sale_method: Math.max(MINS.sale_method, 200), link: 50, raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
@@ -1810,7 +1856,7 @@ export function Sales() {
           </div>
           <input
             type="text"
-            placeholder="Card, cert, SKU, RP-#, order #…"
+            placeholder="Card, cert, SKU, 2026R117, order #…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-64"
@@ -1832,6 +1878,7 @@ export function Sales() {
                   filterDateValues={fSoldDates} onFilterDatesChange={(d) => { setFSoldDates(d); setPage(1); }} />
                 <ColHeader label="Cert / ID" col="cert_number" {...sh} {...rz('cert')} minWidth={MINS.cert} wrap />
                 <ColHeader label="Card"           col="card_name"    {...sh} {...rz('card')} minWidth={MINS.card} />
+                <ColHeader label="Grade / Cond."  {...sh} {...rz('grade_cond')} minWidth={MINS.grade_cond} />
                 <ColHeader label="Sale Method"    col="platform"     {...sh} {...rz('sale_method')} minWidth={MINS.sale_method}
                   filterOptions={filterOptions?.platforms} filterSelected={fPlatform} onFilterChange={(v) => { setFPlatform(v); setPage(1); }} />
                 <th style={{ width: MINS.link + 'px', minWidth: MINS.link + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide">Link</th>
@@ -1845,7 +1892,7 @@ export function Sales() {
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {!data?.data.length ? (
-                <tr><td colSpan={11} className="px-3 py-10 text-center text-zinc-500">No sales found.</td></tr>
+                <tr><td colSpan={12} className="px-3 py-10 text-center text-zinc-500">No sales found.</td></tr>
               ) : data.data.map((sale) => (
                 <tr key={sale.id} className="hover:bg-zinc-800/30 transition-colors cursor-pointer" onClick={() => setSelectedSale(sale)}>
                   <td className="px-3 py-2 text-zinc-500">{formatDate(sale.sold_at)}</td>
@@ -1857,8 +1904,15 @@ export function Sales() {
                   <td className="px-3 py-2">
                     <p className="font-medium text-zinc-200 whitespace-normal break-words leading-snug">{sale.card_name ?? 'Unknown'}</p>
                     <p className="text-[10px] text-zinc-500 whitespace-normal break-words">
-                      {sale.set_name}{sale.grade ? ` · ${sale.grading_company} ${sale.grade_label ?? sale.grade}` : ''}
+                      {sale.set_name}
                     </p>
+                  </td>
+                  <td className="px-3 py-2 text-zinc-300">
+                    {sale.grade_label || sale.grade != null
+                      ? <span><span className="text-zinc-500 text-[10px] mr-1">{sale.grading_company}</span>{sale.grade_label ?? sale.grade}</span>
+                      : sale.condition
+                      ? <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{sale.condition}</span>
+                      : <span className="text-zinc-700">—</span>}
                   </td>
                   <td className="px-3 py-2">
                     <span className="text-xs text-zinc-400">{platformLabel(sale.platform)}</span>
