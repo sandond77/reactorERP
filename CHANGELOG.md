@@ -1,5 +1,29 @@
 # Reactor — Changelog
 
+## May 16, 2026
+
+### Features
+
+**Raw card sales**
+- **Partial-quantity sales** — Record Sale (raw) now has a **Sell qty** input when the picked lot has more than 1 card. Selling fewer than the row holds splits the source `card_instance`: shaves the sold qty off the original, inserts a sibling instance with `status='sold'` + `quantity=sellQty`, and links the sale to the sibling. Selling 1 of 6 HP no longer flips the whole stack sold.
+- **Strike-price label clarifies "total"** when selling multiple copies, with a small "≈ $X.XX per card" hint underneath.
+- **CS / Listed price surfaced** on the raw card summary in Record Sale: shows `CS Price: $X` for card-show platform or `Listed: $X` for eBay, matching the existing graded-side cue.
+
+**Raw Overall**
+- **Lot-aggregation for split siblings** (option C / hybrid). When a partial sale has split a lot (e.g. qty=5 raw_for_sale + qty=1 sold sibling), Raw Overall renders one consolidated row with combined per-status counts and a "split ×N" indicator instead of two separate rows. Click to expand and see the individual sibling instances. Single-instance lots render unchanged. Sales analytics still point at the sibling UUIDs.
+
+### Fixes
+
+**Part # search / autofill**
+- **Fallback when set filter zeroes out** — if `card_name` + `card_number` are present and the set filter produces 0 results, retry without the set filter. Rescues cases where the autofill returned a set label that doesn't appear in the catalog row (e.g. "Legendary Holo Collection" when the row is stored as "Legendary Shine Collection").
+- **Autofill canonicalizes set_name** from the resolved set_code via the seeded set list — and now exposes the resolved `set_code` to the client. So autofilling "Dialga CP2 012" lands in the form as `Legendary Shine Collection` (canonical JP name), not whatever the AI hallucinated.
+- **`XY-CP4` seed corrected** to "Champions Premium Pack" (was incorrectly mapped to "Hyper Metal Chain Deck").
+
+**Sales**
+- **Bulk raw sale at card shows** wasn't finding anything — required `status='raw_for_sale'` AND `is_card_show='yes'`. Raw cards aren't pre-tagged to shows in this workflow, so the filter hid every sellable card. Loosened to match the individual raw sale flow (any of `purchased_raw` / `inspected` / `raw_for_sale` with decision `sell_raw`).
+
+---
+
 ## May 15, 2026
 
 ### Features
