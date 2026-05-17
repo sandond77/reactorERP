@@ -742,6 +742,8 @@ export async function listRawFlat(
       COALESCE(cc.set_name, ci.set_name_override)        AS set_name,
       COALESCE(cc.card_number, ci.card_number_override)  AS card_number,
       ci.condition,
+      ci.quantity,
+      ci.status,
       (l.id IS NOT NULL)                                 AS is_listed,
       l.list_price                                       AS listed_price,
       l.ebay_listing_url                                 AS listing_url,
