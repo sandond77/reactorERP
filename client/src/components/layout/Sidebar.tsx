@@ -42,18 +42,22 @@ function NavItem({ to, icon: Icon, label, indent = false }: {
     <NavLink
       to={to}
       end={to === '/'}
+      title={label}
       className={({ isActive }) =>
         cn(
           'flex items-center gap-3 py-2 rounded-lg text-sm transition-colors',
-          indent ? 'pl-8 pr-3' : 'px-3',
+          // Indent only kicks in when labels are visible (≥lg). At tablet
+          // width the sidebar shows icons-only and indent would push them
+          // off-center.
+          indent ? 'lg:pl-8 lg:pr-3 px-3 justify-center lg:justify-start' : 'px-3 justify-center lg:justify-start',
           isActive
             ? 'bg-indigo-600/20 text-indigo-400 font-medium'
             : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60'
         )
       }
     >
-      <Icon size={16} />
-      {label}
+      <Icon size={16} className="shrink-0" />
+      <span className="hidden lg:inline">{label}</span>
     </NavLink>
   );
 }
@@ -69,16 +73,20 @@ function NavFolder({ icon: Icon, label, routes, children, defaultOpen = false }:
     <div>
       <button
         onClick={() => setOpen((o) => !o)}
+        title={label}
         className={cn(
-          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
+          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors justify-center lg:justify-start',
           active ? 'text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60'
         )}
       >
-        <Icon size={16} />
-        <span className="flex-1 text-left">{label}</span>
-        <ChevronDown size={13} className={cn('transition-transform text-zinc-500', open ? 'rotate-180' : '')} />
+        <Icon size={16} className="shrink-0" />
+        <span className="hidden lg:inline flex-1 text-left">{label}</span>
+        <ChevronDown size={13} className={cn('hidden lg:inline transition-transform text-zinc-500', open ? 'rotate-180' : '')} />
       </button>
-      {open && <div className="mt-0.5 space-y-0.5">{children}</div>}
+      {/* Desktop: honor open/closed toggle. Tablet: always show children
+          (icons-only takes barely any space; folding adds friction). */}
+      <div className={cn('mt-0.5 space-y-0.5 lg:hidden')}>{children}</div>
+      {open && <div className="mt-0.5 space-y-0.5 hidden lg:block">{children}</div>}
     </div>
   );
 }
@@ -93,13 +101,13 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="w-56 shrink-0 flex flex-col bg-zinc-950 border-r border-zinc-800 h-screen overflow-y-auto">
+    <aside className="w-14 lg:w-56 shrink-0 flex flex-col bg-zinc-950 border-r border-zinc-800 h-screen overflow-y-auto">
       {/* Logo */}
-      <div className="flex items-center gap-2 px-4 py-5 border-b border-zinc-800">
-        <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+      <div className="flex items-center justify-center lg:justify-start gap-2 px-2 lg:px-4 py-5 border-b border-zinc-800">
+        <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center shrink-0">
           <Zap size={14} className="text-white" />
         </div>
-        <span className="text-sm font-bold text-zinc-100 tracking-wide">REACTOR</span>
+        <span className="hidden lg:inline text-sm font-bold text-zinc-100 tracking-wide">REACTOR</span>
       </div>
 
       {/* Nav */}
@@ -145,25 +153,26 @@ export function Sidebar() {
 
         <button
           onClick={handleLogout}
-          className="mt-auto w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors"
+          title="Log out"
+          className="mt-auto w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors justify-center lg:justify-start"
         >
-          <LogOut size={16} />
-          Log out
+          <LogOut size={16} className="shrink-0" />
+          <span className="hidden lg:inline">Log out</span>
         </button>
       </nav>
 
       {/* User */}
       {user && (
-        <div className="px-3 py-3 border-t border-zinc-800">
-          <div className="flex items-center gap-2 px-0.5">
+        <div className="px-2 lg:px-3 py-3 border-t border-zinc-800">
+          <div className="flex items-center gap-2 px-0.5 justify-center lg:justify-start">
             {user.avatar_url ? (
-              <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full" />
+              <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full shrink-0" />
             ) : (
-              <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-xs text-white font-medium">
+              <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-xs text-white font-medium shrink-0">
                 {(user.display_name ?? user.email)[0].toUpperCase()}
               </div>
             )}
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 hidden lg:block">
               <p className="text-xs font-medium text-zinc-200 truncate">{user.display_name ?? user.email}</p>
             </div>
           </div>
