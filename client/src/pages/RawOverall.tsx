@@ -108,6 +108,11 @@ export function RawOverall() {
   const [selectedRow, setSelectedRow] = useState<RawRow | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  // Lot-level expanders (one level deeper than group expanders). Key is
+  // `${groupKey}::${lot}::${condition}` so each lot+condition can toggle
+  // independently. Only used when a lot has more than one card_instance
+  // (i.e. it's been split by a partial sale).
+  const [expandedLots, setExpandedLots] = useState<Set<string>>(new Set());
 
   const isSummary = statusFilter === 'summary';
 
@@ -268,6 +273,14 @@ export function RawOverall() {
     });
   }
 
+  function toggleLot(key: string) {
+    setExpandedLots((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) { next.delete(key); } else { next.add(key); }
+      return next;
+    });
+  }
+
   const sh = { sortCol, sortDir, onSort: handleSort };
   const ssh = { sortCol: null, sortDir: 'asc' as SortDir, onSort: () => {} };
 
@@ -351,34 +364,102 @@ export function RawOverall() {
                         <td className="px-3 py-2 text-right tabular-nums">{num(group.returned_count)}</td>
                         <td />
                       </tr>
-                      {expanded && group.instances.map((inst) => (
-                        <tr key={inst.id}
-                          className="border-b border-zinc-800/40 bg-zinc-900/40 hover:bg-zinc-800/50 cursor-pointer transition-colors"
-                          onClick={() => setSelectedId(inst.id)}>
-                          <td className="pl-3"><div className="w-px h-3 bg-zinc-700 mx-auto" /></td>
-                          <td className="px-3 py-1.5">
-                            <span className="text-[10px] text-zinc-600 mr-1">ID</span>
-                            <span className="font-mono text-[11px] text-indigo-300/70">{inst.raw_purchase_label ?? '—'}</span>
-                          </td>
-                          <td className="px-3 py-1.5 pl-5">
-                            <span className="text-[10px] text-zinc-600 mr-1">Cond</span>
-                            <span className="text-zinc-400 text-[11px]">{inst.condition ?? '—'}</span>
-                            {inst.location_name && <><span className="ml-3 text-[10px] text-zinc-600 mr-1">Loc</span><span className="text-zinc-400 text-[11px]">{inst.location_name}</span></>}
-                          </td>
-                          <td className="px-3 py-1.5">
-                            <span className="text-[10px] text-zinc-600 mr-1">Cost</span>
-                            <span className="text-zinc-500 text-[11px]">{formatCurrency(inst.purchase_cost, inst.currency)}</span>
-                          </td>
-                          <td className="px-3 py-1.5" />
-                          <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{inst.quantity}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{num(instForSale(inst))}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{num(instSold(inst))}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{num(instToGrade(inst))}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{num(instGrading(inst))}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">{num(inst.status === 'graded' ? inst.quantity : 0)}</td>
-                          <td className="px-3 py-1.5 text-zinc-500 text-[10px]">{inst.notes ?? ''}</td>
-                        </tr>
-                      ))}
+                      {expanded && (() => {
+                        // Group card_instances by lot+condition so partial-sale
+                        // splits (e.g. qty=5 raw_for_sale + qty=1 sold sibling)
+                        // collapse into one aggregated lot row by default. The
+                        // raw splits are reachable via an in-lot expander.
+                        const lotMap = new Map<string, typeof group.instances>();
+                        for (const inst of group.instances) {
+                          const lk = `${inst.raw_purchase_label ?? 'no-lot'}::${inst.condition ?? 'no-cond'}`;
+                          const arr = lotMap.get(lk) ?? [];
+                          arr.push(inst);
+                          lotMap.set(lk, arr);
+                        }
+                        return Array.from(lotMap.entries()).flatMap(([lotKey, insts]) => {
+                          const fullKey = `${key}::${lotKey}`;
+                          const lotExpanded = expandedLots.has(fullKey);
+                          // Aggregates across the lot+condition
+                          const lotQty = insts.reduce((s, x) => s + x.quantity, 0);
+                          const lotForSale = insts.reduce((s, x) => s + instForSale(x), 0);
+                          const lotSold = insts.reduce((s, x) => s + instSold(x), 0);
+                          const lotToGrade = insts.reduce((s, x) => s + instToGrade(x), 0);
+                          const lotGrading = insts.reduce((s, x) => s + instGrading(x), 0);
+                          const lotGraded = insts.reduce((s, x) => s + (x.status === 'graded' ? x.quantity : 0), 0);
+                          const first = insts[0];
+                          const isSplit = insts.length > 1;
+
+                          const lotRow = (
+                            <tr key={`${fullKey}::row`}
+                              className="border-b border-zinc-800/40 bg-zinc-900/40 hover:bg-zinc-800/50 transition-colors"
+                              onClick={(e) => {
+                                // Single-instance lot → behave like before, drill into the card.
+                                // Split lot → toggle the in-lot expander instead.
+                                if (isSplit) {
+                                  e.stopPropagation();
+                                  toggleLot(fullKey);
+                                } else {
+                                  setSelectedId(first.id);
+                                }
+                              }}
+                              style={{ cursor: isSplit ? 'pointer' : 'pointer' }}>
+                              <td className="pl-3">
+                                {isSplit
+                                  ? <ChevronRight size={11} className={`text-zinc-500 mx-auto transition-transform ${lotExpanded ? 'rotate-90' : ''}`} />
+                                  : <div className="w-px h-3 bg-zinc-700 mx-auto" />}
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <span className="text-[10px] text-zinc-600 mr-1">ID</span>
+                                <span className="font-mono text-[11px] text-indigo-300/70">{first.raw_purchase_label ?? '—'}</span>
+                                {isSplit && <span className="ml-2 text-[9px] text-zinc-600 uppercase tracking-wide">split ×{insts.length}</span>}
+                              </td>
+                              <td className="px-3 py-1.5 pl-5">
+                                <span className="text-[10px] text-zinc-600 mr-1">Cond</span>
+                                <span className="text-zinc-400 text-[11px]">{first.condition ?? '—'}</span>
+                                {first.location_name && <><span className="ml-3 text-[10px] text-zinc-600 mr-1">Loc</span><span className="text-zinc-400 text-[11px]">{first.location_name}</span></>}
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <span className="text-[10px] text-zinc-600 mr-1">Cost</span>
+                                <span className="text-zinc-500 text-[11px]">{formatCurrency(first.purchase_cost, first.currency)}</span>
+                              </td>
+                              <td className="px-3 py-1.5" />
+                              <td className="px-3 py-1.5 text-right tabular-nums text-zinc-400">{lotQty}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{num(lotForSale)}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{num(lotSold)}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{num(lotToGrade)}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{num(lotGrading)}</td>
+                              <td className="px-3 py-1.5 text-right tabular-nums">{num(lotGraded)}</td>
+                              <td className="px-3 py-1.5 text-zinc-500 text-[10px]">{first.notes ?? ''}</td>
+                            </tr>
+                          );
+
+                          if (!isSplit || !lotExpanded) return [lotRow];
+
+                          // Sibling drill-down rows for split lots
+                          const childRows = insts.map((inst) => (
+                            <tr key={`${fullKey}::inst::${inst.id}`}
+                              className="border-b border-zinc-800/30 bg-zinc-950/60 hover:bg-zinc-800/40 cursor-pointer transition-colors"
+                              onClick={(e) => { e.stopPropagation(); setSelectedId(inst.id); }}>
+                              <td />
+                              <td className="px-3 py-1 pl-8 text-[10px] text-zinc-600">
+                                <span className="text-zinc-700 mr-1">└─</span>
+                                <span className={`uppercase tracking-wide ${inst.status === 'sold' ? 'text-rose-400/70' : 'text-zinc-500'}`}>
+                                  {inst.status.replace(/_/g, ' ')}
+                                </span>
+                              </td>
+                              <td colSpan={3} />
+                              <td className="px-3 py-1 text-right tabular-nums text-[11px] text-zinc-500">{inst.quantity}</td>
+                              <td className="px-3 py-1 text-right tabular-nums text-[11px]">{num(instForSale(inst))}</td>
+                              <td className="px-3 py-1 text-right tabular-nums text-[11px]">{num(instSold(inst))}</td>
+                              <td className="px-3 py-1 text-right tabular-nums text-[11px]">{num(instToGrade(inst))}</td>
+                              <td className="px-3 py-1 text-right tabular-nums text-[11px]">{num(instGrading(inst))}</td>
+                              <td className="px-3 py-1 text-right tabular-nums text-[11px]">{num(inst.status === 'graded' ? inst.quantity : 0)}</td>
+                              <td />
+                            </tr>
+                          ));
+                          return [lotRow, ...childRows];
+                        });
+                      })()}
                     </React.Fragment>
                   );
                 })}

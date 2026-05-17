@@ -86,6 +86,8 @@ interface RawCardResult {
   currency: string;
   raw_purchase_label: string | null;
   is_listed: boolean;
+  listed_price: number | null;
+  card_show_price: number | null;
   location_name: string | null;
 }
 
@@ -228,12 +230,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     enabled: step === 'bulk-search' && bulkTab === 'graded',
   });
   // Bulk search: raw inventory
+  // For card shows, we don't enforce is_card_show=yes — users don't pre-tag
+  // raw cards to a show, so the filter would hide everything sellable.
+  // Status list matches the individual raw sale flow so inspected/awaiting
+  // cards are reachable from bulk too.
   const { data: bulkRawResults, isFetching: isBulkRawSearching } = useQuery<PaginatedResult<RawCardShowResult>>({
     queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay],
     queryFn: () => api.get('/cards', {
       params: bulkIsEbay
-        ? { search: debouncedBulkSearch || undefined, limit: 50, is_listed: 'yes', status: 'raw_for_sale', is_personal_collection: 'no' }
-        : { search: debouncedBulkSearch || undefined, limit: 50, is_card_show: 'yes', status: 'raw_for_sale', is_personal_collection: 'no' },
+        ? { search: debouncedBulkSearch || undefined, limit: 50, is_listed: 'yes', status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no' }
+        : { search: debouncedBulkSearch || undefined, limit: 50, status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no' },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'raw',
   });
@@ -643,6 +649,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   currency: d.currency,
                   raw_purchase_label: d.raw_purchase_label ?? null,
                   is_listed: true,
+                  listed_price: d.listed_price ?? null,
+                  card_show_price: d.card_show_price ?? null,
                   location_name: d.location_name ?? null,
                 });
                 setStep('details');
@@ -849,6 +857,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <p className="text-[11px] text-zinc-500 mt-0.5">
                 {selectedRawCard.set_name}{selectedRawCard.card_number ? ` · ${selectedRawCard.card_number}` : ''}
                 {selectedRawCard.condition ? <span className="ml-2 font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{selectedRawCard.condition}</span> : ''}
+                {platform === 'card_show' && selectedRawCard.card_show_price
+                  ? <span className="ml-2 text-zinc-400">CS Price: {formatCurrency(selectedRawCard.card_show_price, selectedRawCard.currency)}</span>
+                  : platform === 'ebay' && selectedRawCard.listed_price
+                  ? <span className="ml-2 text-zinc-400">Listed: {formatCurrency(selectedRawCard.listed_price, selectedRawCard.currency)}</span>
+                  : null}
               </p>
             </div>
             <button type="button" onClick={() => setStep('raw-select')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
