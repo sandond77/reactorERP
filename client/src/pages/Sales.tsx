@@ -965,17 +965,32 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {platform === 'ebay' ? (
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="Strike Price" type="number" step="0.01" min="0" placeholder="0.00"
-            value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
-          <Input label="Order Earnings (After Fees)" type="number" step="0.01" min="0" placeholder="0.00"
-            value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
-        </div>
-      ) : (
-        <Input label="Strike Price" type="number" step="0.01" min="0" placeholder="0.00"
-          value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
-      )}
+      {(() => {
+        const sellQty = saleMode === 'raw' ? Math.max(1, parseInt(rawSaleQty || '1', 10) || 1) : 1;
+        const isMulti = sellQty > 1;
+        const strikeLabel = isMulti ? 'Strike Price (total)' : 'Strike Price';
+        const priceNum = parseFloat(strikePrice);
+        const perCard = isMulti && Number.isFinite(priceNum) && priceNum > 0
+          ? (priceNum / sellQty).toFixed(2)
+          : null;
+        return platform === 'ebay' ? (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="flex flex-col gap-1">
+              <Input label={strikeLabel} type="number" step="0.01" min="0" placeholder="0.00"
+                value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+              {perCard && <p className="text-[11px] text-zinc-500">≈ ${perCard} per card</p>}
+            </div>
+            <Input label="Order Earnings (After Fees)" type="number" step="0.01" min="0" placeholder="0.00"
+              value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <Input label={strikeLabel} type="number" step="0.01" min="0" placeholder="0.00"
+              value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+            {perCard && <p className="text-[11px] text-zinc-500">≈ ${perCard} per card</p>}
+          </div>
+        );
+      })()}
 
       {platform === 'ebay' && (
         <>
