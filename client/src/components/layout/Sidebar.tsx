@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Star, TrendingUp, ListOrdered,
   BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
   ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties, Receipt,
-  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut, CalendarDays, Bell, Users,
+  ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut, CalendarDays, Bell, Users, X,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useAuth } from '../../contexts/AuthContext';
@@ -35,29 +35,26 @@ const MANAGE_NAV = [
 ];
 
 
-function NavItem({ to, icon: Icon, label, indent = false }: {
-  to: string; icon: React.ElementType; label: string; indent?: boolean;
+function NavItem({ to, icon: Icon, label, indent = false, onNavigate }: {
+  to: string; icon: React.ElementType; label: string; indent?: boolean; onNavigate?: () => void;
 }) {
   return (
     <NavLink
       to={to}
       end={to === '/'}
-      title={label}
+      onClick={onNavigate}
       className={({ isActive }) =>
         cn(
           'flex items-center gap-3 py-2 rounded-lg text-sm transition-colors',
-          // Indent only kicks in when labels are visible (≥lg). At tablet
-          // width the sidebar shows icons-only and indent would push them
-          // off-center.
-          indent ? 'lg:pl-8 lg:pr-3 px-3 justify-center lg:justify-start' : 'px-3 justify-center lg:justify-start',
+          indent ? 'pl-8 pr-3' : 'px-3',
           isActive
             ? 'bg-indigo-600/20 text-indigo-400 font-medium'
             : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60'
         )
       }
     >
-      <Icon size={16} className="shrink-0" />
-      <span className="hidden lg:inline">{label}</span>
+      <Icon size={16} />
+      {label}
     </NavLink>
   );
 }
@@ -73,112 +70,143 @@ function NavFolder({ icon: Icon, label, routes, children, defaultOpen = false }:
     <div>
       <button
         onClick={() => setOpen((o) => !o)}
-        title={label}
         className={cn(
-          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors justify-center lg:justify-start',
+          'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors',
           active ? 'text-indigo-400 font-medium' : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60'
         )}
       >
-        <Icon size={16} className="shrink-0" />
-        <span className="hidden lg:inline flex-1 text-left">{label}</span>
-        <ChevronDown size={13} className={cn('hidden lg:inline transition-transform text-zinc-500', open ? 'rotate-180' : '')} />
+        <Icon size={16} />
+        <span className="flex-1 text-left">{label}</span>
+        <ChevronDown size={13} className={cn('transition-transform text-zinc-500', open ? 'rotate-180' : '')} />
       </button>
-      {/* Desktop: honor open/closed toggle. Tablet: always show children
-          (icons-only takes barely any space; folding adds friction). */}
-      <div className={cn('mt-0.5 space-y-0.5 lg:hidden')}>{children}</div>
-      {open && <div className="mt-0.5 space-y-0.5 hidden lg:block">{children}</div>}
+      {open && <div className="mt-0.5 space-y-0.5">{children}</div>}
     </div>
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
 
   async function handleLogout() {
     await api.post('/auth/logout').catch(() => {});
     navigate('/login');
   }
 
+  // Auto-close the tablet overlay on navigation
+  useEffect(() => { onClose(); }, [location.pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
-    <aside className="w-14 lg:w-56 shrink-0 flex flex-col bg-zinc-950 border-r border-zinc-800 h-screen overflow-y-auto">
-      {/* Logo */}
-      <div className="flex items-center justify-center lg:justify-start gap-2 px-2 lg:px-4 py-5 border-b border-zinc-800">
-        <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center shrink-0">
-          <Zap size={14} className="text-white" />
-        </div>
-        <span className="hidden lg:inline text-sm font-bold text-zinc-100 tracking-wide">REACTOR</span>
-      </div>
+    <>
+      {/* Backdrop — only visible at tablet width while the sidebar is open. */}
+      <div
+        onClick={onClose}
+        className={cn(
+          'fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity lg:hidden',
+          open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        )}
+      />
 
-      {/* Nav */}
-      <nav className="flex-1 px-2 py-3 flex flex-col">
-        <div className="space-y-0.5">
-          <NavItem to="/"        icon={LayoutDashboard} label="Dashboard" />
-          <NavItem to="/overall" icon={LayoutGrid}      label="Graded/Slabs" />
-
-          <NavFolder icon={PackageSearch} label="Raw Cards" routes={RAW_ROUTES}>
-            {RAW_NAV.map(({ to, icon, label }) => (
-              <NavItem key={to} to={to} icon={icon} label={label} indent />
-            ))}
-          </NavFolder>
-
-          <NavFolder icon={Tag} label="Selling" routes={SELLING_ROUTES}>
-            {SELLING_NAV.map(({ to, icon, label }) => (
-              <NavItem key={to} to={to} icon={icon} label={label} indent />
-            ))}
-          </NavFolder>
-
-          <NavFolder icon={ShoppingBag} label="Card Shows" routes={['/card-show']}>
-            <NavItem to="/card-show"          icon={LayoutGrid}    label="Inventory"      indent />
-            <NavItem to="/card-show/schedule" icon={CalendarDays}  label="Show Schedule"  indent />
-          </NavFolder>
-          <NavItem to="/expenses"  icon={Receipt}     label="Expenses" />
-
-          <NavItem to="/reports" icon={BarChart3} label="Reports" />
-
-          <NavFolder icon={Settings2} label="Manage" routes={MANAGE_ROUTES}>
-            {MANAGE_NAV.map(({ to, icon, label }) => (
-              <NavItem key={to} to={to} icon={icon} label={label} indent />
-            ))}
-          </NavFolder>
-
-          <NavFolder icon={FolderClock} label="Audit" routes={['/audit']}>
-            <NavItem to="/audit/log"      icon={ScrollText}   label="Audit Log" indent />
-            <NavItem to="/audit/auditing" icon={ShieldCheck}  label="Inventory Audit" indent />
-          </NavFolder>
-
-          <NavItem to="/import" icon={Upload} label="Import" />
-          <NavItem to="/team"   icon={Users}  label="Team" />
+      {/* Sidebar
+          - Desktop (lg+): always visible in flow, 224px.
+          - Tablet (<lg): fixed overlay, slides in from the left when `open`. */}
+      <aside
+        className={cn(
+          'flex flex-col bg-zinc-950 border-r border-zinc-800 h-screen overflow-y-auto',
+          // Desktop: in normal flow, always visible
+          'lg:static lg:translate-x-0 lg:w-56 lg:shrink-0',
+          // Tablet: fixed overlay
+          'fixed inset-y-0 left-0 z-50 w-56 transition-transform',
+          open ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        )}
+      >
+        {/* Logo + close button (tablet only) */}
+        <div className="flex items-center justify-between gap-2 px-4 py-5 border-b border-zinc-800">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center">
+              <Zap size={14} className="text-white" />
+            </div>
+            <span className="text-sm font-bold text-zinc-100 tracking-wide">REACTOR</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="lg:hidden p-1 rounded text-zinc-500 hover:text-zinc-200 hover:bg-zinc-800/60 transition-colors"
+            title="Close menu"
+          >
+            <X size={16} />
+          </button>
         </div>
 
-        <button
-          onClick={handleLogout}
-          title="Log out"
-          className="mt-auto w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors justify-center lg:justify-start"
-        >
-          <LogOut size={16} className="shrink-0" />
-          <span className="hidden lg:inline">Log out</span>
-        </button>
-      </nav>
+        {/* Nav */}
+        <nav className="flex-1 px-2 py-3 flex flex-col">
+          <div className="space-y-0.5">
+            <NavItem to="/"        icon={LayoutDashboard} label="Dashboard" />
+            <NavItem to="/overall" icon={LayoutGrid}      label="Graded/Slabs" />
 
-      {/* User */}
-      {user && (
-        <div className="px-2 lg:px-3 py-3 border-t border-zinc-800">
-          <div className="flex items-center gap-2 px-0.5 justify-center lg:justify-start">
-            {user.avatar_url ? (
-              <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full shrink-0" />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-xs text-white font-medium shrink-0">
-                {(user.display_name ?? user.email)[0].toUpperCase()}
+            <NavFolder icon={PackageSearch} label="Raw Cards" routes={RAW_ROUTES}>
+              {RAW_NAV.map(({ to, icon, label }) => (
+                <NavItem key={to} to={to} icon={icon} label={label} indent />
+              ))}
+            </NavFolder>
+
+            <NavFolder icon={Tag} label="Selling" routes={SELLING_ROUTES}>
+              {SELLING_NAV.map(({ to, icon, label }) => (
+                <NavItem key={to} to={to} icon={icon} label={label} indent />
+              ))}
+            </NavFolder>
+
+            <NavFolder icon={ShoppingBag} label="Card Shows" routes={['/card-show']}>
+              <NavItem to="/card-show"          icon={LayoutGrid}    label="Inventory"      indent />
+              <NavItem to="/card-show/schedule" icon={CalendarDays}  label="Show Schedule"  indent />
+            </NavFolder>
+            <NavItem to="/expenses"  icon={Receipt}     label="Expenses" />
+
+            <NavItem to="/reports" icon={BarChart3} label="Reports" />
+
+            <NavFolder icon={Settings2} label="Manage" routes={MANAGE_ROUTES}>
+              {MANAGE_NAV.map(({ to, icon, label }) => (
+                <NavItem key={to} to={to} icon={icon} label={label} indent />
+              ))}
+            </NavFolder>
+
+            <NavFolder icon={FolderClock} label="Audit" routes={['/audit']}>
+              <NavItem to="/audit/log"      icon={ScrollText}   label="Audit Log" indent />
+              <NavItem to="/audit/auditing" icon={ShieldCheck}  label="Inventory Audit" indent />
+            </NavFolder>
+
+            <NavItem to="/import" icon={Upload} label="Import" />
+            <NavItem to="/team"   icon={Users}  label="Team" />
+          </div>
+
+          <button
+            onClick={handleLogout}
+            className="mt-auto w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 transition-colors"
+          >
+            <LogOut size={16} />
+            Log out
+          </button>
+        </nav>
+
+        {/* User */}
+        {user && (
+          <div className="px-3 py-3 border-t border-zinc-800">
+            <div className="flex items-center gap-2 px-0.5">
+              {user.avatar_url ? (
+                <img src={user.avatar_url} alt="" className="w-7 h-7 rounded-full" />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-indigo-600 flex items-center justify-center text-xs text-white font-medium">
+                  {(user.display_name ?? user.email)[0].toUpperCase()}
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-zinc-200 truncate">{user.display_name ?? user.email}</p>
               </div>
-            )}
-            <div className="flex-1 min-w-0 hidden lg:block">
-              <p className="text-xs font-medium text-zinc-200 truncate">{user.display_name ?? user.email}</p>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-    </aside>
+      </aside>
+    </>
   );
 }
