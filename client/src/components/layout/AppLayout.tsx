@@ -10,7 +10,7 @@ export function AppLayout() {
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden relative pl-12 lg:pl-0">
         {/* Hamburger — only visible at tablet width when the sidebar is hidden.
             Sits in absolute position over the page header; small enough to not
             collide with most header content. */}
