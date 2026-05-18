@@ -1557,10 +1557,15 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex items-center justify-between gap-2 pt-1">
           {!isEbaySet && (() => {
-            const missing = bulkCart.filter(i => { const n = parseFloat(i.final_price_input || '0'); return isNaN(n) || n <= 0; }).length;
-            return missing > 0
-              ? <p className="text-xs text-amber-500">{missing} item{missing === 1 ? '' : 's'} missing Final price</p>
-              : <span />;
+            const blocked = bulkCart.filter(i => { const n = parseFloat(i.final_price_input || '0'); return isNaN(n) || n <= 0; });
+            if (blocked.length === 0) return <span />;
+            // Surface the actual card names so a 21-item cart doesn't hide
+            // which row is dead. Also dump the raw cart to console for
+            // pasting back if the names alone aren't enough.
+            // eslint-disable-next-line no-console
+            console.warn('[bulk-review] blocked rows:', blocked.map(b => ({ name: b.card_name, final: b.final_price_input, sticker: b.sticker_price_input, id: b.id, entry: b.cart_entry_id })));
+            const names = blocked.slice(0, 3).map(b => b.card_name ?? '(unnamed)').join(', ');
+            return <p className="text-xs text-amber-500">Missing final price: {names}{blocked.length > 3 ? ` +${blocked.length - 3} more` : ''}</p>;
           })()}
           <div className="flex justify-end gap-2 ml-auto">
             <Button type="button" variant="ghost" onClick={() => setStep('bulk-search')}>Back</Button>
