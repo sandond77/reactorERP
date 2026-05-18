@@ -1959,7 +1959,7 @@ export function Sales() {
                     {sale.grade_label || sale.grade != null
                       ? <span><span className="text-zinc-500 text-[10px] mr-1">{sale.grading_company}</span>{sale.grade_label ?? sale.grade}</span>
                       : sale.condition
-                      ? <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{sale.condition}</span>
+                      ? <span><span className="text-zinc-500 text-[10px] mr-1">Raw</span>{sale.condition}</span>
                       : <span className="text-zinc-700">—</span>}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums text-zinc-400">{sale.quantity ?? 1}</td>
