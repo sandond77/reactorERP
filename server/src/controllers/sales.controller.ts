@@ -79,7 +79,7 @@ export async function recordBulkSale(req: Request, res: Response, next: NextFunc
       items: z.array(z.object({
         card_instance_id: z.string().uuid(),
         listing_id: z.string().uuid().optional(),
-        sale_price: z.number().int().positive(),
+        sale_price: z.number().int().nonnegative(),
         platform_fees: z.number().int().nonnegative().default(0),
         quantity: z.coerce.number().int().positive().optional(),
       })).min(1),

@@ -161,6 +161,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [bulkSearchMode, setBulkSearchMode] = useState<'search' | 'url'>('search');
   const [bulkUrl, setBulkUrl] = useState('');
   const [bulkUrlLoading, setBulkUrlLoading] = useState(false);
+  // Re-add confirmation for the bulk raw cart — replaces window.confirm so the
+  // prompt matches the rest of the app's styling.
+  const [reAddPrompt, setReAddPrompt] = useState<{
+    cardName: string;
+    usedQty: number;
+    lotQty: number;
+    onConfirm: () => void;
+  } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedBulkSearch(bulkSearch), 300);
@@ -306,7 +314,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     const cardId = saleMode === 'raw' ? selectedRawCard?.id : selectedCard?.id;
     if (!cardId) { toast.error('Select a card'); return; }
-    if (!strikePrice) { toast.error('Enter a strike price'); return; }
+    // Empty is invalid; 0 is allowed (giveaway / total loss).
+    if (!strikePrice.trim() || isNaN(parseFloat(strikePrice)) || parseFloat(strikePrice) < 0) {
+      toast.error('Enter a strike price (0 is OK for giveaways)'); return;
+    }
     // Raw lots can carry quantity > 1; validate the user-entered qty.
     let qtyToSell: number | undefined;
     if (saleMode === 'raw' && selectedRawCard) {
@@ -1079,6 +1090,27 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const isSearching = bulkTab === 'graded' ? isBulkSearching : isBulkRawSearching;
     const activeRows = bulkTab === 'graded' ? bulkSearchRows : bulkRawRows;
     return (
+      <>
+      {reAddPrompt && (
+        // In-app confirm — replaces window.confirm(). z-[60] sits above the
+        // parent Record Sale modal (z-50) and backdrop intercepts click-aways.
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setReAddPrompt(null)} />
+          <div className="relative bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-5 space-y-3">
+            <p className="text-sm font-semibold text-zinc-100">Add another entry?</p>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              <span className="font-medium text-zinc-200">{reAddPrompt.cardName}</span> is already in the cart
+              ({reAddPrompt.usedQty} of {reAddPrompt.lotQty}). Only add another if a second copy sold at a different price.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={() => setReAddPrompt(null)}>Cancel</Button>
+              <Button type="button" onClick={() => { reAddPrompt.onConfirm(); setReAddPrompt(null); }}>
+                Add Another
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="space-y-3">
         <div className="flex items-center gap-2 mb-1">
           <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
@@ -1183,36 +1215,41 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 <button key={r.id} type="button" disabled={added}
                   onClick={() => {
                     if (added) return;
+                    const doAdd = () => {
+                      const rawStickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
+                      const rawDiscPct = parseFloat(bulkDiscount || '0');
+                      const rawFinalStr = rawStickerStr && rawDiscPct > 0
+                        ? (parseFloat(rawStickerStr) * (1 - rawDiscPct / 100)).toFixed(2)
+                        : rawStickerStr;
+                      setBulkCart(prev => [...prev, {
+                        cart_entry_id: crypto.randomUUID(),
+                        id: r.id,
+                        card_name: r.card_name,
+                        set_name: r.set_name,
+                        cert_number: null,
+                        grade_label: r.condition,
+                        company: null,
+                        raw_purchase_label: r.raw_purchase_label ?? null,
+                        sticker_price_input: rawStickerStr,
+                        final_price_input: rawFinalStr,
+                        card_type: 'raw',
+                        quantity: 1,
+                        lot_quantity: lotQty,
+                      }]);
+                    };
                     // Re-add confirm — multi-add is intentional only when the
                     // copies sold at different prices. Click-happy users were
                     // accidentally double-adding the same card.
                     if (usedQty > 0) {
-                      const ok = window.confirm(
-                        `${r.card_name ?? 'This card'} is already in the cart (${usedQty} of ${lotQty}). ` +
-                        `Add another entry? Only do this if a second copy sold at a different price.`
-                      );
-                      if (!ok) return;
+                      setReAddPrompt({
+                        cardName: r.card_name ?? 'This card',
+                        usedQty,
+                        lotQty,
+                        onConfirm: doAdd,
+                      });
+                      return;
                     }
-                    const rawStickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
-                    const rawDiscPct = parseFloat(bulkDiscount || '0');
-                    const rawFinalStr = rawStickerStr && rawDiscPct > 0
-                      ? (parseFloat(rawStickerStr) * (1 - rawDiscPct / 100)).toFixed(2)
-                      : rawStickerStr;
-                    setBulkCart(prev => [...prev, {
-                      cart_entry_id: crypto.randomUUID(),
-                      id: r.id,
-                      card_name: r.card_name,
-                      set_name: r.set_name,
-                      cert_number: null,
-                      grade_label: r.condition,
-                      company: null,
-                      raw_purchase_label: r.raw_purchase_label ?? null,
-                      sticker_price_input: rawStickerStr,
-                      final_price_input: rawFinalStr,
-                      card_type: 'raw',
-                      quantity: 1,
-                      lot_quantity: lotQty,
-                    }]);
+                    doAdd();
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
                   <div className="min-w-0">
@@ -1244,7 +1281,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             <div className="rounded-lg border border-zinc-700 overflow-hidden">
               <div className="max-h-[360px] overflow-y-auto">
               {bulkCart.map((item, i) => {
-                const missingPrice = !item.sticker_price_input || parseFloat(item.sticker_price_input) <= 0;
+                // 0 is valid (giveaway / total loss). Only flag empty or non-numeric.
+                const missingPrice = !item.sticker_price_input.trim() || isNaN(parseFloat(item.sticker_price_input)) || parseFloat(item.sticker_price_input) < 0;
                 // Cross-entry rollup: sum of qtys across all cart rows sharing
                 // this source must not exceed the lot. Per-row min is 1.
                 const totalForSource = item.card_type === 'raw'
@@ -1313,7 +1351,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div className="flex items-center justify-between">
-              {!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0) && (
+              {!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input.trim() || isNaN(parseFloat(i.sticker_price_input)) || parseFloat(i.sticker_price_input) < 0) && (
                 <p className="text-xs text-amber-500">Enter a sticker price for each line (total per line, not per card)</p>
               )}
               {(() => {
@@ -1329,7 +1367,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 <Button type="button"
                   disabled={
                     bulkCart.length === 0
-                    || (!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0))
+                    || (!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input.trim() || isNaN(parseFloat(i.sticker_price_input)) || parseFloat(i.sticker_price_input) < 0))
                     || bulkCart.some(i => {
                       if (i.quantity < 1) return true;
                       const total = i.card_type === 'raw' ? (rawCartQtyBySource.get(i.id) ?? i.quantity) : i.quantity;
@@ -1344,6 +1382,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           </div>
         )}
       </div>
+      </>
     );
   }
 
@@ -1374,7 +1413,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         // Confirm because every row needs final to be > 0.
         if (field === 'sticker_price_input') {
           const currentFinal = parseFloat(c.final_price_input || '0');
-          return { ...c, sticker_price_input: val, ...(currentFinal <= 0 ? { final_price_input: val } : {}) };
+          // Cascade only when final is empty / non-numeric / negative, NOT
+          // when final has been intentionally set to 0 (giveaway).
+          const finalEmpty = !c.final_price_input.trim() || isNaN(currentFinal) || currentFinal < 0;
+          return { ...c, sticker_price_input: val, ...(finalEmpty ? { final_price_input: val } : {}) };
         }
         return { ...c, [field]: val };
       }));
@@ -1490,7 +1532,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                         value={item.final_price_input}
                         onChange={(e) => updateReviewField(item.cart_entry_id, 'final_price_input', e.target.value.replace(/[^0-9.]/g, ''))}
                         className={cn('w-16 text-xs bg-zinc-800 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500',
-                          final <= 0 ? 'border border-amber-600/60' : 'border border-indigo-600/60')}
+                          !item.final_price_input.trim() || isNaN(final) || final < 0 ? 'border border-amber-600/60' : 'border border-indigo-600/60')}
                       />
                     </div>
                     <p className={cn('text-xs text-right tabular-nums', discountPct > 0 ? 'text-amber-400' : 'text-zinc-600')}>
@@ -1556,25 +1598,31 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         <Input label="Notes" placeholder="Person, location, etc." value={notes} onChange={(e) => setNotes(e.target.value)} />
 
         <div className="flex items-center justify-between gap-2 pt-1">
-          {!isEbaySet && (() => {
-            const blocked = bulkCart.filter(i => { const n = parseFloat(i.final_price_input || '0'); return isNaN(n) || n <= 0; });
-            if (blocked.length === 0) return <span />;
-            // Surface the actual card names so a 21-item cart doesn't hide
-            // which row is dead. Also dump the raw cart to console for
-            // pasting back if the names alone aren't enough.
-            // eslint-disable-next-line no-console
-            console.warn('[bulk-review] blocked rows:', blocked.map(b => ({ name: b.card_name, final: b.final_price_input, sticker: b.sticker_price_input, id: b.id, entry: b.cart_entry_id })));
-            const names = blocked.slice(0, 3).map(b => b.card_name ?? '(unnamed)').join(', ');
-            return <p className="text-xs text-amber-500">Missing final price: {names}{blocked.length > 3 ? ` +${blocked.length - 3} more` : ''}</p>;
-          })()}
+          <span />
           <div className="flex justify-end gap-2 ml-auto">
             <Button type="button" variant="ghost" onClick={() => setStep('bulk-search')}>Back</Button>
             <Button type="button"
-              disabled={isEbaySet
-                ? !strikePrice || parseFloat(strikePrice) <= 0
-                : bulkCart.some(i => { const n = parseFloat(i.final_price_input || '0'); return isNaN(n) || n <= 0; })
-              }
-              onClick={() => setStep('bulk-confirm')}>
+              disabled={bulkCart.length === 0}
+              onClick={() => {
+                // Validate at click time, not on every render, so the button
+                // doesn't flicker disabled mid-typing (which made users think
+                // it was permanently broken).
+                if (isEbaySet) {
+                  if (!strikePrice.trim() || isNaN(parseFloat(strikePrice)) || parseFloat(strikePrice) < 0) {
+                    toast.error('Enter a total strike price (0 is OK for giveaways)');
+                    return;
+                  }
+                } else {
+                  // 0 is valid (giveaway). Flag only empty / non-numeric / negative.
+                  const blocked = bulkCart.filter(i => { const raw = i.final_price_input; const n = parseFloat(raw); return !raw.trim() || isNaN(n) || n < 0; });
+                  if (blocked.length > 0) {
+                    const names = blocked.slice(0, 3).map(b => b.card_name ?? '(unnamed)').join(', ');
+                    toast.error(`Missing final price: ${names}${blocked.length > 3 ? ` +${blocked.length - 3} more` : ''}`);
+                    return;
+                  }
+                }
+                setStep('bulk-confirm');
+              }}>
               Review &amp; Confirm →
             </Button>
           </div>
