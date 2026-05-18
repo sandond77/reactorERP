@@ -25,7 +25,9 @@ const schema = z.object({
   currency: z.enum(['USD', 'JPY']).default('USD'),
   purchased_at: z.string().min(1, 'Purchase date required'),
   notes: z.string().optional(),
-  location_id: z.string().uuid().optional().nullable(),
+  // Empty-string preprocess: the <select> emits '' for the "No location"
+  // option, which would otherwise fail .uuid() and block submit.
+  location_id: z.preprocess((v) => v === '' ? undefined : v, z.string().uuid().optional().nullable()),
   is_personal_collection: z.boolean().default(false),
   slab_company: z.enum(GRADING_COMPANIES),
   slab_grade: z.coerce.number().min(1, 'Grade required').max(10),

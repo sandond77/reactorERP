@@ -26,7 +26,9 @@ const schema = z.object({
   condition: z.string().optional(),
   purchased_at: z.string().optional(),
   notes: z.string().optional(),
-  location_id: z.string().uuid().optional().nullable(),
+  // Empty-string preprocess: the <select> emits '' for the "No location"
+  // option, which would otherwise fail .uuid() and block submit.
+  location_id: z.preprocess((v) => v === '' ? undefined : v, z.string().uuid().optional().nullable()),
 });
 
 type FormData = z.infer<typeof schema>;
