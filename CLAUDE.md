@@ -118,7 +118,7 @@ No test suite exists. Validate changes by running the dev server.
 
 **Key tables:**
 - `card_catalog` — shared global card reference (game, set, name, SKU/part number). Not user-specific.
-- `card_instances` — user-owned cards. Carries status, condition, decision, cost, quantity, and optional `raw_purchase_id`. Soft-deleted via `deleted_at`.
+- `card_instances` — user-owned cards. Carries status, condition, decision, cost, quantity, and optional `raw_purchase_id`. **Hard-deleted** (no `deleted_at` column — dropped in migration 014).
 - `raw_purchases` — grouped bulk purchase records, the lot-level entry point.
 - `slab_details` — graded card data (cert number, grade, company) joined 1:1 to a `card_instances` row.
 - `grading_submissions` / `grading_batches` — batch submission tracking.
