@@ -1183,6 +1183,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 <button key={r.id} type="button" disabled={added}
                   onClick={() => {
                     if (added) return;
+                    // Re-add confirm — multi-add is intentional only when the
+                    // copies sold at different prices. Click-happy users were
+                    // accidentally double-adding the same card.
+                    if (usedQty > 0) {
+                      const ok = window.confirm(
+                        `${r.card_name ?? 'This card'} is already in the cart (${usedQty} of ${lotQty}). ` +
+                        `Add another entry? Only do this if a second copy sold at a different price.`
+                      );
+                      if (!ok) return;
+                    }
                     const rawStickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
                     const rawDiscPct = parseFloat(bulkDiscount || '0');
                     const rawFinalStr = rawStickerStr && rawDiscPct > 0
@@ -1206,7 +1216,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
                   <div className="min-w-0">
-                    <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
+                    <p className="text-sm text-zinc-200 truncate">
+                      {r.card_name ?? '—'}
+                      {usedQty > 0 && (
+                        <span className="ml-2 text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                          in cart ×{usedQty}
+                        </span>
+                      )}
+                    </p>
                     <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.raw_purchase_label ? ` · ${r.raw_purchase_label}` : ''}</p>
                   </div>
                   <div className="shrink-0 text-right">
@@ -1350,7 +1367,17 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     }, 0);
 
     function updateReviewField(entryId: string, field: 'sticker_price_input' | 'final_price_input', val: string) {
-      setBulkCart(prev => prev.map(c => c.cart_entry_id === entryId ? { ...c, [field]: val } : c));
+      setBulkCart(prev => prev.map(c => {
+        if (c.cart_entry_id !== entryId) return c;
+        // Cascade sticker → final when final is still empty/0. Users were
+        // entering only sticker, then bouncing off a disabled Review &
+        // Confirm because every row needs final to be > 0.
+        if (field === 'sticker_price_input') {
+          const currentFinal = parseFloat(c.final_price_input || '0');
+          return { ...c, sticker_price_input: val, ...(currentFinal <= 0 ? { final_price_input: val } : {}) };
+        }
+        return { ...c, [field]: val };
+      }));
     }
 
     return (
@@ -1462,7 +1489,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       <input type="text" inputMode="decimal"
                         value={item.final_price_input}
                         onChange={(e) => updateReviewField(item.cart_entry_id, 'final_price_input', e.target.value.replace(/[^0-9.]/g, ''))}
-                        className="w-16 text-xs bg-zinc-800 border border-indigo-600/60 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500"
+                        className={cn('w-16 text-xs bg-zinc-800 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500',
+                          final <= 0 ? 'border border-amber-600/60' : 'border border-indigo-600/60')}
                       />
                     </div>
                     <p className={cn('text-xs text-right tabular-nums', discountPct > 0 ? 'text-amber-400' : 'text-zinc-600')}>
@@ -1527,16 +1555,24 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </div>
         <Input label="Notes" placeholder="Person, location, etc." value={notes} onChange={(e) => setNotes(e.target.value)} />
 
-        <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="ghost" onClick={() => setStep('bulk-search')}>Back</Button>
-          <Button type="button"
-            disabled={isEbaySet
-              ? !strikePrice || parseFloat(strikePrice) <= 0
-              : bulkCart.some(i => { const n = parseFloat(i.final_price_input || '0'); return isNaN(n) || n <= 0; })
-            }
-            onClick={() => setStep('bulk-confirm')}>
-            Review &amp; Confirm →
-          </Button>
+        <div className="flex items-center justify-between gap-2 pt-1">
+          {!isEbaySet && (() => {
+            const missing = bulkCart.filter(i => { const n = parseFloat(i.final_price_input || '0'); return isNaN(n) || n <= 0; }).length;
+            return missing > 0
+              ? <p className="text-xs text-amber-500">{missing} item{missing === 1 ? '' : 's'} missing Final price</p>
+              : <span />;
+          })()}
+          <div className="flex justify-end gap-2 ml-auto">
+            <Button type="button" variant="ghost" onClick={() => setStep('bulk-search')}>Back</Button>
+            <Button type="button"
+              disabled={isEbaySet
+                ? !strikePrice || parseFloat(strikePrice) <= 0
+                : bulkCart.some(i => { const n = parseFloat(i.final_price_input || '0'); return isNaN(n) || n <= 0; })
+              }
+              onClick={() => setStep('bulk-confirm')}>
+              Review &amp; Confirm →
+            </Button>
+          </div>
         </div>
       </div>
     );
