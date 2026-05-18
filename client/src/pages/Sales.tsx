@@ -95,7 +95,8 @@ interface RawCardResult {
 }
 
 interface BulkCartItem {
-  id: string;             // card_instance_id
+  cart_entry_id: string;  // unique per cart row; lets the same card_instance be added multiple times
+  id: string;             // card_instance_id (the source lot — may repeat across entries)
   listing_id?: string;
   card_name: string | null;
   set_name: string | null;
@@ -363,6 +364,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           return true;
         })
         .map(r => ({
+          cart_entry_id: crypto.randomUUID(),
           id: r.id,
           listing_id: r.listing_id,
           card_name: r.card_name,
@@ -893,18 +895,20 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <span className="text-sm text-zinc-300">{selectedRawCard.location_name}</span>
             </div>
           )}
-          {selectedRawCard.quantity > 1 && (
-            <div className="flex items-center gap-2 border-t border-zinc-700/50 pt-2">
-              <label className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">Sell qty</label>
-              <input
-                type="number" min={1} max={selectedRawCard.quantity}
-                value={rawSaleQty}
-                onChange={(e) => setRawSaleQty(e.target.value)}
-                className="w-20 px-2 py-1 text-sm bg-zinc-900 border border-zinc-700 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
-              <span className="text-[11px] text-zinc-500">of {selectedRawCard.quantity} in this lot</span>
-            </div>
-          )}
+          {/* Always render Sell qty for raw so the user can see/confirm
+              what's about to flip sold — even for qty=1 lots where the
+              field is effectively read-only. */}
+          <div className="flex items-center gap-2 border-t border-zinc-700/50 pt-2">
+            <label className="text-[10px] font-bold uppercase tracking-wide text-zinc-400">Sell qty</label>
+            <input
+              type="number" min={1} max={selectedRawCard.quantity}
+              value={rawSaleQty}
+              readOnly={selectedRawCard.quantity === 1}
+              onChange={(e) => setRawSaleQty(e.target.value)}
+              className={`w-20 px-2 py-1 text-sm bg-zinc-900 border border-zinc-700 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${selectedRawCard.quantity === 1 ? 'opacity-60 cursor-not-allowed' : ''}`}
+            />
+            <span className="text-[11px] text-zinc-500">of {selectedRawCard.quantity} in this lot</span>
+          </div>
         </div>
       ) : selectedCard ? (
         <div className="rounded-lg bg-zinc-800/60 border border-zinc-700/50 px-4 py-3 space-y-2">
@@ -1057,6 +1061,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // ── Step: bulk-search ────────────────────────────────────────────────────────
 
   if (step === 'bulk-search') {
+    // Per-source cart-qty rollup for raw lots: lets us allow the same multi-
+    // card lot to be added multiple times (one entry per discrete sale, each
+    // with its own price), capped at the lot's remaining capacity.
+    const rawCartQtyBySource = new Map<string, number>();
+    for (const c of bulkCart) {
+      if (c.card_type !== 'raw') continue;
+      rawCartQtyBySource.set(c.id, (rawCartQtyBySource.get(c.id) ?? 0) + (c.quantity || 0));
+    }
     const alreadyAdded = new Set(bulkCart.map(c => c.id));
     const isSearching = bulkTab === 'graded' ? isBulkSearching : isBulkRawSearching;
     const activeRows = bulkTab === 'graded' ? bulkSearchRows : bulkRawRows;
@@ -1127,6 +1139,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       ? (parseFloat(stickerStr) * (1 - discPct / 100)).toFixed(2)
                       : stickerStr;
                     setBulkCart(prev => [...prev, {
+                      cart_entry_id: crypto.randomUUID(),
                       id: r.id,
                       listing_id: r.listing_id ?? undefined,
                       card_name: r.card_name,
@@ -1154,7 +1167,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 </button>
               );
             }) : bulkRawRows.map((r) => {
-              const added = alreadyAdded.has(r.id);
+              // Raw multi-card lots: re-add as many discrete sales as the lot
+              // has remaining capacity for. Each entry holds its own price.
+              // Single-card raw rows behave like before (one-shot).
+              const usedQty = rawCartQtyBySource.get(r.id) ?? 0;
+              const lotQty = r.quantity || 1;
+              const added = usedQty >= lotQty;
               return (
                 <button key={r.id} type="button" disabled={added}
                   onClick={() => {
@@ -1165,6 +1183,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       ? (parseFloat(rawStickerStr) * (1 - rawDiscPct / 100)).toFixed(2)
                       : rawStickerStr;
                     setBulkCart(prev => [...prev, {
+                      cart_entry_id: crypto.randomUUID(),
                       id: r.id,
                       card_name: r.card_name,
                       set_name: r.set_name,
@@ -1176,7 +1195,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       final_price_input: rawFinalStr,
                       card_type: 'raw',
                       quantity: 1,
-                      lot_quantity: r.quantity || 1,
+                      lot_quantity: lotQty,
                     }]);
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
@@ -1203,10 +1222,15 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <div className="max-h-[360px] overflow-y-auto">
               {bulkCart.map((item, i) => {
                 const missingPrice = !item.sticker_price_input || parseFloat(item.sticker_price_input) <= 0;
-                const qtyInvalid = item.quantity < 1 || item.quantity > item.lot_quantity;
+                // Cross-entry rollup: sum of qtys across all cart rows sharing
+                // this source must not exceed the lot. Per-row min is 1.
+                const totalForSource = item.card_type === 'raw'
+                  ? (rawCartQtyBySource.get(item.id) ?? item.quantity)
+                  : item.quantity;
+                const qtyInvalid = item.quantity < 1 || totalForSource > item.lot_quantity;
                 const showQty = item.card_type === 'raw' && item.lot_quantity > 1;
                 return (
-                  <div key={item.id} className="flex items-start gap-3 px-3 py-2 border-b border-zinc-700/40 last:border-0">
+                  <div key={item.cart_entry_id} className="flex items-start gap-3 px-3 py-2 border-b border-zinc-700/40 last:border-0">
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-zinc-200 leading-snug">{item.card_name ?? '—'}</p>
                       <p className="text-xs text-zinc-500 mt-0.5">
@@ -1269,15 +1293,25 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               {!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0) && (
                 <p className="text-xs text-amber-500">Enter a sticker price for each line (total per line, not per card)</p>
               )}
-              {bulkCart.some(i => i.quantity < 1 || i.quantity > i.lot_quantity) && (
-                <p className="text-xs text-amber-500">Each qty must be between 1 and the lot size</p>
-              )}
+              {(() => {
+                // Validate cross-entry: each source's summed qty ≤ its lot.
+                const overflow = bulkCart.some(i => {
+                  if (i.quantity < 1) return true;
+                  const total = i.card_type === 'raw' ? (rawCartQtyBySource.get(i.id) ?? i.quantity) : i.quantity;
+                  return total > i.lot_quantity;
+                });
+                return overflow ? <p className="text-xs text-amber-500">Each lot's cart qty must fit within its remaining inventory</p> : null;
+              })()}
               <div className="ml-auto">
                 <Button type="button"
                   disabled={
                     bulkCart.length === 0
                     || (!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0))
-                    || bulkCart.some(i => i.quantity < 1 || i.quantity > i.lot_quantity)
+                    || bulkCart.some(i => {
+                      if (i.quantity < 1) return true;
+                      const total = i.card_type === 'raw' ? (rawCartQtyBySource.get(i.id) ?? i.quantity) : i.quantity;
+                      return total > i.lot_quantity;
+                    })
                   }
                   onClick={() => setStep('bulk-review')}>
                   Review Sale →
@@ -1309,8 +1343,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       return s + final;
     }, 0);
 
-    function updateReviewField(id: string, field: 'sticker_price_input' | 'final_price_input', val: string) {
-      setBulkCart(prev => prev.map(c => c.id === id ? { ...c, [field]: val } : c));
+    function updateReviewField(entryId: string, field: 'sticker_price_input' | 'final_price_input', val: string) {
+      setBulkCart(prev => prev.map(c => c.cart_entry_id === entryId ? { ...c, [field]: val } : c));
     }
 
     return (
@@ -1385,7 +1419,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             const final = parseFloat(item.final_price_input || '0');
             const discountPct = sticker > 0 ? Math.round((1 - final / sticker) * 100) : 0;
             return (
-              <div key={item.id} className={cn('gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start',
+              <div key={item.cart_entry_id} className={cn('gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start',
                 isEbaySet ? 'flex items-center justify-between' : 'grid grid-cols-[1fr_6rem_6rem_4rem]')}>
                 <div className="min-w-0">
                   <p className="text-sm text-zinc-200 leading-snug">
@@ -1413,7 +1447,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       <span className="text-zinc-600 text-xs">$</span>
                       <input type="text" inputMode="decimal"
                         value={item.sticker_price_input}
-                        onChange={(e) => updateReviewField(item.id, 'sticker_price_input', e.target.value.replace(/[^0-9.]/g, ''))}
+                        onChange={(e) => updateReviewField(item.cart_entry_id, 'sticker_price_input', e.target.value.replace(/[^0-9.]/g, ''))}
                         className="w-16 text-xs bg-zinc-800 border border-zinc-700 rounded px-1.5 py-1 text-zinc-300 text-right focus:outline-none focus:border-indigo-500"
                       />
                     </div>
@@ -1421,7 +1455,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       <span className="text-zinc-600 text-xs">$</span>
                       <input type="text" inputMode="decimal"
                         value={item.final_price_input}
-                        onChange={(e) => updateReviewField(item.id, 'final_price_input', e.target.value.replace(/[^0-9.]/g, ''))}
+                        onChange={(e) => updateReviewField(item.cart_entry_id, 'final_price_input', e.target.value.replace(/[^0-9.]/g, ''))}
                         className="w-16 text-xs bg-zinc-800 border border-indigo-600/60 rounded px-1.5 py-1 text-zinc-100 text-right focus:outline-none focus:border-indigo-500"
                       />
                     </div>
@@ -1606,7 +1640,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
         <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-[360px] overflow-y-auto">
           {itemsWithFinal.map((item) => (
-            <div key={item.id} className="flex items-start justify-between gap-3 px-3 py-2.5 border-b border-zinc-700/40 last:border-0">
+            <div key={item.cart_entry_id} className="flex items-start justify-between gap-3 px-3 py-2.5 border-b border-zinc-700/40 last:border-0">
               <div className="min-w-0">
                 <p className="text-sm text-zinc-200 leading-snug">{item.card_name ?? '—'}</p>
                 <p className="text-xs text-zinc-500 mt-0.5">
