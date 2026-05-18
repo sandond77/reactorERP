@@ -1538,7 +1538,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             listing_id: item.listing_id,
             sale_price: item.final_price,
             platform_fees: item.platform_fees,
-            quantity: item.quantity > 1 ? item.quantity : undefined,
+            // Always send the cart qty — never undefined. Server's recordSale
+            // defaults undefined to card.quantity (the source lot's full count),
+            // which silently flips a whole multi-card lot sold when the user
+            // really only meant to sell 1 from it.
+            quantity: item.quantity,
           })),
           platform: isEbaySet ? 'ebay' : 'card_show',
           card_show_id: isEbaySet ? undefined : (cardShowId || undefined),
