@@ -1787,6 +1787,7 @@ export function Sales() {
     cert:         colMinWidth('Cert / ID', true, false),
     card:         colMinWidth('Card',          true,  false),
     grade_cond:   colMinWidth('Grade / Cond.', true, false),
+    qty:          colMinWidth('Qty',           true,  false),
     sale_method:  colMinWidth('Sale Method',   true,  true),
     link:         50,
     raw_cost:     colMinWidth('Raw Cost',      true,  false),
@@ -1796,7 +1797,7 @@ export function Sales() {
     after_ebay:   colMinWidth('After Fees',    true,  false),
     net:          colMinWidth('Net',           true,  false),
   };
-  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 155), card: Math.max(MINS.card, 460), grade_cond: Math.max(MINS.grade_cond, 130), sale_method: Math.max(MINS.sale_method, 200), link: 50, raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
+  const { rz, totalWidth } = useColWidths({ date: Math.max(MINS.date, 115), cert: Math.max(MINS.cert, 155), card: Math.max(MINS.card, 460), grade_cond: Math.max(MINS.grade_cond, 130), qty: Math.max(MINS.qty, 60), sale_method: Math.max(MINS.sale_method, 200), link: 50, raw_cost: Math.max(MINS.raw_cost, 105), grading_cost: Math.max(MINS.grading_cost, 130), listed_price: Math.max(MINS.listed_price, 130), strike: Math.max(MINS.strike, 130), after_ebay: Math.max(MINS.after_ebay, 130), net: Math.max(MINS.net, 105) });
 
   useEffect(() => {
     const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
@@ -1892,6 +1893,7 @@ export function Sales() {
                 <ColHeader label="Cert / ID" col="cert_number" {...sh} {...rz('cert')} minWidth={MINS.cert} wrap />
                 <ColHeader label="Card"           col="card_name"    {...sh} {...rz('card')} minWidth={MINS.card} />
                 <ColHeader label="Grade / Cond."  {...sh} {...rz('grade_cond')} minWidth={MINS.grade_cond} />
+                <ColHeader label="Qty"            {...sh} {...rz('qty')} minWidth={MINS.qty} align="right" />
                 <ColHeader label="Sale Method"    col="platform"     {...sh} {...rz('sale_method')} minWidth={MINS.sale_method}
                   filterOptions={filterOptions?.platforms} filterSelected={fPlatform} onFilterChange={(v) => { setFPlatform(v); setPage(1); }} />
                 <th style={{ width: MINS.link + 'px', minWidth: MINS.link + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide">Link</th>
@@ -1905,7 +1907,7 @@ export function Sales() {
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {!data?.data.length ? (
-                <tr><td colSpan={12} className="px-3 py-10 text-center text-zinc-500">No sales found.</td></tr>
+                <tr><td colSpan={13} className="px-3 py-10 text-center text-zinc-500">No sales found.</td></tr>
               ) : data.data.map((sale) => (
                 <tr key={sale.id} className="hover:bg-zinc-800/30 transition-colors cursor-pointer" onClick={() => setSelectedSale(sale)}>
                   <td className="px-3 py-2 text-zinc-500">{formatDate(sale.sold_at)}</td>
@@ -1927,6 +1929,7 @@ export function Sales() {
                       ? <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{sale.condition}</span>
                       : <span className="text-zinc-700">—</span>}
                   </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-zinc-400">{sale.quantity ?? 1}</td>
                   <td className="px-3 py-2">
                     <span className="text-xs text-zinc-400">{platformLabel(sale.platform)}</span>
                     {sale.platform === 'card_show' && sale.card_show_name && (

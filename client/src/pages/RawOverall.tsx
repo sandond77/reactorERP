@@ -123,7 +123,9 @@ export function RawOverall() {
     sku:               colMinWidth('Part #',        true,  false),
     card_name:         colMinWidth('Card',          true,  false),
     condition:         colMinWidth('Condition',     true,  true),
-    qty:               colMinWidth('Qty',           true,  false),
+    total:             colMinWidth('Total',         true,  false),
+    unsold:            colMinWidth('Unsold',        true,  false),
+    sold:              colMinWidth('Sold',          true,  false),
     is_listed:         colMinWidth('Listed?',       true,  true),
     listed_price:      colMinWidth('Listed',        true,  false),
     listing:           colMinWidth('Link',          false, false),
@@ -144,7 +146,9 @@ export function RawOverall() {
     sku:               Math.max(MINS.sku,               190),
     card_name:         Math.max(MINS.card_name,          500),
     condition:         Math.max(MINS.condition,           90),
-    qty:               Math.max(MINS.qty,                 170),
+    total:             Math.max(MINS.total,                65),
+    unsold:            Math.max(MINS.unsold,               65),
+    sold:              Math.max(MINS.sold,                 65),
     is_listed:         Math.max(MINS.is_listed,           80),
     listed_price:      Math.max(MINS.listed_price,        80),
     listing:           Math.max(MINS.listing,             55),
@@ -479,7 +483,9 @@ export function RawOverall() {
                 <ColHeader label="Part #"           col="sku"                {...sh} {...rz('sku')}               minWidth={MINS.sku} />
                 <ColHeader label="ID"               col="raw_purchase_label" {...sh} {...rz('id')}               minWidth={MINS.id} />
                 <ColHeader label="Card"             col="card_name"          {...sh} {...rz('card_name')}         minWidth={MINS.card_name} />
-                <ColHeader label="Qty"              col="quantity"           {...sh} {...rz('qty')}               minWidth={MINS.qty} align="right" />
+                <ColHeader label="Total"            col="quantity"           {...sh} {...rz('total')}             minWidth={MINS.total} align="right" />
+                <ColHeader label="Unsold"                                    {...sh} {...rz('unsold')}            minWidth={MINS.unsold} align="right" />
+                <ColHeader label="Sold"                                      {...sh} {...rz('sold')}              minWidth={MINS.sold} align="right" />
                 <ColHeader label="Condition"        col="condition"          {...sh} {...rz('condition')}         minWidth={MINS.condition}
                   filterOptions={filterOptions?.conditions} filterSelected={fCondition} onFilterChange={(v) => { setFCondition(v); setPage(1); }} />
                 <ColHeader label="Location"                                  {...sh} {...rz('location')}          minWidth={MINS.location} />
@@ -506,7 +512,7 @@ export function RawOverall() {
             </thead>
             <tbody>
               {!data?.data.length ? (
-                <tr><td colSpan={18} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
+                <tr><td colSpan={20} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
               ) : (() => {
                 // Group consecutive rows by (raw_purchase_label, condition) so
                 // a lot that's been split by partial sales (e.g. qty=2 unsold
@@ -549,12 +555,12 @@ export function RawOverall() {
                         </span>
                       </td>
                       <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{first.card_name ?? ''}</td>
+                      <td className="px-3 py-1 text-right tabular-nums text-zinc-300">{totalQty}</td>
                       <td className="px-3 py-1 text-right tabular-nums">
-                        <span className="text-zinc-300">{totalQty}</span>
-                        <span className="text-[10px] text-zinc-600 ml-1">
-                          ({soldQty > 0 ? <span className="text-rose-400/70">{soldQty} sold</span> : '0 sold'}
-                          {unsoldQty > 0 ? <> · <span className="text-zinc-400">{unsoldQty} left</span></> : ''})
-                        </span>
+                        <span className={unsoldQty > 0 ? 'text-zinc-300' : 'text-zinc-600'}>{unsoldQty}</span>
+                      </td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={soldQty > 0 ? 'text-rose-400/80' : 'text-zinc-600'}>{soldQty}</span>
                       </td>
                       <td className="px-3 py-1 text-zinc-300">{first.condition ?? ''}</td>
                       <td className="px-3 py-1 text-zinc-400 truncate" title={first.location_name ?? ''}>{first.location_name ?? ''}</td>
@@ -584,8 +590,12 @@ export function RawOverall() {
                       <td className="px-3 py-1 font-mono text-[11px] text-zinc-400">{first.sku ?? '—'}</td>
                       <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{first.raw_purchase_label ?? ''}</td>
                       <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{first.card_name ?? ''}</td>
+                      <td className="px-3 py-1 text-right tabular-nums text-zinc-300">{first.quantity}</td>
                       <td className="px-3 py-1 text-right tabular-nums">
-                        <span className={first.status === 'sold' ? 'text-rose-400/80' : 'text-zinc-300'}>{first.quantity}</span>
+                        <span className={first.status !== 'sold' ? 'text-zinc-300' : 'text-zinc-600'}>{first.status !== 'sold' ? first.quantity : 0}</span>
+                      </td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={first.status === 'sold' ? 'text-rose-400/80' : 'text-zinc-600'}>{first.status === 'sold' ? first.quantity : 0}</span>
                       </td>
                       <td className="px-3 py-1 text-zinc-300">{first.condition ?? ''}</td>
                       <td className="px-3 py-1 text-zinc-400 truncate" title={first.location_name ?? ''}>{first.location_name ?? ''}</td>
@@ -633,8 +643,12 @@ export function RawOverall() {
                         </span>
                       </td>
                       <td />
+                      <td className="px-3 py-1 text-right tabular-nums text-[11px] text-zinc-500">{row.quantity}</td>
                       <td className="px-3 py-1 text-right tabular-nums">
-                        <span className={row.status === 'sold' ? 'text-rose-400/80 text-[11px]' : 'text-zinc-400 text-[11px]'}>{row.quantity}</span>
+                        <span className={row.status !== 'sold' ? 'text-zinc-400 text-[11px]' : 'text-zinc-700 text-[11px]'}>{row.status !== 'sold' ? row.quantity : 0}</span>
+                      </td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={row.status === 'sold' ? 'text-rose-400/80 text-[11px]' : 'text-zinc-700 text-[11px]'}>{row.status === 'sold' ? row.quantity : 0}</span>
                       </td>
                       <td className="px-3 py-1 text-zinc-500 text-[11px]">{row.condition ?? ''}</td>
                       <td className="px-3 py-1 text-zinc-500 text-[11px] truncate" title={row.location_name ?? ''}>{row.location_name ?? ''}</td>

@@ -352,17 +352,73 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
     ...(input.order_details_link !== undefined && { order_details_link: input.order_details_link }),
   }).where('id', '=', saleId).where('user_id', '=', userId).execute();
 
-  // Quantity edit: updates the linked card_instance's quantity directly.
-  // Doesn't try to rebalance against sibling instances in the same lot —
-  // that's the user's call. Just guards against zero/negative qty.
+  // Quantity edit: rebalance against the source sibling in the same lot so
+  // the lot's original for-sale total (set at inspection) stays invariant.
+  // Delta is applied to the linked sold sibling AND its source counterpart;
+  // increases beyond what the source still has are rejected.
   if (input.quantity !== undefined) {
     if (input.quantity < 1) throw new AppError(400, 'Sale quantity must be at least 1');
-    await db
-      .updateTable('card_instances')
-      .set({ quantity: input.quantity })
+    const sold = await db
+      .selectFrom('card_instances')
+      .selectAll()
       .where('id', '=', existing.card_instance_id)
       .where('user_id', '=', userId)
-      .execute();
+      .executeTakeFirst();
+    if (!sold) throw new AppError(404, 'Sale card not found');
+    const delta = input.quantity - sold.quantity;
+    if (delta !== 0) {
+      // Find a sibling source row in the same lot+condition+catalog that we
+      // can take from (delta>0) or return to (delta<0).
+      const source = await db
+        .selectFrom('card_instances')
+        .selectAll()
+        .where('user_id', '=', userId)
+        .where('id', '!=', sold.id)
+        .where('status', '!=', 'sold')
+        .$if(sold.raw_purchase_id != null, (qb) => qb.where('raw_purchase_id', '=', sold.raw_purchase_id!))
+        .$if(sold.raw_purchase_id == null, (qb) => qb.where('raw_purchase_id', 'is', null))
+        .$if(sold.catalog_id != null, (qb) => qb.where('catalog_id', '=', sold.catalog_id!))
+        .$if(sold.catalog_id == null, (qb) => qb.where('catalog_id', 'is', null))
+        .$if(sold.condition != null, (qb) => qb.where('condition', '=', sold.condition!))
+        .$if(sold.condition == null, (qb) => qb.where('condition', 'is', null))
+        .executeTakeFirst();
+      if (delta > 0) {
+        if (!source) throw new AppError(409, `No remaining inventory in this lot to draw ${delta} more from`);
+        if (source.quantity < delta) throw new AppError(409, `Only ${source.quantity} remaining in this lot; can't increase sale by ${delta}`);
+        await db.updateTable('card_instances').set({ quantity: source.quantity - delta }).where('id', '=', source.id).execute();
+        await db.updateTable('card_instances').set({ quantity: input.quantity }).where('id', '=', sold.id).execute();
+      } else {
+        // delta < 0 — return the difference to the source, or recreate one
+        // if the whole lot had been sold off.
+        const returnQty = -delta;
+        if (source) {
+          await db.updateTable('card_instances').set({ quantity: source.quantity + returnQty }).where('id', '=', source.id).execute();
+        } else {
+          await db.insertInto('card_instances').values({
+            user_id: userId,
+            catalog_id: sold.catalog_id,
+            raw_purchase_id: sold.raw_purchase_id,
+            purchase_type: sold.purchase_type,
+            card_game: sold.card_game,
+            status: 'raw_for_sale',
+            decision: sold.decision,
+            condition: sold.condition,
+            quantity: returnQty,
+            purchase_cost: sold.purchase_cost,
+            currency: sold.currency,
+            language: sold.language,
+            card_name_override: sold.card_name_override,
+            set_name_override: sold.set_name_override,
+            card_number_override: sold.card_number_override,
+            location_id: null,
+            notes: sold.notes,
+            purchased_at: sold.purchased_at,
+            is_personal_collection: sold.is_personal_collection,
+          } as any).execute();
+        }
+        await db.updateTable('card_instances').set({ quantity: input.quantity }).where('id', '=', sold.id).execute();
+      }
+    }
   }
 
   const updated = await getSaleById(userId, saleId);
