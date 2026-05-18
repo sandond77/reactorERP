@@ -43,7 +43,7 @@ export async function listCards(
     .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
     .leftJoin('locations as loc', 'loc.id', 'ci.location_id')
     .leftJoin(
-      db.selectFrom('listings').select('card_instance_id').where('listing_status', '=', 'active').as('al'),
+      db.selectFrom('listings').select(['card_instance_id', 'list_price']).where('listing_status', '=', 'active').as('al'),
       'al.card_instance_id', 'ci.id'
     )
     .select([
@@ -73,6 +73,7 @@ export async function listCards(
       'ci.notes',
       'rp.purchase_id as raw_purchase_label',
       sql<boolean>`(al.card_instance_id IS NOT NULL)`.as('is_listed'),
+      'al.list_price as listed_price',
       'loc.name as location_name',
       'ci.is_card_show',
       'ci.card_show_price',
