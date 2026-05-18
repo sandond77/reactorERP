@@ -237,6 +237,7 @@ const SALES_SORT_COLS: Record<string, string> = {
   net_proceeds: 's.net_proceeds',
   profit: `(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`,
   sold_at: 's.sold_at',
+  quantity: 'ci.quantity',
 };
 
 export async function getSaleFilterOptions(userId: string) {
@@ -431,6 +432,12 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
         await db.updateTable('card_instances').set({ quantity: input.quantity }).where('id', '=', sold.id).execute();
       }
     }
+    // computeCostBasis multiplies purchase_cost × quantity (+grading_cost),
+    // so after the qty change we recompute and persist the new basis on the
+    // sale row. Without this, net stays anchored to the pre-edit qty and
+    // the displayed profit goes wildly negative on a downward edit.
+    const newBasis = await computeCostBasis(existing.card_instance_id);
+    await db.updateTable('sales').set({ total_cost_basis: newBasis }).where('id', '=', saleId).where('user_id', '=', userId).execute();
   }
 
   const updated = await getSaleById(userId, saleId);

@@ -154,6 +154,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [bulkCart, setBulkCart] = useState<BulkCartItem[]>([]);
   const [bulkSearch, setBulkSearch] = useState('');
   const [debouncedBulkSearch, setDebouncedBulkSearch] = useState('');
+  const [bulkExactMatch, setBulkExactMatch] = useState(false);
   const [bulkDiscount, setBulkDiscount] = useState('');
   const [bulkTab, setBulkTab] = useState<'graded' | 'raw'>('graded');
   const [bulkSearchMode, setBulkSearchMode] = useState<'search' | 'url'>('search');
@@ -229,11 +230,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Bulk search: card show graded inventory
   const bulkIsEbay = platform === 'ebay';
   const { data: bulkSearchResults, isFetching: isBulkSearching } = useQuery<PaginatedResult<SlabResult>>({
-    queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay],
+    queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay, bulkExactMatch],
     queryFn: () => api.get('/grading/slabs', {
       params: bulkIsEbay
-        ? { search: debouncedBulkSearch, limit: 50, status: 'unsold', for_sale: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' }
-        : { search: debouncedBulkSearch, limit: 50, status: 'unsold', is_card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
+        ? { search: debouncedBulkSearch, limit: 50, status: 'unsold', for_sale: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined }
+        : { search: debouncedBulkSearch, limit: 50, status: 'unsold', is_card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'graded',
   });
@@ -243,11 +244,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Status list matches the individual raw sale flow so inspected/awaiting
   // cards are reachable from bulk too.
   const { data: bulkRawResults, isFetching: isBulkRawSearching } = useQuery<PaginatedResult<RawCardShowResult>>({
-    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay],
+    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay, bulkExactMatch],
     queryFn: () => api.get('/cards', {
       params: bulkIsEbay
-        ? { search: debouncedBulkSearch || undefined, limit: 50, is_listed: 'yes', status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no' }
-        : { search: debouncedBulkSearch || undefined, limit: 50, status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no' },
+        ? { search: debouncedBulkSearch || undefined, limit: 50, is_listed: 'yes', status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined }
+        : { search: debouncedBulkSearch || undefined, limit: 50, status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'raw',
   });
@@ -1105,6 +1106,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 autoFocus autoComplete="off" />
               {isSearching && <Loader2 size={13} className="absolute right-3 top-[30px] animate-spin text-zinc-500" />}
             </div>
+            <label className="flex items-center gap-2 text-[11px] text-zinc-400 cursor-pointer select-none">
+              <input type="checkbox" checked={bulkExactMatch} onChange={(e) => setBulkExactMatch(e.target.checked)}
+                className="accent-indigo-500" />
+              Strict match — require exact term (no fuzzy/substring)
+            </label>
           </>
         )}
         {activeRows.length > 0 ? (
@@ -1261,7 +1267,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             </div>
             <div className="flex items-center justify-between">
               {!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input || parseFloat(i.sticker_price_input) <= 0) && (
-                <p className="text-xs text-amber-500">Enter a sticker price for each card</p>
+                <p className="text-xs text-amber-500">Enter a sticker price for each line (total per line, not per card)</p>
               )}
               {bulkCart.some(i => i.quantity < 1 || i.quantity > i.lot_quantity) && (
                 <p className="text-xs text-amber-500">Each qty must be between 1 and the lot size</p>
@@ -1926,7 +1932,7 @@ export function Sales() {
                 <ColHeader label="Cert / ID" col="cert_number" {...sh} {...rz('cert')} minWidth={MINS.cert} wrap />
                 <ColHeader label="Card"           col="card_name"    {...sh} {...rz('card')} minWidth={MINS.card} />
                 <ColHeader label="Grade / Cond."  {...sh} {...rz('grade_cond')} minWidth={MINS.grade_cond} />
-                <ColHeader label="Qty"            {...sh} {...rz('qty')} minWidth={MINS.qty} align="right" />
+                <ColHeader label="Qty"            col="quantity"     {...sh} {...rz('qty')} minWidth={MINS.qty} align="right" />
                 <ColHeader label="Sale Method"    col="platform"     {...sh} {...rz('sale_method')} minWidth={MINS.sale_method}
                   filterOptions={filterOptions?.platforms} filterSelected={fPlatform} onFilterChange={(v) => { setFPlatform(v); setPage(1); }} />
                 <th style={{ width: MINS.link + 'px', minWidth: MINS.link + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide">Link</th>
