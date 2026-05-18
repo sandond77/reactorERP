@@ -399,6 +399,13 @@ export async function createRawPurchase(userId: string, input: CreateRawPurchase
     ? new Date(input.purchased_at).getFullYear()
     : new Date().getFullYear();
 
+  // R-type ('raw') purchases represent a single card and are always qty=1 by
+  // domain rule. Reject any attempt to log a multi-card raw — those belong
+  // on a B (bulk) purchase.
+  if (input.type === 'raw' && input.card_count !== undefined && input.card_count !== 1) {
+    throw new AppError(400, 'R (single-raw) purchases must have card_count = 1. Use a B (bulk) purchase for multiple cards.');
+  }
+
   const purchaseId = await nextPurchaseId(userId, input.type, year);
 
   const purchase = await db
@@ -417,7 +424,7 @@ export async function createRawPurchase(userId: string, input: CreateRawPurchase
       total_cost_yen: input.total_cost_yen ?? null,
       fx_rate: input.fx_rate ?? null,
       total_cost_usd: input.total_cost_usd ?? null,
-      card_count: input.card_count ?? 1,
+      card_count: input.type === 'raw' ? 1 : (input.card_count ?? 1),
       status: input.status ?? 'ordered',
       purchased_at: input.purchased_at ? new Date(input.purchased_at) : null,
       received_at: input.received_at ? new Date(input.received_at) : null,
@@ -447,6 +454,26 @@ export async function updateRawPurchase(
     update.purchase_id = await nextPurchaseId(userId, input.type as RawPurchaseType, year);
   }
 
+  // Resolve effective type for this update so the qty-1 rule fires whether
+  // type is being changed or already raw.
+  const effectiveType = (input.type ?? existing?.type) as RawPurchaseType | undefined;
+  if (effectiveType === 'raw') {
+    if (input.card_count !== undefined && input.card_count !== 1) {
+      throw new AppError(400, 'R (single-raw) purchases must have card_count = 1. Use a B (bulk) purchase for multiple cards.');
+    }
+    // Also guard against an in-flight rename from B → R while line qtys are
+    // still > 1 — would leave inspection rows in an invalid state.
+    if (existing && input.type === 'raw' && existing.type !== 'raw') {
+      const child = await sql<{ total: number }>`
+        SELECT COALESCE(SUM(quantity), 0)::int AS total
+        FROM card_instances WHERE raw_purchase_id = ${id} AND user_id = ${userId}
+      `.execute(db);
+      if (Number(child.rows[0].total) > 1) {
+        throw new AppError(409, 'Cannot convert this purchase to R — it already has more than 1 card allocated. Reduce inspection-line quantities first.');
+      }
+    }
+  }
+
   if (input.type !== undefined)          update.type = input.type;
   if (input.source !== undefined)        update.source = input.source;
   if (input.order_number !== undefined)  update.order_number = input.order_number;
@@ -458,7 +485,7 @@ export async function updateRawPurchase(
   if (input.total_cost_yen !== undefined) update.total_cost_yen = input.total_cost_yen;
   if (input.fx_rate !== undefined)       update.fx_rate = input.fx_rate;
   if (input.total_cost_usd !== undefined) update.total_cost_usd = input.total_cost_usd;
-  if (input.card_count !== undefined)    update.card_count = input.card_count;
+  if (input.card_count !== undefined)    update.card_count = effectiveType === 'raw' ? 1 : input.card_count;
   if (input.status !== undefined)        update.status = input.status;
   if (input.purchased_at !== undefined)  update.purchased_at = input.purchased_at ? new Date(input.purchased_at) : null;
   if (input.received_at !== undefined)   update.received_at = input.received_at ? new Date(input.received_at) : null;
@@ -561,6 +588,11 @@ export async function addInspectionLine(
     throw new AppError(409, `Can't add a line to a cancelled purchase. Revert it to Ordered first.`);
   }
 
+  // R-type purchases are always 1 card — reject any line with qty > 1.
+  if (purchase.type === 'raw' && input.quantity !== 1) {
+    throw new AppError(400, 'R (single-raw) purchases only support quantity = 1 per line.');
+  }
+
   // Block over-allocation: existing inspection-line quantities + this new line
   // must not exceed the purchase's card_count.
   const usedRow = await sql<{ total: number }>`
@@ -619,10 +651,13 @@ export async function updateInspectionLine(
   if (input.quantity !== undefined && existing?.raw_purchase_id) {
     const purchase = await db
       .selectFrom('raw_purchases')
-      .select(['card_count'])
+      .select(['card_count', 'type'])
       .where('id', '=', existing.raw_purchase_id)
       .where('user_id', '=', userId)
       .executeTakeFirst();
+    if (purchase?.type === 'raw' && input.quantity !== 1) {
+      throw new AppError(400, 'R (single-raw) purchases only support quantity = 1 per line.');
+    }
     if (purchase) {
       const otherRow = await sql<{ total: number }>`
         SELECT COALESCE(SUM(quantity), 0)::int AS total
