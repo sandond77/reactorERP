@@ -173,6 +173,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [showArchived, setShowArchived] = useState(false);
   const [strikePrice, setStrikePrice] = useState('');
   const [rawSaleQty, setRawSaleQty] = useState('1');
+  // Reset Sell qty whenever the picked raw card changes so a stale value
+  // (e.g. '5' typed for a prior 5-card lot) can't quietly flip the whole
+  // stack sold on the next card.
+  useEffect(() => {
+    setRawSaleQty('1');
+  }, [selectedRawCard?.id]);
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
   const [notes, setNotes] = useState('');
