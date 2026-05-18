@@ -335,7 +335,6 @@ export async function listSales(
         WHERE ci2.user_id = ci.user_id
           AND ci2.id <> ci.id
           AND ci2.status <> 'sold'
-          AND ci2.deleted_at IS NULL
           AND ci2.raw_purchase_id IS NOT DISTINCT FROM ci.raw_purchase_id
           AND ci2.condition IS NOT DISTINCT FROM ci.condition
           AND ci2.catalog_id IS NOT DISTINCT FROM ci.catalog_id
