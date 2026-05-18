@@ -229,7 +229,11 @@ export const JP_SETS: SetEntry[] = [
   { code: 'DPt3', names: ['beat of the frontier', 'dpt3'] },
   { code: 'DPt4', names: ['advent of arceus', 'arceus jp', 'dpt4'] },
   // HGSS
+  // Legacy combined L1 — preserved for already-imported data (will be reclassified
+  // by hand into L1HG / L1SS).
   { code: 'L1',   names: ['heart gold and soul silver', 'heart gold soul silver', 'hgss jp', 'hgss1'] },
+  { code: 'L1HG', names: ['heartgold collection', 'heart gold collection', 'hg collection', 'l1 hg', 'l1-hg'] },
+  { code: 'L1SS', names: ['soulsilver collection', 'soul silver collection', 'ss collection', 'l1 ss', 'l1-ss'] },
   { code: 'L2',   names: ['reviving legends', 'reviving legend', 'hgss2'] },
   { code: 'L3',   names: ['clash at the summit', 'clash at the summit jp', 'hgss3'] },
   { code: 'LL',   names: ['lost link', 'lost link jp', 'hgss-ll'] },
