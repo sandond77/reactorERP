@@ -1,5 +1,39 @@
 # Reactor — Changelog
 
+## May 17, 2026
+
+### Features
+
+**Lot-quantity invariant — single source of truth**
+- **Edit Sale qty rebalances the lot.** Changing a sale's quantity now finds the source sibling in the same `raw_purchase + condition + catalog` and shifts the delta between them, so the lot's original inspection-set total stays constant. If the whole lot had been sold off, shrinking a sale recreates a `raw_for_sale` sibling for the leftover. Increases beyond `source.qty` are rejected.
+- **Quantity is no longer freely editable.** Removed the Quantity input from the shared `CardDetailModal` — qty is set at intake/inspection and only changes through sale splits. Server `cards.updateCard` strips any `quantity` from the patch payload as defense-in-depth.
+- **Dynamic max-bound validation in Edit Sale.** Sales list now returns `lot_available_qty` (sum of non-sold sibling qty in the same lot via correlated subquery). Modal shows max in the label, live inline error, live preview ("Will pull 2 more from the source lot" / "Will return 1 to the source lot"), and disables Save until valid.
+
+**Raw Overall — Total / Unsold / Sold columns**
+- Replaced the single Qty column with three (Total / Unsold / Sold, 65px each). Lot mainrows sum across siblings; single-instance rows put qty in the matching column; sub-rows under expanded lots do the same. Much easier to scan than the prior crammed `10 (3 sold · 7 left)` cell.
+
+**Raw Overall — flat-tab lot grouping**
+- All flat tabs (All / Unsold / Sold / For Sale / To Grade / Submitted) now group consecutive rows by `(raw_purchase_label, condition)`. Lots split by partial sales render as one main row with aggregate totals + a chevron to expand the underlying instances. Single-instance lots render unchanged.
+
+**Sales page**
+- **Qty column** added to the sales table.
+- **Grade / Cond. column** added (was missing for raw sales).
+- **Bulk sale modal** now has a per-item Qty input (with `1 ≤ qty ≤ lot_quantity` validation) when the picked card is a raw lot with multiple copies.
+- **Bulk sale pre-flight check** lists every already-sold card in the cart by name in the 409 error, instead of failing mid-loop and leaving the batch partially committed.
+
+### Fixes
+
+**Numeric input rounding (cents)**
+- App-wide swap of `type="number" step="0.01"` → `type="text" inputMode="decimal"`. Browsers were snapping `175` → `174.98` on scroll. Affects every price/cost input that feeds `toCents()`.
+
+**Raw Overall**
+- `/cards/raw-flat` now returns `ci.quantity` + `ci.status` (was missing, causing NaN in Qty and an `undefined.replace` crash on row expand).
+
+**Sales placeholder text**
+- Sales search placeholder no longer suggests the nonexistent `RP-#` format — purchase IDs are `2026R…` / `2026B…` / `2026L…`.
+
+---
+
 ## May 16, 2026
 
 ### Features
