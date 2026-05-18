@@ -559,12 +559,15 @@ export async function softDeleteCard(userId: string, cardId: string, actor: 'use
 export async function computeCostBasis(cardId: string): Promise<number> {
   const card = await db
     .selectFrom('card_instances')
-    .select(['purchase_cost', 'purchase_type'])
+    .select(['purchase_cost', 'quantity', 'purchase_type'])
     .where('id', '=', cardId)
     .executeTakeFirst();
 
   if (!card) return 0;
-  let basis = card.purchase_cost;
+  // purchase_cost is per-card; multiply by the row's quantity so partial-sale
+  // siblings (qty>1) carry the full cost basis for the sold cards. Slabs are
+  // always qty=1 so this is a no-op for graded.
+  let basis = card.purchase_cost * (card.quantity ?? 1);
 
   const slab = await db
     .selectFrom('slab_details')
