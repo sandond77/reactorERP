@@ -28,6 +28,7 @@ interface Sale {
   grade_label: string | null;
   grading_company: string | null;
   condition: string | null;
+  quantity: number;
   cert_number: string | null;
   raw_purchase_label: string | null;
   unique_id: string | null;
@@ -1624,10 +1625,16 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
   const [currency, setCurrency] = useState(sale.currency);
   const [soldAt, setSoldAt] = useState(sale.sold_at ? sale.sold_at.slice(0, 10) : '');
   const [orderNumber, setOrderNumber] = useState(sale.unique_id ?? '');
+  const [quantity, setQuantity] = useState(String(sale.quantity ?? 1));
   const [submitting, setSubmitting] = useState(false);
 
   async function handleEdit(e: React.FormEvent) {
     e.preventDefault();
+    const qtyParsed = parseInt(quantity || '1', 10);
+    if (!Number.isFinite(qtyParsed) || qtyParsed < 1) {
+      toast.error('Quantity must be at least 1');
+      return;
+    }
     setSubmitting(true);
     const strikeCents = Math.round(parseFloat(strikePrice) * 100);
     const earningsCents = platform === 'ebay' && orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : strikeCents;
@@ -1643,6 +1650,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
         unique_id: platform === 'ebay' ? (orderNumber || undefined) : undefined,
         unique_id_2: notes || undefined,
         order_details_link: platform === 'ebay' ? (ebayLink || undefined) : undefined,
+        quantity: qtyParsed,
       });
       toast.success('Sale updated');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -1690,6 +1698,11 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
           <option value="USD">USD</option>
           <option value="JPY">JPY</option>
         </Select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Quantity" type="text" inputMode="numeric"
+          value={quantity}
+          onChange={(e) => setQuantity(e.target.value.replace(/[^0-9]/g, ''))} />
       </div>
       {platform === 'ebay' ? (
         <div className="grid grid-cols-2 gap-3">

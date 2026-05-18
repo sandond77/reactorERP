@@ -316,6 +316,7 @@ export async function listSales(
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       'ci.card_game',
       'ci.condition',
+      'ci.quantity',
       'sd.grade',
       'sd.grade_label',
       'sd.company as grading_company',
@@ -350,6 +351,19 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
     ...(input.unique_id_2 !== undefined && { unique_id_2: input.unique_id_2 }),
     ...(input.order_details_link !== undefined && { order_details_link: input.order_details_link }),
   }).where('id', '=', saleId).where('user_id', '=', userId).execute();
+
+  // Quantity edit: updates the linked card_instance's quantity directly.
+  // Doesn't try to rebalance against sibling instances in the same lot —
+  // that's the user's call. Just guards against zero/negative qty.
+  if (input.quantity !== undefined) {
+    if (input.quantity < 1) throw new AppError(400, 'Sale quantity must be at least 1');
+    await db
+      .updateTable('card_instances')
+      .set({ quantity: input.quantity })
+      .where('id', '=', existing.card_instance_id)
+      .where('user_id', '=', userId)
+      .execute();
+  }
 
   const updated = await getSaleById(userId, saleId);
   await logAudit(userId, 'sales', saleId, 'updated', existing, updated);
