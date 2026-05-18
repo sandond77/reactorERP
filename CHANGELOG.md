@@ -1,5 +1,28 @@
 # Reactor — Changelog
 
+## May 18, 2026 (PM)
+
+### Features
+
+**$0 sales are valid (giveaways / total losses)**
+- Every price validation across the sale flows relaxed to reject only empty / NaN / negative — `0` is now an accepted value. Covers single Record Sale (raw + slab), bulk cart sticker, bulk review final, and the bulk eBay total-strike field. Server `/sales/batch` `sale_price` schema flipped from `.positive()` → `.nonnegative()`. The sticker→final cascade in review also respects an intentional `0`.
+
+**In-app re-add confirm**
+- Replaced the native browser `window.confirm()` with a proper Reactor-styled modal when re-adding a raw lot that's already in the bulk-sale cart. Sits on `z-[60]` over the parent Record Sale modal with a backdrop click-away. Same content (`X is already in the cart (N of LOT). Only add another if a second copy sold at a different price.`) just without the OS chrome.
+
+### Fixes
+
+**Bulk-sale Review & Confirm button flicker / silent disable**
+- Disabled state was evaluated on every render, so intermediate keystrokes (e.g. emptying a field to retype) flipped the button off mid-typing — making it look permanently broken when in fact a single off-screen row had `0` or empty `final`. Validation now runs on click; the button stays enabled, and clicking with invalid data toasts the offending card names (`Missing final price: Chespin`). The earlier diagnostic `console.warn` is gone.
+
+**Record Sale — stale Sell qty silently sold whole lot**
+- `rawSaleQty` persisted across `selectedRawCard` changes. If you typed `5` for a 5-card lot then picked a different lot via raw-select, the input still held `5`. When the new lot's quantity matched, validation passed and `sellQty == card.quantity` skipped the split path → whole stack flipped sold. `rawSaleQty` now resets to `1` on every `selectedRawCard.id` change.
+
+**Bulk-sale re-add visibility**
+- "in cart ×N" amber badge on the raw search-result row when the lot already has cart entries — clicking pops the new confirm prompt. Multi-add still available for cards that legitimately sold at different prices.
+
+---
+
 ## May 18, 2026
 
 ### Features
