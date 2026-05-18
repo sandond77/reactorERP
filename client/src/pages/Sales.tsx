@@ -1208,6 +1208,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                           ? `${item.grade_label ?? 'Raw'}${item.raw_purchase_label ? ` · ${item.raw_purchase_label}` : ''}`
                           : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
                       </p>
+                      {item.quantity > 1 && parseFloat(item.sticker_price_input || '0') > 0 && (
+                        <p className="text-[10px] text-zinc-600 mt-0.5">
+                          total — ≈ ${(parseFloat(item.sticker_price_input) / item.quantity).toFixed(2)} per card
+                        </p>
+                      )}
                     </div>
                     {showQty && (
                       <div className="flex items-center gap-1 shrink-0">
@@ -1377,12 +1382,20 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <div key={item.id} className={cn('gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start',
                 isEbaySet ? 'flex items-center justify-between' : 'grid grid-cols-[1fr_6rem_6rem_4rem]')}>
                 <div className="min-w-0">
-                  <p className="text-sm text-zinc-200 leading-snug">{item.card_name ?? '—'}</p>
+                  <p className="text-sm text-zinc-200 leading-snug">
+                    {item.card_name ?? '—'}
+                    {item.quantity > 1 && <span className="ml-1.5 text-[10px] text-amber-400/80 font-medium">×{item.quantity}</span>}
+                  </p>
                   <p className="text-xs text-zinc-500 mt-0.5">
                     {item.card_type === 'raw'
                       ? `${item.grade_label ?? 'Raw'}${item.raw_purchase_label ? ` · ${item.raw_purchase_label}` : ''}`
                       : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
                   </p>
+                  {item.quantity > 1 && final > 0 && (
+                    <p className="text-[10px] text-zinc-600 mt-0.5">
+                      total — ≈ ${(final / item.quantity).toFixed(2)} per card
+                    </p>
+                  )}
                 </div>
                 {isEbaySet ? (
                   <p className="text-sm tabular-nums text-zinc-400 shrink-0">
@@ -1967,7 +1980,7 @@ export function Sales() {
                       </a>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right text-zinc-400">{formatCurrency(sale.raw_cost, sale.currency)}</td>
+                  <td className="px-3 py-2 text-right text-zinc-400">{formatCurrency(sale.raw_cost * (sale.quantity ?? 1), sale.currency)}</td>
                   <td className="px-3 py-2 text-right text-zinc-400">{sale.grading_cost ? formatCurrency(sale.grading_cost, sale.currency) : '—'}</td>
                   <td className="px-3 py-2 text-right text-zinc-400">{sale.listed_price ? formatCurrency(sale.listed_price, sale.currency) : '—'}</td>
                   <td className="px-3 py-2 text-right text-zinc-300">{formatCurrency(sale.sale_price, sale.currency)}</td>

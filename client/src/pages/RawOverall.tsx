@@ -575,7 +575,7 @@ export function RawOverall() {
                           <a href={first.listing_url} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="eBay listing"><ExternalLink size={11} /></a>
                         ) : ''}
                       </td>
-                      <td className="px-3 py-1 text-right text-zinc-400">{fmt(first.raw_cost)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-400">{fmt(first.raw_cost * totalQty)}</td>
                       <td className="px-3 py-1 text-right text-zinc-300">{fmt(sumStrike)}</td>
                       <td className="px-3 py-1 text-right text-zinc-300">{fmt(sumAfter)}</td>
                       <td className="px-3 py-1 text-right"><NetCell afterEbay={sumAfter} raw={first.raw_cost * soldQty} /></td>
@@ -610,14 +610,14 @@ export function RawOverall() {
                           <a href={first.listing_url} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="eBay listing"><ExternalLink size={11} /></a>
                         ) : ''}
                       </td>
-                      <td className="px-3 py-1 text-right text-zinc-400">{fmt(first.raw_cost)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-400">{fmt(first.raw_cost * first.quantity)}</td>
                       <td className="px-3 py-1 text-right text-zinc-300">{fmt(first.strike_price)}</td>
                       <td className="px-3 py-1 text-right text-zinc-300">{fmt(first.after_ebay)}</td>
-                      <td className="px-3 py-1 text-right"><NetCell afterEbay={first.after_ebay} raw={first.raw_cost} /></td>
+                      <td className="px-3 py-1 text-right"><NetCell afterEbay={first.after_ebay} raw={first.raw_cost * first.quantity} /></td>
                       <td className="px-3 py-1 text-zinc-500">{fmtDate(first.raw_purchase_date)}</td>
                       <td className="px-3 py-1 text-zinc-500">{fmtDate(first.date_listed)}</td>
                       <td className="px-3 py-1 text-zinc-500">{fmtDate(first.date_sold)}</td>
-                      <td className="px-3 py-1 text-right"><RoiCell roi={first.roi_pct} afterEbay={first.after_ebay} raw={first.raw_cost} /></td>
+                      <td className="px-3 py-1 text-right"><RoiCell roi={first.roi_pct} afterEbay={first.after_ebay} raw={first.raw_cost * first.quantity} /></td>
                       <td className="px-3 py-1 text-zinc-500 truncate" title={first.notes ?? ''}>{first.notes ?? ''}</td>
                     </>
                   );
