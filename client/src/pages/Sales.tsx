@@ -29,6 +29,7 @@ interface Sale {
   grading_company: string | null;
   condition: string | null;
   quantity: number;
+  lot_available_qty: number;
   cert_number: string | null;
   raw_purchase_label: string | null;
   unique_id: string | null;
@@ -1628,11 +1629,16 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
   const [quantity, setQuantity] = useState(String(sale.quantity ?? 1));
   const [submitting, setSubmitting] = useState(false);
 
+  // Max sale qty = what's on this sale today + what's still available in the
+  // same lot to grow into. Keeps the lot's original total invariant.
+  const qtyMax = (sale.quantity ?? 1) + (sale.lot_available_qty ?? 0);
+  const qtyParsed = parseInt(quantity || '0', 10);
+  const qtyValid = Number.isFinite(qtyParsed) && qtyParsed >= 1 && qtyParsed <= qtyMax;
+
   async function handleEdit(e: React.FormEvent) {
     e.preventDefault();
-    const qtyParsed = parseInt(quantity || '1', 10);
-    if (!Number.isFinite(qtyParsed) || qtyParsed < 1) {
-      toast.error('Quantity must be at least 1');
+    if (!qtyValid) {
+      toast.error(qtyParsed < 1 ? 'Quantity must be at least 1' : `Lot has only ${qtyMax} available`);
       return;
     }
     setSubmitting(true);
@@ -1700,9 +1706,23 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
         </Select>
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Input label="Quantity" type="text" inputMode="numeric"
-          value={quantity}
-          onChange={(e) => setQuantity(e.target.value.replace(/[^0-9]/g, ''))} />
+        <div>
+          <Input label={`Quantity (max ${qtyMax})`} type="text" inputMode="numeric"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value.replace(/[^0-9]/g, ''))} />
+          {!qtyValid && quantity !== '' && (
+            <p className="text-[11px] text-rose-400 mt-1">
+              {qtyParsed < 1 ? 'Must be at least 1' : `Lot only has ${qtyMax} available — extras would have to come from new inventory`}
+            </p>
+          )}
+          {qtyValid && qtyParsed !== sale.quantity && (
+            <p className="text-[11px] text-zinc-500 mt-1">
+              {qtyParsed > sale.quantity
+                ? `Will pull ${qtyParsed - sale.quantity} more from the source lot`
+                : `Will return ${sale.quantity - qtyParsed} to the source lot`}
+            </p>
+          )}
+        </div>
       </div>
       {platform === 'ebay' ? (
         <div className="grid grid-cols-2 gap-3">
@@ -1726,7 +1746,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       <Input label="Notes" placeholder="Card Show, Location, Person, Etc..." value={notes} onChange={(e) => setNotes(e.target.value)} />
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={() => setMode('prompt')}>Back</Button>
-        <Button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting || !qtyValid}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
           Save Changes
         </Button>

@@ -451,6 +451,11 @@ export async function updateCard(
 
   const { slab_cert_number, slab_grade, slab_grade_label, slab_grading_cost, ...instanceData } = data;
 
+  // Quantity is invariant outside intake/inspection/sales — it's set at
+  // purchase and only adjusted through sale splits. Strip any client-supplied
+  // qty so a stale caller can't desync the lot pool.
+  if ('quantity' in instanceData) delete (instanceData as any).quantity;
+
   // When decision changes to sell_raw on a raw card, promote status to raw_for_sale
   if (instanceData.decision === 'sell_raw' && ['purchased_raw', 'inspected'].includes(existing.status)) {
     (instanceData as any).status = 'raw_for_sale';

@@ -327,6 +327,19 @@ export async function listSales(
       // card, not the eBay list price. Show whichever matches the platform.
       sql<number | null>`CASE WHEN s.platform = 'card_show' THEN ci.card_show_price ELSE l.list_price END`.as('listed_price'),
       sql<number>`(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`.as('profit'),
+      // Remaining quantity in the same lot (raw_purchase + condition + catalog)
+      // that the Edit Sale modal can grow into. Used to enforce the invariant
+      // that the lot's inspection-set total stays constant on qty edits.
+      sql<number>`COALESCE((
+        SELECT SUM(ci2.quantity)::integer FROM card_instances ci2
+        WHERE ci2.user_id = ci.user_id
+          AND ci2.id <> ci.id
+          AND ci2.status <> 'sold'
+          AND ci2.deleted_at IS NULL
+          AND ci2.raw_purchase_id IS NOT DISTINCT FROM ci.raw_purchase_id
+          AND ci2.condition IS NOT DISTINCT FROM ci.condition
+          AND ci2.catalog_id IS NOT DISTINCT FROM ci.catalog_id
+      ), 0)`.as('lot_available_qty'),
     ])
     .orderBy(sql.raw(SALES_SORT_COLS[sortBy ?? ''] ?? 's.sold_at'), sortDir ?? 'desc')
     .limit(pagination.limit)

@@ -31,7 +31,6 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   // Edit state — initialized when editing starts
   const [editDecision,    setEditDecision]    = useState('');
   const [editCondition,   setEditCondition]   = useState('');
-  const [editQuantity,    setEditQuantity]     = useState('');
   const [editPurchasedAt, setEditPurchasedAt] = useState('');
   const [editCost,        setEditCost]         = useState('');
   const [editNotes,       setEditNotes]        = useState('');
@@ -58,7 +57,6 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   function startEdit() {
     setEditDecision(card.decision ?? '');
     setEditCondition(card.condition ?? '');
-    setEditQuantity(String(card.quantity ?? 1));
     setEditPurchasedAt(card.purchased_at ? card.purchased_at.slice(0, 10) : '');
     setEditCost(card.purchase_cost != null ? String(card.purchase_cost / 100) : '');
     setEditNotes(card.notes ?? '');
@@ -71,7 +69,6 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
       await api.patch(`/cards/${card.id}`, {
         decision:     editDecision    || undefined,
         condition:    editCondition   || undefined,
-        quantity:     parseInt(editQuantity) || undefined,
         purchased_at: editPurchasedAt || undefined,
         purchase_cost: editCost ? Math.round(parseFloat(editCost) * 100) : undefined,
         notes: editNotes || null,
@@ -187,14 +184,6 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                       <option value="">—</option>
                       {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-zinc-500 mb-1">Quantity</label>
-                    <input
-                      type="number" min={1} value={editQuantity}
-                      onChange={(e) => setEditQuantity(e.target.value)}
-                      className={inputCls + ' [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'}
-                    />
                   </div>
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Purchase Date</label>
