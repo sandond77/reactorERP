@@ -1,5 +1,51 @@
 # Reactor — Changelog
 
+## May 18, 2026
+
+### Features
+
+**Bulk sale — multi-add per source lot**
+- A single B-lot can now be added to the bulk-sale cart **multiple times**, one entry per discrete sale, each with its own price. Solves the "two Piplups sold at $15 and $5 got averaged to $10" problem — the prior cart forced one consolidated row with one price field. New `cart_entry_id` keeps React keys + edit helpers stable across duplicate source IDs. Cross-entry validation: cart-row qty input, Add button on the search list, and the Review Sale button all use the per-source sum (`sum of all cart entries for source X ≤ X.lot_quantity`). Warning reads "Each lot's cart qty must fit within its remaining inventory."
+- **Record Sale always shows Sell qty for raw** (read-only when lot=1) so users can see/confirm what's about to flip sold. Was hidden whenever the picked lot had only 1 card left.
+
+**Strict search**
+- New **Strict Match** checkbox in the bulk-sale search panel. As the catalog has grown, the default `ILIKE '%term%'` fuzzy match returns too many false positives when you know the exact value (e.g. `2026R2` matched `2026R20`, `2026R248`…). Strict mode switches to case-insensitive whole-term equality across the same searched fields (card name, set name, cert #, purchase_id). Server `/cards` accepts `exact=true`.
+
+**R-purchase invariant: single card always qty=1**
+- Domain rule: R-type purchases represent one card; only B (bulk) and L can carry qty ≥ 1. Enforced everywhere — `createRawPurchase` + `updateRawPurchase` reject `card_count != 1` for type='raw' and block in-flight B → R flips when child quantities already exceed 1. `addInspectionLine` / `updateInspectionLine` reject `quantity != 1` on raw parents. Client `Intake.tsx`: # of Cards input + Receive modal Quantity + multi-line row qty input all read-only/grayed for raw, with type-flip snapping qty back to 1.
+
+**JP set codes — L1 split**
+- Added `L1HG` (HeartGold Collection) and `L1SS` (SoulSilver Collection) as standalone codes; legacy `L1` preserved for already-imported data (to be reclassified by hand). Migration 050 seeds both for every existing JP user.
+
+### Fixes
+
+**Cost basis math**
+- `computeCostBasis()` now multiplies `purchase_cost × quantity` (+ grading_cost) instead of returning per-card cost as-is. Every multi-qty raw sale was writing one card's basis into `sales.total_cost_basis`, overstating profit by `(qty - 1) × per_card_cost`. Slabs are always qty=1 so no-op for graded.
+- **Migration 051** backfills `total_cost_basis` for every existing sale whose linked `card_instance.quantity > 1`.
+- **Edit Sale qty edit now recomputes basis** and writes it back — without this, a sale edited from qty=11 down to qty=1 kept the original $42 basis and the Net column went wildly negative.
+
+**Bulk sale qty payload — "sold whole lot" bug**
+- Cart was submitting `quantity: item.quantity > 1 ? item.quantity : undefined`. When you added a B-lot to the cart (default cart qty=1), `undefined` got sent, and server's `recordSale` defaulted to `card.quantity` (full lot count) — flipping the entire stack sold. Always send the cart qty now.
+
+**Display alignment — totals everywhere**
+- Sales list `Raw Cost` cell now multiplies `× qty` so all money columns are sale-totals (was per-card, mismatched against per-sale Strike/Net).
+- Raw Overall lot-aggregate main row uses `raw_cost × totalQty`; single-instance main row uses `raw_cost × first.quantity` (NetCell + RoiCell follow). Sub-rows on expanded lots stay per-instance as the granular view.
+- Bulk-sale cart + review steps show `total — ≈ $X.XX per card` hint under multi-qty price inputs.
+- Bulk-cart warning text reads "total per line, not per card."
+- Sales `Grade / Cond.` column shows `Raw NM` for raw rows to match the `PSA GEM MINT 10` format on graded rows.
+- Sales `Qty` column is now sortable.
+
+**Record Sale — Listed price cue**
+- `/cards` was returning `is_listed` but never the actual `list_price` from the active-listing subquery, so the `Listed: $X` line in Record Sale never appeared. Subquery now selects `list_price` and exposes it as `listed_price`.
+
+**Form glitch — empty-string location_id blocks Add Slab / Add Card**
+- The Location `<select>` emits `''` for "— No location —", but the Zod schema was `z.string().uuid().optional().nullable()` — `.optional()` only allows `undefined`, so `''` failed `.uuid()` and quietly blocked submit with a confusing focus highlight on the (supposedly optional) field. Preprocess `''` → `undefined` before the uuid check.
+
+**Docs**
+- `CLAUDE.md` corrected: `card_instances` is hard-deleted (no `deleted_at` column — dropped in migration 014). The stale soft-delete claim led to a 500 yesterday when a new sales subquery filtered on the phantom column.
+
+---
+
 ## May 17, 2026
 
 ### Features
