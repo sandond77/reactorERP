@@ -187,6 +187,32 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     setRawSaleQty('1');
   }, [selectedRawCard?.id]);
+
+  // Auto-fill Strike Price from the card's existing reference price when a
+  // raw card is picked — CS sticker for card_show, list price for ebay.
+  // Matches what the bulk-sale cart already does on add. Only fires when
+  // Strike is still empty so user-typed values aren't clobbered.
+  useEffect(() => {
+    if (!selectedRawCard) return;
+    if (strikePrice) return;
+    const ref = platform === 'card_show'
+      ? selectedRawCard.card_show_price
+      : platform === 'ebay'
+        ? selectedRawCard.listed_price
+        : null;
+    if (ref && ref > 0) setStrikePrice((ref / 100).toFixed(2));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRawCard?.id, platform]);
+
+  // Same auto-fill for graded — defaults strike from the slab's active
+  // listing price when present and Strike is empty.
+  useEffect(() => {
+    if (!selectedCard) return;
+    if (strikePrice) return;
+    const ref = selectedCard.listed_price;
+    if (ref && ref > 0) setStrikePrice((ref / 100).toFixed(2));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCard?.id]);
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
   const [notes, setNotes] = useState('');
@@ -889,15 +915,15 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <p className="text-[11px] text-zinc-500 mt-0.5">
                 {selectedRawCard.set_name}{selectedRawCard.card_number ? ` · ${selectedRawCard.card_number}` : ''}
                 {selectedRawCard.condition ? <span className="ml-2 font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{selectedRawCard.condition}</span> : ''}
-                {/* Always surface the existing reference price (CS sticker /
-                    eBay list) regardless of the platform the sale is being
-                    recorded against — helps the user compare strike vs ask. */}
-                {selectedRawCard.card_show_price
-                  ? <span className="ml-2 text-zinc-400">CS Price: {formatCurrency(selectedRawCard.card_show_price, selectedRawCard.currency)}</span>
-                  : null}
-                {selectedRawCard.listed_price
-                  ? <span className="ml-2 text-zinc-400">Listed: {formatCurrency(selectedRawCard.listed_price, selectedRawCard.currency)}</span>
-                  : null}
+                {/* Always render both reference prices (em-dash when null) so
+                    the user can see at a glance whether a CS sticker or eBay
+                    listing exists — vs the field being silently absent. */}
+                <span className={`ml-2 ${selectedRawCard.card_show_price ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                  CS: {selectedRawCard.card_show_price ? formatCurrency(selectedRawCard.card_show_price, selectedRawCard.currency) : '—'}
+                </span>
+                <span className={`ml-2 ${selectedRawCard.listed_price ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                  Listed: {selectedRawCard.listed_price ? formatCurrency(selectedRawCard.listed_price, selectedRawCard.currency) : '—'}
+                </span>
               </p>
             </div>
             <button type="button" onClick={() => setStep('raw-select')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
