@@ -21,6 +21,7 @@ const VALID_TRANSITIONS: Record<CardStatus, CardStatus[]> = {
 export interface CardFilters {
   status?: CardStatus;
   search?: string;
+  exact?: boolean;  // when true, search matches whole-term equality instead of ILIKE '%term%'
   card_game?: string;
   language?: string;
   condition?: string;
@@ -111,19 +112,37 @@ export async function listCards(
   if (filters.is_personal_collection === 'yes') query = query.where('ci.is_personal_collection', '=', true);
   if (filters.is_personal_collection === 'no') query = query.where('ci.is_personal_collection', '=', false);
   if (filters.search) {
-    const words = filters.search.trim().split(/\s+/).filter(Boolean);
-    for (const word of words) {
-      const term = `%${word}%`;
+    if (filters.exact) {
+      // Strict mode — whole-term case-insensitive equality across the same
+      // fields. No tokenization, no substring. Cuts noise on a large catalog
+      // when you know the exact value (e.g. typing '2026R2' to find ONLY
+      // purchase_id 2026R2, not 2026R248).
+      const term = filters.search.trim();
       query = query.where((eb) =>
         eb.or([
           eb('cc.card_name', 'ilike', term),
           eb('ci.card_name_override', 'ilike', term),
           eb('cc.set_name', 'ilike', term),
           eb('ci.set_name_override', 'ilike', term),
-          sql<boolean>`sd.cert_number::text ilike ${term}`,
+          sql<boolean>`sd.cert_number::text = ${term}`,
           eb('rp.purchase_id', 'ilike', term),
         ])
       );
+    } else {
+      const words = filters.search.trim().split(/\s+/).filter(Boolean);
+      for (const word of words) {
+        const term = `%${word}%`;
+        query = query.where((eb) =>
+          eb.or([
+            eb('cc.card_name', 'ilike', term),
+            eb('ci.card_name_override', 'ilike', term),
+            eb('cc.set_name', 'ilike', term),
+            eb('ci.set_name_override', 'ilike', term),
+            sql<boolean>`sd.cert_number::text ilike ${term}`,
+            eb('rp.purchase_id', 'ilike', term),
+          ])
+        );
+      }
     }
   }
 

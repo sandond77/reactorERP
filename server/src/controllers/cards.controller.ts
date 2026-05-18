@@ -12,6 +12,7 @@ import { db } from '../config/database';
 const cardFiltersSchema = z.object({
   status: z.string().optional(),
   search: z.string().optional(),
+  exact: z.coerce.boolean().optional(),
   card_game: z.string().optional(),
   language: z.string().optional(),
   condition: z.string().optional(),
