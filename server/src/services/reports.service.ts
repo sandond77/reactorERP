@@ -814,10 +814,24 @@ export async function cardTrendSearch(userId: string, q: string) {
 }
 
 export async function getCardTrend(userId: string, catalogId: string) {
+  // Resolve the selected catalog row's SKU and match all card_instances that
+  // link to ANY catalog row sharing that SKU. Imports occasionally produce
+  // duplicate catalog entries for the same physical card (e.g. "Squirtle"
+  // canonical + "2023 Pokemon Japanese... Squirtle" PSA-label variant), so
+  // matching by catalog_id alone misses sales that were linked to the
+  // alternate entry. SKU is the stable identity.
+  const seed = await db
+    .selectFrom('card_catalog')
+    .select(['sku'])
+    .where('id', '=', catalogId)
+    .executeTakeFirst();
+  const sku = seed?.sku ?? null;
+
   // Sales history — one row per sale
   const sales = await db
     .selectFrom('sales as s')
     .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .select([
       's.id',
@@ -833,13 +847,18 @@ export async function getCardTrend(userId: string, catalogId: string) {
       sql<string | null>`ci.condition`.as('condition'),
     ])
     .where('s.user_id', '=', userId)
-    .where('ci.catalog_id', '=', catalogId)
+    .$if(sku !== null, (qb) => qb.where((eb) => eb.or([
+      eb('ci.catalog_id', '=', catalogId),
+      eb('cc.sku', '=', sku!),
+    ])))
+    .$if(sku === null, (qb) => qb.where('ci.catalog_id', '=', catalogId))
     .orderBy('s.sold_at', 'asc')
     .execute();
 
   // Cost/purchase history — one row per card instance
   const costs = await db
     .selectFrom('card_instances as ci')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .select([
       'ci.id',
@@ -853,7 +872,11 @@ export async function getCardTrend(userId: string, catalogId: string) {
       sql<string | null>`ci.condition`.as('condition'),
     ])
     .where('ci.user_id', '=', userId)
-    .where('ci.catalog_id', '=', catalogId)
+    .$if(sku !== null, (qb) => qb.where((eb) => eb.or([
+      eb('ci.catalog_id', '=', catalogId),
+      eb('cc.sku', '=', sku!),
+    ])))
+    .$if(sku === null, (qb) => qb.where('ci.catalog_id', '=', catalogId))
     .where('ci.purchased_at', 'is not', null)
     .orderBy('ci.purchased_at', 'asc')
     .execute();
