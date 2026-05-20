@@ -1,5 +1,23 @@
 # Reactor — Changelog
 
+## May 19, 2026
+
+### Fixes
+
+**Import card-number parser — wrong SKU on PSA labels with numeric set names**
+- Labels like `2023 POKEMON JAPANESE SV2a-POKEMON 151 168 CHARMANDER` were getting stamped as `PKMN-JP-SV2a-151` because the parser took the **first** 3-digit match — and "Pokemon 151" (the set name) contains `151`. The actual card number is `168` (PSA labels always put the card # right before the card name). Switched `threeDigit` / `twoDigit` matchers to use the **last** match. Going forward, new imports are correct; existing rows with bad SKUs (Squirtle, Charmander stuck at `-151`) need a manual fix via the Part Numbers manager.
+
+**Card Trend — "No data" on cards with short canonical names**
+- Trend was joining strictly by `card_instances.catalog_id = seed.catalog_id`. When imports produced duplicate catalog rows for the same physical card (e.g. canonical `"Squirtle"` + full PSA-label variant `"2023 Pokemon Japanese SV2a 170 Squirtle…"` sharing the same SKU), the search returned one row but instances were linked to the other → empty trend. Joins now OR-match across four arms: `catalog_id` ∪ `sku` ∪ `(set_code + card_number)` ∪ `card_name_override ILIKE seedName`. Same fix on the cost-history side.
+
+**Card Trend — x-axis label crowding**
+- Sales clustered on close dates were piling labels on top of each other (`Dec 24 25`, `Mar 26 Apr 26` etc.). Added `minTickGap={60}` + `interval="preserveStartEnd"` so the renderer skips ticks until each label has ~60px of breathing room. First/last dates always preserved so the range is still readable.
+
+**Raw Overall sub-rows — commerce-only**
+- Expanded lot sub-rows were including transient `inspected` and `purchased_raw` workflow states, cluttering the view. Now only commerce-relevant statuses (`raw_for_sale`, `sold`, `grading_submitted`, `graded`, `lost_damaged`) appear in the breakdown.
+
+---
+
 ## May 18, 2026 (PM)
 
 ### Features
