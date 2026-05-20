@@ -822,10 +822,13 @@ export async function getCardTrend(userId: string, catalogId: string) {
   // alternate entry. SKU is the stable identity.
   const seed = await db
     .selectFrom('card_catalog')
-    .select(['sku'])
+    .select(['sku', 'card_name', 'set_code', 'card_number'])
     .where('id', '=', catalogId)
     .executeTakeFirst();
   const sku = seed?.sku ?? null;
+  const seedName = seed?.card_name ?? null;
+  const setCode = seed?.set_code ?? null;
+  const cardNumber = seed?.card_number ?? null;
 
   // Sales history — one row per sale
   const sales = await db
@@ -847,11 +850,15 @@ export async function getCardTrend(userId: string, catalogId: string) {
       sql<string | null>`ci.condition`.as('condition'),
     ])
     .where('s.user_id', '=', userId)
-    .$if(sku !== null, (qb) => qb.where((eb) => eb.or([
-      eb('ci.catalog_id', '=', catalogId),
-      eb('cc.sku', '=', sku!),
-    ])))
-    .$if(sku === null, (qb) => qb.where('ci.catalog_id', '=', catalogId))
+    .where((eb) => {
+      const arms: ReturnType<typeof eb> [] = [eb('ci.catalog_id', '=', catalogId)];
+      if (sku) arms.push(eb('cc.sku', '=', sku));
+      if (setCode && cardNumber) {
+        arms.push(eb.and([eb('cc.set_code', '=', setCode), eb('cc.card_number', '=', cardNumber)]));
+      }
+      if (seedName) arms.push(eb('ci.card_name_override', 'ilike', `%${seedName}%`));
+      return eb.or(arms);
+    })
     .orderBy('s.sold_at', 'asc')
     .execute();
 
