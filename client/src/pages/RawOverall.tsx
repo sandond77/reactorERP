@@ -632,7 +632,14 @@ export function RawOverall() {
 
                   if (!isLot || !lotExpanded) return [mainRow];
 
-                  const subRows = g.rows.map((row) => (
+                  // Sub-rows show the commerce breakdown of the lot. Pure
+                  // 'inspected' rows (post-inspection, pre-routing) are
+                  // intermediate workflow state and not useful at this view —
+                  // hide them. raw_for_sale, sold, grading_submitted, graded,
+                  // lost_damaged all stay.
+                  const visibleRows = g.rows.filter((r) => r.status !== 'inspected' && r.status !== 'purchased_raw');
+                  if (visibleRows.length === 0) return [mainRow];
+                  const subRows = visibleRows.map((row) => (
                     <tr key={`${g.key}::${row.id}`}
                       onClick={() => setSelectedRow(row)}
                       className="border-b border-zinc-800/30 bg-zinc-950/60 hover:bg-zinc-800/30 transition-colors cursor-pointer">

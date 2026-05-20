@@ -241,6 +241,12 @@ function TrendChart({ data, view, showTrendLine }: { data: TrendData; view: Pric
           tick={{ fill: '#71717a', fontSize: 11 }}
           axisLine={{ stroke: '#3f3f46' }}
           tickLine={false}
+          // Prevent the labels from overlapping when sales cluster on close
+          // dates — Recharts will skip ticks until each label has at least
+          // ~60px breathing room. Always keep first/last so the range stays
+          // visible.
+          minTickGap={60}
+          interval="preserveStartEnd"
         />
         <YAxis
           dataKey="y"
