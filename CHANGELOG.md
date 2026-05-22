@@ -7,6 +7,9 @@
 **Card show inventory can be cross-listed on eBay**
 - The eBay listing picker excluded any card flagged `is_card_show` (graded single + set modes), so a card sitting in card-show inventory couldn't also be listed online. Removed that exclusion — card-show cards now appear in the listing flow and can be cross-listed. The raw-card listing path already allowed it; this brings graded in line. A card stays in card-show inventory while listed (true cross-listing); only personal-collection and already-listed copies remain excluded.
 
+**Part-level reassign — move a whole part's cards at once**
+- The existing Reassign only moved one grade-row at a time and was reachable solely from a multi-grade part's expanded sub-rows — so consolidating a mis-filed part meant repeating it row by row. Edit Part now has a **Reassign** button: pick a target part and *every* card under the current part (raw + graded, all grades) moves in one action via the new `PATCH /catalog/reassign-part`. Afterward it reports how many cards moved and offers to delete the now-empty source part. Makes the "A different part number already exists with this Set + Card #… Use Reassign" error actionable instead of a dead end.
+
 ### Fixes
 
 **Catalog page crash — `M.map is not a function` after opening Add Part**

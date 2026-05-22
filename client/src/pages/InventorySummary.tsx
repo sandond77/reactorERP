@@ -100,9 +100,10 @@ const LANGUAGES = [
 interface EditPartModalProps {
   row: SummaryRow;
   onClose: () => void;
+  onReassign: () => void;
 }
 
-function EditPartModal({ row, onClose }: EditPartModalProps) {
+function EditPartModal({ row, onClose, onReassign }: EditPartModalProps) {
   const isNew = !row.catalog_id;          // no catalog entry at all → "Link to Catalog"
   const isIncomplete = !isNew && !row.sku; // has catalog entry but no SKU → "Complete Setup"
   const queryClient = useQueryClient();
@@ -326,9 +327,14 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
           {/* Delete flow — only for existing catalog entries */}
           <div className="flex items-center gap-2">
             {!isNew && deleteStep === 0 && (
-              <button onClick={() => setDeleteStep(1)} className="px-3 py-1.5 text-sm text-red-500 hover:text-red-400 transition-colors">
-                Delete
-              </button>
+              <>
+                <button onClick={onReassign} className="px-3 py-1.5 text-sm text-indigo-400 hover:text-indigo-300 transition-colors">
+                  Reassign
+                </button>
+                <button onClick={() => setDeleteStep(1)} className="px-3 py-1.5 text-sm text-red-500 hover:text-red-400 transition-colors">
+                  Delete
+                </button>
+              </>
             )}
             {deleteStep === 1 && (
               <>
@@ -479,6 +485,145 @@ function ReassignModal({ row, onClose }: { row: ReassignTarget; onClose: () => v
             </Button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Reassign Entire Part Modal ────────────────────────────────────────────────
+// Moves every card under one part into another part in a single action, then
+// offers to delete the now-empty source part.
+
+function ReassignPartModal({ part, onClose }: { part: SummaryRow; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const [selected, setSelected] = useState<{ id: string; sku: string | null; card_name: string; set_name: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [moved, setMoved] = useState<{ count: number } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: results = [] } = useQuery<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }[]>({
+    queryKey: ['catalog-search', debouncedSearch],
+    queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 20 } }).then(r => r.data.data),
+    enabled: debouncedSearch.length >= 2,
+  });
+  const targets = results.filter(r => r.id !== part.catalog_id);
+
+  async function doReassign() {
+    if (!selected || !part.catalog_id) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await api.patch('/catalog/reassign-part', {
+        old_catalog_id: part.catalog_id,
+        new_catalog_id: selected.id,
+      });
+      queryClient.invalidateQueries({ queryKey: ['inventory-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['empty-parts'] });
+      setMoved({ count: res.data?.updated ?? 0 });
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      setError((err as any)?.response?.data?.error ?? 'Failed to reassign.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteEmptyPart() {
+    if (!part.catalog_id) return;
+    setDeleting(true);
+    try {
+      await api.delete(`/catalog/${part.catalog_id}`);
+      queryClient.invalidateQueries({ queryKey: ['inventory-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['empty-parts'] });
+      toast.success('Cards moved · empty part deleted');
+      onClose();
+    } catch {
+      setError('Cards were moved, but deleting the empty part failed.');
+      setDeleting(false);
+    }
+  }
+
+  const sourceLabel = part.sku ?? part.card_name ?? '—';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-xl w-full max-w-lg p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-zinc-100">{moved ? 'Cards Moved' : 'Reassign Entire Part'}</h2>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300"><X size={16} /></button>
+        </div>
+
+        {moved ? (
+          <>
+            <div className="mb-4 p-3 bg-zinc-800/60 rounded-lg text-sm space-y-1">
+              <p className="text-zinc-200">
+                Moved <span className="font-medium text-emerald-400">{moved.count}</span> card{moved.count !== 1 ? 's' : ''} into{' '}
+                <span className="font-mono text-indigo-300">{selected?.sku ?? selected?.card_name}</span>.
+              </p>
+              <p className="text-zinc-500 text-xs">
+                <span className="font-mono">{sourceLabel}</span> is now empty. Delete it?
+              </p>
+            </div>
+            {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={onClose} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Keep empty part</button>
+              <Button size="sm" variant="danger" onClick={deleteEmptyPart} disabled={deleting}>
+                {deleting ? 'Deleting…' : 'Delete empty part'}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mb-4 p-3 bg-zinc-800/60 rounded-lg text-sm space-y-0.5">
+              <p className="text-zinc-200 break-words">{part.card_name ?? '—'}</p>
+              <p className="text-zinc-500 text-xs"><span className="font-mono">{sourceLabel}</span> · {part.qty_total} card{part.qty_total !== 1 ? 's' : ''}</p>
+            </div>
+            <p className="text-xs text-zinc-500 mb-3">Pick the part to move every card under this part into.</p>
+
+            <div className="mb-3">
+              <input
+                autoFocus
+                className="w-full px-3 py-2 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+                placeholder="Search part numbers or card names…"
+                value={search}
+                onChange={e => { setSearch(e.target.value); setSelected(null); }}
+              />
+            </div>
+
+            {targets.length > 0 && (
+              <div className="max-h-52 overflow-y-auto divide-y divide-zinc-800 border border-zinc-700 rounded-lg mb-3">
+                {targets.map(r => (
+                  <button
+                    key={r.id}
+                    onClick={() => setSelected(r)}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-zinc-800 transition-colors ${selected?.id === r.id ? 'bg-indigo-900/40' : ''}`}
+                  >
+                    <span className="font-mono text-indigo-300 text-xs mr-2">{r.sku ?? '—'}</span>
+                    <span className="text-zinc-300">{r.card_name}</span>
+                    <span className="text-zinc-600 ml-1 text-xs">· {r.set_name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {error && <p className="text-xs text-red-400 mb-3">{error}</p>}
+
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={onClose} className="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
+              <Button size="sm" onClick={doReassign} disabled={!selected || saving}>
+                {saving ? 'Moving…' : 'Reassign cards'}
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1527,6 +1672,7 @@ export function InventorySummary() {
   const [showUnlinked, setShowUnlinked] = useState(false);
   const [editPart, setEditPart] = useState<SummaryRow | null>(null);
   const [reassignRow, setReassignRow] = useState<ReassignTarget | null>(null);
+  const [reassignPart, setReassignPart] = useState<SummaryRow | null>(null);
   const MINS = {
     sku:       colMinWidth('Part #',  true,  false),
     set:       colMinWidth('Set',     true,  false),
@@ -1864,8 +2010,9 @@ export function InventorySummary() {
 
       {/* Add Set Alias Modal */}
       {showAddModal && <AddPartModal onClose={() => setShowAddModal(false)} />}
-      {editPart && <EditPartModal row={editPart} onClose={() => setEditPart(null)} />}
+      {editPart && <EditPartModal row={editPart} onClose={() => setEditPart(null)} onReassign={() => { setReassignPart(editPart); setEditPart(null); }} />}
       {reassignRow && <ReassignModal row={reassignRow} onClose={() => setReassignRow(null)} />}
+      {reassignPart && <ReassignPartModal part={reassignPart} onClose={() => setReassignPart(null)} />}
     </div>
   );
 }

@@ -640,6 +640,22 @@ export async function reassignCatalogRow(userId: string, params: {
   return { updated: Number(result.numAffectedRows ?? 0) };
 }
 
+// Move every card_instance under one catalog entry to another — a part-level
+// merge. Unlike reassignCatalogRow this is unfiltered: all grades, raw + graded.
+export async function reassignAllInstances(
+  userId: string,
+  oldCatalogId: string,
+  newCatalogId: string
+): Promise<{ updated: number }> {
+  const result = await sql`
+    UPDATE card_instances
+    SET catalog_id = ${newCatalogId}
+    WHERE user_id = ${userId}
+      AND catalog_id = ${oldCatalogId}
+  `.execute(db);
+  return { updated: Number(result.numAffectedRows ?? 0) };
+}
+
 export async function deleteCatalogCard(userId: string, id: string) {
   // Unlink any card instances pointing to this catalog entry
   await sql`
