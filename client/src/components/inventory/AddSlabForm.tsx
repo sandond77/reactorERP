@@ -90,7 +90,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
           const m = matches[0];
           setCreatedCatalogId(m.id);
           setPartNumber({ sku: m.sku ?? null, exists: true, catalogData: m });
-        } else if (matches.length === 0 && num) {
+        } else if (matches.length === 0 && (num || unnumbered)) {
           setCreatedCatalogId(null);
           setPartNumber({
             sku: null,
@@ -105,7 +105,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       }
     }, 350);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [watchedName, watchedSet, watchedNumber, watchedLang, autoFilling]);
+  }, [watchedName, watchedSet, watchedNumber, watchedLang, unnumbered, autoFilling]);
 
   const handleImageSelect = (file: File) => {
     setImageFile(file);
@@ -481,6 +481,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
             set_name:    getValues('set_name_override')  || partNumber?.catalogData?.set_name,
             card_number: getValues('card_number_override') || partNumber?.catalogData?.card_number,
             language:    getValues('language') || partNumber?.catalogData?.language || 'EN',
+            unnumbered,
           }}
           onClose={() => setShowCreatePartModal(false)}
           onCreated={(part) => {

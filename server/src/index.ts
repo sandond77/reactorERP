@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { app } from './app';
 import { env } from './config/env';
-import { db } from './config/database';
+import { db, pool } from './config/database';
 
 const PORT = env.PORT;
 
@@ -22,7 +22,12 @@ async function main() {
     // script failed", which Railway flags as a deploy failure.
     const shutdown = (signal: string) => {
       console.log(`[reactor] ${signal} received, shutting down`);
-      server.close(() => process.exit(0));
+      server.close(() => {
+        pool.end().finally(() => process.exit(0));
+      });
+      // server.close() ignores idle keep-alive sockets; drop them now so the
+      // callback fires immediately instead of waiting on the hard timeout.
+      server.closeIdleConnections();
       // Hard timeout so a stuck connection can't block the deploy rollover
       setTimeout(() => process.exit(0), 10_000).unref();
     };

@@ -8,7 +8,7 @@ import { SetCombobox, useMergedSets } from './SetCombobox';
 const ADD_GAME_SENTINEL = '__add_new_game__';
 
 interface CardGame {
-  id: string;
+  id: string | null;
   name: string;
   abbreviation: string | null;
 }
@@ -49,6 +49,7 @@ interface Props {
     set_name?: string;
     card_number?: string;
     language?: string;
+    unnumbered?: boolean;
   };
 }
 
@@ -94,12 +95,15 @@ const LANGUAGES = [
 
 export function AddPartModal({ onClose, onCreated, prefill }: Props) {
   const queryClient = useQueryClient();
-  const { data: gamesData } = useQuery<{ data: CardGame[] }>({
+  // Shares the ['card-games'] query key with the catalog page — both MUST hit
+  // the same endpoint. /sets/games returns a bare array; /card-games returns
+  // { data: [...] }. Mixing them under one key poisons the cache and crashes
+  // whichever consumer reads the wrong shape.
+  const { data: games = [] } = useQuery<CardGame[]>({
     queryKey: ['card-games'],
-    queryFn: () => api.get('/card-games').then(r => r.data),
+    queryFn: () => api.get('/sets/games').then(r => r.data),
     staleTime: 5 * 60 * 1000,
   });
-  const games = gamesData?.data ?? [];
   const gamePrefixes = new Map(games.map(g => [g.name.toLowerCase(), g.abbreviation || fallbackPrefix(g.name)]));
   const [form, setForm] = useState({
     game:        'pokemon',
@@ -112,7 +116,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     rarity:      '',
     variant:     '',
   });
-  const [unnumbered, setUnnumbered] = useState(false);
+  const [unnumbered, setUnnumbered] = useState(prefill?.unnumbered ?? false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addingGame, setAddingGame] = useState(false);
@@ -245,7 +249,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
               >
                 {games.length === 0
                   ? <option value="pokemon">Pokémon</option>
-                  : games.map(g => <option key={g.id} value={g.name}>{gameLabel(g.name)}</option>)}
+                  : games.map(g => <option key={g.id ?? g.name} value={g.name}>{gameLabel(g.name)}</option>)}
                 <option value={ADD_GAME_SENTINEL}>+ Add new game…</option>
               </select>
               {addingGame && (
@@ -280,11 +284,11 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                       disabled={!newGameName.trim() || !newGameAbbrev.trim()}
                       onClick={async () => {
                         try {
-                          const res = await api.post('/card-games', {
+                          const res = await api.post('/sets/games', {
                             name: newGameName.trim(),
                             abbreviation: newGameAbbrev.trim(),
                           });
-                          const created = res.data?.data;
+                          const created = res.data;
                           if (!created?.name) throw new Error('No game returned');
                           // Wait for the refetch to complete BEFORE we update
                           // form.game, so the dropdown has an <option> for

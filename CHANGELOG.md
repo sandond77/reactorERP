@@ -1,5 +1,28 @@
 # Reactor — Changelog
 
+## May 22, 2026
+
+### Features
+
+**Card show inventory can be cross-listed on eBay**
+- The eBay listing picker excluded any card flagged `is_card_show` (graded single + set modes), so a card sitting in card-show inventory couldn't also be listed online. Removed that exclusion — card-show cards now appear in the listing flow and can be cross-listed. The raw-card listing path already allowed it; this brings graded in line. A card stays in card-show inventory while listed (true cross-listing); only personal-collection and already-listed copies remain excluded.
+
+### Fixes
+
+**Catalog page crash — `M.map is not a function` after opening Add Part**
+- `AddPartModal` shared the React Query cache key `['card-games']` with the catalog page's game queries but fetched a different endpoint: `/card-games` returns `{ data: [...] }` while `/sets/games` returns a bare array. Opening the modal overwrote the shared cache with the object shape, and the catalog page's `gameOptions = gamesData.map(...)` then ran `.map` on an object → hard crash (recovered only on page refresh). `AddPartModal` now uses `/sets/games` like every other consumer, so the cached shape is consistent.
+
+**Edit Part modal — broken "Set" field in custom-set mode**
+- The custom set-code input carried both `w-full` (from the shared input class) and `w-28`; Tailwind's `w-full` wins, so the input took the whole row and squeezed the set-name input into an unusable sliver. Stripped `w-full` from that input.
+
+**Add Slab — "no card #" didn't surface the part-number resolver**
+- Ticking "no card # (unnumbered)" didn't re-run the catalog lookup (the `unnumbered` flag wasn't a resolver dependency, and clearing an already-empty field is a no-op), and the resolver only offered "Create part" when a card number was present. So unnumbered cards never got a Create-part badge — you had to type a digit and delete it to nudge it. The resolver now reacts to the unnumbered toggle and offers Create part for unnumbered cards; the create modal opens with "no card #" pre-ticked.
+
+**Graceful shutdown — faster, cleaner deploy rollover**
+- The SIGTERM handler called `server.close()`, which ignores idle keep-alive sockets — so the old container always waited the full 10s hard timeout before exiting. Added `server.closeIdleConnections()` so the close callback fires immediately, and the pg pool is now drained on shutdown. The old container exits 0 promptly, well inside Railway's grace window.
+
+---
+
 ## May 19, 2026
 
 ### Fixes

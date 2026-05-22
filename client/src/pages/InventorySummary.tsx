@@ -256,7 +256,7 @@ function EditPartModal({ row, onClose }: EditPartModalProps) {
             {showCustomSet ? (
               <div className="flex gap-2">
                 <input
-                  className={inputCls + ' w-28 shrink-0'}
+                  className={inputCls.replace('w-full', 'w-28 shrink-0')}
                   placeholder="Set code"
                   value={form.set_code}
                   onChange={e => setForm(f => ({ ...f, set_code: e.target.value }))}

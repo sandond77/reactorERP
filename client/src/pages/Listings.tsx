@@ -138,13 +138,13 @@ function SetSlotRow({
 
   const uniqueNames = searchData
     ? Array.from(searchData.data.reduce((m, s) => {
-        if (!s.is_card_show) m.set(s.card_name ?? '', (m.get(s.card_name ?? '') ?? 0) + 1);
+        m.set(s.card_name ?? '', (m.get(s.card_name ?? '') ?? 0) + 1);
         return m;
       }, new Map<string, number>())).filter(([n, c]) => n && c > 0)
     : [];
 
   const copies = (copiesData?.data ?? []).filter(
-    c => c.card_name === slot.cardName && !c.is_listed && !c.is_card_show && !c.is_personal_collection
+    c => c.card_name === slot.cardName && !c.is_listed && !c.is_personal_collection
   );
 
   // Collapsed state — cert has been picked
@@ -330,7 +330,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   });
 
   const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName) ?? [];
-  const availableCopies = allCopies.filter(c => !c.is_listed && !c.is_card_show && !c.is_personal_collection);
+  const availableCopies = allCopies.filter(c => !c.is_listed && !c.is_personal_collection);
 
   const gradeBreakdown = availableCopies.reduce((map, c) => {
     const key = c.grade_label ?? 'Ungraded';
@@ -353,7 +353,6 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const uniqueCardNames = searchResults
     ? Array.from(
         searchResults.data.reduce((map, s) => {
-          if (s.is_card_show) return map;
           const name = s.card_name ?? 'Unknown';
           map.set(name, (map.get(name) ?? 0) + 1);
           return map;
@@ -527,9 +526,6 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       ) : availableCopies.length === 0 ? (
         <div className="py-4 text-center space-y-1">
           <p className="text-sm text-zinc-500">No unlisted copies available.</p>
-          {allCopies.some(c => c.is_card_show) && (
-            <p className="text-xs text-zinc-600">{allCopies.filter(c => c.is_card_show).length} {allCopies.filter(c => c.is_card_show).length === 1 ? 'copy is' : 'copies are'} at a card show</p>
-          )}
         </div>
       ) : (
         <>
@@ -559,11 +555,8 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
                   <span className="font-medium text-zinc-200 tabular-nums">{copiesForGrade.length}</span>{' '}
                   unlisted {activeGrade ?? ''} {copiesForGrade.length === 1 ? 'copy' : 'copies'}
                 </p>
-                {allCopies.some(c => c.is_card_show) && (
-                  <p className="text-[10px] text-zinc-600">{allCopies.filter(c => c.is_card_show).length} at card show</p>
-                )}
-                {allCopies.some(c => c.is_listed && !c.is_card_show) && (
-                  <p className="text-[10px] text-zinc-600">{allCopies.filter(c => c.is_listed && !c.is_card_show).length} already listed</p>
+                {allCopies.some(c => c.is_listed) && (
+                  <p className="text-[10px] text-zinc-600">{allCopies.filter(c => c.is_listed).length} already listed</p>
                 )}
               </div>
               <div className="flex flex-col items-end gap-1">
