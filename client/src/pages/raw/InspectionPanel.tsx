@@ -136,10 +136,18 @@ function InspectionLineForm({
       }
       submittingRef.current = true;
       setSubmitting(true);
+      // If we're editing an existing non-back-link line (e.g. Grade → Already
+      // Graded), the lot has no remaining capacity until that line is gone.
+      // Pass _replace_line_id so the mutation deletes the old line before
+      // posting the back-link.
+      const replaceLineId = initial && initial.decision !== 'already_graded' && initial.id
+        ? initial.id
+        : undefined;
       onSave({
         _back_link: true,
         slab_ids: pickedSlabs.map(s => s.id),
         _replace_slab_id: editingBackLinkId ?? undefined,
+        _replace_line_id: replaceLineId,
       }, {});
       return;
     }
@@ -167,13 +175,15 @@ function InspectionLineForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-2 gap-4">
-        <div>
-          <label className={label}>Condition</label>
-          <select value={form.condition} onChange={(e) => set('condition', e.target.value)} className={inp}>
-            {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div>
+        {form.decision !== 'already_graded' && (
+          <div>
+            <label className={label}>Condition</label>
+            <select value={form.condition} onChange={(e) => set('condition', e.target.value)} className={inp}>
+              {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+        )}
+        <div className={form.decision === 'already_graded' ? 'col-span-2' : ''}>
           <label className={label}>Decision</label>
           <select value={form.decision} onChange={(e) => set('decision', e.target.value)} className={inp}>
             <option value="sell_raw">Sell Raw</option>
@@ -377,9 +387,15 @@ export function InspectionPanel({
         // Edit/swap flow — unlink the original slab first, then add new picks.
         // (No-op if the user re-picked the same slab as before.)
         const replaceId = body._replace_slab_id as string | undefined;
+        const replaceLineId = body._replace_line_id as string | undefined;
         const newIds = body.slab_ids as string[];
         if (replaceId && !newIds.includes(replaceId)) {
           await api.delete(`/raw-purchases/${purchase.id}/back-link-slab/${replaceId}`).catch(() => {});
+        }
+        // Converting an existing non-back-link line (Grade / Sell Raw) into a
+        // back-link — delete the original line to free its slot before posting.
+        if (replaceLineId) {
+          await api.delete(`/raw-purchases/${purchase.id}/lines/${replaceLineId}`);
         }
         return api.post(`/raw-purchases/${purchase.id}/back-link-slab`, { slab_ids: newIds }).then((r) => r.data);
       }

@@ -12,6 +12,11 @@
 
 ### Fixes
 
+**Inspection Line modal — Already Graded UX cleanup**
+- Two friction points when back-linking an existing slab to a lot via the inspection-line modal:
+  - The **Condition** dropdown was still shown for the Already Graded decision even though a slab's condition isn't meaningful (and the submit handler ignored it). Now hidden whenever Decision = Already Graded; the Decision dropdown takes the full row. Condition state is preserved if you switch back to Sell Raw / Grade.
+  - **Editing an existing `Grade` / `Sell Raw` line and switching it to Already Graded failed** with "Only 0 cards remaining in lot" — the original line still occupied its slot during the back-link's capacity check. The edit flow now deletes the original line first (via the inspection-line delete endpoint) before posting the back-link, freeing the slot. Same delete-then-post pattern the existing `_replace_slab_id` swap uses.
+
 **Add Part — `no card # (unnumbered)` left the Part # field blank**
 - `autoSku` short-circuited to empty whenever the unnumbered checkbox was ticked, so creating a sentinel like `PKMN-JP-LEGACY` produced no SKU at all (saved as `sku = NULL`, displayed only via the synthesized `… (no #)` label at render time). For real bucket parts you want an addressable SKU. The generator now substitutes a normalized form of the **Card Name** for the missing card-number segment — `Legacy Cards` under set code `LEGACY` → `PKMN-JP-LEGACY-LEGACYCARDS`. Normalization is `[A-Z0-9]`-only, uppercase, truncated to 24 chars; if the name yields no ASCII chars the SKU falls back gracefully to `prefix-lang-setcode`. The Part # field also updates live as you type the Card Name now (previously the name didn't influence the SKU at all).
 
