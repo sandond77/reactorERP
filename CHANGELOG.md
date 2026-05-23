@@ -12,6 +12,9 @@
 
 ### Fixes
 
+**Grading sub detail page 500 — missing `expected_grade` column**
+- `GET /api/v1/grading-subs/:id` selected `gbi.expected_grade` ([grading-submissions.service.ts:99](server/src/services/grading-submissions.service.ts#L99)) and the TypeScript type declared it, but no migration ever created the column on `grading_batch_items`. Any DB that didn't receive an out-of-band ALTER hit `column gbi.expected_grade does not exist` → 500 the moment you clicked into a sub (the list page didn't reference the column, so subs looked fine until you opened one). Migration **052** adds `expected_grade NUMERIC(4,1)` (matches `slab_details.grade` precision so half-grades round-trip) — idempotent via `IF NOT EXISTS`, existing rows get `NULL`.
+
 **Inspection Line modal — Already Graded UX cleanup**
 - Two friction points when back-linking an existing slab to a lot via the inspection-line modal:
   - The **Condition** dropdown was still shown for the Already Graded decision even though a slab's condition isn't meaningful (and the submit handler ignored it). Now hidden whenever Decision = Already Graded; the Decision dropdown takes the full row. Condition state is preserved if you switch back to Sell Raw / Grade.
