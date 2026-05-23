@@ -1,5 +1,22 @@
 # Reactor — Changelog
 
+## May 23, 2026
+
+### Features
+
+**Legacy part numbers — sentinel buckets for unnumbered / orphan raw cards**
+- Convention for cataloging legacy raw inventory (vintage cards, cards already in subs that were never in the system) without trying to catalog each one properly. Create one per language with **Set Code = `LEGACY`** in the Add Part modal — you'll get `PKMN-JP-LEGACY-…`, `PKMN-EN-LEGACY-…`, etc. The raw rows you add against them carry their own purchase cost, so submitting them to grading and bringing them back keeps cost basis intact.
+
+**Auto-relink on grading return when source was bucketed under a legacy part**
+- Previously the grading-return flow only re-resolved a card's catalog link if the raw was completely unlinked (`catalog_id IS NULL`). Cards intentionally linked to a legacy bucket stayed on the legacy bucket forever, so a slab that came back with a corrected name would still display under `PKMN-JP-LEGACY-…` instead of its real part. The return resolver in [grading-submissions.service.ts:453](server/src/services/grading-submissions.service.ts#L453) now also fires when the source is linked to a `set_code = 'LEGACY'` catalog row (case-insensitive). If the resolver finds a real match the new slab picks up that catalog_id; if not, the legacy link is preserved (no silent drop to unlinked). Cost basis flows through `card_instances.purchase_cost` exactly as before — only the catalog pointer changes.
+
+### Fixes
+
+**Add Part — `no card # (unnumbered)` left the Part # field blank**
+- `autoSku` short-circuited to empty whenever the unnumbered checkbox was ticked, so creating a sentinel like `PKMN-JP-LEGACY` produced no SKU at all (saved as `sku = NULL`, displayed only via the synthesized `… (no #)` label at render time). For real bucket parts you want an addressable SKU. The generator now substitutes a normalized form of the **Card Name** for the missing card-number segment — `Legacy Cards` under set code `LEGACY` → `PKMN-JP-LEGACY-LEGACYCARDS`. Normalization is `[A-Z0-9]`-only, uppercase, truncated to 24 chars; if the name yields no ASCII chars the SKU falls back gracefully to `prefix-lang-setcode`. The Part # field also updates live as you type the Card Name now (previously the name didn't influence the SKU at all).
+
+---
+
 ## May 22, 2026
 
 ### Features

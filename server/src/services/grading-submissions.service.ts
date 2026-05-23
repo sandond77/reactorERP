@@ -450,23 +450,36 @@ export async function processReturn(userId: string, batchId: string, input: Proc
       .executeTakeFirst();
     if (!original) continue;
 
-    // If the source raw had no catalog_id (legacy adds skip resolution at submit
-    // time), try to resolve now that the slab is real. The card name on the
-    // returned slab may have been corrected too, so prefer item.card_name_override.
+    // Re-resolve the catalog link on return when either:
+    //   (a) the raw had no catalog_id (legacy adds skip resolution at submit time), or
+    //   (b) the raw was bucketed under a "legacy" placeholder part (set_code = 'LEGACY',
+    //       case-insensitive — convention for sentinel buckets like PKMN-JP-LEGACY).
+    // The slab name may have been corrected on return, so prefer item.card_name_override.
+    // For (b), if the resolver finds nothing we keep the legacy link rather than
+    // dropping the card to unlinked.
     let resolvedCatalogId: string | null = original.catalog_id;
-    if (!resolvedCatalogId) {
+    const isLegacyLinked = resolvedCatalogId
+      ? !!(await db
+          .selectFrom('card_catalog')
+          .select('id')
+          .where('id', '=', resolvedCatalogId)
+          .where('set_code', 'ilike', 'LEGACY')
+          .executeTakeFirst())
+      : false;
+    if (!resolvedCatalogId || isLegacyLinked) {
       const cardName = item.card_name_override ?? original.card_name_override;
       if (cardName) {
         try {
           const resolve = await resolveLazy();
-          resolvedCatalogId = await resolve!(
+          const resolved = await resolve!(
             cardName,
             original.set_name_override,
             original.card_number_override,
             original.language,
             0,
           );
-        } catch { /* fall through unlinked */ }
+          if (resolved) resolvedCatalogId = resolved;
+        } catch { /* keep existing link (legacy or null) */ }
       }
     }
 

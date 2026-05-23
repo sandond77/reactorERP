@@ -133,7 +133,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     if (games.length === 0) return;
     setForm((prev) => ({
       ...prev,
-      sku: autoSku(prev.game, prev.language, prev.set_code, prev.card_number, unnumbered),
+      sku: autoSku(prev.game, prev.language, prev.set_code, prev.card_number, prev.card_name, unnumbered),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [games.length]);
@@ -160,18 +160,24 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     }
   }
 
-  function autoSku(game: string, lang: string, setCode: string, cardNum: string, isUnnumbered: boolean) {
-    if (!setCode && !cardNum) return '';
+  function autoSku(game: string, lang: string, setCode: string, cardNum: string, cardName: string, isUnnumbered: boolean) {
     const prefix = gamePrefixes.get(game.toLowerCase()) ?? fallbackPrefix(game);
-    if (isUnnumbered) return '';
-    return [prefix, lang.toUpperCase(), setCode.toUpperCase(), cardNum.toUpperCase()].filter(Boolean).join('-');
+    // When unnumbered, substitute a normalized card name for the card-number
+    // segment so each unnumbered card under the same set still gets a unique,
+    // addressable SKU (e.g. PKMN-JP-LEGACY-LEGACYCARDS). Strips non-ASCII-alnum
+    // and uppercases; truncated to keep the SKU readable. Falls back gracefully
+    // to just prefix-lang-setcode if the name doesn't yield any ASCII chars.
+    const nameKey = (cardName ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+    const tail = isUnnumbered ? nameKey : cardNum.toUpperCase();
+    if (!setCode && !tail) return '';
+    return [prefix, lang.toUpperCase(), setCode.toUpperCase(), tail].filter(Boolean).join('-');
   }
 
   const field = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const val = e.target.value;
     setForm(prev => {
       const next = { ...prev, [key]: val };
-      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
+      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
       return next;
     });
   };
@@ -357,7 +363,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                 onTyped={(name) => setForm((prev) => ({ ...prev, set_name: name }))}
                 onSelect={(entry) => setForm((prev) => {
                   const next = { ...prev, set_name: entry.name, set_code: entry.code };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
                   return next;
                 })}
                 onAddNew={handleAddNewSet}
@@ -374,12 +380,12 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                 typedSetCode={form.set_code}
                 onTyped={(code) => setForm((prev) => {
                   const next = { ...prev, set_code: code };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
                   return next;
                 })}
                 onSelect={(entry) => setForm((prev) => {
                   const next = { ...prev, set_code: entry.code, set_name: entry.name };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
                   return next;
                 })}
                 onAddNew={handleAddNewSet}
@@ -402,7 +408,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                     setUnnumbered(checked);
                     setForm((prev) => {
                       const next = checked ? { ...prev, card_number: '' } : prev;
-                      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, checked);
+                      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, checked);
                       return next;
                     });
                   }}
