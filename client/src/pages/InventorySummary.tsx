@@ -1965,8 +1965,14 @@ export function InventorySummary() {
                     </td>
                     <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{lang}</td>
                     <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{rarity}</td>
-                    <td className="px-3 py-1.5 text-zinc-600 whitespace-nowrap">{groupRows.map((r) => r.company).filter((v, i, a) => a.indexOf(v) === i).join(', ')}</td>
-                    <td className="px-3 py-1.5 text-zinc-600 whitespace-nowrap">{groupRows.length} grades</td>
+                    <td className="px-3 py-1.5 text-zinc-600 whitespace-nowrap">{(() => {
+                      const companies = groupRows.map((r) => r.company).filter((c) => c && c !== '—').filter((v, i, a) => a.indexOf(v) === i);
+                      return companies.length === 0 ? '—' : companies.join(', ');
+                    })()}</td>
+                    <td className="px-3 py-1.5 text-zinc-600 whitespace-nowrap">{(() => {
+                      const gradedCount = groupRows.filter((r) => r.grade != null).length;
+                      return gradedCount === 0 ? '—' : `${gradedCount} grade${gradedCount === 1 ? '' : 's'}`;
+                    })()}</td>
                     <td className="px-3 py-1.5 text-right text-zinc-200 font-semibold whitespace-nowrap">{qty}</td>
                     <td className="px-3 py-1.5 text-right text-zinc-200 font-semibold whitespace-nowrap">{groupRows.reduce((s, r) => s + r.qty_unsold, 0)}</td>
                     <td className="px-3 py-1.5 text-right text-zinc-400 whitespace-nowrap">{groupRows.reduce((s, r) => s + r.qty_sold, 0)}</td>
