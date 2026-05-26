@@ -1,24 +1,5 @@
 # Reactor — Changelog
 
-## May 26, 2026
-
-### Features
-
-**Legacy bucket workflow — pull from your pre-Reactor stash into grading subs**
-- The "Legacy (no lot)" tab in Add Card to Batch could only auto-create a *new* one-card phantom lot per add. With years of pre-Reactor inventory sitting in a single bulk lot, that meant scattering 10 legacy adds across 10 separate phantom lots — no way to track the stash as a coherent pool. Now the tab has a **Legacy Bucket** dropdown that lists your stash lots (lots whose catalog entry has `set_code='LEGACY'`) with `SKU · remaining/total · $X/card` for each. Pick one and the modal pulls from that bucket: language and per-card cost auto-fill (read-only), the stash row's `quantity` decrements by the pulled amount, and the new grading row links to the same lot. The existing part-number search stays for assigning the **real card identity** — that's the catalog entry the eventual slab ends up under, separate from the legacy sentinel. Leaving the bucket blank falls back to the current phantom-lot behavior.
-
-**Legacy bucket inventory tracking through grading return**
-- The lot itself shrinks when slabs come back. `processReturn` now detects "legacy bucket" via the lot's catalog entry (`set_code='LEGACY'`) and after the slab is created decrements `lot.card_count -= qty` and `lot.total_cost_usd -= purchase_cost × qty`. So a stash that started at `1000 cards / $10,000` becomes `999 / $9,990` after one card returns from grading, and the $10 share moves cleanly onto the slab as its `purchase_cost`. Total cost basis across the system stays equal to original spend; the lot, the stash row, and the slab reconcile against each other so any drift is spottable. `revertReturn` reverses the decrement symmetrically when a return is undone.
-
-**Per-user seed of EN + JP legacy catalog entries**
-- Migration **053** seeds `PKMN-EN-LEGACY-LEGACYCARDS` and `PKMN-JP-LEGACY-LEGACYCARDS` catalog entries for every existing user (idempotent via `NOT EXISTS`, won't duplicate for users who already created one manually). Each user just needs to create the backing bulk lot (linked to one of these catalog entries) to start using the workflow — no UI changes elsewhere required.
-
-### Server
-
-- New endpoint `GET /api/v1/raw-purchases/legacy-lots` returning lots whose catalog entry is `LEGACY` with remaining capacity, each row including `purchase_id`, `language`, `card_count`, `used`, `remaining`, and computed `per_card_cost`. Registered before `/:id` so the path isn't eaten by the dynamic id route.
-
----
-
 ## May 23, 2026
 
 ### Features

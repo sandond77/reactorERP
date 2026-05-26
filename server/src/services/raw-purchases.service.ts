@@ -163,49 +163,6 @@ export async function backLinkSlabsToLot(userId: string, lotId: string, slabIds:
   return { ok: true, lotId, linked: slabs.length, total_qty: incomingQty, cost_backfilled: backfilled };
 }
 
-// List lots whose catalog entry is a "legacy" sentinel (set_code='LEGACY')
-// and that still have remaining capacity. Used by the Grading "Legacy" tab
-// picker so users can pull cards from their pre-Reactor stash bucket.
-export async function listLegacyBucketLots(userId: string) {
-  const result = await sql<{
-    id: string;
-    purchase_id: string;
-    language: string;
-    card_count: number;
-    total_cost_usd: number;
-    sku: string | null;
-    card_name: string | null;
-    used: number;
-    remaining: number;
-    per_card_cost: number;
-  }>`
-    SELECT
-      rp.id,
-      rp.purchase_id,
-      rp.language,
-      rp.card_count,
-      COALESCE(rp.total_cost_usd, 0)::int AS total_cost_usd,
-      cc.sku,
-      cc.card_name,
-      COALESCE(SUM(ci.quantity), 0)::int AS used,
-      (rp.card_count - COALESCE(SUM(ci.quantity), 0))::int AS remaining,
-      CASE WHEN rp.card_count > 0
-        THEN ROUND(COALESCE(rp.total_cost_usd, 0)::numeric / rp.card_count)::int
-        ELSE 0
-      END AS per_card_cost
-    FROM raw_purchases rp
-    INNER JOIN card_catalog cc ON cc.id = rp.catalog_id
-    LEFT JOIN card_instances ci ON ci.raw_purchase_id = rp.id AND ci.user_id = rp.user_id
-    WHERE rp.user_id = ${userId}
-      AND cc.set_code ILIKE 'LEGACY'
-      AND COALESCE(rp.status::text, 'received') != 'cancelled'
-    GROUP BY rp.id, cc.sku, cc.card_name
-    HAVING rp.card_count - COALESCE(SUM(ci.quantity), 0) > 0
-    ORDER BY rp.language, rp.purchase_id
-  `.execute(db);
-  return result.rows;
-}
-
 async function nextPurchaseId(userId: string, type: RawPurchaseType, year: number): Promise<string> {
   const letter = type === 'raw' ? 'R' : type === 'bulk' ? 'B' : 'L';
 

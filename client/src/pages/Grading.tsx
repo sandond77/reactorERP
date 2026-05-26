@@ -339,19 +339,6 @@ interface CatalogSearchResult {
   language: string;
 }
 
-interface LegacyBucketLot {
-  id: string;
-  purchase_id: string;
-  language: string;
-  card_count: number;
-  total_cost_usd: number;
-  sku: string | null;
-  card_name: string | null;
-  used: number;
-  remaining: number;
-  per_card_cost: number;
-}
-
 function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
@@ -370,7 +357,6 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
   const [pickedCatalog, setPickedCatalog] = useState<CatalogSearchResult | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [bucketLotId, setBucketLotId] = useState<string>('');
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
 
@@ -379,24 +365,6 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
     const t = setTimeout(() => setDebouncedSearch(searchLabel), 250);
     return () => clearTimeout(t);
   }, [searchLabel]);
-
-  // Legacy bucket lots — the user's stash lots (lots whose catalog entry has
-  // set_code='LEGACY'). When one is picked, cost/lang auto-fill from the lot.
-  const { data: bucketLots = [] } = useQuery<LegacyBucketLot[]>({
-    queryKey: ['legacy-bucket-lots'],
-    queryFn: () => api.get('/raw-purchases/legacy-lots').then(r => r.data.data),
-  });
-  const bucketLot = bucketLots.find(b => b.id === bucketLotId) ?? null;
-
-  // When a bucket is picked, sync the language + cost from the lot.
-  useEffect(() => {
-    if (!bucketLot) return;
-    setForm(prev => ({
-      ...prev,
-      language: bucketLot.language,
-      purchase_cost: (bucketLot.per_card_cost / 100).toFixed(2),
-    }));
-  }, [bucketLot]);
 
   const { data: matches = [], isFetching: searching } = useQuery<CatalogSearchResult[]>({
     queryKey: ['catalog-search-legacy', debouncedSearch],
@@ -460,10 +428,6 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
     if (!form.card_name.trim()) { toast.error('Card name is required'); return; }
     const qtyNum = parseInt(form.quantity);
     if (!qtyNum || qtyNum < 1) { toast.error('Quantity must be at least 1'); return; }
-    if (bucketLot && qtyNum > bucketLot.remaining) {
-      toast.error(`Only ${bucketLot.remaining} card${bucketLot.remaining === 1 ? '' : 's'} remaining in this bucket`);
-      return;
-    }
     setSaving(true);
     try {
       await api.post(`/grading-subs/${batchId}/items/legacy`, {
@@ -473,13 +437,10 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
         language:        form.language,
         condition:       form.condition || null,
         quantity:        qtyNum,
-        // When pulling from an existing bucket, server derives cost from the
-        // lot — purchase_cost from the form is ignored in that path.
         purchase_cost:   form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
         expected_grade:  form.expected_grade ? parseFloat(form.expected_grade) : undefined,
         estimated_value: form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
         catalog_id:      pickedCatalog?.id,
-        raw_purchase_id: bucketLotId || undefined,
       });
       toast.success('Legacy card added to batch');
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
@@ -496,39 +457,13 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <p className="text-xs text-zinc-500 leading-relaxed">
-        For cards you owned before tracking purchases in Reactor. Pick a legacy bucket to pull from your stash
-        (cost + inventory tracked there), or leave it blank to auto-create a backdated one-off lot.
+        For cards you owned before tracking purchases in Reactor. Search to find or generate a part number,
+        then fill in the rest. A backdated raw purchase lot is auto-created so cost basis stays accurate.
       </p>
-
-      {/* Legacy bucket picker */}
-      <div>
-        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">
-          Legacy Bucket {!bucketLotId && <span className="text-zinc-600 normal-case">(optional)</span>}
-        </label>
-        <select
-          value={bucketLotId}
-          onChange={(e) => setBucketLotId(e.target.value)}
-          className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500"
-        >
-          <option value="">— None: auto-create a backdated lot —</option>
-          {bucketLots.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.sku ?? b.purchase_id} · {b.remaining}/{b.card_count} left · ${(b.per_card_cost / 100).toFixed(2)}/card
-            </option>
-          ))}
-        </select>
-        {bucketLot && (
-          <p className="text-[10px] text-zinc-500 mt-1">
-            Pulling from this bucket. On grading return, the lot's card count + cost will shrink by the pulled qty.
-          </p>
-        )}
-      </div>
 
       {/* Part number search */}
       <div>
-        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">
-          Card Part # <span className="text-zinc-600 normal-case">(real card identity{bucketLot ? ' — reassigns off the legacy bucket' : ''})</span>
-        </label>
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">Part Number</label>
         <div className="relative">
           <input
             type="text"
@@ -610,19 +545,8 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Input
-          label={`Quantity *${bucketLot ? ` (max ${bucketLot.remaining})` : ''}`}
-          type="number" min="1" max={bucketLot?.remaining}
-          value={form.quantity} onChange={set('quantity')} className={noSpinner}
-        />
-        <Input
-          label={`Cost / Card (USD)${bucketLot ? ' — from bucket' : ''}`}
-          type="text" inputMode="decimal"
-          value={form.purchase_cost} onChange={set('purchase_cost')}
-          placeholder="0.00"
-          readOnly={!!bucketLot}
-          className={`${noSpinner} ${bucketLot ? 'opacity-60 cursor-not-allowed' : ''}`}
-        />
+        <Input label="Quantity *" type="number" min="1" value={form.quantity} onChange={set('quantity')} className={noSpinner} />
+        <Input label="Cost / Card (USD)" type="text" inputMode="decimal" value={form.purchase_cost} onChange={set('purchase_cost')} placeholder="0.00" className={noSpinner} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800">
