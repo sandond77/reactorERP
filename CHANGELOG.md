@@ -22,6 +22,9 @@
 **Legacy picker / pull scoped to `decision='grade'` only**
 - Cards on the same legacy bucket but marked for raw sale (`decision='sell_raw'`) were inflating the dropdown's "left" count and could be accidentally drained by a grading pull. The picker query (`/catalog/legacy-buckets`) and the pull-side stash finder in `addLegacyItem` both now filter to `decision='grade'`, so raw-sale inventory stays out of the grading flow.
 
+**Auto-recalc per-card cost when inspection-line qty changes (single-line lot)**
+- After relaxing the R-purchase qty=1 rule, changing an inspection line's quantity from 1 → 2 left the line's `purchase_cost` at the lot's full total (e.g. lot total $131.13, line qty=2, cost/card still $131.13) — even though the avg/card displayed elsewhere correctly recalculated to $65.57. `updateInspectionLine` now auto-derives `purchase_cost = round(lot.total_cost_usd / lot.card_count)` when the user changes qty on the **only** line of a lot and doesn't explicitly pass a new `purchase_cost`. Multi-line lots are left alone so custom per-line allocations (e.g. one chase card at $50 + commons at $1) aren't clobbered. Explicit `purchase_cost` in the request is always respected.
+
 **R-purchase qty=1 invariant relaxed**
 - The May 18 rule that forced R (single-raw) purchases to `card_count = 1` and rejected any inspection-line qty != 1 turned out to be too rigid in practice. Removed the four server-side hard rejects (`createRawPurchase`, `updateRawPurchase`, `addInspectionLine`, `updateInspectionLine`) and the B→R conversion block. The Intake form's # of Cards / Quantity Received / multi-line row qty inputs are no longer read-only for raw type. Switching a line from Bulk to Raw no longer snaps qty back to 1. A soft warning ("Bulk (B) is recommended for >1 card") with an amber input border appears whenever an R-type line has qty > 1, but it's just a UX hint — submit isn't blocked.
 

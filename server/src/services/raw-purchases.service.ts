@@ -616,15 +616,19 @@ export async function updateInspectionLine(
 
   // Block over-allocation when quantity is increasing on a row tied to a
   // raw purchase. Sum the other lines and require that other_total + new_qty
-  // ≤ purchase.card_count.
+  // ≤ purchase.card_count. Also pulls total_cost_usd so we can auto-recalc
+  // per-card cost on a single-line lot when qty changes.
+  let parentLot: { card_count: number; total_cost_usd: number | null } | null = null;
+  let otherLinesTotal = 0;
   if (input.quantity !== undefined && existing?.raw_purchase_id) {
     const purchase = await db
       .selectFrom('raw_purchases')
-      .select(['card_count', 'type'])
+      .select(['card_count', 'total_cost_usd', 'type'])
       .where('id', '=', existing.raw_purchase_id)
       .where('user_id', '=', userId)
       .executeTakeFirst();
     if (purchase) {
+      parentLot = { card_count: purchase.card_count, total_cost_usd: purchase.total_cost_usd };
       const otherRow = await sql<{ total: number }>`
         SELECT COALESCE(SUM(quantity), 0)::int AS total
         FROM card_instances
@@ -632,9 +636,9 @@ export async function updateInspectionLine(
           AND user_id = ${userId}
           AND id != ${cardInstanceId}
       `.execute(db);
-      const otherTotal = Number(otherRow.rows[0].total);
-      if (otherTotal + input.quantity > purchase.card_count) {
-        const remaining = purchase.card_count - otherTotal;
+      otherLinesTotal = Number(otherRow.rows[0].total);
+      if (otherLinesTotal + input.quantity > purchase.card_count) {
+        const remaining = purchase.card_count - otherLinesTotal;
         throw new AppError(409,
           `Can't set quantity to ${input.quantity} — only ${remaining} of ${purchase.card_count} card${purchase.card_count === 1 ? '' : 's'} remain unallocated on this purchase.`
         );
@@ -652,6 +656,21 @@ export async function updateInspectionLine(
   if (input.purchase_cost !== undefined) update.purchase_cost = input.purchase_cost;
   if (input.notes !== undefined)         update.notes = input.notes;
   if (input.location_id !== undefined)   update.location_id = input.location_id;
+
+  // Auto-recalc per-card cost when qty changes on a SINGLE-line lot and the
+  // user didn't explicitly set purchase_cost. The line's per-card cost
+  // should match the lot's avg ($total / card_count). Skipped for multi-
+  // line lots because each line may have a custom allocation.
+  if (
+    input.quantity !== undefined &&
+    input.purchase_cost === undefined &&
+    parentLot &&
+    parentLot.total_cost_usd != null &&
+    parentLot.card_count > 0 &&
+    otherLinesTotal === 0
+  ) {
+    update.purchase_cost = Math.round(parentLot.total_cost_usd / parentLot.card_count);
+  }
 
   const updated = await db
     .updateTable('card_instances')
