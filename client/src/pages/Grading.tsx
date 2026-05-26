@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, ArrowLeft, Loader2, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plus, ArrowLeft, Loader2, Trash2, CheckCircle, AlertCircle, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -189,23 +189,26 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
   );
 }
 
+const BULK_ADD_MAX = 10;
+
+interface BulkAddRow {
+  card: CardToGrade;
+  qty: string;
+  expectedGrade: string;
+  estimatedValue: string;
+}
+
 function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: () => void }) {
   const qc = useQueryClient();
-  const [search, setSearch]                 = useState('');
-  const [debounced, setDebounced]           = useState('');
-  const [selected, setSelected]             = useState<CardToGrade | null>(null);
-  const [qty, setQty]                       = useState<string>('');
-  const [expectedGrade, setExpectedGrade]   = useState('');
-  const [estimatedValue, setEstimatedValue] = useState('');
-  const [saving, setSaving]                 = useState(false);
+  const [search, setSearch]       = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [rows, setRows]           = useState<BulkAddRow[]>([]);
+  const [saving, setSaving]       = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 300);
     return () => clearTimeout(t);
   }, [search]);
-
-  // Reset qty when card changes
-  useEffect(() => { setQty(''); }, [selected]);
 
   const { data: cardResults, isLoading } = useQuery<PaginatedResult<CardToGrade>>({
     queryKey: ['card-picker-grading', debounced],
@@ -215,112 +218,153 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
     enabled: debounced.length >= 2,
   });
 
+  const cards = cardResults?.data ?? [];
+  const selectedIds = new Set(rows.map(r => r.card.id));
+  const atCap = rows.length >= BULK_ADD_MAX;
+
+  function addRow(card: CardToGrade) {
+    if (selectedIds.has(card.id) || atCap) return;
+    setRows(prev => [...prev, { card, qty: '1', expectedGrade: '', estimatedValue: '' }]);
+    setSearch('');
+  }
+  function removeRow(id: string) {
+    setRows(prev => prev.filter(r => r.card.id !== id));
+  }
+  function updateRow(id: string, key: 'qty' | 'expectedGrade' | 'estimatedValue', val: string) {
+    setRows(prev => prev.map(r => r.card.id === id ? { ...r, [key]: val } : r));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected) { toast.error('Select a card'); return; }
-    const qtyNum = parseInt(qty);
-    if (!qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > selected.quantity) { toast.error(`Quantity must be between 1 and ${selected.quantity}`); return; }
+    if (rows.length === 0) { toast.error('Add at least one card'); return; }
+    for (const r of rows) {
+      const qtyNum = parseInt(r.qty);
+      if (!r.qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > r.card.quantity) {
+        toast.error(`${r.card.card_name ?? 'Card'}: qty must be between 1 and ${r.card.quantity}`);
+        return;
+      }
+    }
     setSaving(true);
     try {
-      await api.post(`/grading-subs/${batchId}/items`, {
-        card_instance_id: selected.id,
-        quantity:         qtyNum,
-        expected_grade:   expectedGrade ? parseFloat(expectedGrade) : undefined,
-        estimated_value:  estimatedValue ? Math.round(parseFloat(estimatedValue) * 100) : undefined,
+      await api.post(`/grading-subs/${batchId}/items/bulk`, {
+        items: rows.map(r => ({
+          card_instance_id: r.card.id,
+          quantity:         parseInt(r.qty),
+          expected_grade:   r.expectedGrade ? parseFloat(r.expectedGrade) : undefined,
+          estimated_value:  r.estimatedValue ? Math.round(parseFloat(r.estimatedValue) * 100) : undefined,
+        })),
       });
-      toast.success('Card added to batch');
+      toast.success(rows.length === 1 ? 'Card added to batch' : `${rows.length} cards added to batch`);
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       onClose();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to add card');
+      toast.error(err?.response?.data?.error ?? 'Failed to add cards');
     } finally {
       setSaving(false);
     }
   }
 
-  const cards = cardResults?.data ?? [];
+  const cellCls = 'w-full px-2 py-1.5 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       {/* Search */}
       <input
         type="text"
-        placeholder="Search by card name or purchase ID…"
+        placeholder={atCap ? `Maximum ${BULK_ADD_MAX} cards per batch add` : 'Search by card name or purchase ID…'}
         value={search}
-        onChange={(e) => { setSearch(e.target.value); setSelected(null); }}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+        onChange={(e) => setSearch(e.target.value)}
+        disabled={atCap}
+        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
         autoComplete="off"
       />
 
-      {/* Card list */}
-      <div className="border border-zinc-700 rounded-lg overflow-hidden">
-        {debounced.length < 2 ? (
-          <div className="px-4 py-6 text-center text-zinc-600 text-sm">Type For Search Results</div>
-        ) : isLoading ? (
-          <div className="px-4 py-6 text-center text-zinc-600 text-sm">Loading…</div>
-        ) : cards.length === 0 ? (
-          <div className="px-4 py-6 text-center text-zinc-500 text-sm">No cards found.</div>
-        ) : (
-          <div className="max-h-52 overflow-y-auto divide-y divide-zinc-800">
-            {cards.map((card) => {
-              const active = selected?.id === card.id;
-              return (
-                <button key={card.id} type="button"
-                  className={`w-full text-left px-3 py-2 text-sm transition-colors ${active ? 'bg-indigo-600/20 border-l-2 border-indigo-500' : 'hover:bg-zinc-800/60'}`}
-                  onClick={() => setSelected(active ? null : card)}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`font-medium truncate ${active ? 'text-indigo-300' : 'text-zinc-200'}`}>
-                      {card.card_name ?? 'Unknown'}
-                    </span>
-                    <span className="text-xs font-mono font-semibold text-zinc-400 shrink-0">
-                      {card.raw_purchase_label ?? '—'}
-                    </span>
-                  </div>
-                  <div className="text-xs text-zinc-500 mt-0.5">
-                    {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{card.quantity} available</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Qty + estimated value — only shown once a card is selected */}
-      {selected && (
-        <div className="space-y-3 pt-1 border-t border-zinc-800">
-          <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr 1.4fr' }}>
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">
-                Qty <span className="text-zinc-600 normal-case">(max {selected.quantity})</span>
-              </label>
-              <input
-                type="number" min={1} max={selected.quantity} value={qty}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === '') { setQty(''); return; }
-                  const n = parseInt(v);
-                  if (!isNaN(n)) setQty(String(Math.min(selected.quantity, Math.max(1, n))));
-                }}
-                className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
+      {/* Card list — click to add to selection */}
+      {!atCap && (
+        <div className="border border-zinc-700 rounded-lg overflow-hidden">
+          {debounced.length < 2 ? (
+            <div className="px-4 py-4 text-center text-zinc-600 text-sm">Type to search</div>
+          ) : isLoading ? (
+            <div className="px-4 py-4 text-center text-zinc-600 text-sm">Loading…</div>
+          ) : cards.length === 0 ? (
+            <div className="px-4 py-4 text-center text-zinc-500 text-sm">No cards found.</div>
+          ) : (
+            <div className="max-h-44 overflow-y-auto divide-y divide-zinc-800">
+              {cards.map((card) => {
+                const already = selectedIds.has(card.id);
+                return (
+                  <button key={card.id} type="button" disabled={already}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors ${already ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-800/60'}`}
+                    onClick={() => addRow(card)}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium truncate text-zinc-200">{card.card_name ?? 'Unknown'}</span>
+                      <span className="text-xs font-mono font-semibold text-zinc-400 shrink-0">
+                        {card.raw_purchase_label ?? '—'}
+                        {already && <span className="ml-2 text-[10px] text-indigo-400 font-sans">added</span>}
+                      </span>
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{card.quantity} available</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-            <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
-              value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)}
-              className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-            <Input label="Est. Value / Card" type="text" inputMode="decimal" placeholder="0.00"
-              value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)}
-              className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+          )}
+        </div>
+      )}
+
+      {/* Selected rows — per-card qty/grade/value */}
+      {rows.length > 0 && (
+        <div className="space-y-2 pt-2 border-t border-zinc-800">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+            Selected ({rows.length}/{BULK_ADD_MAX})
+          </p>
+          <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+            {rows.map((r) => (
+              <div key={r.card.id} className="grid items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
+                style={{ gridTemplateColumns: 'minmax(0,1.6fr) 80px 90px 110px 24px' }}>
+                <div className="min-w-0">
+                  <p className="text-xs text-zinc-100 truncate font-medium">{r.card.card_name ?? 'Unknown'}</p>
+                  <p className="text-[10px] text-zinc-500 truncate">
+                    {r.card.set_name ?? '—'}{r.card.card_number ? ` · #${r.card.card_number}` : ''}
+                    {' · '}<span className="font-mono text-zinc-400">{r.card.raw_purchase_label ?? '—'}</span>
+                    {' · '}max {r.card.quantity}
+                  </p>
+                </div>
+                <input type="number" min={1} max={r.card.quantity} value={r.qty}
+                  placeholder="Qty"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '') { updateRow(r.card.id, 'qty', ''); return; }
+                    const n = parseInt(v);
+                    if (!isNaN(n)) updateRow(r.card.id, 'qty', String(Math.min(r.card.quantity, Math.max(1, n))));
+                  }}
+                  className={cellCls} />
+                <input type="number" step="0.5" min="1" max="10" placeholder="Grade"
+                  value={r.expectedGrade}
+                  onChange={(e) => updateRow(r.card.id, 'expectedGrade', e.target.value)}
+                  className={cellCls} />
+                <input type="text" inputMode="decimal" placeholder="$ / card"
+                  value={r.estimatedValue}
+                  onChange={(e) => updateRow(r.card.id, 'estimatedValue', e.target.value)}
+                  className={cellCls} />
+                <button type="button" onClick={() => removeRow(r.card.id)}
+                  className="text-zinc-600 hover:text-red-400 transition-colors flex items-center justify-center">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={saving || !selected}>
+        <Button type="submit" disabled={saving || rows.length === 0}>
           {saving && <Loader2 size={14} className="animate-spin" />}
-          Add to Batch
+          Add {rows.length > 0 ? `${rows.length} ` : ''}to Batch
         </Button>
       </div>
     </form>
@@ -1027,7 +1071,7 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
         {editingItem && <EditItemModal item={editingItem} batchId={batchId} onClose={() => setEditingItem(null)} />}
       </Modal>
 
-      <Modal open={showAddCard} onClose={() => setShowAddCard(false)} title="Add Card to Batch">
+      <Modal open={showAddCard} onClose={() => setShowAddCard(false)} title="Add Card to Batch" className="max-w-2xl">
         <AddCardModal batchId={batchId} onClose={() => setShowAddCard(false)} />
       </Modal>
 

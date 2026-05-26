@@ -42,6 +42,14 @@ export async function addItem(req: Request, res: Response, next: NextFunction) {
   } catch (err) { next(err); }
 }
 
+export async function addItemsBulk(req: Request, res: Response, next: NextFunction) {
+  try {
+    const items = (req.body && Array.isArray(req.body.items)) ? req.body.items : [];
+    const created = await svc.addItemsBulk(req.dataUserId, req.params['id'] as string, items);
+    res.status(201).json({ data: created });
+  } catch (err) { next(err); }
+}
+
 export async function addLegacyItem(req: Request, res: Response, next: NextFunction) {
   try {
     res.status(201).json(await svc.addLegacyItem(req.dataUserId, req.params['id'] as string, req.body));

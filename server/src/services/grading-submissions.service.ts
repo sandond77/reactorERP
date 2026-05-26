@@ -215,6 +215,36 @@ export async function deleteBatch(userId: string, id: string) {
   return result;
 }
 
+// Bulk variant — add multiple inventory cards to a batch in one call. Rejects
+// duplicate card_instance_ids in the input (qty on the row is the right knob
+// for "more of the same card"), enforces a per-call cap so the modal can't
+// over-submit, and uses the existing addItem path for each so per-row
+// validation matches the single-add behavior.
+const BULK_ADD_MAX = 10;
+
+export async function addItemsBulk(
+  userId: string,
+  batchId: string,
+  items: AddItemInput[]
+) {
+  if (!items.length) throw new AppError(400, 'No items provided');
+  if (items.length > BULK_ADD_MAX) {
+    throw new AppError(400, `Maximum ${BULK_ADD_MAX} cards per bulk add (got ${items.length})`);
+  }
+  const seen = new Set<string>();
+  for (const it of items) {
+    if (seen.has(it.card_instance_id)) {
+      throw new AppError(400, 'Duplicate card in the batch add — pick each card once and use qty on its row');
+    }
+    seen.add(it.card_instance_id);
+  }
+  const created: Awaited<ReturnType<typeof addItem>>[] = [];
+  for (const it of items) {
+    created.push(await addItem(userId, batchId, it));
+  }
+  return created;
+}
+
 export async function addItem(userId: string, batchId: string, input: AddItemInput) {
   const batch = await db
     .selectFrom('grading_batches')
