@@ -229,6 +229,9 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
         limit: 50,
         status: 'purchased_raw,inspected,grading_submitted',
         decision: 'grade',
+        // Legacy stash rows live in the Legacy (no lot) tab; suppress them
+        // here so they don't pollute the From Inventory search results.
+        exclude_legacy_bucket: 'true',
       },
     }).then((r) => r.data),
     enabled: debounced.length >= 2,

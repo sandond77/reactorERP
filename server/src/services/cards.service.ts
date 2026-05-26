@@ -28,6 +28,7 @@ export interface CardFilters {
   purchase_type?: string;
   decision?: string;
   exclude_decision?: string;
+  exclude_legacy_bucket?: boolean;
   is_card_show?: string;  // 'yes' | 'no'
   is_personal_collection?: string;  // 'yes' | 'no'
 }
@@ -106,6 +107,13 @@ export async function listCards(
   if (filters.exclude_decision) query = query.where((eb) => eb.or([
     eb('ci.decision', 'is', null),
     eb('ci.decision', '!=', filters.exclude_decision as any),
+  ]));
+  // Hide legacy bucket stash rows from generic pickers — those should only
+  // be drawn from via the Legacy tab in Add Card to Batch, not picked
+  // directly as "From Inventory".
+  if (filters.exclude_legacy_bucket) query = query.where((eb) => eb.or([
+    eb('cc.set_code', 'is', null),
+    eb('cc.set_code', 'not ilike', 'LEGACY'),
   ]));
   if (filters.is_card_show === 'yes') query = query.where('ci.is_card_show', '=', true);
   if (filters.is_card_show === 'no') query = query.where('ci.is_card_show', '=', false);
