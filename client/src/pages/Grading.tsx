@@ -202,6 +202,7 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
   const qc = useQueryClient();
   const [search, setSearch]       = useState('');
   const [debounced, setDebounced] = useState('');
+  const [strict, setStrict]       = useState(false);
   const [rows, setRows]           = useState<BulkAddRow[]>([]);
   const [saving, setSaving]       = useState(false);
 
@@ -211,9 +212,20 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
   }, [search]);
 
   const { data: cardResults, isLoading } = useQuery<PaginatedResult<CardToGrade>>({
-    queryKey: ['card-picker-grading', debounced],
+    queryKey: ['card-picker-grading', debounced, strict],
     queryFn:  () => api.get('/cards', {
-      params: { search: debounced, limit: 50, status: 'inspected,grading_submitted', decision: 'grade' },
+      // Broader status filter — anything that hasn't been terminated. The
+      // decision='grade' filter (now actually applied server-side after the
+      // schema fix) narrows back to grading-bound cards. Catches edge cases
+      // where a Grade-decision card is sitting in purchased_raw or another
+      // non-terminal status the original tight filter missed.
+      params: {
+        search: debounced,
+        ...(strict ? { exact: 'true' } : {}),
+        limit: 50,
+        status: 'purchased_raw,inspected,grading_submitted',
+        decision: 'grade',
+      },
     }).then((r) => r.data),
     enabled: debounced.length >= 2,
   });
@@ -270,15 +282,22 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       {/* Search */}
-      <input
-        type="text"
-        placeholder={atCap ? `Maximum ${BULK_ADD_MAX} cards per batch add` : 'Search by card name or purchase ID…'}
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        disabled={atCap}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-        autoComplete="off"
-      />
+      <div className="space-y-1.5">
+        <input
+          type="text"
+          placeholder={atCap ? `Maximum ${BULK_ADD_MAX} cards per batch add` : 'Search by card name or purchase ID…'}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          disabled={atCap}
+          className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+          autoComplete="off"
+        />
+        <label className="flex items-center gap-1.5 text-[10px] text-zinc-500 cursor-pointer select-none">
+          <input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)}
+            className="accent-indigo-500" />
+          Strict match <span className="text-zinc-600">(whole-term — e.g. <span className="font-mono">2026R2</span> won't match <span className="font-mono">2026R20</span>)</span>
+        </label>
+      </div>
 
       {/* Card list — click to add to selection */}
       {!atCap && (
@@ -509,6 +528,7 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!legacyBucketId) { toast.error('Pick a Legacy Part # to draw from'); return; }
     if (!form.card_name.trim()) { toast.error('Card name is required'); return; }
     const qtyNum = parseInt(form.quantity);
     if (!qtyNum || qtyNum < 1) { toast.error('Quantity must be at least 1'); return; }
@@ -553,17 +573,17 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
         then assign the <span className="text-zinc-300">Card Part #</span> for what this specific card actually is — that's the part the slab lands under.
       </p>
 
-      {/* Legacy Part # — bucket source */}
+      {/* Legacy Part # — bucket source (required) */}
       <div>
         <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">
-          Legacy Part # {!legacyBucketId && <span className="text-zinc-600 normal-case">(optional)</span>}
+          Legacy Part # <span className="text-red-500">*</span>
         </label>
         <select
           value={legacyBucketId}
           onChange={(e) => setLegacyBucketId(e.target.value)}
           className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500"
         >
-          <option value="">— None: auto-create backdated lot for cost basis —</option>
+          <option value="">— Pick a legacy bucket to pull from —</option>
           {legacyBuckets.map((b) => (
             <option key={b.id} value={b.id}>
               {b.sku ?? b.card_name} · {b.stash_qty} left · ${(b.per_card_cost / 100).toFixed(2)}/card
@@ -652,11 +672,21 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
           <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">Language</label>
           <select value={form.language} onChange={set('language')}
             className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500">
-            <option value="EN">EN</option>
-            <option value="JP">JP</option>
-            <option value="KR">KR</option>
-            <option value="ZH-TW">ZH-TW</option>
-            <option value="ZH-CN">ZH-CN</option>
+            <option value="EN">EN — English</option>
+            <option value="JP">JP — Japanese</option>
+            <option value="KR">KR — Korean</option>
+            <option value="ZH-TW">ZH-TW — Chinese (Traditional)</option>
+            <option value="ZH-CN">ZH-CN — Chinese (Simplified)</option>
+            <option value="FR">FR — French</option>
+            <option value="DE">DE — German</option>
+            <option value="IT">IT — Italian</option>
+            <option value="ES">ES — Spanish</option>
+            <option value="PT">PT — Portuguese</option>
+            <option value="PL">PL — Polish</option>
+            <option value="NL">NL — Dutch</option>
+            <option value="RU">RU — Russian</option>
+            <option value="TH">TH — Thai</option>
+            <option value="ID">ID — Indonesian</option>
           </select>
         </div>
         <Input label="Condition" value={form.condition} onChange={set('condition')} placeholder="NM" />
@@ -687,7 +717,7 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
 
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={saving || !form.card_name.trim()}>
+        <Button type="submit" disabled={saving || !form.card_name.trim() || !legacyBucketId}>
           {saving && <Loader2 size={14} className="animate-spin" />}
           Add to Batch
         </Button>

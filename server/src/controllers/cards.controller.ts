@@ -17,6 +17,7 @@ const cardFiltersSchema = z.object({
   language: z.string().optional(),
   condition: z.string().optional(),
   purchase_type: z.string().optional(),
+  decision: z.string().optional(),
   exclude_decision: z.string().optional(),
   is_card_show: z.string().optional(),
   is_personal_collection: z.string().optional(),
