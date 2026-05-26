@@ -103,6 +103,19 @@ export async function getBatch(userId: string, id: string) {
       'ci.purchase_cost',
       'ci.currency',
       'ci.condition',
+      'ci.legacy_source_catalog_id',
+      // Remaining stash for a legacy-sourced line — drives the modal's qty
+      // max so the user can pull more from the bucket via Edit Line Item.
+      // Sums grade-decision stash rows (status not in terminal states) under
+      // the same legacy catalog entry. 0 for non-legacy lines.
+      sql<number>`COALESCE((
+        SELECT SUM(stash.quantity)::int
+        FROM card_instances stash
+        WHERE stash.catalog_id = ci.legacy_source_catalog_id
+          AND stash.user_id = ci.user_id
+          AND stash.status NOT IN ('grading_submitted', 'graded', 'sold', 'lost_damaged')
+          AND stash.decision = 'grade'
+      ), 0)`.as('legacy_stash_remaining'),
       'rp.purchase_id as raw_purchase_label',
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
@@ -134,7 +147,7 @@ export async function getBatch(userId: string, id: string) {
   return {
     ...batch,
     items: itemsWithRolling,
-    stats: { rawCost, gradingCost, totalCost, totalValue, maxGain, estimate80 },
+    stats: { totalQty, rawCost, gradingCost, totalCost, totalValue, maxGain, estimate80 },
   };
 }
 
@@ -466,6 +479,59 @@ export interface UpdateItemInput {
 }
 
 export async function updateItem(userId: string, itemId: string, input: UpdateItemInput) {
+  // For legacy-sourced lines the source card_instance.quantity must stay in
+  // sync with the batch_item.quantity, and the legacy bucket's stash row
+  // absorbs/emits the delta. Fetch the existing item + linked instance up
+  // front so we can detect the legacy case and adjust both sides atomically.
+  const existing = await db
+    .selectFrom('grading_batch_items as gbi')
+    .innerJoin('card_instances as ci', 'ci.id', 'gbi.card_instance_id')
+    .innerJoin('grading_batches as gb', 'gb.id', 'gbi.batch_id')
+    .select([
+      'gbi.id',
+      'gbi.card_instance_id',
+      'gbi.quantity as gbi_qty',
+      'ci.quantity as ci_qty',
+      'ci.legacy_source_catalog_id',
+    ])
+    .where('gbi.id', '=', itemId)
+    .where('gb.user_id', '=', userId)
+    .executeTakeFirst();
+  if (!existing) return null;
+
+  // Adjust stash + card_instance.quantity when a legacy line's qty changes.
+  if (
+    input.quantity !== undefined &&
+    input.quantity !== existing.gbi_qty &&
+    existing.legacy_source_catalog_id
+  ) {
+    const delta = input.quantity - existing.gbi_qty;
+    const stash = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('catalog_id', '=', existing.legacy_source_catalog_id)
+      .where('user_id', '=', userId)
+      .where('status', 'not in', ['grading_submitted', 'graded', 'sold', 'lost_damaged'])
+      .where('decision', '=', 'grade')
+      .orderBy('quantity', 'desc')
+      .executeTakeFirst();
+    if (!stash) {
+      throw new AppError(409, 'No legacy stash row available to pull from / return to');
+    }
+    if (delta > 0 && stash.quantity < delta) {
+      throw new AppError(409, `Only ${stash.quantity} card${stash.quantity === 1 ? '' : 's'} remaining in the legacy stash`);
+    }
+    // Move delta from stash → card_instance (or back if delta < 0)
+    const stashBefore = { ...stash };
+    await db.updateTable('card_instances')
+      .set({ quantity: stash.quantity - delta, updated_at: new Date() })
+      .where('id', '=', stash.id).execute();
+    await logAudit(userId, 'card_instances', stash.id, 'updated', stashBefore, { ...stashBefore, quantity: stash.quantity - delta });
+    await db.updateTable('card_instances')
+      .set({ quantity: existing.ci_qty + delta, updated_at: new Date() })
+      .where('id', '=', existing.card_instance_id).execute();
+  }
+
   const update: Record<string, unknown> = {};
   if (input.quantity        !== undefined) update.quantity        = input.quantity;
   if (input.expected_grade  !== undefined) update.expected_grade  = input.expected_grade;

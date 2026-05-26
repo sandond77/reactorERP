@@ -40,6 +40,13 @@
 **Part Numbers — `GRADE` column counted raw sub-rows as grades**
 - A part with multiple raw sub-rows (e.g. two raw lots of the same card at different conditions) was rendering "2 grades" in the GRADE column even though `grade` is `NULL` on both — the multi-row summary did `groupRows.length` unconditionally. Now counts only sub-rows where `grade IS NOT NULL`, renders `—` when none, and pluralizes correctly (`1 grade` vs `2 grades`). Also cleaned up the GRADER cell so placeholder `—` company values don't appear in the comma-joined list.
 
+**Sub detail header — `Cards` split into `Line Items` + `Total Cards`**
+- The header pill labelled `Cards: N` was rendering `data.items.length` (line-item count). Renamed to `Line Items` for clarity and added a separate `Total Cards` pill showing the sum of per-line quantities (the actual physical card count). Server `getBatch` now exposes `stats.totalQty` alongside the existing cost stats.
+
+**Edit Line Item — qty edit for legacy-sourced lines now pulls/returns from the bucket's stash**
+- The Edit Line Item modal was capping qty at the line's `available_quantity`. For a card pulled via the Legacy tab the underlying `card_instance.quantity` equals what was originally pulled (often 1), so the max stayed `1` and there was no way to grade more without deleting + re-adding. The modal now uses `available_quantity + legacy_stash_remaining` as the cap for legacy-sourced lines and reads `… — N in bucket` in the label. On save, the server moves the delta between the stash row and the line's card_instance: increase qty → pull from stash and grow the line; decrease qty → return to stash. The grading_batch_items row updates atomically with both sides; stash-row updates are logged to the audit table. From-Inventory lines behave the same as before.
+- Required to expose two new fields on each batch item from `getBatch`: `legacy_source_catalog_id` and a subquery-computed `legacy_stash_remaining` (sum of grade-decision stash rows under the legacy bucket, status not in terminal states).
+
 **Legacy tab — Auto-fill (paste card name → AI parses fields)**
 - After redesigning Card Part # to use `PartNumberField`, the paste-anything entry from the old bespoke search was missing. Added an **Auto-fill** input + button at the top of the Legacy form (same `/agent/auto-fill` endpoint Add Slab uses). Paste a PSA-label-style card name like `2024 Pokemon Indonesian SV-P Promo 154 Pikachu` and the agent parses it into Card Name / Set Name / Card # / Language; the `PartNumberField` below then auto-resolves against the catalog. If no match, the "+ Create new part #" affordance opens `AddPartModal` pre-filled with the parsed fields.
 

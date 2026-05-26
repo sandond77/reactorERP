@@ -48,8 +48,10 @@ interface BatchItem {
   set_name: string | null;
   card_number: string | null;
   condition: string | null;
-  quantity: number;           // qty submitted to this batch
-  available_quantity: number; // total qty on the card instance
+  quantity: number;                       // qty submitted to this batch
+  available_quantity: number;             // total qty on the card instance
+  legacy_source_catalog_id: string | null; // non-null when line was pulled via Legacy tab
+  legacy_stash_remaining: number;          // remaining grade-decision stash under the legacy bucket
   purchase_cost: number;
   currency: string;
   estimated_value: number | null;
@@ -62,6 +64,7 @@ interface BatchItem {
 interface BatchDetail extends Batch {
   items: BatchItem[];
   stats: {
+    totalQty: number;
     rawCost: number;
     gradingCost: number;
     totalCost: number;
@@ -672,11 +675,17 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
   const [estimatedValue, setEstimatedValue] = useState(item.estimated_value != null ? String(item.estimated_value / 100) : '');
   const [saving, setSaving] = useState(false);
 
+  // For legacy-sourced lines, qty can climb beyond the current available_quantity
+  // by pulling additional cards from the bucket's stash row. The server adjusts
+  // both sides on save (stash decrements, card_instance increments).
+  const isLegacy = !!item.legacy_source_catalog_id;
+  const maxQty = isLegacy ? item.available_quantity + item.legacy_stash_remaining : item.available_quantity;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const qtyNum = parseInt(qty);
-    if (!qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > item.available_quantity) {
-      toast.error(`Qty must be 1–${item.available_quantity}`); return;
+    if (!qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > maxQty) {
+      toast.error(`Qty must be 1–${maxQty}`); return;
     }
     setSaving(true);
     try {
@@ -686,8 +695,10 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
         estimated_value: estimatedValue ? Math.round(parseFloat(estimatedValue) * 100) : null,
       });
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
+      qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
       onClose();
-    } catch { toast.error('Failed to update'); }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) { toast.error(err?.response?.data?.error ?? 'Failed to update'); }
     finally { setSaving(false); }
   }
 
@@ -703,10 +714,10 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
       <div className="grid grid-cols-3 gap-3">
         <div>
           <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">
-            Qty <span className="text-zinc-600 normal-case">(max {item.available_quantity})</span>
+            Qty <span className="text-zinc-600 normal-case">(max {maxQty}{isLegacy ? ` — ${item.legacy_stash_remaining} in bucket` : ''})</span>
           </label>
-          <input type="number" min={1} max={item.available_quantity} value={qty}
-            onChange={(e) => { const v = e.target.value; if (v === '') { setQty(''); return; } const n = parseInt(v); if (!isNaN(n)) setQty(String(Math.min(item.available_quantity, Math.max(1, n)))); }}
+          <input type="number" min={1} max={maxQty} value={qty}
+            onChange={(e) => { const v = e.target.value; if (v === '') { setQty(''); return; } const n = parseInt(v); if (!isNaN(n)) setQty(String(Math.min(maxQty, Math.max(1, n)))); }}
             className={`w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500 ${noSpinner}`} />
         </div>
         <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
@@ -947,7 +958,8 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
 
       {/* Stats bar */}
       <div className="flex gap-6 px-6 py-2.5 border-b border-zinc-800 text-xs text-zinc-400">
-        <span>Cards: <span className="text-zinc-200">{data.items.length}</span></span>
+        <span>Line Items: <span className="text-zinc-200">{data.items.length}</span></span>
+        <span>Total Cards: <span className="text-zinc-200">{data.stats.totalQty}</span></span>
         <span>Raw Cost: <span className="text-zinc-200">{formatCurrency(data.stats.rawCost, 'USD')}</span></span>
         <span>Grading: <span className="text-zinc-200">{formatCurrency(data.stats.gradingCost, 'USD')}</span></span>
         <span>Total In: <span className="text-zinc-200">{formatCurrency(data.stats.totalCost, 'USD')}</span></span>
