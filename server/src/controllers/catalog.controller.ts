@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { db } from '../config/database';
-import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog, linkUnlinkedByCardName, reassignCatalogRow, reassignAllInstances } from '../services/catalog.service';
+import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog, linkUnlinkedByCardName, reassignCatalogRow, reassignAllInstances, listLegacyBuckets } from '../services/catalog.service';
 
 export async function inventorySummary(req: Request, res: Response, next: NextFunction) {
   try {
@@ -87,6 +87,13 @@ export async function linkByName(req: Request, res: Response, next: NextFunction
     if (err?.code === '23505') return res.status(409).json({ error: 'A catalog entry with this SKU already exists.' });
     next(err);
   }
+}
+
+export async function legacyBuckets(req: Request, res: Response, next: NextFunction) {
+  try {
+    const rows = await listLegacyBuckets(req.dataUserId);
+    res.json({ data: rows });
+  } catch (err) { next(err); }
 }
 
 export async function emptyCatalog(req: Request, res: Response, next: NextFunction) {

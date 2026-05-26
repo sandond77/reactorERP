@@ -656,6 +656,48 @@ export async function reassignAllInstances(
   return { updated: Number(result.numAffectedRows ?? 0) };
 }
 
+// List catalog entries with set_code='LEGACY' along with their current stash
+// snapshot (total qty across child card_instances that haven't moved to
+// grading/graded/sold yet, plus the per-card cost from the largest stash row).
+// Powers the "Legacy Part #" picker in the grading-sub Legacy tab.
+export async function listLegacyBuckets(userId: string) {
+  const result = await sql<{
+    id: string;
+    sku: string | null;
+    card_name: string;
+    set_name: string;
+    language: string;
+    stash_qty: number;
+    per_card_cost: number;
+  }>`
+    SELECT
+      cc.id,
+      cc.sku,
+      cc.card_name,
+      cc.set_name,
+      cc.language,
+      COALESCE(SUM(ci.quantity) FILTER (
+        WHERE ci.status NOT IN ('grading_submitted', 'graded', 'sold', 'lost_damaged')
+      ), 0)::int AS stash_qty,
+      COALESCE((
+        SELECT ci2.purchase_cost
+        FROM card_instances ci2
+        WHERE ci2.catalog_id = cc.id
+          AND ci2.user_id = ${userId}
+          AND ci2.status NOT IN ('grading_submitted', 'graded', 'sold', 'lost_damaged')
+        ORDER BY ci2.quantity DESC NULLS LAST
+        LIMIT 1
+      ), 0)::int AS per_card_cost
+    FROM card_catalog cc
+    LEFT JOIN card_instances ci ON ci.catalog_id = cc.id AND ci.user_id = cc.user_id
+    WHERE cc.user_id = ${userId}
+      AND cc.set_code ILIKE 'LEGACY'
+    GROUP BY cc.id, cc.sku, cc.card_name, cc.set_name, cc.language
+    ORDER BY cc.language, cc.card_name
+  `.execute(db);
+  return result.rows;
+}
+
 export async function deleteCatalogCard(userId: string, id: string) {
   // Unlink any card instances pointing to this catalog entry
   await sql`

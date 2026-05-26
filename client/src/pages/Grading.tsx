@@ -327,7 +327,7 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
   );
 }
 
-// ── Legacy Add (no raw lot) ───────────────────────────────────────────────────
+// ── Legacy Add (catalog-bucket flow) ──────────────────────────────────────────
 
 interface CatalogSearchResult {
   id: string;
@@ -337,6 +337,16 @@ interface CatalogSearchResult {
   set_code: string | null;
   card_number: string | null;
   language: string;
+}
+
+interface LegacyBucket {
+  id: string;
+  sku: string | null;
+  card_name: string;
+  set_name: string;
+  language: string;
+  stash_qty: number;
+  per_card_cost: number;
 }
 
 function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => void }) {
@@ -357,6 +367,7 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
   const [pickedCatalog, setPickedCatalog] = useState<CatalogSearchResult | null>(null);
   const [creatingPart, setCreatingPart] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [legacyBucketId, setLegacyBucketId] = useState<string>('');
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
 
@@ -365,6 +376,26 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
     const t = setTimeout(() => setDebouncedSearch(searchLabel), 250);
     return () => clearTimeout(t);
   }, [searchLabel]);
+
+  // Legacy buckets — catalog entries with set_code='LEGACY' and their stash
+  // snapshot (qty across child card_instances, per-card cost from the stash row).
+  const { data: legacyBuckets = [] } = useQuery<LegacyBucket[]>({
+    queryKey: ['legacy-buckets'],
+    queryFn: () => api.get('/catalog/legacy-buckets').then(r => r.data.data),
+  });
+  const legacyBucket = legacyBuckets.find(b => b.id === legacyBucketId) ?? null;
+
+  // When a legacy bucket is picked, sync language + per-card cost from it
+  // (cost auto-fills read-only). User still assigns the REAL card identity
+  // via the second part-number search below.
+  useEffect(() => {
+    if (!legacyBucket) return;
+    setForm(prev => ({
+      ...prev,
+      language: legacyBucket.language,
+      purchase_cost: (legacyBucket.per_card_cost / 100).toFixed(2),
+    }));
+  }, [legacyBucket]);
 
   const { data: matches = [], isFetching: searching } = useQuery<CatalogSearchResult[]>({
     queryKey: ['catalog-search-legacy', debouncedSearch],
@@ -428,22 +459,30 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
     if (!form.card_name.trim()) { toast.error('Card name is required'); return; }
     const qtyNum = parseInt(form.quantity);
     if (!qtyNum || qtyNum < 1) { toast.error('Quantity must be at least 1'); return; }
+    if (legacyBucket && qtyNum > legacyBucket.stash_qty) {
+      toast.error(`Only ${legacyBucket.stash_qty} card${legacyBucket.stash_qty === 1 ? '' : 's'} in this legacy bucket`);
+      return;
+    }
     setSaving(true);
     try {
       await api.post(`/grading-subs/${batchId}/items/legacy`, {
-        card_name:       form.card_name.trim(),
-        set_name:        form.set_name.trim() || null,
-        card_number:     form.card_number.trim() || null,
-        language:        form.language,
-        condition:       form.condition || null,
-        quantity:        qtyNum,
-        purchase_cost:   form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
-        expected_grade:  form.expected_grade ? parseFloat(form.expected_grade) : undefined,
-        estimated_value: form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
-        catalog_id:      pickedCatalog?.id,
+        card_name:         form.card_name.trim(),
+        set_name:          form.set_name.trim() || null,
+        card_number:       form.card_number.trim() || null,
+        language:          form.language,
+        condition:         form.condition || null,
+        quantity:          qtyNum,
+        // When pulling from a legacy bucket, server derives cost from the
+        // stash row; purchase_cost is only used in the phantom-lot fallback.
+        purchase_cost:     form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
+        expected_grade:    form.expected_grade ? parseFloat(form.expected_grade) : undefined,
+        estimated_value:   form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
+        catalog_id:        pickedCatalog?.id,        // REAL card identity — slab lands here
+        legacy_catalog_id: legacyBucketId || undefined, // legacy bucket — stash drawn from here
       });
       toast.success('Legacy card added to batch');
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
+      qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
       onClose();
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to add legacy card');
@@ -457,13 +496,39 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <p className="text-xs text-zinc-500 leading-relaxed">
-        For cards you owned before tracking purchases in Reactor. Search to find or generate a part number,
-        then fill in the rest. A backdated raw purchase lot is auto-created so cost basis stays accurate.
+        For cards you owned before tracking purchases in Reactor. Pick a <span className="text-zinc-300">Legacy Part #</span> to draw from your stash (cost + inventory tracked there),
+        then assign the <span className="text-zinc-300">Card Part #</span> for what this specific card actually is — that's the part the slab lands under.
       </p>
 
-      {/* Part number search */}
+      {/* Legacy Part # — bucket source */}
       <div>
-        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">Part Number</label>
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">
+          Legacy Part # {!legacyBucketId && <span className="text-zinc-600 normal-case">(optional)</span>}
+        </label>
+        <select
+          value={legacyBucketId}
+          onChange={(e) => setLegacyBucketId(e.target.value)}
+          className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500"
+        >
+          <option value="">— None: auto-create backdated lot for cost basis —</option>
+          {legacyBuckets.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.sku ?? b.card_name} · {b.stash_qty} left · ${(b.per_card_cost / 100).toFixed(2)}/card
+            </option>
+          ))}
+        </select>
+        {legacyBucket && (
+          <p className="text-[10px] text-zinc-500 mt-1">
+            Pulling from this bucket. The stash row decrements by the qty you pull; cost moves to the slab when it returns.
+          </p>
+        )}
+      </div>
+
+      {/* Card Part # — real card identity */}
+      <div>
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">
+          Card Part # <span className="text-zinc-600 normal-case">(real card identity{legacyBucket ? ' — slab lands here, not under the legacy bucket' : ''})</span>
+        </label>
         <div className="relative">
           <input
             type="text"
@@ -545,8 +610,19 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Input label="Quantity *" type="number" min="1" value={form.quantity} onChange={set('quantity')} className={noSpinner} />
-        <Input label="Cost / Card (USD)" type="text" inputMode="decimal" value={form.purchase_cost} onChange={set('purchase_cost')} placeholder="0.00" className={noSpinner} />
+        <Input
+          label={`Quantity *${legacyBucket ? ` (max ${legacyBucket.stash_qty})` : ''}`}
+          type="number" min="1" max={legacyBucket?.stash_qty}
+          value={form.quantity} onChange={set('quantity')} className={noSpinner}
+        />
+        <Input
+          label={`Cost / Card (USD)${legacyBucket ? ' — from legacy bucket' : ''}`}
+          type="text" inputMode="decimal"
+          value={form.purchase_cost} onChange={set('purchase_cost')}
+          placeholder="0.00"
+          readOnly={!!legacyBucket}
+          className={`${noSpinner} ${legacyBucket ? 'opacity-60 cursor-not-allowed' : ''}`}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800">

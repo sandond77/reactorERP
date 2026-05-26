@@ -1,5 +1,23 @@
 # Reactor — Changelog
 
+## May 26, 2026
+
+### Features
+
+**Legacy bucket workflow — pull pre-Reactor stash directly via the legacy part #**
+- The Legacy tab in Add Card to Batch now has two part-number fields that mirror the actual mental model: **Legacy Part #** picks the catalog entry your stash sits under (`set_code='LEGACY'`) — the dropdown shows current stash qty + per-card cost — and **Card Part #** assigns the real card identity for what you're actually grading, which is the part the slab ultimately lands under. No `raw_purchases` lot abstraction in between. Picking a legacy bucket auto-fills language + per-card cost (read-only), and the quantity input is capped by the bucket's remaining stash.
+- Server-side: `addLegacyItem` now accepts `legacy_catalog_id`. When provided it finds your existing stash card_instance under that catalog entry (status not in grading/graded/sold), decrements its `quantity` by the pull amount, carries that row's `purchase_cost` onto the new grading row, and uses the real `catalog_id` as the slab's destination part. No phantom lot created. Leaving the field blank falls back to the original phantom-lot behavior for one-off backdated cards.
+- Cost-basis flow is automatic: stash `qty × purchase_cost` is the bucket's reported raw cost (e.g. `1000 × $10 = $10,000`). Pull 1 → stash becomes `999 × $10 = $9,990`, grading row carries `1 × $10` in flight. Return → slab carries `1 × $10`. Standard status-based report rollups handle the rest — raw cost shrinks, graded cost grows, total cost basis stays equal to original spend. Nothing to chase; the stash row is the single source of truth.
+
+**`GET /api/v1/catalog/legacy-buckets`**
+- New endpoint returning the user's legacy catalog entries (`set_code='LEGACY'`) with their aggregated stash snapshot — `stash_qty` (sum of child `card_instances.quantity` for rows that haven't moved to grading/graded/sold) and `per_card_cost` (from the largest stash row). Powers the Legacy Part # dropdown.
+
+### Reverted
+
+**Lot-based legacy bucket picker (`45bd2bf`)** — the original first cut required maintaining a separate `raw_purchases` lot per legacy catalog entry with its own `card_count` and `total_cost_usd` decremented on return. The lot abstraction didn't fit — the catalog entry alone is the natural bucket and the stash card_instance is the natural source of truth. Migration 053 (per-user EN/JP legacy seed) and the auto-relink on grading return (set_code='LEGACY' detection) were both kept since they're still useful for the simpler model.
+
+---
+
 ## May 23, 2026
 
 ### Features

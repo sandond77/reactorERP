@@ -8,6 +8,7 @@ catalogRouter.use(requireAuth);
 catalogRouter.get('/inventory-summary', catalogController.inventorySummary);
 catalogRouter.get('/search', catalogController.search);
 catalogRouter.get('/empty-parts', catalogController.emptyCatalog);
+catalogRouter.get('/legacy-buckets', catalogController.legacyBuckets);
 catalogRouter.patch('/reassign-row', catalogController.reassignRow);
 catalogRouter.patch('/reassign-part', catalogController.reassignPart);
 catalogRouter.post('/link-by-name', catalogController.linkByName);

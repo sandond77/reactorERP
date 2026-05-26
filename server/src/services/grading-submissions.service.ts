@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { AppError } from '../middleware/errorHandler';
 import type { GradingCompany } from '../types/db';
 
 // ── ID generation ─────────────────────────────────────────────────────────────
@@ -262,21 +263,29 @@ export interface AddLegacyItemInput {
   language: string;
   condition?: string | null;
   quantity?: number;
-  purchase_cost?: number;       // in cents, defaults to 0 (user has no purchase record)
+  purchase_cost?: number;       // in cents, only used in phantom-lot fallback
   expected_grade?: number;
   estimated_value?: number;     // in cents
-  catalog_id?: string;          // if client already picked or generated a part number
+  catalog_id?: string;          // the REAL part the card is — slab will land under this
+  legacy_catalog_id?: string;   // legacy bucket the stash is pulled from (set_code='LEGACY')
 }
 
 /**
  * Create a card_instance for a card the user owned before tracking purchases
- * in Reactor, and add it directly to a grading batch. To keep accounting
- * balanced, this also creates a backdated `raw_purchases` lot so the per-
- * part-number aggregates show "1 raw acquired (consumed) + 1 graded" once
- * the slab returns, rather than a graded slab with no raw provenance.
+ * in Reactor, and add it directly to a grading batch.
  *
- * catalog_id is intentionally left NULL here — the resolver runs at
- * processReturn time, so the part number lives on the slab once verified.
+ * Two paths:
+ *   1. legacy_catalog_id provided → catalog-based bucket flow. Find the user's
+ *      stash card_instance(s) linked to that legacy catalog entry, decrement
+ *      one by qty, carry that row's purchase_cost onto the grading row. Cost
+ *      basis flows automatically through standard reports (raw rollups shrink
+ *      as the stash decrements; graded rollups grow as the slab returns).
+ *      catalog_id (the real part) is what the new grading row carries so the
+ *      eventual slab lands under the correct part, not the legacy sentinel.
+ *
+ *   2. No legacy_catalog_id → phantom-lot fallback (legacy "no lot" original
+ *      behavior). Creates a backdated raw_purchases lot of size qty so the
+ *      submission still has provenance.
  */
 export async function addLegacyItem(userId: string, batchId: string, input: AddLegacyItemInput) {
   const batch = await db
@@ -285,31 +294,75 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
     .where('id', '=', batchId)
     .where('user_id', '=', userId)
     .executeTakeFirst();
-  if (!batch) throw new Error('Batch not found');
+  if (!batch) throw new AppError(404, 'Batch not found');
 
-  // Phantom raw lot — represents the (untracked) original acquisition. This
-  // makes inventory math balance: when the slab returns, the lot is the
-  // historical record of "where this raw came from".
-  const { createRawPurchase } = await import('./raw-purchases.service');
   const qty = input.quantity ?? 1;
-  const perCardCost = input.purchase_cost ?? 0;
-  const lot = await createRawPurchase(userId, {
-    type: 'legacy',
-    source: 'Legacy (pre-Reactor)',
-    language: input.language,
-    card_name: input.card_name,
-    set_name: input.set_name ?? undefined,
-    card_number: input.card_number ?? undefined,
-    total_cost_usd: perCardCost * qty,
-    card_count: qty,
-    status: 'received',
-    purchased_at: new Date().toISOString(),
-    received_at: new Date().toISOString(),
-    notes: 'Auto-created from legacy grading submission',
-  });
+  let perCardCost: number;
+  let lotId: string | null = null;
 
-  // If the client already picked or generated a part number, use it directly.
-  // Otherwise fall back to the resolver (same path as every other raw card).
+  if (input.legacy_catalog_id) {
+    // ── Catalog-based bucket flow ────────────────────────────────────────────
+    // Verify the picked catalog entry is actually a legacy sentinel.
+    const bucket = await db
+      .selectFrom('card_catalog')
+      .select(['id', 'set_code'])
+      .where('id', '=', input.legacy_catalog_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!bucket) throw new AppError(404, 'Legacy bucket not found');
+    if (!bucket.set_code || bucket.set_code.toUpperCase() !== 'LEGACY') {
+      throw new AppError(400, 'Picked catalog entry is not a legacy bucket (set_code must be LEGACY)');
+    }
+
+    // Find a stash row tied to this catalog entry with enough qty. The "stash
+    // row" is just a card_instance the user added via standard Add Card with
+    // catalog_id=legacy bucket; it's not in grading_submitted/graded/sold.
+    // Largest-first so we drain the bigger pools before fragmenting smaller.
+    const stash = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('catalog_id', '=', input.legacy_catalog_id)
+      .where('user_id', '=', userId)
+      .where('status', 'not in', ['grading_submitted', 'graded', 'sold', 'lost_damaged'])
+      .where('quantity', '>=', qty)
+      .orderBy('quantity', 'desc')
+      .executeTakeFirst();
+    if (!stash) {
+      throw new AppError(409, `No stash row under this legacy bucket has ${qty} card${qty === 1 ? '' : 's'} available`);
+    }
+    perCardCost = stash.purchase_cost ?? 0;
+    lotId = stash.raw_purchase_id; // preserve lineage if the stash itself came from a lot
+
+    const stashBefore = { ...stash };
+    await db
+      .updateTable('card_instances')
+      .set({ quantity: stash.quantity - qty, updated_at: new Date() })
+      .where('id', '=', stash.id)
+      .execute();
+    await logAudit(userId, 'card_instances', stash.id, 'updated', stashBefore, { ...stashBefore, quantity: stash.quantity - qty });
+  } else {
+    // ── Phantom-lot fallback (legacy "no lot" — pre-bucket behavior) ─────────
+    const { createRawPurchase } = await import('./raw-purchases.service');
+    perCardCost = input.purchase_cost ?? 0;
+    const lot = await createRawPurchase(userId, {
+      type: 'legacy',
+      source: 'Legacy (pre-Reactor)',
+      language: input.language,
+      card_name: input.card_name,
+      set_name: input.set_name ?? undefined,
+      card_number: input.card_number ?? undefined,
+      total_cost_usd: perCardCost * qty,
+      card_count: qty,
+      status: 'received',
+      purchased_at: new Date().toISOString(),
+      received_at: new Date().toISOString(),
+      notes: 'Auto-created from legacy grading submission',
+    });
+    lotId = lot.id;
+  }
+
+  // If the client already picked or generated a part number for the real card
+  // identity, use it directly. Otherwise fall back to the resolver.
   let catalogId: string | null = input.catalog_id ?? null;
   if (!catalogId) {
     const { createCatalogResolver } = await import('./import/import.service');
@@ -348,7 +401,7 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       purchase_cost: perCardCost,
       currency: 'USD',
       condition: input.condition ?? null,
-      raw_purchase_id: lot.id,
+      raw_purchase_id: lotId,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -367,7 +420,7 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
     .executeTakeFirstOrThrow();
 
   await logAudit(userId, 'card_instances', ci.id, 'created', null, ci);
-  return { card_instance: ci, batch_item: item, raw_purchase: lot };
+  return { card_instance: ci, batch_item: item };
 }
 
 export interface UpdateItemInput {
