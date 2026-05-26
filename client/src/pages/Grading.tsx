@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, ArrowLeft, Loader2, Trash2, CheckCircle, AlertCircle, X } from 'lucide-react';
+import { Plus, ArrowLeft, Loader2, Trash2, X } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
+import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
 import { formatCurrency, formatDate } from '../lib/utils';
 import toast from 'react-hot-toast';
 
@@ -401,16 +402,6 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
 
 // ── Legacy Add (catalog-bucket flow) ──────────────────────────────────────────
 
-interface CatalogSearchResult {
-  id: string;
-  sku: string | null;
-  card_name: string;
-  set_name: string;
-  set_code: string | null;
-  card_number: string | null;
-  language: string;
-}
-
 interface LegacyBucket {
   id: string;
   sku: string | null;
@@ -434,20 +425,12 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
     expected_grade: '',
     estimated_value: '',
   });
-  const [searchLabel, setSearchLabel] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [pickedCatalog, setPickedCatalog] = useState<CatalogSearchResult | null>(null);
-  const [creatingPart, setCreatingPart] = useState(false);
+  const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(null);
+  const [catalogId, setCatalogId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [legacyBucketId, setLegacyBucketId] = useState<string>('');
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
-
-  // Debounce the search input
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchLabel), 250);
-    return () => clearTimeout(t);
-  }, [searchLabel]);
 
   // Legacy buckets — catalog entries with set_code='LEGACY' and their stash
   // snapshot (qty across child card_instances, per-card cost from the stash row).
@@ -459,7 +442,7 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
 
   // When a legacy bucket is picked, sync language + per-card cost from it
   // (cost auto-fills read-only). User still assigns the REAL card identity
-  // via the second part-number search below.
+  // via the PartNumberField below.
   useEffect(() => {
     if (!legacyBucket) return;
     setForm(prev => ({
@@ -468,63 +451,6 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
       purchase_cost: (legacyBucket.per_card_cost / 100).toFixed(2),
     }));
   }, [legacyBucket]);
-
-  const { data: matches = [], isFetching: searching } = useQuery<CatalogSearchResult[]>({
-    queryKey: ['catalog-search-legacy', debouncedSearch],
-    queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 8 } }).then(r => r.data.data),
-    enabled: debouncedSearch.trim().length >= 2 && !pickedCatalog,
-  });
-
-  function pickMatch(m: CatalogSearchResult) {
-    setPickedCatalog(m);
-    setForm(prev => ({
-      ...prev,
-      card_name: m.card_name,
-      set_name: m.set_name,
-      card_number: m.card_number ?? prev.card_number,
-      language: m.language ?? prev.language,
-    }));
-    setSearchLabel(m.sku ?? m.card_name);
-  }
-
-  function clearPick() {
-    setPickedCatalog(null);
-    setSearchLabel('');
-  }
-
-  async function generatePart() {
-    if (!form.card_name.trim() || !form.set_name.trim()) {
-      toast.error('Card name and set name required to generate a part number');
-      return;
-    }
-    setCreatingPart(true);
-    try {
-      const res = await api.post('/catalog', {
-        game: 'pokemon',
-        card_name: form.card_name.trim(),
-        set_name: form.set_name.trim(),
-        card_number: form.card_number.trim() || null,
-        language: form.language,
-      });
-      const created = res.data?.data ?? res.data;
-      const newPick: CatalogSearchResult = {
-        id: created.id,
-        sku: created.sku ?? null,
-        card_name: created.card_name,
-        set_name: created.set_name,
-        set_code: created.set_code ?? null,
-        card_number: created.card_number ?? null,
-        language: created.language,
-      };
-      setPickedCatalog(newPick);
-      setSearchLabel(newPick.sku ?? newPick.card_name);
-      toast.success('Part number created');
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to create part number');
-    } finally {
-      setCreatingPart(false);
-    }
-  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -550,8 +476,8 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
         purchase_cost:     form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
         expected_grade:    form.expected_grade ? parseFloat(form.expected_grade) : undefined,
         estimated_value:   form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
-        catalog_id:        pickedCatalog?.id,        // REAL card identity — slab lands here
-        legacy_catalog_id: legacyBucketId || undefined, // legacy bucket — stash drawn from here
+        catalog_id:        catalogId ?? undefined,        // REAL card identity — slab lands here
+        legacy_catalog_id: legacyBucketId || undefined,   // legacy bucket — stash drawn from here
       });
       toast.success('Legacy card added to batch');
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
@@ -597,71 +523,7 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
         )}
       </div>
 
-      {/* Card Part # — real card identity */}
-      <div>
-        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">
-          Card Part # <span className="text-zinc-600 normal-case">(real card identity{legacyBucket ? ' — slab lands here, not under the legacy bucket' : ''})</span>
-        </label>
-        <div className="relative">
-          <input
-            type="text"
-            value={searchLabel}
-            onChange={(e) => { setSearchLabel(e.target.value); if (pickedCatalog) setPickedCatalog(null); }}
-            placeholder="Search by part #, card name, or set…"
-            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
-          />
-          {/* Search results dropdown */}
-          {!pickedCatalog && debouncedSearch.trim().length >= 2 && (
-            <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl divide-y divide-zinc-800">
-              {searching ? (
-                <div className="px-3 py-2 text-xs text-zinc-500">Searching…</div>
-              ) : matches.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-zinc-500">
-                  No matching part number. Fill in fields below and click <span className="text-yellow-400">Generate part</span>.
-                </div>
-              ) : matches.map(m => (
-                <button key={m.id} type="button" onClick={() => pickMatch(m)}
-                  className="w-full text-left px-3 py-2 hover:bg-zinc-800/60 transition-colors">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs text-indigo-300">{m.sku ?? '(no sku)'}</span>
-                    <span className="text-[10px] text-zinc-500">{m.language}</span>
-                  </div>
-                  <div className="text-xs text-zinc-200 truncate">{m.card_name}</div>
-                  <div className="text-[10px] text-zinc-500 truncate">{m.set_name}{m.card_number ? ` · #${m.card_number}` : ''}</div>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Selected part number badge */}
-      {pickedCatalog ? (
-        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm border bg-green-950/40 border-green-800/50">
-          <div className="flex items-center gap-2 min-w-0">
-            <CheckCircle size={14} className="text-green-400 shrink-0" />
-            <span className="font-mono text-xs text-zinc-200 shrink-0">{pickedCatalog.sku ?? '(no sku)'}</span>
-            <span className="text-xs text-zinc-400 truncate">{pickedCatalog.card_name} · {pickedCatalog.set_name}</span>
-          </div>
-          <button type="button" onClick={clearPick} className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0 ml-2">Clear</button>
-        </div>
-      ) : (form.card_name.trim() && form.set_name.trim()) ? (
-        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm border bg-yellow-950/40 border-yellow-700/50">
-          <div className="flex items-center gap-2">
-            <AlertCircle size={14} className="text-yellow-400 shrink-0" />
-            <span className="text-xs text-yellow-400">No part number assigned — generate one from the fields below?</span>
-          </div>
-          <button
-            type="button"
-            onClick={generatePart}
-            disabled={creatingPart}
-            className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
-          >
-            {creatingPart ? 'Creating…' : 'Generate part'}
-          </button>
-        </div>
-      ) : null}
-
+      {/* Card identity fields — drive the PartNumberField search */}
       <div className="grid grid-cols-2 gap-3">
         <Input label="Card Name *" value={form.card_name} onChange={set('card_name')} placeholder="e.g. Charizard" />
         <Input label="Set Name"   value={form.set_name}  onChange={set('set_name')}  placeholder="e.g. Base Set" />
@@ -691,6 +553,26 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
         </div>
         <Input label="Condition" value={form.condition} onChange={set('condition')} placeholder="NM" />
       </div>
+
+      {/* Card Part # — real card identity, same picker pattern as Add Card / Add Slab */}
+      <PartNumberField
+        form={{ card_name: form.card_name, set_name: form.set_name, card_number: form.card_number, language: form.language }}
+        catalogMatch={catalogMatch}
+        catalogId={catalogId}
+        onSelect={(m) => {
+          setCatalogMatch(m);
+          setCatalogId(m.id);
+          // Fill any blank form fields from the picked catalog row
+          setForm(prev => ({
+            ...prev,
+            card_name:   prev.card_name   || m.card_name,
+            set_name:    prev.set_name    || m.set_name,
+            card_number: prev.card_number || (m.card_number ?? ''),
+            language:    m.language       || prev.language,
+          }));
+        }}
+        onClear={() => { setCatalogMatch(null); setCatalogId(null); }}
+      />
 
       <div className="grid grid-cols-2 gap-3">
         <Input
