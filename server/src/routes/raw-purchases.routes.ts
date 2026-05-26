@@ -16,6 +16,10 @@ router.use(requireAuth);
 
 // Purchases
 router.get('/',           ctrl.list);
+// Legacy bucket picker — must come before /:id to avoid the path being eaten
+// by the dynamic id route. Returns lots whose catalog is set_code='LEGACY'
+// with remaining capacity.
+router.get('/legacy-lots', ctrl.listLegacyBucketLots);
 router.get('/:id',        ctrl.getOne);
 router.post('/',          ctrl.create);
 router.patch('/:id',      ctrl.update);

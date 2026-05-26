@@ -28,6 +28,15 @@ export async function list(req: Request, res: Response) {
   }
 }
 
+export async function listLegacyBucketLots(req: Request, res: Response) {
+  try {
+    const rows = await svc.listLegacyBucketLots(req.dataUserId);
+    res.json({ data: rows });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+}
+
 export async function getOne(req: Request, res: Response) {
   try {
     const purchase = await svc.getRawPurchase(req.dataUserId, req.params['id'] as string);

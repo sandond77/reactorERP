@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { AppError } from '../middleware/errorHandler';
 import type { GradingCompany } from '../types/db';
 
 // ── ID generation ─────────────────────────────────────────────────────────────
@@ -266,6 +267,7 @@ export interface AddLegacyItemInput {
   expected_grade?: number;
   estimated_value?: number;     // in cents
   catalog_id?: string;          // if client already picked or generated a part number
+  raw_purchase_id?: string;     // when pulling from an existing legacy bucket lot
 }
 
 /**
@@ -285,28 +287,88 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
     .where('id', '=', batchId)
     .where('user_id', '=', userId)
     .executeTakeFirst();
-  if (!batch) throw new Error('Batch not found');
+  if (!batch) throw new AppError(404, 'Batch not found');
 
-  // Phantom raw lot — represents the (untracked) original acquisition. This
-  // makes inventory math balance: when the slab returns, the lot is the
-  // historical record of "where this raw came from".
-  const { createRawPurchase } = await import('./raw-purchases.service');
   const qty = input.quantity ?? 1;
-  const perCardCost = input.purchase_cost ?? 0;
-  const lot = await createRawPurchase(userId, {
-    type: 'legacy',
-    source: 'Legacy (pre-Reactor)',
-    language: input.language,
-    card_name: input.card_name,
-    set_name: input.set_name ?? undefined,
-    card_number: input.card_number ?? undefined,
-    total_cost_usd: perCardCost * qty,
-    card_count: qty,
-    status: 'received',
-    purchased_at: new Date().toISOString(),
-    received_at: new Date().toISOString(),
-    notes: 'Auto-created from legacy grading submission',
-  });
+  let lotId: string;
+  let perCardCost: number;
+
+  if (input.raw_purchase_id) {
+    // ── Existing-lot path (legacy bucket workflow) ────────────────────────────
+    // User picked one of their existing legacy bucket lots. Pull qty cards
+    // from its stash row, derive cost from the lot, link the new grading
+    // card_instance to the same lot. On return processReturn will decrement
+    // the lot itself.
+    const lot = await db
+      .selectFrom('raw_purchases')
+      .selectAll()
+      .where('id', '=', input.raw_purchase_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!lot) throw new AppError(404, 'Lot not found');
+
+    // Capacity check — sum of existing children + new qty must fit
+    const usedRow = await sql<{ total: number }>`
+      SELECT COALESCE(SUM(quantity), 0)::int AS total
+      FROM card_instances
+      WHERE raw_purchase_id = ${lot.id} AND user_id = ${userId}
+    `.execute(db);
+    const used = Number(usedRow.rows[0].total);
+    const remaining = lot.card_count - used;
+    if (qty > remaining) {
+      throw new AppError(409, `Only ${remaining} card${remaining === 1 ? '' : 's'} remaining in lot — can't pull ${qty}`);
+    }
+
+    perCardCost = (lot.total_cost_usd && lot.card_count > 0)
+      ? Math.round(lot.total_cost_usd / lot.card_count)
+      : 0;
+
+    // Find a stash row in this lot (raw, not already in grading or sold) with
+    // enough quantity, and decrement it by qty. Largest first so we drain the
+    // bigger pools before fragmenting smaller ones.
+    const stash = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('raw_purchase_id', '=', lot.id)
+      .where('user_id', '=', userId)
+      .where('status', 'not in', ['grading_submitted', 'graded', 'sold', 'lost_damaged'])
+      .where('quantity', '>=', qty)
+      .orderBy('quantity', 'desc')
+      .executeTakeFirst();
+    if (!stash) {
+      throw new AppError(409, `No raw stash row in this lot has ${qty} card${qty === 1 ? '' : 's'} available`);
+    }
+    const stashBefore = { ...stash };
+    await db
+      .updateTable('card_instances')
+      .set({ quantity: stash.quantity - qty, updated_at: new Date() })
+      .where('id', '=', stash.id)
+      .execute();
+    await logAudit(userId, 'card_instances', stash.id, 'updated', stashBefore, { ...stashBefore, quantity: stash.quantity - qty });
+
+    lotId = lot.id;
+  } else {
+    // ── Phantom-lot path (legacy "no lot" — pre-bucket behavior) ─────────────
+    // No existing lot picked: create a backdated lot of size qty so the slab
+    // still has raw provenance once it returns.
+    const { createRawPurchase } = await import('./raw-purchases.service');
+    perCardCost = input.purchase_cost ?? 0;
+    const lot = await createRawPurchase(userId, {
+      type: 'legacy',
+      source: 'Legacy (pre-Reactor)',
+      language: input.language,
+      card_name: input.card_name,
+      set_name: input.set_name ?? undefined,
+      card_number: input.card_number ?? undefined,
+      total_cost_usd: perCardCost * qty,
+      card_count: qty,
+      status: 'received',
+      purchased_at: new Date().toISOString(),
+      received_at: new Date().toISOString(),
+      notes: 'Auto-created from legacy grading submission',
+    });
+    lotId = lot.id;
+  }
 
   // If the client already picked or generated a part number, use it directly.
   // Otherwise fall back to the resolver (same path as every other raw card).
@@ -348,7 +410,7 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       purchase_cost: perCardCost,
       currency: 'USD',
       condition: input.condition ?? null,
-      raw_purchase_id: lot.id,
+      raw_purchase_id: lotId,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -367,7 +429,7 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
     .executeTakeFirstOrThrow();
 
   await logAudit(userId, 'card_instances', ci.id, 'created', null, ci);
-  return { card_instance: ci, batch_item: item, raw_purchase: lot };
+  return { card_instance: ci, batch_item: item };
 }
 
 export interface UpdateItemInput {
@@ -537,6 +599,33 @@ export async function processReturn(userId: string, batchId: string, input: Proc
         .where('user_id', '=', userId)
         .execute();
     }
+
+    // Legacy bucket bookkeeping — when the source raw came from a lot whose
+    // catalog entry is the 'LEGACY' sentinel, that lot is your pre-Reactor
+    // stash. A returned slab means a card physically left the stash, so
+    // shrink the lot to match: card_count -= qty, total_cost_usd -= the
+    // per-card share that was carried on the raw. The slab keeps its
+    // purchase_cost (cost basis flows through), only the lot pool changes.
+    if (original.raw_purchase_id) {
+      const isLegacyLot = await db
+        .selectFrom('raw_purchases as rp')
+        .innerJoin('card_catalog as cc', 'cc.id', 'rp.catalog_id')
+        .select('rp.id')
+        .where('rp.id', '=', original.raw_purchase_id)
+        .where('rp.user_id', '=', userId)
+        .where('cc.set_code', 'ilike', 'LEGACY')
+        .executeTakeFirst();
+      if (isLegacyLot) {
+        const costDelta = (original.purchase_cost ?? 0) * batchItem.quantity;
+        await sql`
+          UPDATE raw_purchases
+          SET card_count = GREATEST(card_count - ${batchItem.quantity}, 0),
+              total_cost_usd = GREATEST(COALESCE(total_cost_usd, 0) - ${costDelta}, 0),
+              updated_at = NOW()
+          WHERE id = ${original.raw_purchase_id} AND user_id = ${userId}
+        `.execute(db);
+      }
+    }
   }
 
   await db
@@ -642,6 +731,39 @@ export async function revertReturn(userId: string, batchId: string) {
           created_at: snap.created_at ? new Date(snap.created_at) : new Date(),
           updated_at: new Date(),
         } as any).execute();
+      }
+    }
+
+    // Legacy bucket revert — undo the lot decrement processReturn did. Only
+    // applies when a slab was actually created (so we know processReturn ran
+    // its decrement path). The restored raw's purchase_cost is the per-card
+    // share we add back.
+    if (slabDetail) {
+      const restored = await db
+        .selectFrom('card_instances')
+        .select(['raw_purchase_id', 'purchase_cost'])
+        .where('id', '=', batchItem.card_instance_id)
+        .where('user_id', '=', userId)
+        .executeTakeFirst();
+      if (restored?.raw_purchase_id) {
+        const isLegacyLot = await db
+          .selectFrom('raw_purchases as rp')
+          .innerJoin('card_catalog as cc', 'cc.id', 'rp.catalog_id')
+          .select('rp.id')
+          .where('rp.id', '=', restored.raw_purchase_id)
+          .where('rp.user_id', '=', userId)
+          .where('cc.set_code', 'ilike', 'LEGACY')
+          .executeTakeFirst();
+        if (isLegacyLot) {
+          const costDelta = (restored.purchase_cost ?? 0) * batchItem.quantity;
+          await sql`
+            UPDATE raw_purchases
+            SET card_count = card_count + ${batchItem.quantity},
+                total_cost_usd = COALESCE(total_cost_usd, 0) + ${costDelta},
+                updated_at = NOW()
+            WHERE id = ${restored.raw_purchase_id} AND user_id = ${userId}
+          `.execute(db);
+        }
       }
     }
   }
