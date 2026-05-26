@@ -626,20 +626,17 @@ function PurchaseForm({
                       <span className="text-zinc-600">—</span>
                     )}
                   </div>
-                  <input type="number" min="1" value={li.type === 'raw' ? '1' : li.quantity}
-                    readOnly={li.type === 'raw'}
+                  <input type="number" min="1" value={li.quantity}
                     onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))}
-                    title={li.type === 'raw' ? 'R lines are always qty 1 — switch to Bulk for multiple' : undefined}
-                    className={`col-span-1 ${inp} ${errors[`line_${i}_qty`] ? 'border-red-500/60' : ''} ${li.type === 'raw' ? 'opacity-60 cursor-not-allowed' : ''}`} />
+                    title={li.type === 'raw' && parseInt(li.quantity || '1') > 1 ? 'Bulk (B) is recommended for purchases with more than 1 card' : undefined}
+                    className={`col-span-1 ${inp} ${errors[`line_${i}_qty`] ? 'border-red-500/60' : ''} ${li.type === 'raw' && parseInt(li.quantity || '1') > 1 ? 'border-amber-500/40' : ''}`} />
                   <input type="text" inputMode="decimal" value={li.cost}
                     onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, cost: e.target.value } : x))}
                     className={`col-span-2 ${inp} ${errors[`line_${i}_cost`] ? 'border-red-500/60' : ''}`} />
                   <select value={li.type}
                     onChange={(e) => {
                       const nextType = e.target.value as PurchaseType;
-                      // Snap qty back to 1 when flipping to R so the input
-                      // matches the rule we're about to enforce.
-                      setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, type: nextType, quantity: nextType === 'raw' ? '1' : x.quantity } : x));
+                      setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, type: nextType } : x));
                     }}
                     className={`col-span-2 ${inp}`}>
                     <option value="raw">Raw</option>
@@ -711,11 +708,10 @@ function PurchaseForm({
           />
 
           <div>
-            <label className={lbl}># of Cards{err('card_count')}{form.type === 'raw' && <span className="ml-2 text-[10px] text-zinc-600 normal-case">R (single-raw) is always 1</span>}</label>
-            <input type="number" min="1" value={form.type === 'raw' ? '1' : form.card_count}
-              readOnly={form.type === 'raw'}
+            <label className={lbl}># of Cards{err('card_count')}{form.type === 'raw' && parseInt(form.card_count || '1') > 1 && <span className="ml-2 text-[10px] text-amber-400 normal-case">Bulk (B) is recommended for &gt;1 card</span>}</label>
+            <input type="number" min="1" value={form.card_count}
               onChange={(e) => { set('card_count', e.target.value); setErrors((p) => ({ ...p, card_count: '' })); }}
-              className={`${inp} ${errors.card_count ? 'border-red-500/60' : ''} ${form.type === 'raw' ? 'opacity-60 cursor-not-allowed' : ''}`} />
+              className={`${inp} ${errors.card_count ? 'border-red-500/60' : ''} ${form.type === 'raw' && parseInt(form.card_count || '1') > 1 ? 'border-amber-500/40' : ''}`} />
           </div>
 
           <div className="grid grid-cols-3 gap-4">
@@ -835,10 +831,10 @@ function ReceiveModal({
           <input type="date" value={form.received_at} onChange={(e) => set('received_at', e.target.value)} required className={inp} />
         </div>
         <div>
-          <label className={lbl}>Quantity Received{purchase.type === 'raw' && <span className="ml-2 text-[10px] text-zinc-600 normal-case">R is always 1</span>}</label>
-          <input type="number" min="1" value={purchase.type === 'raw' ? '1' : form.card_count} readOnly={purchase.type === 'raw'}
+          <label className={lbl}>Quantity Received{purchase.type === 'raw' && parseInt(form.card_count || '1') > 1 && <span className="ml-2 text-[10px] text-amber-400 normal-case">Bulk (B) is recommended for &gt;1 card</span>}</label>
+          <input type="number" min="1" value={form.card_count}
             onChange={(e) => set('card_count', e.target.value)} required
-            className={`${inp} ${purchase.type === 'raw' ? 'opacity-60 cursor-not-allowed' : ''}`} />
+            className={`${inp} ${purchase.type === 'raw' && parseInt(form.card_count || '1') > 1 ? 'border-amber-500/40' : ''}`} />
         </div>
       </div>
 

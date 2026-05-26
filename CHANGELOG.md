@@ -22,6 +22,9 @@
 **Legacy picker / pull scoped to `decision='grade'` only**
 - Cards on the same legacy bucket but marked for raw sale (`decision='sell_raw'`) were inflating the dropdown's "left" count and could be accidentally drained by a grading pull. The picker query (`/catalog/legacy-buckets`) and the pull-side stash finder in `addLegacyItem` both now filter to `decision='grade'`, so raw-sale inventory stays out of the grading flow.
 
+**R-purchase qty=1 invariant relaxed**
+- The May 18 rule that forced R (single-raw) purchases to `card_count = 1` and rejected any inspection-line qty != 1 turned out to be too rigid in practice. Removed the four server-side hard rejects (`createRawPurchase`, `updateRawPurchase`, `addInspectionLine`, `updateInspectionLine`) and the B→R conversion block. The Intake form's # of Cards / Quantity Received / multi-line row qty inputs are no longer read-only for raw type. Switching a line from Bulk to Raw no longer snaps qty back to 1. A soft warning ("Bulk (B) is recommended for >1 card") with an amber input border appears whenever an R-type line has qty > 1, but it's just a UX hint — submit isn't blocked.
+
 ### Reverted
 
 **Lot-based legacy bucket picker (`45bd2bf`)** — the original first cut required maintaining a separate `raw_purchases` lot per legacy catalog entry with its own `card_count` and `total_cost_usd` decremented on return. The lot abstraction didn't fit — the catalog entry alone is the natural bucket and the stash card_instance is the natural source of truth. Migration 053 (per-user EN/JP legacy seed) and the auto-relink on grading return (set_code='LEGACY' detection) were both kept since they're still useful for the simpler model.
