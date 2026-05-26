@@ -678,6 +678,7 @@ export async function listLegacyBuckets(userId: string) {
       cc.language,
       COALESCE(SUM(ci.quantity) FILTER (
         WHERE ci.status NOT IN ('grading_submitted', 'graded', 'sold', 'lost_damaged')
+          AND ci.decision = 'grade'
       ), 0)::int AS stash_qty,
       COALESCE((
         SELECT ci2.purchase_cost
@@ -685,6 +686,7 @@ export async function listLegacyBuckets(userId: string) {
         WHERE ci2.catalog_id = cc.id
           AND ci2.user_id = ${userId}
           AND ci2.status NOT IN ('grading_submitted', 'graded', 'sold', 'lost_damaged')
+          AND ci2.decision = 'grade'
         ORDER BY ci2.quantity DESC NULLS LAST
         LIMIT 1
       ), 0)::int AS per_card_cost

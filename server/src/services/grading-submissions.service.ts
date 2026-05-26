@@ -314,9 +314,10 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       throw new AppError(400, 'Picked catalog entry is not a legacy bucket (set_code must be LEGACY)');
     }
 
-    // Find a stash row tied to this catalog entry with enough qty. The "stash
-    // row" is just a card_instance the user added via standard Add Card with
-    // catalog_id=legacy bucket; it's not in grading_submitted/graded/sold.
+    // Find a stash row tied to this catalog entry with enough qty. Only rows
+    // marked decision='grade' count — cards on the same legacy bucket but
+    // destined for raw sale (decision='sell_raw') stay out of the picker so
+    // pulling for grading can't accidentally drain raw-sale inventory.
     // Largest-first so we drain the bigger pools before fragmenting smaller.
     const stash = await db
       .selectFrom('card_instances')
@@ -324,11 +325,12 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       .where('catalog_id', '=', input.legacy_catalog_id)
       .where('user_id', '=', userId)
       .where('status', 'not in', ['grading_submitted', 'graded', 'sold', 'lost_damaged'])
+      .where('decision', '=', 'grade')
       .where('quantity', '>=', qty)
       .orderBy('quantity', 'desc')
       .executeTakeFirst();
     if (!stash) {
-      throw new AppError(409, `No stash row under this legacy bucket has ${qty} card${qty === 1 ? '' : 's'} available`);
+      throw new AppError(409, `No 'Grade' decision stash row under this legacy bucket has ${qty} card${qty === 1 ? '' : 's'} available`);
     }
     perCardCost = stash.purchase_cost ?? 0;
     lotId = stash.raw_purchase_id; // preserve lineage if the stash itself came from a lot
@@ -402,6 +404,10 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       currency: 'USD',
       condition: input.condition ?? null,
       raw_purchase_id: lotId,
+      // Remember the legacy bucket this card was pulled from. processReturn
+      // copies this onto the slab so the bucket can cross-tally its returned
+      // count even though the slab itself lives under its real catalog_id.
+      legacy_source_catalog_id: input.legacy_catalog_id ?? null,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -555,6 +561,9 @@ export async function processReturn(userId: string, batchId: string, input: Proc
         purchase_cost:        original.purchase_cost,
         currency:             original.currency,
         raw_purchase_id:      null,
+        // Preserve legacy-bucket lineage so the bucket can cross-tally this
+        // slab into its returned_count even though catalog_id is the real part.
+        legacy_source_catalog_id: original.legacy_source_catalog_id,
       })
       .returningAll()
       .executeTakeFirstOrThrow();
@@ -688,6 +697,7 @@ export async function revertReturn(userId: string, batchId: string) {
           decision: snap.decision ?? null,
           notes: snap.notes ?? null,
           catalog_id: snap.catalog_id ?? null,
+          legacy_source_catalog_id: snap.legacy_source_catalog_id ?? null,
           // Card is at the grader — no physical location while submitted
           location_id: null,
           trade_id: snap.trade_id ?? null,

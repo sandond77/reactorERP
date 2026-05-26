@@ -253,9 +253,17 @@ export async function listCardsGroupedByPart(
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
       sql<number>`COALESCE(gbi.batch_qty, 0)`.as('batch_qty'),
       'loc.name as location_name',
+      'ci.legacy_source_catalog_id',
     ])
     .where('ci.user_id', '=', userId)
-    .where('ci.raw_purchase_id', 'is not', null)
+    // Include rows that are either part of a raw lot OR carry a legacy
+    // bucket lineage. The second clause picks up returned slabs (which
+    // have raw_purchase_id=null) so they cross-tally into their legacy
+    // bucket's returned_count.
+    .where((eb) => eb.or([
+      eb('ci.raw_purchase_id',          'is not', null),
+      eb('ci.legacy_source_catalog_id', 'is not', null),
+    ]))
     .orderBy('ci.purchased_at', 'desc');
 
   if (pipeline === 'sell') {
@@ -352,6 +360,18 @@ export async function listCardsGroupedByPart(
     else if (row.status === 'raw_for_sale')       group.for_sale_count += qty;
     else if (row.decision === 'grade')            group.to_grade_count += qty;
     group.instances.push(row);
+
+    // Legacy-bucket cross-tally — slabs that came from a legacy bucket
+    // also count toward THAT bucket's returned_count (in addition to their
+    // primary catalog group). The bucket's `total` is untouched: the slab
+    // physically lives under its real catalog_id, this is just an
+    // audit/tracking dimension. Only fires for status='graded' (i.e. the
+    // slab has actually returned).
+    const legacySource = (row as { legacy_source_catalog_id?: string | null }).legacy_source_catalog_id;
+    if (legacySource && row.status === 'graded' && legacySource !== row.catalog_id) {
+      const legacyGroup = groupMap.get(legacySource);
+      if (legacyGroup) legacyGroup.returned_count += qty;
+    }
   }
 
   return Array.from(groupMap.values());

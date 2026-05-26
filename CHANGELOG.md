@@ -12,6 +12,16 @@
 **`GET /api/v1/catalog/legacy-buckets`**
 - New endpoint returning the user's legacy catalog entries (`set_code='LEGACY'`) with their aggregated stash snapshot — `stash_qty` (sum of child `card_instances.quantity` for rows that haven't moved to grading/graded/sold) and `per_card_cost` (from the largest stash row). Powers the Legacy Part # dropdown.
 
+**Legacy cross-tally on grading return**
+- The slab that comes back from grading lands under its real `catalog_id`, but the legacy bucket it was pulled from also needs to see "1 graded" so its lifecycle counts add up. Migration **054** adds `legacy_source_catalog_id` to `card_instances` — a nullable FK back to the legacy catalog entry. `addLegacyItem` stamps it on the new grading row at submit; `processReturn` copies it onto the new slab. The per-catalog grouping in `cards.service.ts:listCardsGroupedByPart` now does a cross-tally: for any row with `status='graded' AND legacy_source_catalog_id` set, the slab's quantity is also added to that legacy bucket's `returned_count`. Total inventory counts under the slab's real part are unchanged — this is a tracking dimension on top, not a duplicate inventory record.
+- End state in the inventory view: a legacy bucket shows `to_grade_count` shrinking as you pull, `returned_count` growing as slabs come back — even though those slabs themselves now live under their proper parts. Cumulative legacy pulls visible at a glance.
+
+**Returned column on To Be Submitted**
+- The "To Be Submitted" inventory page now shows a **Returned** column alongside Total / To Grade / Submitted / Sold. The data was already computed (`returned_count` on the group rollup) — just exposed in the UI. Sortable like the others.
+
+**Legacy picker / pull scoped to `decision='grade'` only**
+- Cards on the same legacy bucket but marked for raw sale (`decision='sell_raw'`) were inflating the dropdown's "left" count and could be accidentally drained by a grading pull. The picker query (`/catalog/legacy-buckets`) and the pull-side stash finder in `addLegacyItem` both now filter to `decision='grade'`, so raw-sale inventory stays out of the grading flow.
+
 ### Reverted
 
 **Lot-based legacy bucket picker (`45bd2bf`)** — the original first cut required maintaining a separate `raw_purchases` lot per legacy catalog entry with its own `card_count` and `total_cost_usd` decremented on return. The lot abstraction didn't fit — the catalog entry alone is the natural bucket and the stash card_instance is the natural source of truth. Migration 053 (per-user EN/JP legacy seed) and the auto-relink on grading return (set_code='LEGACY' detection) were both kept since they're still useful for the simpler model.
