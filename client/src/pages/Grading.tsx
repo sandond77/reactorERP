@@ -346,21 +346,22 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
           </p>
           {/* Column headers — match the row grid below */}
           <div className="grid items-center gap-2 px-2.5 text-[10px] text-zinc-500 uppercase tracking-wide font-medium"
-            style={{ gridTemplateColumns: 'minmax(0,1.6fr) 80px 90px 110px 24px' }}>
+            style={{ gridTemplateColumns: 'minmax(0,1fr) 80px 90px 110px 24px' }}>
             <span>Card</span>
             <span>Qty</span>
             <span>Expected Grade</span>
             <span>Est. Value / Card</span>
             <span />
           </div>
-          <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+          <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
             {rows.map((r) => (
-              <div key={r.card.id} className="grid items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
-                style={{ gridTemplateColumns: 'minmax(0,1.6fr) 80px 90px 110px 24px' }}>
+              <div key={r.card.id} className="grid items-start gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
+                style={{ gridTemplateColumns: 'minmax(0,1fr) 80px 90px 110px 24px' }}>
                 <div className="min-w-0">
-                  <p className="text-xs text-zinc-100 truncate font-medium">{r.card.card_name ?? 'Unknown'}</p>
-                  <p className="text-[10px] text-zinc-500 truncate">
+                  <p className="text-xs text-zinc-100 font-medium whitespace-normal break-words leading-snug">{r.card.card_name ?? 'Unknown'}</p>
+                  <p className="text-[10px] text-zinc-500 whitespace-normal break-words leading-snug mt-0.5">
                     {r.card.set_name ?? '—'}{r.card.card_number ? ` · #${r.card.card_number}` : ''}
+                    {r.card.condition ? ` · ${r.card.condition}` : ''}
                     {' · '}<span className="font-mono text-zinc-400">{r.card.raw_purchase_label ?? '—'}</span>
                     {' · '}max {r.card.quantity}
                   </p>
@@ -1062,7 +1063,7 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
         {editingItem && <EditItemModal item={editingItem} batchId={batchId} onClose={() => setEditingItem(null)} />}
       </Modal>
 
-      <Modal open={showAddCard} onClose={() => setShowAddCard(false)} title="Add Card to Batch" className="max-w-2xl">
+      <Modal open={showAddCard} onClose={() => setShowAddCard(false)} title="Add Card to Batch" className="max-w-4xl">
         <AddCardModal batchId={batchId} onClose={() => setShowAddCard(false)} />
       </Modal>
 
