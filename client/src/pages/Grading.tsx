@@ -711,14 +711,17 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
         {item.set_name ? <span className="text-zinc-500"> · {item.set_name}</span> : null}
         {item.card_number ? <span className="text-zinc-500"> #{item.card_number}</span> : null}
       </p>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-3 items-start">
         <div>
-          <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">
-            Qty <span className="text-zinc-600 normal-case">(max {maxQty}{isLegacy ? ` — ${item.legacy_stash_remaining} in bucket` : ''})</span>
+          <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1 whitespace-nowrap">
+            Qty <span className="text-zinc-600 normal-case">(max {maxQty})</span>
           </label>
           <input type="number" min={1} max={maxQty} value={qty}
             onChange={(e) => { const v = e.target.value; if (v === '') { setQty(''); return; } const n = parseInt(v); if (!isNaN(n)) setQty(String(Math.min(maxQty, Math.max(1, n)))); }}
             className={`w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500 ${noSpinner}`} />
+          {isLegacy && (
+            <p className="text-[10px] text-zinc-500 mt-1">{item.legacy_stash_remaining} in bucket</p>
+          )}
         </div>
         <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
           value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)} className={noSpinner} />
