@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, ArrowLeft, Loader2, Trash2, X } from 'lucide-react';
+import { Plus, ArrowLeft, Loader2, Trash2, X, Sparkles } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -429,6 +429,8 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
   const [catalogId, setCatalogId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [legacyBucketId, setLegacyBucketId] = useState<string>('');
+  const [autoFillText, setAutoFillText] = useState('');
+  const [autoFilling, setAutoFilling] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
 
@@ -451,6 +453,36 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
       purchase_cost: (legacyBucket.per_card_cost / 100).toFixed(2),
     }));
   }, [legacyBucket]);
+
+  // Auto-fill: paste a PSA-label-style card name (or part of one), agent
+  // parses card_name/set_name/card_number/language and fills the form
+  // fields below. PartNumberField then auto-resolves against the catalog.
+  async function autoFill(name: string) {
+    if (!name.trim()) return;
+    setAutoFilling(true);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await api.post('/agent/auto-fill', { partial_name: name, game: 'pokemon' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = (res.data as any)?.data?.suggestions?.[0];
+      if (s) {
+        setForm(prev => ({
+          ...prev,
+          card_name:   (s.catalog_exists && s.catalog_card_name) ? s.catalog_card_name : (s.card_name ?? prev.card_name),
+          set_name:    s.set_name    ?? prev.set_name,
+          card_number: s.card_number ?? prev.card_number,
+          language:    s.language    ?? prev.language,
+        }));
+        toast.success('Auto-filled from card database');
+      } else {
+        toast('No match found — fill manually', { icon: '🔍' });
+      }
+    } catch {
+      toast.error('Unable to auto-fill — fill manually');
+    } finally {
+      setAutoFilling(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -521,6 +553,29 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
             Pulling from this bucket. The stash row decrements by the qty you pull; cost moves to the slab when it returns.
           </p>
         )}
+      </div>
+
+      {/* Auto-fill — paste a card name (PSA-label style) and the agent parses
+          it into the form fields below */}
+      <div className="flex flex-col gap-2">
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+          Auto-fill <span className="normal-case text-zinc-600">(optional — paste card name to populate fields below)</span>
+        </label>
+        <div className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={autoFillText}
+            onChange={(e) => setAutoFillText(e.target.value)}
+            placeholder="e.g. 2024 Pokemon Indonesian SV-P Promo 154 Pikachu"
+            className="flex-1 rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+          />
+          <Button type="button" variant="secondary" size="sm" className="shrink-0"
+            onClick={() => autoFill(autoFillText)}
+            disabled={autoFilling || !autoFillText.trim()}>
+            {autoFilling ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            Auto-fill
+          </Button>
+        </div>
       </div>
 
       {/* Card identity fields — drive the PartNumberField search */}
