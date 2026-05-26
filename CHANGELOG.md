@@ -32,6 +32,21 @@
 **R-purchase qty=1 invariant relaxed**
 - The May 18 rule that forced R (single-raw) purchases to `card_count = 1` and rejected any inspection-line qty != 1 turned out to be too rigid in practice. Removed the four server-side hard rejects (`createRawPurchase`, `updateRawPurchase`, `addInspectionLine`, `updateInspectionLine`) and the B→R conversion block. The Intake form's # of Cards / Quantity Received / multi-line row qty inputs are no longer read-only for raw type. Switching a line from Bulk to Raw no longer snaps qty back to 1. A soft warning ("Bulk (B) is recommended for >1 card") with an amber input border appears whenever an R-type line has qty > 1, but it's just a UX hint — submit isn't blocked.
 
+### Fixes
+
+**Bulk Add to Batch — column headers + clearer placeholders**
+- The first cut of the bulk picker labelled each row's inputs with placeholder text only ("Qty", "Grade", "$ / card"). "$ / card" read like cost-per-card rather than the estimated graded value. Added a header strip above the rows (`Card / Qty / Expected Grade / Est. Value / Card`) so the columns are labelled once, and the inputs use neutral hints (`1`, `e.g. 9`, `0.00`) that don't conflict with the headers.
+
+**Part Numbers — `GRADE` column counted raw sub-rows as grades**
+- A part with multiple raw sub-rows (e.g. two raw lots of the same card at different conditions) was rendering "2 grades" in the GRADE column even though `grade` is `NULL` on both — the multi-row summary did `groupRows.length` unconditionally. Now counts only sub-rows where `grade IS NOT NULL`, renders `—` when none, and pluralizes correctly (`1 grade` vs `2 grades`). Also cleaned up the GRADER cell so placeholder `—` company values don't appear in the comma-joined list.
+
+**Add Card to Batch — Legacy required, expanded languages, Strict Match, hidden picker filter bug**
+- **Legacy Part # is now required** in the Legacy tab. The optional fallback was confusing — leaving it blank silently dropped into the phantom-lot path. Submit is blocked unless a bucket is picked; the placeholder reads `— Pick a legacy bucket to pull from —`.
+- **Language dropdown** in the Legacy tab now matches `AddPartModal`'s full list — adds **ID** (Indonesian) and FR/DE/IT/ES/PT/PL/NL/RU/TH alongside the existing EN/JP/KR/ZH-TW/ZH-CN, with clearer labels (`EN — English`). Picked legacy entries with non-EN/JP/KR/Chinese languages now render correctly in the dropdown instead of falling back to a wrong value.
+- **Strict Match checkbox** under the From Inventory search — same pattern as Sales/Listings. When ticked, passes `exact=true` to `/cards` so e.g. `2026R2` won't pull in `2026R20`/`2026R248`.
+- **Long-standing schema gap fixed:** `cardFiltersSchema` didn't include `decision`, so the `decision='grade'` / `decision='sell_raw'` params Grading/Sales/Listings have all been sending were being silently stripped by Zod. The decision filter actually applies now.
+- **Grading picker status filter broadened** to include `purchased_raw`. Grade-decision cards that hadn't been promoted to `status='inspected'` yet (e.g. mass-imported rows that bypass the Inspection Panel) are findable instead of needing a manual delete-and-re-add as a workaround.
+
 ### Reverted
 
 **Lot-based legacy bucket picker (`45bd2bf`)** — the original first cut required maintaining a separate `raw_purchases` lot per legacy catalog entry with its own `card_count` and `total_cost_usd` decremented on return. The lot abstraction didn't fit — the catalog entry alone is the natural bucket and the stash card_instance is the natural source of truth. Migration 053 (per-user EN/JP legacy seed) and the auto-relink on grading return (set_code='LEGACY' detection) were both kept since they're still useful for the simpler model.
