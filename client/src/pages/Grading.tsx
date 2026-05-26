@@ -1114,7 +1114,8 @@ export function Grading() {
               <col style={{ minWidth: 200 }} />
               <col style={{ minWidth: 70 }} />
               <col style={{ minWidth: 100 }} />
-              <col style={{ minWidth: 55 }} />
+              <col style={{ minWidth: 75 }} />
+              <col style={{ minWidth: 75 }} />
               <col style={{ minWidth: 105 }} />
               <col style={{ minWidth: 105 }} />
               <col style={{ minWidth: 105 }} />
@@ -1129,7 +1130,8 @@ export function Grading() {
                 <th className="px-4 py-2 text-left font-medium">Batch</th>
                 <th className="px-4 py-2 text-left font-medium">Company</th>
                 <th className="px-4 py-2 text-left font-medium">Tier</th>
-                <th className="px-4 py-2 text-right font-medium">Cards</th>
+                <th className="px-4 py-2 text-right font-medium">Line Items</th>
+                <th className="px-4 py-2 text-right font-medium">Total Cards</th>
                 <th className="px-4 py-2 text-right font-medium">Cost/Card</th>
                 <th className="px-4 py-2 text-right font-medium">Raw Cost</th>
                 <th className="px-4 py-2 text-right font-medium">Grade Cost</th>
@@ -1157,6 +1159,7 @@ export function Grading() {
                     <td className="px-4 py-2.5 text-zinc-300">{batch.company}</td>
                     <td className="px-4 py-2.5 text-zinc-400">{batch.tier}</td>
                     <td className="px-4 py-2.5 text-right text-zinc-300">{batch.item_count}</td>
+                    <td className="px-4 py-2.5 text-right text-zinc-300">{batch.total_qty}</td>
                     <td className="px-4 py-2.5 text-right text-zinc-400">
                       {batch.grading_cost ? formatCurrency(batch.grading_cost, 'USD') : '—'}
                     </td>
