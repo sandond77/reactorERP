@@ -321,6 +321,15 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
           <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
             Selected ({rows.length}/{BULK_ADD_MAX})
           </p>
+          {/* Column headers — match the row grid below */}
+          <div className="grid items-center gap-2 px-2.5 text-[10px] text-zinc-500 uppercase tracking-wide font-medium"
+            style={{ gridTemplateColumns: 'minmax(0,1.6fr) 80px 90px 110px 24px' }}>
+            <span>Card</span>
+            <span>Qty</span>
+            <span>Expected Grade</span>
+            <span>Est. Value / Card</span>
+            <span />
+          </div>
           <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
             {rows.map((r) => (
               <div key={r.card.id} className="grid items-center gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
@@ -334,7 +343,7 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
                   </p>
                 </div>
                 <input type="number" min={1} max={r.card.quantity} value={r.qty}
-                  placeholder="Qty"
+                  placeholder="1"
                   onChange={(e) => {
                     const v = e.target.value;
                     if (v === '') { updateRow(r.card.id, 'qty', ''); return; }
@@ -342,11 +351,11 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
                     if (!isNaN(n)) updateRow(r.card.id, 'qty', String(Math.min(r.card.quantity, Math.max(1, n))));
                   }}
                   className={cellCls} />
-                <input type="number" step="0.5" min="1" max="10" placeholder="Grade"
+                <input type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
                   value={r.expectedGrade}
                   onChange={(e) => updateRow(r.card.id, 'expectedGrade', e.target.value)}
                   className={cellCls} />
-                <input type="text" inputMode="decimal" placeholder="$ / card"
+                <input type="text" inputMode="decimal" placeholder="0.00"
                   value={r.estimatedValue}
                   onChange={(e) => updateRow(r.card.id, 'estimatedValue', e.target.value)}
                   className={cellCls} />
