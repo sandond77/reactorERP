@@ -22,6 +22,8 @@ interface RawOption {
   card_name: string | null;
   set_name: string | null;
   condition: string | null;
+  condition_notes: string | null;
+  notes: string | null;
   quantity: number;
   purchase_cost: number | null;
   card_show_price: number | null;
@@ -34,8 +36,11 @@ interface SelectedCard {
   label: string;
   listed_price: number | null;
   card_show_price_input: string;
+  inspection_notes: string | null;
   _type: 'graded' | 'raw';
 }
+
+const MAX_SELECT = 5;
 
 function toCents(val: string): number {
   return Math.round(parseFloat(val) * 100);
@@ -88,12 +93,14 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
       if (next.has(row.id)) {
         next.delete(row.id);
       } else {
+        if (next.size >= MAX_SELECT) return prev;
         next.set(row.id, {
           id: row.id,
           card_name: row.card_name,
           label: `${row.grade_label ?? ''} · ${row.company} · #${row.cert_number}`,
           listed_price: row.listed_price,
           card_show_price_input: row.listed_price ? (row.listed_price / 100).toFixed(2) : '',
+          inspection_notes: null,
           _type: 'graded',
         });
       }
@@ -107,12 +114,18 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
       if (next.has(row.id)) {
         next.delete(row.id);
       } else {
+        if (next.size >= MAX_SELECT) return prev;
+        // Combine condition + condition_notes (from inspection) + free-form
+        // notes into one readable string for the card-show view.
+        const noteParts = [row.condition_notes?.trim(), row.notes?.trim()].filter(Boolean) as string[];
+        const inspectionNotes = noteParts.length ? noteParts.join(' · ') : null;
         next.set(row.id, {
           id: row.id,
           card_name: row.card_name,
           label: `${row.condition ?? 'Raw'}${row.raw_purchase_label ? ` · ${row.raw_purchase_label}` : ''}`,
           listed_price: null,
           card_show_price_input: '',
+          inspection_notes: inspectionNotes,
           _type: 'raw',
         });
       }
@@ -164,10 +177,18 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
           </div>
           <div className="max-h-[420px] overflow-y-auto">
             {selectedList.map((card) => (
-              <div key={card.id} className="grid grid-cols-[1fr_8rem_10rem_2.5rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-center">
+              <div key={card.id} className="grid grid-cols-[1fr_8rem_10rem_2.5rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-start">
                 <div className="min-w-0">
                   <p className="text-sm text-zinc-100 font-medium whitespace-normal break-words leading-snug">{card.card_name ?? '—'}</p>
                   <p className="text-xs text-zinc-500 mt-0.5">{card.label}</p>
+                  {card._type === 'raw' && (
+                    <p className="text-[11px] mt-1 whitespace-normal break-words leading-snug">
+                      <span className="text-zinc-500">Inspection: </span>
+                      {card.inspection_notes
+                        ? <span className="text-amber-300/80">{card.inspection_notes}</span>
+                        : <span className="text-zinc-600 italic">no notes recorded</span>}
+                    </p>
+                  )}
                 </div>
                 <span className="text-sm text-zinc-400 text-right block">
                   {card.listed_price ? formatCurrency(card.listed_price) : '—'}
@@ -240,9 +261,12 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
               <p className="px-4 py-8 text-center text-sm text-zinc-500">No unsold graded cards available.</p>
             ) : rows.map((row) => {
               const isChecked = selected.has(row.id);
+              const capReached = !isChecked && selected.size >= MAX_SELECT;
               return (
-                <div key={row.id} onClick={() => toggleGradedRow(row)}
-                  className={cn('grid grid-cols-[2.5rem_1fr_10rem_6rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-center cursor-pointer transition-colors', isChecked ? 'bg-indigo-600/10' : 'hover:bg-zinc-800/40')}>
+                <div key={row.id} onClick={() => { if (!capReached) toggleGradedRow(row); }}
+                  className={cn('grid grid-cols-[2.5rem_1fr_10rem_6rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-center transition-colors',
+                    capReached ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+                    isChecked ? 'bg-indigo-600/10' : !capReached && 'hover:bg-zinc-800/40')}>
                   <div className={cn('w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors', isChecked ? 'bg-indigo-600 border-indigo-600' : 'border-zinc-600')}>
                     {isChecked && <Check size={12} className="text-white" />}
                   </div>
@@ -274,15 +298,25 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
               <p className="px-4 py-8 text-center text-sm text-zinc-500">No raw cards designated for sale.</p>
             ) : rawRows.map((row) => {
               const isChecked = selected.has(row.id);
+              const noteParts = [row.condition_notes?.trim(), row.notes?.trim()].filter(Boolean) as string[];
+              const rowNotes = noteParts.length ? noteParts.join(' · ') : null;
+              const capReached = !isChecked && selected.size >= MAX_SELECT;
               return (
-                <div key={row.id} onClick={() => toggleRawRow(row)}
-                  className={cn('grid grid-cols-[2.5rem_1fr_8rem_6rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-center cursor-pointer transition-colors', isChecked ? 'bg-indigo-600/10' : 'hover:bg-zinc-800/40')}>
-                  <div className={cn('w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors', isChecked ? 'bg-indigo-600 border-indigo-600' : 'border-zinc-600')}>
+                <div key={row.id} onClick={() => { if (!capReached) toggleRawRow(row); }}
+                  className={cn('grid grid-cols-[2.5rem_1fr_8rem_6rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-start transition-colors',
+                    capReached ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+                    isChecked ? 'bg-indigo-600/10' : !capReached && 'hover:bg-zinc-800/40')}>
+                  <div className={cn('w-5 h-5 mt-0.5 rounded-md border flex items-center justify-center shrink-0 transition-colors', isChecked ? 'bg-indigo-600 border-indigo-600' : 'border-zinc-600')}>
                     {isChecked && <Check size={12} className="text-white" />}
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm text-zinc-100 truncate font-medium">{row.card_name ?? '—'}</p>
                     <p className="text-xs text-zinc-500 mt-0.5">{row.set_name ?? ''}{row.raw_purchase_label ? ` · ${row.raw_purchase_label}` : ''}</p>
+                    {rowNotes && (
+                      <p className="text-[11px] text-amber-300/80 mt-1 line-clamp-2 leading-snug">
+                        <span className="text-zinc-500">Notes: </span>{rowNotes}
+                      </p>
+                    )}
                   </div>
                   <span className="text-sm text-zinc-400 text-right">{row.condition ?? '—'}</span>
                   <span className="text-xs text-zinc-500 text-right">{row.purchase_cost ? formatCurrency(row.purchase_cost) : '—'}</span>
@@ -295,7 +329,7 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
 
       <div className="flex items-center justify-between pt-1">
         <span className="text-sm text-zinc-400">
-          {selected.size > 0 ? `${selected.size} selected` : 'Select cards to add'}
+          {selected.size > 0 ? `${selected.size} of ${MAX_SELECT} selected` : `Select up to ${MAX_SELECT} cards`}
         </span>
         <Button onClick={() => setStep('price')} disabled={selected.size === 0}>
           Set Prices <ArrowRight size={15} />

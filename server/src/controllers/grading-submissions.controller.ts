@@ -31,8 +31,9 @@ export async function update(req: Request, res: Response, next: NextFunction) {
 
 export async function remove(req: Request, res: Response, next: NextFunction) {
   try {
-    await svc.deleteBatch(req.dataUserId, req.params['id'] as string);
-    res.status(204).send();
+    const result = await svc.deleteBatch(req.dataUserId, req.params['id'] as string);
+    if (!result) return res.status(404).json({ error: 'Not found' });
+    res.json(result);
   } catch (err) { next(err); }
 }
 

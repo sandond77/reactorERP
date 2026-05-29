@@ -190,6 +190,7 @@ export interface SlabDetailsTable {
   user_id: string;
   source_raw_instance_id: string | null;
   grading_submission_id: string | null;
+  grading_batch_id: string | null;
   company: GradingCompany;
   cert_number: number | null;
   grade: number | null;

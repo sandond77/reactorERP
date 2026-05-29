@@ -237,7 +237,10 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
     enabled: debounced.length >= 2,
   });
 
-  const cards = cardResults?.data ?? [];
+  // Exclude cards already in this batch — same card_instance can't be added twice.
+  const batchDetail = qc.getQueryData<BatchDetail>(['grading-batch', batchId]);
+  const alreadyInBatch = new Set((batchDetail?.items ?? []).map((it) => it.card_instance_id));
+  const cards = (cardResults?.data ?? []).filter((c) => !alreadyInBatch.has(c.id));
   const selectedIds = new Set(rows.map(r => r.card.id));
   const atCap = rows.length >= BULK_ADD_MAX;
 
@@ -883,9 +886,22 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
   });
 
   const deleteBatch = useMutation({
-    mutationFn: () => api.delete(`/grading-subs/${batchId}`),
-    onSuccess:  () => {
-      toast.success('Batch deleted');
+    mutationFn: () => api.delete(`/grading-subs/${batchId}`).then((r) => r.data),
+    onSuccess:  (data: { kept_slabs?: { reason: 'sold' | 'listed' }[]; recredited_to_legacy?: number } | undefined) => {
+      const kept = data?.kept_slabs?.length ?? 0;
+      const credited = data?.recredited_to_legacy ?? 0;
+      if (kept > 0) {
+        const sold   = data?.kept_slabs?.filter((s) => s.reason === 'sold').length   ?? 0;
+        const listed = data?.kept_slabs?.filter((s) => s.reason === 'listed').length ?? 0;
+        const parts: string[] = [];
+        if (sold)   parts.push(`${sold} sold`);
+        if (listed) parts.push(`${listed} listed`);
+        toast(`Batch deleted. ${parts.join(', ')} slab${kept === 1 ? '' : 's'} kept in inventory.`, { icon: '⚠️', duration: 6000 });
+      } else if (credited > 0) {
+        toast.success(`Batch deleted. ${credited} card${credited === 1 ? '' : 's'} credited back to legacy bucket.`);
+      } else {
+        toast.success('Batch deleted');
+      }
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
       onBack();
     },
@@ -946,11 +962,12 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
           <Button size="sm" variant="ghost" onClick={() => setShowEdit(true)}>
             Edit Details
           </Button>
-          {data.status === 'submitted' ? (
+          {data.status === 'submitted' && (
             <Button size="sm" variant="ghost" onClick={() => setStatus.mutate('pending')} disabled={setStatus.isPending}>
               Unlock Sub
             </Button>
-          ) : (
+          )}
+          {data.status === 'pending' && (
             <>
               <Button size="sm" variant="ghost" onClick={() => setShowCloseSub(true)}>
                 Close Sub

@@ -1,5 +1,45 @@
 # Reactor — Changelog
 
+## May 28, 2026
+
+### Features
+
+**Sub Returns rebuilt around a per-cert slot model (PSA CSV-driven)**
+- PSA returns one row per physical slab and shuffles the order — the previous one-row-per-sub-line return form fell apart on multi-qty subs and on mixed legacy/non-legacy batches. The form now expands each sub-line of qty N into N independent **slots** (one per physical card). Server `processReturn` accepts a per-cert input array, groups entries by `batch_item_id`, creates one `card_instances` row (qty=1) + one `slab_details` row per graded entry, then decrements the source raw by the entries-in-payload count.
+- **Multi-signal CSV matcher.** Replaces the line-number-then-name fallback with a scoring matcher: card name substring (4) + Jaccard token overlap fallback (up to 2), card # match (+3, **−3 on explicit mismatch**), year (1), set token overlap (up to 1.5), language (1), line position (1). Card # is now extracted from PSA's Description column when no separate column exists (PSA's CSV has Cert/Type/Description/Grade/After Service/Images — everything's embedded in Description). Greedy one-to-one assignment by score descending; the −3 mismatch penalty keeps confidently-wrong rows out of the picker. Confidence tiers Strong (≥8) / Good (≥5) / Weak (≥2) / Manual — each row's dot + score is visible in a Match column.
+- **Preview + remap without re-upload.** After CSV match, every slot is editable in a wide table: Line · Card · ID · Cost · Exp · Cert # · Grade · Label · Match · Remap · Disposition. The **Remap** column is a dropdown listing every batch item so a mis-assigned slot can be reassigned in memory — no need to fix the CSV and re-upload.
+- **Four dispositions per slot:** `graded` (default — creates the slab), `not_graded` (card returned ungraded — creates a new raw `card_instances` row back in inventory with cost = original + grading_cost), `lost` (write-off — consume source, no new row), `not_submitted` (never actually shipped — creates a new raw row with cost = original, no grading fee). Per-row **Ignore (×)** button drops a slot from the payload entirely (qty mismatch — source stays in `grading_submitted` to be handled in a future return). Only graded slots require cert # + grade; the others can submit blank.
+- **CSV-import lock + per-row override.** Cert #, Grade, and Label are locked (read-only) once a CSV upload populates them so a user can't accidentally retype PSA's authoritative values. A small lock icon on each CSV-matched row toggles override — 🔒 (locked, default) → 🔓 (amber, editable). Manual rows are always editable.
+- **Label dropdown sourced from `server/src/utils/grade-labels.ts`** — the same map the Dashboard's Grade Distribution chart uses. PSA `GEM MINT 10 / MINT 9 / NEAR MINT-MINT 8 / ...`, BGS `PRISTINE / GEM MINT 9.5 / ...` with full half-grade scale, CGC with both pre-2024 (Perfect 10, Gem Mint 9.5) and post-2024 (Pristine 10, Gem Mint 10, Mint+ 9.5) forms in the same list so legacy slabs and new submissions both resolve. ARS has no descriptive labels — UI shows the grade as plaintext. handleConfirm detects grade-inclusive labels (ARS) and skips re-appending.
+- **Inputs validated server-side.** Empty `items` array → `400 Return must include at least one item`. Per-graded-item: `cert_number` must match `^\d{1,12}$`; `grade` must be a finite number in `[0, 10]`. Stops a typo from poisoning a half-applied return.
+
+**Grading-cost edits propagate to existing slabs**
+- Migration **056** adds `slab_details.grading_batch_id` (UUID → `grading_batches`, ON DELETE SET NULL). `processReturn` stamps it on every slab going forward. `updateBatch` now fans out any `grading_cost` change to every linked slab AND recomputes `sales.total_cost_basis` (via `computeCostBasis`) for slabs that have since been sold — so edit-after-return keeps cost basis correct on held inventory AND historical profit numbers correct on sold inventory. `grading_cost` is coerced to integer cents and validated `≥ 0` before update; comparison uses the coerced value so propagation only fires on real changes. Legacy slabs (created before migration 056) have NULL `grading_batch_id` and stay frozen at their snapshot value — no way to back-fill without traversing the audit log.
+
+**Delete a sub now rolls back everything**
+- For a **returned** batch: `revertReturn(skipLockedSlabs: true)` runs first — deletes every slab not currently sold or actively listed and restores the original raw `card_instances` from the audit log. Slabs that are sold or listed stay intact (you'd lose revenue records otherwise) and are reported back as `kept_slabs`. For each restored / still-pending batch_item, the card is then routed: **legacy** (`legacy_source_catalog_id` set) → quantity is credited back to an existing grade-decision stash row under the same bucket (or a fresh stash row is created), then the row is hard-deleted; **non-legacy** → status flips to `inspected/grade-decision` (the previous behavior). Batch row deleted, audit entry written.
+- Client surfaces what happened: clean delete → "Batch deleted"; legacy credit → "Batch deleted. N card(s) credited back to legacy bucket."; sold/listed slabs survived → orange warning toast "Batch deleted. X sold, Y listed slab(s) kept in inventory." (6s). `revertReturn` standalone (Revert Return button on the Sub Returns list) now throws a specific 400 — `"Cannot revert — line 5 slab is sold. Unwind first or use Delete Batch."` — instead of silently failing on the dropped FK.
+
+**Add to Card Show — multi-select cap + inspection notes on price step**
+- The picker now caps at **5 cards** (down from unlimited) — counter reads `N of 5 selected`, rows beyond the cap dim to 40% with `cursor-not-allowed`. The price step's selected-card cell shows an **Inspection:** line under each raw card: amber notes when `condition_notes` / `notes` are populated, muted italic `no notes recorded` placeholder when empty so it's obvious nothing was captured. Graded cards don't show the line. `/cards` listing now returns `ci.condition_notes` alongside the existing `ci.notes` to feed this.
+
+### Fixes
+
+**`processReturn` FK violation on full-consume returns (migration 055)**
+- `grading_batch_items.card_instance_id` had a no-action FK to `card_instances(id)`. When a qty-1 sub-line was fully returned, the original card_instance was deleted — but the FK from the historical batch_item blocked it with constraint `23503`. The same bug existed in the previous single-line code path but rarely surfaced; the per-cert rewrite triggers it on every typical return. Migration **055** drops the FK constraint entirely; the column keeps its UUID value and NOT NULL as a soft reference (which `revertReturn` already looks up via the audit log to restore the original on revert).
+
+**Closed/Returned sub allowed Add Card + re-adding existing items**
+- The Add Card and Close Sub buttons rendered on any non-`submitted` batch — including `returned` and `cancelled`. Now they render only when `status === 'pending'`. Submitted batches still show Unlock Sub. The From Inventory picker also filters out any `card_instance_id` already in this batch (read from the React Query cache) so even on a pending batch you can't accidentally re-add the same card.
+
+**Match-column labels misread as no-match for valid CSV matches**
+- The Match column was reading "No match (3.0)" for rows that had clearly been populated from the CSV — confusing because the matcher actually had assigned them, just at a low score. Relabeled the bands as **Strong (≥8) / Good (≥5) / Weak (≥2) / Manual (<2)** with colored dots (green / lime / amber / grey), and lowered the assignment threshold to 2 so anything below that stays Manual rather than auto-filling a bad pick.
+
+**Per-cert form columns + Card cell wrapping**
+- The form was sized for the old one-row-per-sub-line model. Padding tightened from `px-4` → `px-2` on every non-Card column to free horizontal space; Card column got `min-w-[260px]` and the input swapped to a `<textarea rows={2}>` with `whitespace-normal break-words leading-snug` so full PSA labels wrap to two lines instead of being truncated. Remap dropdown lost its `max-w-36` cap (was hiding most of the card name when closed) and got `min-w-[220px]` on the column header. Three new columns — **ID** (RP-YYYY-NNN), **Cost** (per-card basis, right-aligned), **Exp** (expected grade) — were added so the user can correlate which lots are producing which grades; review modal widened to `max-w-6xl` to fit them.
+
+**Missing migrations 049–054 on local DB**
+- Several migrations had never been applied locally — `legacy_source_catalog_id does not exist` was erroring `/cards/by-part`, the Grading tab, and Ungraded Inventory. Applied 049 (rename EN promo set codes to `XX-P`), 050 (split JP `L1` into `L1HG` / `L1SS`), 051 (backfill multi-qty `total_cost_basis`), 052 (add `grading_batch_items.expected_grade`), 053 (seed per-user Legacy catalog buckets), 054 (add `card_instances.legacy_source_catalog_id`). All idempotent — production needs to land them too at deploy time.
+
 ## May 26, 2026
 
 ### Features

@@ -55,6 +55,7 @@ export async function listCards(
       'ci.card_game',
       'ci.language',
       'ci.condition',
+      'ci.condition_notes',
       'ci.purchase_cost',
       'ci.currency',
       'ci.quantity',
