@@ -1087,27 +1087,54 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </div>
       )}
 
-      {/* CS Price form line — shown for card_show sales so the user can set or
-          adjust the sticker right before recording. Saves on blur via PATCH
-          /cards/:id; selectedRawCard / selectedCard reflect the update so the
-          summary block above re-renders without needing a refetch. */}
-      {platform === 'card_show' && (selectedRawCard || selectedCard) && (
-        <div className="flex flex-col gap-1">
-          <Input
-            label="CS Price (sticker)"
-            type="text"
-            inputMode="decimal"
-            placeholder="0.00"
-            value={csPriceInput}
-            onChange={(e) => setCsPriceInput(e.target.value.replace(/[^\d.]/g, ''))}
-            onBlur={commitCsPrice}
-            disabled={csPriceMut.isPending}
-          />
-          <p className="text-[11px] text-zinc-500">
-            Saves to the card automatically — independent of the Strike Price recorded for this sale.
-          </p>
-        </div>
-      )}
+      {/* Reference-price form lines — shown for any sale once a card is
+          selected, regardless of platform. CS Price saves on blur via
+          PATCH /cards/:id; Listed Price is read-only for now (editing
+          would need a per-listing PATCH endpoint). selectedRawCard /
+          selectedCard reflect any CS update so the summary above stays
+          in sync without a refetch. */}
+      {(selectedRawCard || selectedCard) && (() => {
+        const activeListedPrice = saleMode === 'raw'
+          ? selectedRawCard?.listed_price ?? null
+          : selectedCard?.listed_price ?? null;
+        const activeCurrency = saleMode === 'raw'
+          ? selectedRawCard?.currency ?? 'USD'
+          : selectedCard?.currency ?? 'USD';
+        const showListed = platform === 'ebay';
+        return (
+          <div className={cn('flex flex-col gap-1', showListed && 'sm:grid sm:grid-cols-2 sm:gap-3')}>
+            <div className="flex flex-col gap-1">
+              <Input
+                label="CS Price (sticker)"
+                type="text"
+                inputMode="decimal"
+                placeholder="0.00"
+                value={csPriceInput}
+                onChange={(e) => setCsPriceInput(e.target.value.replace(/[^\d.]/g, ''))}
+                onBlur={commitCsPrice}
+                disabled={csPriceMut.isPending}
+              />
+              <p className="text-[11px] text-zinc-500">Saves on blur — separate from Strike Price.</p>
+            </div>
+            {showListed && (
+              <div className="flex flex-col gap-1">
+                <Input
+                  label="Listed Price (eBay)"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="—"
+                  value={activeListedPrice != null ? (activeListedPrice / 100).toFixed(2) : ''}
+                  readOnly
+                  className="opacity-70 cursor-not-allowed"
+                />
+                <p className="text-[11px] text-zinc-500">
+                  Reference from the active listing in {activeCurrency}. Edit on the Listings page.
+                </p>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {(() => {
         const sellQty = saleMode === 'raw' ? Math.max(1, parseInt(rawSaleQty || '1', 10) || 1) : 1;
