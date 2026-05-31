@@ -213,6 +213,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     if (ref && ref > 0) setStrikePrice((ref / 100).toFixed(2));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCard?.id]);
+
+  // Sync the CS Price form input with whichever card is currently selected.
+  // Empty string when no card_show_price is set so the placeholder shows.
+  useEffect(() => {
+    const activeCard = saleMode === 'raw' ? selectedRawCard : selectedCard;
+    setCsPriceInput(activeCard?.card_show_price ? (activeCard.card_show_price / 100).toFixed(2) : '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRawCard?.id, selectedCard?.id, saleMode]);
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
   const [notes, setNotes] = useState('');
@@ -221,45 +229,38 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [orderNumber, setOrderNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Inline CS-price editing on the Record Sale details step — lets the user
-  // set a CS sticker without leaving the modal. Persists via PATCH /cards/:id
-  // and reflects back into the local selectedRawCard / selectedCard so the
-  // strike-price auto-fill works on the next render.
-  const [editingCs, setEditingCs] = useState<null | 'raw' | 'graded'>(null);
-  const [csDraft,   setCsDraft]   = useState('');
+  // Card Show sticker price input — shown as a labeled form line above
+  // Strike Price when the sale platform is Card Show. Persists via
+  // PATCH /cards/:id on blur and reflects back into the local
+  // selectedRawCard / selectedCard so the summary block updates.
+  const [csPriceInput, setCsPriceInput] = useState('');
   const csPriceMut = useMutation({
     mutationFn: ({ id, cents }: { id: string; cents: number | null }) =>
       api.patch(`/cards/${id}`, { card_show_price: cents }),
     onSuccess: (_data, vars) => {
-      // Reflect the new value into local state so the summary block re-renders.
-      if (editingCs === 'raw' && selectedRawCard && selectedRawCard.id === vars.id) {
+      if (selectedRawCard && selectedRawCard.id === vars.id) {
         setSelectedRawCard({ ...selectedRawCard, card_show_price: vars.cents });
-      } else if (editingCs === 'graded' && selectedCard && selectedCard.id === vars.id) {
+      } else if (selectedCard && selectedCard.id === vars.id) {
         setSelectedCard({ ...selectedCard, card_show_price: vars.cents });
       }
-      // Invalidate the raw search caches so subsequent picks see fresh data.
       queryClient.invalidateQueries({ queryKey: ['sale-raw-search'] });
       queryClient.invalidateQueries({ queryKey: ['card-show-raw'] });
-      setEditingCs(null);
-      setCsDraft('');
       toast.success('CS price updated');
     },
     onError: () => toast.error('Failed to update CS price'),
   });
-  function commitCsDraft(target: 'raw' | 'graded') {
-    const current = target === 'raw'
-      ? (selectedRawCard?.card_show_price ?? null)
-      : (selectedCard?.card_show_price ?? null);
-    const trimmed = csDraft.trim();
+  function commitCsPrice() {
+    const activeCard = saleMode === 'raw' ? selectedRawCard : selectedCard;
+    if (!activeCard) return;
+    const current = activeCard.card_show_price ?? null;
+    const trimmed = csPriceInput.trim();
     const cents = trimmed === '' ? null : Math.round(parseFloat(trimmed) * 100);
-    if (cents !== null && (isNaN(cents) || cents < 0)) {
-      toast.error('Enter a valid price');
+    if (cents !== null && (!Number.isFinite(cents) || cents < 0)) {
+      toast.error('Enter a valid CS price');
       return;
     }
-    if (cents === current) { setEditingCs(null); setCsDraft(''); return; }
-    const id = target === 'raw' ? selectedRawCard?.id : selectedCard?.id;
-    if (!id) return;
-    csPriceMut.mutate({ id, cents });
+    if (cents === current) return;
+    csPriceMut.mutate({ id: activeCard.id, cents });
   }
 
   const { data: cardShowsData } = useQuery<{ data: Array<{ id: string; name: string; show_date: string; end_date: string | null; num_days: number; location: string | null }> }>({
@@ -958,42 +959,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 {selectedRawCard.condition ? <span className="ml-2 font-medium px-1.5 py-0.5 rounded bg-zinc-700/60 text-zinc-300">{selectedRawCard.condition}</span> : ''}
                 {/* Always render both reference prices (em-dash when null) so
                     the user can see at a glance whether a CS sticker or eBay
-                    listing exists — vs the field being silently absent. CS is
-                    inline-editable so the user can set a sticker right here
-                    without bouncing to the Card Show page first. */}
-                {editingCs === 'raw' ? (
-                  <span className="ml-2 inline-flex items-center gap-1">
-                    <span className="text-zinc-500">CS: $</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      autoFocus
-                      value={csDraft}
-                      onChange={(e) => setCsDraft(e.target.value.replace(/[^\d.]/g, ''))}
-                      onBlur={() => commitCsDraft('raw')}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
-                        if (e.key === 'Escape') { setEditingCs(null); setCsDraft(''); (e.target as HTMLInputElement).blur(); }
-                      }}
-                      disabled={csPriceMut.isPending}
-                      className="w-16 px-1.5 py-0.5 text-[11px] text-right bg-zinc-900 border border-indigo-500 rounded text-emerald-400 font-medium focus:outline-none"
-                      placeholder="0.00"
-                    />
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCsDraft(selectedRawCard.card_show_price ? (selectedRawCard.card_show_price / 100).toFixed(2) : '');
-                      setEditingCs('raw');
-                    }}
-                    title="Click to edit CS price"
-                    className={`ml-2 hover:text-indigo-300 transition-colors ${selectedRawCard.card_show_price ? 'text-zinc-400' : 'text-zinc-600'}`}
-                  >
-                    CS: {selectedRawCard.card_show_price ? formatCurrency(selectedRawCard.card_show_price, selectedRawCard.currency) : '—'}
-                    <Pencil size={9} className="inline ml-1 opacity-60" />
-                  </button>
-                )}
+                    listing exists — vs the field being silently absent. */}
+                <span className={`ml-2 ${selectedRawCard.card_show_price ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                  CS: {selectedRawCard.card_show_price ? formatCurrency(selectedRawCard.card_show_price, selectedRawCard.currency) : '—'}
+                </span>
                 <span className={`ml-2 ${selectedRawCard.listed_price ? 'text-zinc-400' : 'text-zinc-600'}`}>
                   Listed: {selectedRawCard.listed_price ? formatCurrency(selectedRawCard.listed_price, selectedRawCard.currency) : '—'}
                 </span>
@@ -1033,40 +1002,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <p className="text-sm font-medium text-zinc-100 truncate">{selectedCard.card_name}</p>
               <p className="text-[11px] text-zinc-500 mt-0.5">
                 {selectedCard.company} {selectedCard.grade_label}
-                {/* Inline CS editor — same affordance as the raw block. */}
-                {editingCs === 'graded' ? (
-                  <span className="ml-2 inline-flex items-center gap-1">
-                    <span className="text-zinc-500">CS: $</span>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      autoFocus
-                      value={csDraft}
-                      onChange={(e) => setCsDraft(e.target.value.replace(/[^\d.]/g, ''))}
-                      onBlur={() => commitCsDraft('graded')}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); }
-                        if (e.key === 'Escape') { setEditingCs(null); setCsDraft(''); (e.target as HTMLInputElement).blur(); }
-                      }}
-                      disabled={csPriceMut.isPending}
-                      className="w-16 px-1.5 py-0.5 text-[11px] text-right bg-zinc-900 border border-indigo-500 rounded text-emerald-400 font-medium focus:outline-none"
-                      placeholder="0.00"
-                    />
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCsDraft(selectedCard.card_show_price ? (selectedCard.card_show_price / 100).toFixed(2) : '');
-                      setEditingCs('graded');
-                    }}
-                    title="Click to edit CS price"
-                    className={`ml-2 hover:text-indigo-300 transition-colors ${selectedCard.card_show_price ? 'text-zinc-400' : 'text-zinc-600'}`}
-                  >
-                    CS: {selectedCard.card_show_price ? formatCurrency(selectedCard.card_show_price, selectedCard.currency) : '—'}
-                    <Pencil size={9} className="inline ml-1 opacity-60" />
-                  </button>
-                )}
+                <span className={`ml-2 ${selectedCard.card_show_price ? 'text-zinc-400' : 'text-zinc-600'}`}>
+                  CS: {selectedCard.card_show_price ? formatCurrency(selectedCard.card_show_price, selectedCard.currency) : '—'}
+                </span>
                 {selectedCard.listed_price
                   ? <span className="ml-2 text-zinc-400">Listed: {formatCurrency(selectedCard.listed_price, selectedCard.currency)}</span>
                   : ''}
@@ -1145,6 +1083,28 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <span className="text-amber-400 text-sm shrink-0">⚠</span>
           <p className="text-xs text-amber-300 leading-relaxed">
             This card has an active eBay listing — remember to delist it after recording this sale.
+          </p>
+        </div>
+      )}
+
+      {/* CS Price form line — shown for card_show sales so the user can set or
+          adjust the sticker right before recording. Saves on blur via PATCH
+          /cards/:id; selectedRawCard / selectedCard reflect the update so the
+          summary block above re-renders without needing a refetch. */}
+      {platform === 'card_show' && (selectedRawCard || selectedCard) && (
+        <div className="flex flex-col gap-1">
+          <Input
+            label="CS Price (sticker)"
+            type="text"
+            inputMode="decimal"
+            placeholder="0.00"
+            value={csPriceInput}
+            onChange={(e) => setCsPriceInput(e.target.value.replace(/[^\d.]/g, ''))}
+            onBlur={commitCsPrice}
+            disabled={csPriceMut.isPending}
+          />
+          <p className="text-[11px] text-zinc-500">
+            Saves to the card automatically — independent of the Strike Price recorded for this sale.
           </p>
         </div>
       )}
