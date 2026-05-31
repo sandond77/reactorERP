@@ -1515,8 +1515,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             <div className="rounded-lg border border-zinc-700 overflow-hidden">
               <div className="max-h-[360px] overflow-y-auto">
               {bulkCart.map((item, i) => {
-                // 0 is valid (giveaway / total loss). Only flag empty or non-numeric.
-                const missingPrice = !item.sticker_price_input.trim() || isNaN(parseFloat(item.sticker_price_input)) || parseFloat(item.sticker_price_input) < 0;
                 // Cross-entry rollup: sum of qtys across all cart rows sharing
                 // this source must not exceed the lot. Per-row min is 1.
                 const totalForSource = item.card_type === 'raw'
@@ -1533,11 +1531,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                           ? `${item.grade_label ?? 'Raw'}${item.raw_purchase_label ? ` · ${item.raw_purchase_label}` : ''}`
                           : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
                       </p>
-                      {item.quantity > 1 && parseFloat(item.sticker_price_input || '0') > 0 && (
-                        <p className="text-[10px] text-zinc-600 mt-0.5">
-                          total — ≈ ${(parseFloat(item.sticker_price_input) / item.quantity).toFixed(2)} per card
-                        </p>
-                      )}
                     </div>
                     {showQty && (
                       <div className="flex items-center gap-1 shrink-0">
@@ -1556,29 +1549,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                         <span className="text-[10px] text-zinc-500">/ {item.lot_quantity}</span>
                       </div>
                     )}
-                    {!bulkIsEbay && (
-                      <div className="flex items-center gap-1 shrink-0">
-                        <span className={cn('text-xs', missingPrice ? 'text-amber-500' : 'text-zinc-500')}>$</span>
-                        <input
-                          type="text" inputMode="decimal"
-                          value={item.sticker_price_input}
-                          placeholder="Required"
-                          onChange={(e) => {
-                            // Allow only digits + a single decimal point. Avoids
-                            // browser number-input quirks (scroll-wheel snap,
-                            // step-rounding) that previously turned 175 into
-                            // 174.98 on the CS Price field.
-                            const val = e.target.value.replace(/[^0-9.]/g, '');
-                            setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, sticker_price_input: val, final_price_input: val } : c));
-                          }}
-                          className={cn('w-20 text-xs bg-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none', missingPrice ? 'border border-amber-600/60 placeholder:text-amber-700' : 'border border-zinc-600 focus:border-indigo-500')}
-                        />
-                      </div>
-                    )}
-                    {/* Standing CS sticker on the underlying card — separate
-                        from this sale's sticker_price_input above. Saves on
-                        blur to /cards/:id and fans out to all cart rows that
-                        point at the same card_instance. */}
+                    {/* Standing CS sticker on the underlying card. Sale price
+                        ($/strike) is entered on the next step (bulk-review);
+                        we no longer render the per-row strike input here so
+                        the cart panel stays focused on cards + sticker. */}
                     <div className="flex items-center gap-1 shrink-0" title="Card's standing CS sticker price">
                       <span className="text-[10px] text-zinc-500 uppercase tracking-wide">CS</span>
                       <input
@@ -1630,9 +1604,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               </div>
             </div>
             <div className="flex items-center justify-between">
-              {!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input.trim() || isNaN(parseFloat(i.sticker_price_input)) || parseFloat(i.sticker_price_input) < 0) && (
-                <p className="text-xs text-amber-500">Enter a sticker price for each line (total per line, not per card)</p>
-              )}
               {(() => {
                 // Validate cross-entry: each source's summed qty ≤ its lot.
                 const overflow = bulkCart.some(i => {
@@ -1646,7 +1617,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 <Button type="button"
                   disabled={
                     bulkCart.length === 0
-                    || (!bulkIsEbay && bulkCart.some(i => !i.sticker_price_input.trim() || isNaN(parseFloat(i.sticker_price_input)) || parseFloat(i.sticker_price_input) < 0))
                     || bulkCart.some(i => {
                       if (i.quantity < 1) return true;
                       const total = i.card_type === 'raw' ? (rawCartQtyBySource.get(i.id) ?? i.quantity) : i.quantity;
