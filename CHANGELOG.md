@@ -1,5 +1,24 @@
 # Reactor — Changelog
 
+## May 31, 2026
+
+### Features
+
+**Record Sale modal — set CS / Listed prices without leaving the flow**
+- For any sale platform, once a card is picked the details step renders a **CS Price (sticker)** form line above Strike Price. Saves on blur via `PATCH /cards/:id`, updates `selectedRawCard` / `selectedCard` locally so the "CS: $X" summary line above re-renders without a refetch, and invalidates `['sale-raw-search']` + `['card-show-raw']` so other surfaces stay in sync. Helper text underneath notes it persists to the card automatically and is independent of the Strike Price recorded for this sale.
+- For eBay sales specifically, a second **Listed Price (eBay)** form line renders next to CS Price (two-column grid on `sm+`, stacked below). Editable: saves on blur via the new `PATCH /listings/:listingId` endpoint, reflects into `selectedRawCard.listed_price` / `selectedCard.listed_price` so the summary re-renders, and invalidates `['sale-raw-search']` + `['listings']`. Disabled with `— no active listing —` placeholder when the card isn't currently listed; empty value is rejected with a toast suggesting the Listings page cancel flow instead of nulling the price.
+- New endpoint **`PATCH /api/v1/listings/:listingId`** accepts `{ list_price }` (dollars, coerced to cents server-side). Calls the existing `updateListing` service so an audit-log entry is written. Same shape as the existing group-update endpoint but scoped to a single listing — the new editable form line uses this.
+- `listCards` (`/cards`) now exposes `al.id as listing_id` on every row alongside the existing `listed_price`, so the client can target the active listing for a raw card pick. `SlabResult` already had `listing_id` from the slabs query; `RawCardResult` on the client picked it up to match.
+
+**Card Show Raw inventory — inline CS Price edit + remove button**
+- Each row in the Raw tab of Card Show Inventory has its CS Price as an editable input (was static text). Type a new value, **Enter** or blur to save (`PATCH /cards/:id`), **Escape** cancels. Negative or non-numeric values rejected; empty clears the sticker to `NULL`. Draft state stays local until commit, so typing is responsive without round-tripping each keystroke.
+- New per-row **×** button calls `PATCH /cards/:id` with `is_card_show=false, card_show_price=null` — mirrors how the SlabDetailModal removes a graded card from the show.
+
+### Fixes
+
+**Card Show Inventory pagination — Raw tab read graded counts**
+- The pagination footer at the bottom of Card Show Inventory always read from the graded query's `data` object. On the Card Show > Raw tab the graded query is disabled, so the footer either rendered stale graded totals or — worse — clicking **Next** pushed `page` beyond the raw query's actual page count and the table rendered empty rows. Footer now picks `rawData` when `cardShowMode && cardType === 'raw'`, otherwise `data`; the Next button is properly disabled when there's no next page. Tab switching already resets `page` to 1, so no additional sync was needed.
+
 ## May 28, 2026
 
 ### Features
