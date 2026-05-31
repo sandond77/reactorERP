@@ -98,7 +98,7 @@ interface RawCardResult {
 interface BulkCartItem {
   cart_entry_id: string;  // unique per cart row; lets the same card_instance be added multiple times
   id: string;             // card_instance_id (the source lot — may repeat across entries)
-  listing_id?: string;
+  listing_id?: string | null;
   card_name: string | null;
   set_name: string | null;
   cert_number: string | null;
@@ -112,6 +112,17 @@ interface BulkCartItem {
   quantity: number;
   /** Source lot quantity — cap for the qty input. Always 1 for graded. */
   lot_quantity: number;
+  // Standing reference prices on the underlying card / listing — surfaced
+  // inline so the user can edit them right from the cart without leaving
+  // the bulk flow. NOT the same as sticker_price_input above (which is
+  // this sale's per-row price).
+  card_show_price: number | null;
+  listed_price: number | null;
+  is_listed: boolean;
+  // Local draft state for the inline CS/Listed price inputs. Empty when
+  // not actively editing; populated on focus so blur can detect changes.
+  cs_price_draft?: string;
+  listed_price_draft?: string;
 }
 
 interface RawCardShowResult {
@@ -120,6 +131,9 @@ interface RawCardShowResult {
   set_name: string | null;
   condition: string | null;
   card_show_price: number | null;
+  listed_price: number | null;
+  listing_id: string | null;
+  is_listed: boolean;
   raw_purchase_label: string | null;
   quantity: number;
 }
@@ -245,6 +259,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       } else if (selectedCard && selectedCard.id === vars.id) {
         setSelectedCard({ ...selectedCard, card_show_price: vars.cents });
       }
+      // Fan out to bulk cart rows pointing at the same card_instance so they
+      // reflect the new sticker without a refetch. cs_price_draft is cleared
+      // so the next focus re-initialises from the new value.
+      setBulkCart(prev => prev.map(c => c.id === vars.id
+        ? { ...c, card_show_price: vars.cents, cs_price_draft: undefined }
+        : c));
       queryClient.invalidateQueries({ queryKey: ['sale-raw-search'] });
       queryClient.invalidateQueries({ queryKey: ['card-show-raw'] });
       toast.success('CS price updated');
@@ -273,12 +293,53 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       } else if (selectedCard && selectedCard.listing_id === vars.listingId) {
         setSelectedCard({ ...selectedCard, listed_price: vars.cents });
       }
+      // Fan out to bulk cart rows pointing at the same listing.
+      setBulkCart(prev => prev.map(c => c.listing_id === vars.listingId
+        ? { ...c, listed_price: vars.cents, listed_price_draft: undefined }
+        : c));
       queryClient.invalidateQueries({ queryKey: ['sale-raw-search'] });
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       toast.success('Listed price updated');
     },
     onError: () => toast.error('Failed to update listed price'),
   });
+  // Per-row commit helpers for the bulk cart's inline CS / Listed inputs.
+  function commitCartCsPrice(cartEntryId: string) {
+    const row = bulkCart.find(c => c.cart_entry_id === cartEntryId);
+    if (!row || row.cs_price_draft === undefined) return;
+    const trimmed = row.cs_price_draft.trim();
+    const cents = trimmed === '' ? null : Math.round(parseFloat(trimmed) * 100);
+    if (cents !== null && (!Number.isFinite(cents) || cents < 0)) {
+      toast.error('Enter a valid CS price');
+      return;
+    }
+    if (cents === (row.card_show_price ?? null)) {
+      setBulkCart(prev => prev.map(c => c.cart_entry_id === cartEntryId ? { ...c, cs_price_draft: undefined } : c));
+      return;
+    }
+    csPriceMut.mutate({ id: row.id, cents });
+  }
+  function commitCartListedPrice(cartEntryId: string) {
+    const row = bulkCart.find(c => c.cart_entry_id === cartEntryId);
+    if (!row?.listing_id || row.listed_price_draft === undefined) return;
+    const trimmed = row.listed_price_draft.trim();
+    if (trimmed === '') {
+      toast.error('Listed price cannot be empty — cancel the listing on the Listings page instead');
+      setBulkCart(prev => prev.map(c => c.cart_entry_id === cartEntryId ? { ...c, listed_price_draft: undefined } : c));
+      return;
+    }
+    const cents = Math.round(parseFloat(trimmed) * 100);
+    if (!Number.isFinite(cents) || cents < 0) {
+      toast.error('Enter a valid listed price');
+      return;
+    }
+    if (cents === (row.listed_price ?? null)) {
+      setBulkCart(prev => prev.map(c => c.cart_entry_id === cartEntryId ? { ...c, listed_price_draft: undefined } : c));
+      return;
+    }
+    listedPriceMut.mutate({ listingId: row.listing_id, cents });
+  }
+
   function commitListedPrice() {
     const activeCard = saleMode === 'raw' ? selectedRawCard : selectedCard;
     if (!activeCard?.listing_id) return;
@@ -469,7 +530,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         id: string; listing_id: string; card_name: string | null; set_name: string | null;
         cert_number: string | null; grade_label: string | null; company: string | null;
         raw_purchase_label: string | null; card_show_price: number | null;
-        condition: string | null;
+        condition: string | null; list_price?: number | null; listed_price?: number | null;
       }> = res.data.data;
       if (!rows.length) { toast.error('No active listings found for that URL'); return; }
       const alreadyAdded = new Set(bulkCart.map(c => c.id));
@@ -483,7 +544,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           seenIdentities.add(key);
           return true;
         })
-        .map(r => ({
+        .map<BulkCartItem>(r => ({
           cart_entry_id: crypto.randomUUID(),
           id: r.id,
           listing_id: r.listing_id,
@@ -500,6 +561,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           // URL-lookup path doesn't return the source lot quantity; default to
           // 1 (the lookup is per-listing, which is usually one card anyway).
           lot_quantity: 1,
+          card_show_price: r.card_show_price ?? null,
+          listed_price: r.list_price ?? r.listed_price ?? null,
+          is_listed: true,  // came from /listings/by-url so it IS listed
         }));
       if (!newItems.length) { toast('All cards from that URL are already in the cart'); return; }
       setBulkCart(prev => [...prev, ...newItems]);
@@ -1342,7 +1406,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     setBulkCart(prev => [...prev, {
                       cart_entry_id: crypto.randomUUID(),
                       id: r.id,
-                      listing_id: r.listing_id ?? undefined,
+                      listing_id: r.listing_id ?? null,
                       card_name: r.card_name,
                       set_name: r.set_name,
                       cert_number: r.cert_number,
@@ -1354,6 +1418,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       card_type: 'graded',
                       quantity: 1,
                       lot_quantity: 1,
+                      card_show_price: r.card_show_price ?? null,
+                      listed_price: r.listed_price ?? null,
+                      is_listed: r.is_listed ?? false,
                     }]);
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
@@ -1387,6 +1454,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       setBulkCart(prev => [...prev, {
                         cart_entry_id: crypto.randomUUID(),
                         id: r.id,
+                        listing_id: r.listing_id ?? null,
                         card_name: r.card_name,
                         set_name: r.set_name,
                         cert_number: null,
@@ -1398,6 +1466,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                         card_type: 'raw',
                         quantity: 1,
                         lot_quantity: lotQty,
+                        card_show_price: r.card_show_price ?? null,
+                        listed_price: r.listed_price ?? null,
+                        is_listed: r.is_listed ?? false,
                       }]);
                     };
                     // Re-add confirm — multi-add is intentional only when the
@@ -1501,6 +1572,51 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                             setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, sticker_price_input: val, final_price_input: val } : c));
                           }}
                           className={cn('w-20 text-xs bg-zinc-800 rounded px-2 py-1 text-zinc-200 focus:outline-none', missingPrice ? 'border border-amber-600/60 placeholder:text-amber-700' : 'border border-zinc-600 focus:border-indigo-500')}
+                        />
+                      </div>
+                    )}
+                    {/* Standing CS sticker on the underlying card — separate
+                        from this sale's sticker_price_input above. Saves on
+                        blur to /cards/:id and fans out to all cart rows that
+                        point at the same card_instance. */}
+                    <div className="flex items-center gap-1 shrink-0" title="Card's standing CS sticker price">
+                      <span className="text-[10px] text-zinc-500 uppercase tracking-wide">CS</span>
+                      <input
+                        type="text" inputMode="decimal"
+                        value={item.cs_price_draft !== undefined
+                          ? item.cs_price_draft
+                          : item.card_show_price != null ? (item.card_show_price / 100).toFixed(2) : ''}
+                        placeholder="—"
+                        onFocus={() => setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, cs_price_draft: c.card_show_price != null ? (c.card_show_price / 100).toFixed(2) : '' } : c))}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^0-9.]/g, '');
+                          setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, cs_price_draft: val } : c));
+                        }}
+                        onBlur={() => commitCartCsPrice(item.cart_entry_id)}
+                        disabled={csPriceMut.isPending}
+                        className="w-16 text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-emerald-400 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+                    {/* Listed price — only on eBay bulk sales. Disabled with a
+                        dash when the source card has no active listing. */}
+                    {bulkIsEbay && (
+                      <div className="flex items-center gap-1 shrink-0" title={item.listing_id ? 'Active listing price' : 'No active listing'}>
+                        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">List</span>
+                        <input
+                          type="text" inputMode="decimal"
+                          value={item.listed_price_draft !== undefined
+                            ? item.listed_price_draft
+                            : item.listed_price != null ? (item.listed_price / 100).toFixed(2) : ''}
+                          placeholder={item.listing_id ? '—' : '—'}
+                          onFocus={() => setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, listed_price_draft: c.listed_price != null ? (c.listed_price / 100).toFixed(2) : '' } : c))}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9.]/g, '');
+                            setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, listed_price_draft: val } : c));
+                          }}
+                          onBlur={() => commitCartListedPrice(item.cart_entry_id)}
+                          disabled={!item.listing_id || listedPriceMut.isPending}
+                          className={cn('w-16 text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-sky-400 focus:outline-none focus:border-indigo-500',
+                            !item.listing_id && 'opacity-50 cursor-not-allowed')}
                         />
                       </div>
                     )}
