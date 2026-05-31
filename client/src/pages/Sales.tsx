@@ -1202,7 +1202,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <div className={cn('flex flex-col gap-1', showListed && 'sm:grid sm:grid-cols-2 sm:gap-3')}>
             <div className="flex flex-col gap-1">
               <Input
-                label="CS Price (sticker)"
+                label="CS Price (per card sticker)"
                 type="text"
                 inputMode="decimal"
                 placeholder="0.00"
@@ -1211,7 +1211,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 onBlur={commitCsPrice}
                 disabled={csPriceMut.isPending}
               />
-              <p className="text-[11px] text-zinc-500">Saves on blur — separate from Strike Price.</p>
+              <p className="text-[11px] text-zinc-500">Sticker price per card — independent of the total Strike Price for this sale.</p>
             </div>
             {showListed && (() => {
               const activeListingId = saleMode === 'raw'
