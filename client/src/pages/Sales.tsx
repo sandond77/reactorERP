@@ -90,6 +90,7 @@ interface RawCardResult {
   raw_purchase_label: string | null;
   is_listed: boolean;
   listed_price: number | null;
+  listing_id: string | null;
   card_show_price: number | null;
   location_name: string | null;
 }
@@ -214,11 +215,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCard?.id]);
 
-  // Sync the CS Price form input with whichever card is currently selected.
-  // Empty string when no card_show_price is set so the placeholder shows.
+  // Sync the CS/Listed Price form inputs with whichever card is currently
+  // selected. Empty string when no value is set so the placeholder shows.
   useEffect(() => {
     const activeCard = saleMode === 'raw' ? selectedRawCard : selectedCard;
     setCsPriceInput(activeCard?.card_show_price ? (activeCard.card_show_price / 100).toFixed(2) : '');
+    setListedPriceInput(activeCard?.listed_price ? (activeCard.listed_price / 100).toFixed(2) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRawCard?.id, selectedCard?.id, saleMode]);
   const [orderEarnings, setOrderEarnings] = useState('');
@@ -229,11 +231,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [orderNumber, setOrderNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  // Card Show sticker price input — shown as a labeled form line above
-  // Strike Price when the sale platform is Card Show. Persists via
-  // PATCH /cards/:id on blur and reflects back into the local
-  // selectedRawCard / selectedCard so the summary block updates.
-  const [csPriceInput, setCsPriceInput] = useState('');
+  // Card Show sticker + eBay list price inputs — shown as labeled form
+  // lines above Strike Price. Both save on blur via dedicated mutations
+  // and reflect updates back into the local selectedRawCard / selectedCard.
+  const [csPriceInput,     setCsPriceInput]     = useState('');
+  const [listedPriceInput, setListedPriceInput] = useState('');
   const csPriceMut = useMutation({
     mutationFn: ({ id, cents }: { id: string; cents: number | null }) =>
       api.patch(`/cards/${id}`, { card_show_price: cents }),
@@ -261,6 +263,39 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     }
     if (cents === current) return;
     csPriceMut.mutate({ id: activeCard.id, cents });
+  }
+  const listedPriceMut = useMutation({
+    mutationFn: ({ listingId, cents }: { listingId: string; cents: number }) =>
+      api.patch(`/listings/${listingId}`, { list_price: cents / 100 }),
+    onSuccess: (_data, vars) => {
+      if (selectedRawCard && selectedRawCard.listing_id === vars.listingId) {
+        setSelectedRawCard({ ...selectedRawCard, listed_price: vars.cents });
+      } else if (selectedCard && selectedCard.listing_id === vars.listingId) {
+        setSelectedCard({ ...selectedCard, listed_price: vars.cents });
+      }
+      queryClient.invalidateQueries({ queryKey: ['sale-raw-search'] });
+      queryClient.invalidateQueries({ queryKey: ['listings'] });
+      toast.success('Listed price updated');
+    },
+    onError: () => toast.error('Failed to update listed price'),
+  });
+  function commitListedPrice() {
+    const activeCard = saleMode === 'raw' ? selectedRawCard : selectedCard;
+    if (!activeCard?.listing_id) return;
+    const current = activeCard.listed_price ?? null;
+    const trimmed = listedPriceInput.trim();
+    if (trimmed === '') {
+      toast.error('Listed price cannot be empty — cancel the listing on the Listings page instead');
+      setListedPriceInput(current != null ? (current / 100).toFixed(2) : '');
+      return;
+    }
+    const cents = Math.round(parseFloat(trimmed) * 100);
+    if (!Number.isFinite(cents) || cents < 0) {
+      toast.error('Enter a valid listed price');
+      return;
+    }
+    if (cents === current) return;
+    listedPriceMut.mutate({ listingId: activeCard.listing_id, cents });
   }
 
   const { data: cardShowsData } = useQuery<{ data: Array<{ id: string; name: string; show_date: string; end_date: string | null; num_days: number; location: string | null }> }>({
@@ -1094,9 +1129,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           selectedCard reflect any CS update so the summary above stays
           in sync without a refetch. */}
       {(selectedRawCard || selectedCard) && (() => {
-        const activeListedPrice = saleMode === 'raw'
-          ? selectedRawCard?.listed_price ?? null
-          : selectedCard?.listed_price ?? null;
         const activeCurrency = saleMode === 'raw'
           ? selectedRawCard?.currency ?? 'USD'
           : selectedCard?.currency ?? 'USD';
@@ -1116,22 +1148,32 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               />
               <p className="text-[11px] text-zinc-500">Saves on blur — separate from Strike Price.</p>
             </div>
-            {showListed && (
-              <div className="flex flex-col gap-1">
-                <Input
-                  label="Listed Price (eBay)"
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="—"
-                  value={activeListedPrice != null ? (activeListedPrice / 100).toFixed(2) : ''}
-                  readOnly
-                  className="opacity-70 cursor-not-allowed"
-                />
-                <p className="text-[11px] text-zinc-500">
-                  Reference from the active listing in {activeCurrency}. Edit on the Listings page.
-                </p>
-              </div>
-            )}
+            {showListed && (() => {
+              const activeListingId = saleMode === 'raw'
+                ? selectedRawCard?.listing_id ?? null
+                : selectedCard?.listing_id ?? null;
+              const noListing = !activeListingId;
+              return (
+                <div className="flex flex-col gap-1">
+                  <Input
+                    label="Listed Price (eBay)"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={noListing ? '— no active listing —' : '0.00'}
+                    value={listedPriceInput}
+                    onChange={(e) => setListedPriceInput(e.target.value.replace(/[^\d.]/g, ''))}
+                    onBlur={commitListedPrice}
+                    disabled={noListing || listedPriceMut.isPending}
+                    className={noListing ? 'opacity-60 cursor-not-allowed' : ''}
+                  />
+                  <p className="text-[11px] text-zinc-500">
+                    {noListing
+                      ? 'No active listing — create one on the Listings page first.'
+                      : <>Saves to the listing on blur ({activeCurrency}). Listings page reflects this immediately.</>}
+                  </p>
+                </div>
+              );
+            })()}
           </div>
         );
       })()}
