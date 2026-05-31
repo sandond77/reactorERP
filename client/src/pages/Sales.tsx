@@ -785,6 +785,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   raw_purchase_label: d.raw_purchase_label ?? null,
                   is_listed: true,
                   listed_price: d.listed_price ?? null,
+                  listing_id: d.listing_id ?? null,
                   card_show_price: d.card_show_price ?? null,
                   location_name: d.location_name ?? null,
                 });
