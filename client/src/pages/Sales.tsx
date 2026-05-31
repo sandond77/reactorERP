@@ -1553,8 +1553,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                         ($/strike) is entered on the next step (bulk-review);
                         we no longer render the per-row strike input here so
                         the cart panel stays focused on cards + sticker. */}
-                    <div className="flex items-center gap-1 shrink-0" title="Card's standing CS sticker price">
-                      <span className="text-[10px] text-zinc-500 uppercase tracking-wide">CS</span>
+                    <div className="flex items-center gap-1.5 shrink-0" title="Card's standing CS sticker price — saves on blur">
+                      <span className="text-[11px] font-medium text-emerald-500/80 uppercase tracking-wide">CS&nbsp;Price</span>
                       <input
                         type="text" inputMode="decimal"
                         value={item.cs_price_draft !== undefined
@@ -1568,14 +1568,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                         }}
                         onBlur={() => commitCartCsPrice(item.cart_entry_id)}
                         disabled={csPriceMut.isPending}
-                        className="w-16 text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-emerald-400 focus:outline-none focus:border-indigo-500"
+                        className="w-20 text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-emerald-400 focus:outline-none focus:border-indigo-500"
                       />
                     </div>
                     {/* Listed price — only on eBay bulk sales. Disabled with a
                         dash when the source card has no active listing. */}
                     {bulkIsEbay && (
-                      <div className="flex items-center gap-1 shrink-0" title={item.listing_id ? 'Active listing price' : 'No active listing'}>
-                        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">List</span>
+                      <div className="flex items-center gap-1.5 shrink-0" title={item.listing_id ? 'Active listing price — saves on blur' : 'No active listing'}>
+                        <span className="text-[11px] font-medium text-sky-500/80 uppercase tracking-wide">List&nbsp;Price</span>
                         <input
                           type="text" inputMode="decimal"
                           value={item.listed_price_draft !== undefined
