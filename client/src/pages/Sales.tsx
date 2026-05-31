@@ -1943,7 +1943,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         await api.post('/sales/batch', {
           items: itemsWithFinal.map(item => ({
             card_instance_id: item.id,
-            listing_id: item.listing_id,
+            // Coerce null → undefined so it's omitted from the JSON. The
+            // server's zod schema accepts string|undefined, not null —
+            // raw cart rows with no active listing now hold null here.
+            listing_id: item.listing_id ?? undefined,
             sale_price: item.final_price,
             platform_fees: item.platform_fees,
             // Always send the cart qty — never undefined. Server's recordSale
