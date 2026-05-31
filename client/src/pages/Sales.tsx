@@ -260,11 +260,22 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         setSelectedCard({ ...selectedCard, card_show_price: vars.cents });
       }
       // Fan out to bulk cart rows pointing at the same card_instance so they
-      // reflect the new sticker without a refetch. cs_price_draft is cleared
-      // so the next focus re-initialises from the new value.
-      setBulkCart(prev => prev.map(c => c.id === vars.id
-        ? { ...c, card_show_price: vars.cents, cs_price_draft: undefined }
-        : c));
+      // reflect the new sticker without a refetch. Also propagate into
+      // sticker_price_input / final_price_input so the review step picks up
+      // the value the user just typed — matches the auto-fill that happens
+      // at add-to-cart time. cs_price_draft cleared so next focus re-inits
+      // from the new value.
+      setBulkCart(prev => prev.map(c => {
+        if (c.id !== vars.id) return c;
+        const stickerStr = vars.cents != null ? (vars.cents / 100).toFixed(2) : '';
+        return {
+          ...c,
+          card_show_price: vars.cents,
+          sticker_price_input: stickerStr,
+          final_price_input:   stickerStr,
+          cs_price_draft: undefined,
+        };
+      }));
       queryClient.invalidateQueries({ queryKey: ['sale-raw-search'] });
       queryClient.invalidateQueries({ queryKey: ['card-show-raw'] });
       toast.success('CS price updated');
