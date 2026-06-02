@@ -1,6 +1,15 @@
 # Reactor — Changelog
 
-## May 31, 2026
+## June 2, 2026
+
+### Fixes
+
+**eBay listing flow — FIFO auto-pick now avoids card-show certs + click-to-swap**
+- When listing a multi-copy graded card on eBay, the cert picker's FIFO default would happily auto-select a cert that was already sitting on the card-show table — easy to miss, and the only way to override was to bump qty up, click the cert you actually wanted, then drop qty back down and deselect the original. Now FIFO sorts `is_card_show=false` first before slicing to `qty`, so the auto-pick skips on-show certs whenever an off-show one is available. Falls through to picking on-show certs only when they're the only option.
+- Click-to-swap at limit. Previously clicking an unselected cert when you were already at `qty` was a no-op (cursor-not-allowed). Now it swaps in place — drops the first-inserted entry from the selection and adds the clicked one — so changing your mind is a single click instead of a deselect-then-reselect dance.
+- **On Show** indicator surfaces in three places: a fuchsia badge next to the cert number on the per-cert row, an inline "· N on show" tag in the count summary on the cert pick step ("5 unlisted PSA 10 copies · 2 on show"), and an "N on show" badge on each card-name row at the search step so you can see at a glance which titles have show inventory before drilling in.
+
+
 
 ### Features
 

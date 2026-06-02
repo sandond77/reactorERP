@@ -341,7 +341,9 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const gradeKeys = Array.from(gradeBreakdown.keys());
   const activeGrade = selectedGrade ?? gradeKeys[0] ?? null;
   const copiesForGrade = availableCopies.filter(c => (c.grade_label ?? 'Ungraded') === activeGrade);
-  const fifoIds = new Set(copiesForGrade.slice(0, qty).map(c => c.id));
+  // FIFO auto-pick prefers certs NOT already in card show inventory to avoid double-listing
+  const fifoOrdered = [...copiesForGrade].sort((a, b) => Number(a.is_card_show) - Number(b.is_card_show));
+  const fifoIds = new Set(fifoOrdered.slice(0, qty).map(c => c.id));
   const effectiveIds = customSelected.size > 0 ? customSelected : fifoIds;
   const selectedCopies = copiesForGrade.filter(c => effectiveIds.has(c.id));
 
@@ -349,15 +351,18 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const setSlabs = setSlotList.map(s => s.slab).filter((s): s is SlabResult => s != null);
   const takenSetIds = new Set(setSlabs.map(s => s.id));
 
-  // Deduplicate search results by card name
+  // Deduplicate search results by card name, with on-show count
   const uniqueCardNames = searchResults
     ? Array.from(
         searchResults.data.reduce((map, s) => {
           const name = s.card_name ?? 'Unknown';
-          map.set(name, (map.get(name) ?? 0) + 1);
+          const cur = map.get(name) ?? { count: 0, onShow: 0 };
+          cur.count += 1;
+          if (s.is_card_show) cur.onShow += 1;
+          map.set(name, cur);
           return map;
-        }, new Map<string, number>())
-      ).filter(([, count]) => count > 0)
+        }, new Map<string, { count: number; onShow: number }>())
+      ).filter(([, v]) => v.count > 0)
     : [];
 
   // Raw: group by card name, then per-instance selector
@@ -489,12 +494,17 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       {debouncedSearch.length >= 2 && (
         uniqueCardNames.length > 0 ? (
           <div className="rounded-lg border border-zinc-700 overflow-hidden">
-            {uniqueCardNames.map(([name, count]) => (
+            {uniqueCardNames.map(([name, v]) => (
               <button key={name} type="button"
                 className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-start justify-between gap-3 transition-colors"
                 onClick={() => { setSelectedCardName(name); setQty(1); setStep('quantity'); }}>
                 <span className="text-sm text-zinc-200 break-words leading-snug">{name}</span>
-                <span className="shrink-0 text-[10px] text-zinc-500 font-mono tabular-nums mt-0.5">{count} unsold</span>
+                <span className="shrink-0 flex items-center gap-1.5 mt-0.5">
+                  {v.onShow > 0 && (
+                    <span className="text-[9px] font-bold uppercase tracking-wide bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 rounded px-1 py-0.5 tabular-nums">{v.onShow} on show</span>
+                  )}
+                  <span className="text-[10px] text-zinc-500 font-mono tabular-nums">{v.count} unsold</span>
+                </span>
               </button>
             ))}
           </div>
@@ -554,6 +564,9 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
                 <p className="text-xs text-zinc-400">
                   <span className="font-medium text-zinc-200 tabular-nums">{copiesForGrade.length}</span>{' '}
                   unlisted {activeGrade ?? ''} {copiesForGrade.length === 1 ? 'copy' : 'copies'}
+                  {copiesForGrade.some(c => c.is_card_show) && (
+                    <span className="ml-1.5 text-fuchsia-300 tabular-nums">· {copiesForGrade.filter(c => c.is_card_show).length} on show</span>
+                  )}
                 </p>
                 {allCopies.some(c => c.is_listed) && (
                   <p className="text-[10px] text-zinc-600">{allCopies.filter(c => c.is_listed).length} already listed</p>
@@ -579,28 +592,40 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
           </div>
 
           <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-            {copiesForGrade.map((copy, idx) => {
+            {copiesForGrade.map((copy) => {
               const isSelected = effectiveIds.has(copy.id);
               const atLimit = !isSelected && effectiveIds.size >= qty;
-              const isFifo = customSelected.size === 0 && idx < qty;
+              const isFifo = customSelected.size === 0 && fifoIds.has(copy.id);
               const certLabel = formatCertNumber(copy.cert_number);
               return (
                 <div key={copy.id}
-                  onClick={atLimit ? undefined : () => setCustomSelected(() => {
+                  onClick={() => setCustomSelected(() => {
                     const next = new Set(effectiveIds);
-                    if (next.has(copy.id)) { next.delete(copy.id); } else { next.add(copy.id); }
+                    if (next.has(copy.id)) {
+                      next.delete(copy.id);
+                    } else if (next.size >= qty) {
+                      // Swap: drop the first-inserted entry and add this one
+                      const first = next.values().next().value;
+                      if (first) next.delete(first);
+                      next.add(copy.id);
+                    } else {
+                      next.add(copy.id);
+                    }
                     return next;
                   })}
-                  className={`rounded-lg border px-3 py-2 flex items-center gap-2 transition-colors ${
-                    atLimit ? 'cursor-not-allowed opacity-20 border-zinc-800/20 bg-zinc-900/20'
-                    : isSelected ? 'cursor-pointer border-indigo-500/40 bg-indigo-500/8'
-                    : 'cursor-pointer border-zinc-700/30 bg-zinc-800/20 opacity-50 hover:opacity-70'
+                  className={`rounded-lg border px-3 py-2 flex items-center gap-2 transition-colors cursor-pointer ${
+                    isSelected ? 'border-indigo-500/40 bg-indigo-500/8'
+                    : atLimit ? 'border-zinc-700/30 bg-zinc-800/20 opacity-40 hover:opacity-80'
+                    : 'border-zinc-700/30 bg-zinc-800/20 opacity-50 hover:opacity-80'
                   }`}>
                   <div className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center transition-colors ${isSelected ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600'}`}>
                     {isSelected && <span className="text-[8px] text-white font-bold">✓</span>}
                   </div>
                   {isFifo && (
                     <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-1 py-0.5">FIFO</span>
+                  )}
+                  {copy.is_card_show && (
+                    <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 rounded px-1 py-0.5">On Show</span>
                   )}
                   <span className="text-sm font-mono text-zinc-200">{certLabel}</span>
                   {isSelected && <span className="ml-auto text-[10px] text-indigo-400 font-medium">Will list</span>}
