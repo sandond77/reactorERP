@@ -2,7 +2,30 @@
 
 ## June 2, 2026
 
+### Features
+
+**AI Agent — `get_card_show_report` tool with multi-day prompt flow**
+- Mirrors the existing `/reports/card-show-breakdown/:showId` endpoint as an agent-callable tool, so the agent can summarize a show end-to-end the same way the Reports page does — slab + raw counts, gross revenue, net revenue, total cost basis, profit. Previously the agent could only recite the sales it had personally recorded that session and silently missed anything entered via the browser.
+- Multi-day shows get a prompt loop. When the show has multiple days and the agent calls the tool without a `day` arg, the response includes the overall totals **plus** a `days_available: [1, 2, 3]` array and a `note` field instructing the agent to ask the user whether they want the overall report or a specific day. A follow-up call with `day=2` returns just that day's slice. Single-day shows skip the prompt and return overall directly.
+
+**AI Agent — eBay order URL parsing on Record Sale**
+- Pasting an eBay order-details URL into the **Order Details Link** field now auto-fills **Order #** from the `orderid` query param. `parseEbayOrderId()` swallows malformed URLs and only fills when Order # is currently empty, so a manually-typed order number isn't clobbered. Wired into both the single-card eBay sale form and the eBay set bulk-review form — one less copy-paste step on every eBay sale.
+
+**AI Agent — `update_sale`, `delete_sale`, `list_card_shows` tools + `card_show_id` filter on `list_sales`**
+- The agent could record sales but couldn't edit or remove them. Added `update_sale` (partial update on platform / sale_price / fees / shipping / sold_at / etc.) and `delete_sale` (which routes through the existing service so the underlying card is restored to inventory — graded → graded slot, raw → raw quantity refund).
+- `list_card_shows` returns active + past shows so the agent can resolve a show by name without the user having to paste an ID.
+- `list_sales` gained a `card_show_id` filter and its default limit was bumped from 20 → 50 (cap 50 → 500). Previously summarizing a show only saw the most recent 20 sales and silently truncated older browser-entered ones — now the agent can pull a full show's worth in one tool call.
+
 ### Fixes
+
+**Delete Sale confirmation — wrong label for raw sales**
+- The confirmation modal said *"returned to inventory as graded"* even for raw sales. Now keys off `sale.cert_number` (`"graded"` when present, `"raw"` otherwise) so the label matches what the server actually restores when delete is confirmed.
+
+**Listings page — raw rows of same SKU collapsed across conditions**
+- Two raw listings of the same card in different conditions (e.g. NM + LP) were merging into a single grouped row because the `GROUP BY` only used `cc.sku + grade_label`. Added `CASE WHEN sd.grade_label IS NULL THEN ci.condition END` to the grouping key so raw rows split by condition while graded rows still group by grade.
+
+**Record Sale on eBay — CS Price input was redundant**
+- eBay sales hid the CS Price (per-card sticker) input — Listed Price is the only reference that's relevant on that platform, and showing both was confusing. CS Price still renders on all other platforms.
 
 **eBay listing flow — FIFO auto-pick now avoids card-show certs + click-to-swap**
 - When listing a multi-copy graded card on eBay, the cert picker's FIFO default would happily auto-select a cert that was already sitting on the card-show table — easy to miss, and the only way to override was to bump qty up, click the cert you actually wanted, then drop qty back down and deselect the original. Now FIFO sorts `is_card_show=false` first before slicing to `qty`, so the auto-pick skips on-show certs whenever an off-show one is available. Falls through to picking on-show certs only when they're the only option.
