@@ -11,6 +11,7 @@ import { normalizeGradeLabel } from '../utils/grade-labels';
 import { createRawPurchase, saveReceiptUrl as saveRawPurchaseReceiptUrl } from './raw-purchases.service';
 import { createCard, updateCard, transitionCardStatus, softDeleteCard } from './cards.service';
 import { recordSale, listSales, updateSale, deleteSale } from './sales.service';
+import { getCardShowBreakdown } from './reports.service';
 import { createExpense, deleteExpense, saveReceiptUrl as saveExpenseReceiptUrl } from './expenses.service';
 import { saveReceiptFromBase64 } from '../utils/save-receipt';
 import * as gradingService from './grading-submissions.service';
@@ -640,6 +641,18 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: 'get_card_show_report',
+    description: 'Generate a profit/revenue report for a specific card show — same data the Reports page surfaces. Returns slab + raw counts, revenue, net proceeds, cost basis. For multi-day shows, call without `day` first to discover the days_available; then ASK the user whether they want the overall totals or a specific day (Day 1, Day 2, …) and call again with `day=N`. For single-day shows the overall totals are the only sensible answer.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_show_id: { type: 'string', description: 'UUID of the card show (from list_card_shows)' },
+        day:          { type: 'number', description: 'Optional 1-indexed day number for multi-day shows. Omit to get overall totals + the list of available days.' },
+      },
+      required: ['card_show_id'],
+    },
+  },
+  {
     name: 'list_card_shows',
     description: 'List the user\'s card shows. Use first when the user references a specific show by name or date — get its id, then pass card_show_id into list_sales to summarise that show\'s sales without truncation.',
     input_schema: {
@@ -1234,6 +1247,60 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         sold_at: s.sold_at,
         purchase_label: s.raw_purchase_label,
       })),
+    };
+  }
+
+  if (toolName === 'get_card_show_report') {
+    const { card_show_id, day } = toolInput as { card_show_id: string; day?: number };
+    const report = await getCardShowBreakdown(userId, card_show_id);
+    const isMultiDay = report.days.length > 1;
+    // Format the slab/raw rollup once — used for both scopes.
+    const fmt = (r: typeof report | (typeof report.days)[number]) => ({
+      slab_count:        r.slab_count,
+      slab_revenue_usd:  (r.slab_revenue / 100).toFixed(2),
+      slab_net_usd:      (r.slab_net     / 100).toFixed(2),
+      slab_cost_usd:     (r.slab_cost    / 100).toFixed(2),
+      slab_profit_usd:   ((r.slab_net - r.slab_cost) / 100).toFixed(2),
+      raw_count:         r.raw_count,
+      raw_revenue_usd:   (r.raw_revenue  / 100).toFixed(2),
+      raw_net_usd:       (r.raw_net      / 100).toFixed(2),
+      raw_cost_usd:      (r.raw_cost     / 100).toFixed(2),
+      raw_profit_usd:    ((r.raw_net - r.raw_cost) / 100).toFixed(2),
+      total_count:       r.slab_count + r.raw_count,
+      total_revenue_usd: ((r.slab_revenue + r.raw_revenue) / 100).toFixed(2),
+      total_net_usd:     ((r.slab_net     + r.raw_net)     / 100).toFixed(2),
+      total_cost_usd:    ((r.slab_cost    + r.raw_cost)    / 100).toFixed(2),
+      total_profit_usd:  (((r.slab_net + r.raw_net) - (r.slab_cost + r.raw_cost)) / 100).toFixed(2),
+    });
+
+    if (day != null) {
+      const found = report.days.find(d => d.day_number === day);
+      if (!found) {
+        return {
+          success: false,
+          error: `Day ${day} not found for this show. Available: ${report.days.map(d => `Day ${d.day_number} (${d.show_date})`).join(', ')}`,
+        };
+      }
+      return {
+        scope: `day_${day}`,
+        show_date: found.show_date,
+        ...fmt(found),
+      };
+    }
+
+    // No day specified — return overall and surface the days list so the
+    // agent can prompt the user to drill in if it's multi-day.
+    return {
+      scope: 'overall',
+      is_multi_day: isMultiDay,
+      ...(isMultiDay && {
+        days_available: report.days.map(d => ({
+          day_number: d.day_number,
+          show_date:  d.show_date,
+        })),
+        note: 'Multi-day show — ask the user whether they want the overall totals returned here or a specific day (Day 1, Day 2, …). Call again with `day=N` to get a per-day breakdown.',
+      }),
+      ...fmt(report),
     };
   }
 
