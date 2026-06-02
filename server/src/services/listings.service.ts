@@ -361,6 +361,11 @@ export async function listListings(
         CASE WHEN cc.sku IS NULL THEN COALESCE(cc.set_name, ci.set_name_override) END,
         sd.grade_label,
         sd.company,
+        -- For raw listings (no grade_label), condition is a discriminator —
+        -- two NM and LP listings of the same card need to render as
+        -- separate rows. For graded, ci.condition is NULL so this is a
+        -- no-op and rows still collapse by grade as before.
+        CASE WHEN sd.grade_label IS NULL THEN ci.condition END,
         l.platform,
         l.currency,
         CASE WHEN cc.sku IS NULL THEN l.list_price END,

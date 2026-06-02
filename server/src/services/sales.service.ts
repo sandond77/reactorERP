@@ -251,7 +251,7 @@ export async function getSaleFilterOptions(userId: string) {
 
 export async function listSales(
   userId: string,
-  filters: { platforms?: string[]; search?: string; from?: Date; to?: Date; cardType?: 'all' | 'graded' | 'raw'; soldDates?: string[] },
+  filters: { platforms?: string[]; cardShowIds?: string[]; search?: string; from?: Date; to?: Date; cardType?: 'all' | 'graded' | 'raw'; soldDates?: string[] },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
@@ -267,6 +267,11 @@ export async function listSales(
       filters.platforms!.length === 0
         ? qb.where(sql<boolean>`1=0` as any)
         : qb.where('s.platform', 'in', filters.platforms! as any)
+    )
+    .$if(filters.cardShowIds !== undefined, (qb) =>
+      filters.cardShowIds!.length === 0
+        ? qb.where(sql<boolean>`1=0` as any)
+        : qb.where('s.card_show_id', 'in', filters.cardShowIds! as any)
     )
     .$if(!!filters.search, (qb) => {
       const q = `%${filters.search}%`;

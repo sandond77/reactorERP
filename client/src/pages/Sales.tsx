@@ -78,6 +78,20 @@ function platformLabel(value: string) {
   return PLATFORMS.find(p => p.value === value)?.label ?? value;
 }
 
+// Parse the orderid query param out of an eBay order-details URL. Used to
+// auto-fill the Order # field when the user pastes a link like
+//   https://www.ebay.com/mesh/ord/details?mode=SH&srn=1711&orderid=03-14727-75926&source=…
+// Returns null when the URL is malformed or has no orderid param so the
+// caller can leave the existing value alone.
+function parseEbayOrderId(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl.trim());
+    return u.searchParams.get('orderid');
+  } catch {
+    return null;
+  }
+}
+
 interface RawCardResult {
   id: string;
   card_name: string | null;
@@ -1208,23 +1222,28 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         const activeCurrency = saleMode === 'raw'
           ? selectedRawCard?.currency ?? 'USD'
           : selectedCard?.currency ?? 'USD';
-        const showListed = platform === 'ebay';
+        const isEbay = platform === 'ebay';
+        // On eBay sales we surface the listing price (what the buyer saw)
+        // instead of the CS sticker — they're conceptually redundant and
+        // the listing's list_price is the authoritative reference here.
         return (
-          <div className={cn('flex flex-col gap-1', showListed && 'sm:grid sm:grid-cols-2 sm:gap-3')}>
-            <div className="flex flex-col gap-1">
-              <Input
-                label="CS Price (per card sticker)"
-                type="text"
-                inputMode="decimal"
-                placeholder="0.00"
-                value={csPriceInput}
-                onChange={(e) => setCsPriceInput(e.target.value.replace(/[^\d.]/g, ''))}
-                onBlur={commitCsPrice}
-                disabled={csPriceMut.isPending}
-              />
-              <p className="text-[11px] text-zinc-500">Sticker price per card — independent of the total Strike Price for this sale.</p>
-            </div>
-            {showListed && (() => {
+          <>
+            {!isEbay && (
+              <div className="flex flex-col gap-1">
+                <Input
+                  label="CS Price (per card sticker)"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={csPriceInput}
+                  onChange={(e) => setCsPriceInput(e.target.value.replace(/[^\d.]/g, ''))}
+                  onBlur={commitCsPrice}
+                  disabled={csPriceMut.isPending}
+                />
+                <p className="text-[11px] text-zinc-500">Sticker price per card — independent of the total Strike Price for this sale.</p>
+              </div>
+            )}
+            {isEbay && (() => {
               const activeListingId = saleMode === 'raw'
                 ? selectedRawCard?.listing_id ?? null
                 : selectedCard?.listing_id ?? null;
@@ -1250,7 +1269,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 </div>
               );
             })()}
-          </div>
+          </>
         );
       })()}
 
@@ -1284,7 +1303,19 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       {platform === 'ebay' && (
         <>
           <Input label="eBay Order Details Link" type="url" placeholder="https://www.ebay.com/…"
-            value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
+            value={ebayLink}
+            onChange={(e) => {
+              const val = e.target.value;
+              setEbayLink(val);
+              // Auto-extract orderid from the pasted URL on the way in, but
+              // only when Order # is empty — never clobber a value the user
+              // has typed or already auto-filled. Edits to the URL after
+              // that point leave Order # alone.
+              if (val && !orderNumber) {
+                const parsed = parseEbayOrderId(val);
+                if (parsed) setOrderNumber(parsed);
+              }
+            }} />
           <Input label="Order #" placeholder="e.g. eBay order number"
             value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
         </>
@@ -1708,7 +1739,15 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               )}
             </div>
             <Input label="eBay Order Details Link" type="url" placeholder="https://www.ebay.com/…"
-              value={ebayLink} onChange={(e) => setEbayLink(e.target.value)} />
+              value={ebayLink}
+              onChange={(e) => {
+                const val = e.target.value;
+                setEbayLink(val);
+                if (val && !orderNumber) {
+                  const parsed = parseEbayOrderId(val);
+                  if (parsed) setOrderNumber(parsed);
+                }
+              }} />
             <Input label="Order #" placeholder="e.g. eBay order number"
               value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
           </div>
@@ -2097,7 +2136,16 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
 
   if (mode === 'delete') return (
     <div className="space-y-4">
-      <p className="text-sm text-zinc-300">Delete this sale? The card will be returned to your inventory as <span className="text-zinc-100 font-medium">graded</span>.</p>
+      {/* Restored status mirrors what the server actually does on revert:
+          graded slabs go back to 'graded'; raw cards return to
+          'raw_for_sale' (or the original raw status). cert_number is the
+          clean discriminator since raw rows never carry a cert. */}
+      <p className="text-sm text-zinc-300">
+        Delete this sale? The card will be returned to your inventory as{' '}
+        <span className="text-zinc-100 font-medium">
+          {sale.cert_number ? 'graded' : 'raw'}
+        </span>.
+      </p>
       <p className="text-xs text-zinc-500 font-medium truncate">{sale.card_name}</p>
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={() => setMode('prompt')}>Back</Button>
