@@ -1,13 +1,13 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink, Plus, X } from 'lucide-react';
-import toast from 'react-hot-toast';
 import { api, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { SlabDetailModal } from '../components/inventory/SlabDetailModal';
+import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { AddToCardShowModal } from '../components/inventory/AddToCardShowModal';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
@@ -166,6 +166,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
 
   // Per-column filters
   const [selectedSlab, setSelectedSlab] = useState<SlabRow | null>(null);
+  const [selectedRawCardId, setSelectedRawCardId] = useState<string | null>(null);
 
   const [fCompany, setFCompany]       = useState<string[] | null>(saved.fCompany);
   const [fGrade, setFGrade]           = useState<string[] | null>(saved.fGrade);
@@ -253,46 +254,6 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     enabled: cardShowMode && cardType === 'raw',
   });
 
-  // Inline CS-price edit state for the raw card-show table. Tracks the
-  // working draft so the input is responsive without round-tripping each
-  // keystroke. Saved on blur or Enter.
-  const [rawPriceDraft, setRawPriceDraft] = useState<Record<string, string>>({});
-  const rawPriceMut = useMutation({
-    mutationFn: ({ id, cents }: { id: string; cents: number | null }) =>
-      api.patch(`/cards/${id}`, { card_show_price: cents }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['card-show-raw'] });
-      toast.success('CS price updated');
-    },
-    onError: () => toast.error('Failed to update CS price'),
-  });
-  const rawRemoveMut = useMutation({
-    mutationFn: (id: string) =>
-      api.patch(`/cards/${id}`, { is_card_show: false, card_show_price: null }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['card-show-raw'] });
-      toast.success('Removed from card show');
-    },
-    onError: () => toast.error('Failed to remove from card show'),
-  });
-
-  function commitRawPrice(id: string, currentCents: number | null) {
-    const draft = rawPriceDraft[id];
-    if (draft === undefined) return;
-    const trimmed = draft.trim();
-    const parsed = trimmed === '' ? null : Math.round(parseFloat(trimmed) * 100);
-    if (parsed !== null && (isNaN(parsed) || parsed < 0)) {
-      toast.error('Enter a valid price');
-      return;
-    }
-    if (parsed === currentCents) {
-      setRawPriceDraft((d) => { const n = { ...d }; delete n[id]; return n; });
-      return;
-    }
-    rawPriceMut.mutate({ id, cents: parsed });
-    setRawPriceDraft((d) => { const n = { ...d }; delete n[id]; return n; });
-  }
-
   const hasActiveFilters = fPersonal || fPurchDates.length || fListDates.length || fSoldDates.length ||
     [fCompany, fGrade, fListed, fCardShow, fPurchYear, fListYear, fSoldYear].some((f) => f !== null && f.length > 0);
 
@@ -377,59 +338,24 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                   <th className="px-3 py-2 text-right font-medium">Qty</th>
                   <th className="px-3 py-2 text-right font-medium">Cost</th>
                   <th className="px-3 py-2 text-right font-medium">CS Price</th>
-                  <th className="px-3 py-2 w-10" />
                 </tr>
               </thead>
               <tbody>
                 {!rawData?.data.length ? (
-                  <tr><td colSpan={8} className="px-3 py-10 text-center text-zinc-500">No raw cards in card show inventory.</td></tr>
-                ) : rawData.data.map((row) => {
-                  const draftVal = rawPriceDraft[row.id];
-                  const displayVal = draftVal !== undefined
-                    ? draftVal
-                    : row.card_show_price != null ? (row.card_show_price / 100).toFixed(2) : '';
-                  return (
-                    <tr key={row.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
-                      <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
-                      <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
-                      <td className="px-3 py-1 text-zinc-400 truncate">{row.set_name ?? ''}</td>
-                      <td className="px-3 py-1 text-zinc-400">{row.condition ?? ''}</td>
-                      <td className="px-3 py-1 text-right text-zinc-400">{row.quantity}</td>
-                      <td className="px-3 py-1 text-right text-zinc-400">{row.purchase_cost != null ? fmt(row.purchase_cost) : ''}</td>
-                      <td className="px-3 py-1 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <span className="text-zinc-500 text-[11px]">$</span>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            value={displayVal}
-                            onChange={(e) => setRawPriceDraft((d) => ({ ...d, [row.id]: e.target.value.replace(/[^\d.]/g, '') }))}
-                            onBlur={() => commitRawPrice(row.id, row.card_show_price ?? null)}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); }
-                              if (e.key === 'Escape') {
-                                setRawPriceDraft((d) => { const n = { ...d }; delete n[row.id]; return n; });
-                                (e.target as HTMLInputElement).blur();
-                              }
-                            }}
-                            placeholder="0.00"
-                            className="w-20 px-2 py-1 text-xs text-right bg-zinc-900 border border-zinc-700 rounded text-emerald-400 font-medium placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
-                          />
-                        </div>
-                      </td>
-                      <td className="px-3 py-1 text-center">
-                        <button
-                          onClick={() => rawRemoveMut.mutate(row.id)}
-                          disabled={rawRemoveMut.isPending}
-                          title="Remove from card show"
-                          className="text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-40"
-                        >
-                          <X size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                  <tr><td colSpan={7} className="px-3 py-10 text-center text-zinc-500">No raw cards in card show inventory.</td></tr>
+                ) : rawData.data.map((row) => (
+                  <tr key={row.id}
+                    onClick={() => setSelectedRawCardId(row.id)}
+                    className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
+                    <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-400 truncate">{row.set_name ?? ''}</td>
+                    <td className="px-3 py-1 text-zinc-400">{row.condition ?? ''}</td>
+                    <td className="px-3 py-1 text-right text-zinc-400">{row.quantity}</td>
+                    <td className="px-3 py-1 text-right text-zinc-400">{row.purchase_cost != null ? fmt(row.purchase_cost) : ''}</td>
+                    <td className="px-3 py-1 text-right text-emerald-400 font-medium">{fmt(row.card_show_price)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           )
@@ -534,6 +460,14 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
 
       {selectedSlab && (
         <SlabDetailModal slab={selectedSlab} onClose={() => setSelectedSlab(null)} cardShowMode={cardShowMode} />
+      )}
+      {selectedRawCardId && (
+        <CardDetailModal
+          cardId={selectedRawCardId}
+          onClose={() => setSelectedRawCardId(null)}
+          onDelete={() => setSelectedRawCardId(null)}
+          cardShowMode={cardShowMode}
+        />
       )}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Slab">
         <AddSlabForm onSuccess={() => { setAddOpen(false); invalidateResources(qc, ['slabs']); }} />

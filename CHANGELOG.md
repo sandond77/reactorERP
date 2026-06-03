@@ -2,6 +2,13 @@
 
 ## June 2, 2026
 
+### Fixes
+
+**Card Show Inventory · Raw tab — replace inline CS Price input with row-click modal**
+- The Raw tab's inline CS Price `<input>` + per-row × button shipped with May 31 didn't match the rest of the app — every other inventory surface uses a row-click → detail modal pattern. CS Price column is now read-only emerald text and clicking the row opens `CardDetailModal` in a new `cardShowMode`.
+- `CardDetailModal` gains a `cardShowMode` prop that mirrors `SlabDetailModal`'s card-show behavior: view mode shows a CS Price row in the details grid; **Edit** collapses the form to a single CS Price (USD) input with a "to change card details, edit from Raw Overall" hint so card-show editing doesn't accidentally touch cost / condition / location; the footer's Delete button is replaced by **Remove from Card Show** with a two-step confirm that PATCHes `{ is_card_show: false, card_show_price: null }`.
+- Dead code dropped from `Overall.tsx`: `rawPriceDraft` state, `rawPriceMut` + `rawRemoveMut` mutations, `commitRawPrice` helper, and the now-unused `useMutation` / `toast` imports. Pagination footer math (which keys off `cardShowMode && cardType === 'raw'`) is unchanged.
+
 ### Features
 
 **AI Agent — `get_card_show_report` tool with multi-day prompt flow**
