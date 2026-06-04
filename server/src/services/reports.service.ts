@@ -562,18 +562,31 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
   `.execute(db);
 
   // ── Orders (type-filtered, not view/status filtered) ──────────────────────
-  const ordersQuery = db
-    .selectFrom('raw_purchases as rp')
-    .select([
-      sql<number>`COUNT(*)::int`.as('total'),
-      sql<number>`COUNT(*) FILTER (WHERE rp.status = 'ordered')::int`.as('pending'),
-      sql<number>`COUNT(*) FILTER (WHERE rp.status = 'received')::int`.as('received'),
-      sql<number>`COUNT(*) FILTER (WHERE rp.status = 'cancelled')::int`.as('canceled'),
-      sql<number>`COALESCE(SUM(rp.card_count) FILTER (WHERE rp.status = 'received'), 0)::int`.as('cards_received'),
-    ])
-    .where('rp.user_id', '=', userId)
-    .$if(type !== 'both', (qb) => qb.where('rp.type', '=', type as 'raw' | 'bulk'))
-    .executeTakeFirst();
+  // awaiting_intake = sum over received rps of MAX(0, card_count - sum(ci.quantity)).
+  // Bulk lots of N split into card_instances during inspection; the gap is what
+  // hasn't been split yet. Raw single-card imports are 1:1 so they're 0 once intaked.
+  const ordersQuery = sql<{
+    total: number; pending: number; received: number; canceled: number;
+    cards_received: number; awaiting_intake: number;
+  }>`
+    WITH rp_intake AS (
+      SELECT rp.id, rp.status, rp.card_count,
+        GREATEST(rp.card_count - COALESCE((
+          SELECT SUM(ci.quantity) FROM card_instances ci WHERE ci.raw_purchase_id = rp.id
+        ), 0), 0) AS gap
+      FROM raw_purchases rp
+      WHERE rp.user_id = ${userId}
+        ${type !== 'both' ? sql`AND rp.type = ${type}` : sql``}
+    )
+    SELECT
+      COUNT(*)::int as total,
+      COUNT(*) FILTER (WHERE status = 'ordered')::int as pending,
+      COUNT(*) FILTER (WHERE status = 'received')::int as received,
+      COUNT(*) FILTER (WHERE status = 'cancelled')::int as canceled,
+      COALESCE(SUM(card_count) FILTER (WHERE status = 'received'), 0)::int as cards_received,
+      COALESCE(SUM(gap) FILTER (WHERE status = 'received'), 0)::int as awaiting_intake
+    FROM rp_intake
+  `.execute(db);
 
   // ── Pipeline (always full, not view-filtered, but type-filtered) ────────────
   const pipelineQuery = sql<{
@@ -670,7 +683,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
   const pl = pipelineResult.rows[0];
   const s = salesResult.rows[0];
   const t = turnoverResult.rows[0];
-  const o = ordersResult;
+  const o = ordersResult.rows[0];
 
   return {
     inventory: {
@@ -684,6 +697,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
       received: o?.received ?? 0,
       canceled: o?.canceled ?? 0,
       cards_received: o?.cards_received ?? 0,
+      awaiting_intake: o?.awaiting_intake ?? 0,
     },
     pipeline: {
       purchased_raw: pl?.purchased_raw ?? 0,

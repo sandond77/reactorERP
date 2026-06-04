@@ -1,8 +1,17 @@
 # Reactor — Changelog
 
-## June 2, 2026
+## June 4, 2026
 
 ### Fixes
+
+**Raw-purchase import — type=raw rows now create matching `card_instances`**
+- `executeRawPurchaseImport` only inserted a `raw_purchases` row per CSV line; the matching `card_instances` was never created. Every imported single-card raw order showed up under "Orders → Received" but **zero cards in inventory**, which is what made the Raw Cards dashboard look broken (Raw filter empty, Bulk view only showing the few cards that had been added by hand via the inspection panel). Fix: when `type='raw'`, also `INSERT INTO card_instances` with `purchase_type='raw'`, `status='purchased_raw'`, `quantity=card_count`, the imported cost, language, catalog/override fields, and `raw_purchase_id` pointing back at the new order. Bulk imports are unchanged — bulk is a lot, intake happens later via inspection.
+- Local backfill: 13 orphan raw orders (`2025R1`–`2025R2`, `2026R1`–`2026R11`) got their missing `card_instances` rows inserted via a one-shot scoped `INSERT ... SELECT`. Prod was checked and had zero orphans, so no prod backfill was needed.
+
+**Raw Cards dashboard — surface the bulk intake gap**
+- New **Awaiting Intake** row in the Pipeline → Orders block, rendered in amber, only shown when `> 0`. Computed server-side as `SUM(GREATEST(rp.card_count − SUM(ci.quantity), 0))` over received raw_purchases, type-filtered like the rest of the panel. So Bulk view shows how many cards from received lots still haven't been split into `card_instances` (e.g. a 50-card bulk that's been partially inspected reports `card_count − sum(quantity)` outstanding). Raw view normally reads 0 once each raw order has its instance. `ordersQuery` was rewritten as a CTE so both `card_count` and per-rp `gap` could be summed in one trip.
+
+
 
 **Card Show Inventory · Raw tab — replace inline CS Price input with row-click modal**
 - The Raw tab's inline CS Price `<input>` + per-row × button shipped with May 31 didn't match the rest of the app — every other inventory surface uses a row-click → detail modal pattern. CS Price column is now read-only emerald text and clicking the row opens `CardDetailModal` in a new `cardShowMode`.

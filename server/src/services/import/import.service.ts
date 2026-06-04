@@ -804,7 +804,7 @@ async function executeRawPurchaseImport(
         ? await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex)
         : null;
 
-      await createRawPurchase(userId, {
+      const rp = await createRawPurchase(userId, {
         type: purchaseType,
         source: source ?? undefined,
         order_number: orderNumber ?? undefined,
@@ -819,6 +819,33 @@ async function executeRawPurchaseImport(
         purchased_at: purchasedAt?.toISOString(),
         received_at:  undefined,
       });
+
+      // Raw single-card purchases ARE inventory rows. Bulk purchases are lots
+      // and get split into card_instances during inspection — don't auto-create.
+      if (purchaseType === 'raw') {
+        await db.insertInto('card_instances').values({
+          user_id:              userId,
+          catalog_id:           catalogId ?? null,
+          card_name_override:   cardName || null,
+          set_name_override:    catalogId ? null : (setName ?? null),
+          card_number_override: catalogId ? null : (cardNumber ?? null),
+          card_game:            'pokemon',
+          language,
+          variant: null, rarity: null, notes: null,
+          purchase_type:        'raw' as const,
+          status:               'purchased_raw' as const,
+          quantity:             cardCount,
+          purchase_cost:        Math.round(totalCostUsd * 100),
+          currency:             'USD',
+          source_link:          null,
+          order_number:         orderNumber,
+          condition:            null, condition_notes: null,
+          image_front_url:      null, image_back_url: null,
+          purchased_at:         purchasedAt ?? null,
+          raw_purchase_id:      rp.id,
+          trade_id: null, location_id: null, decision: null,
+        }).execute();
+      }
 
       importedCount++;
       if (importedCount % 10 === 0) onProgress?.(importedCount);
