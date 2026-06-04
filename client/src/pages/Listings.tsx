@@ -138,14 +138,19 @@ function SetSlotRow({
 
   const uniqueNames = searchData
     ? Array.from(searchData.data.reduce((m, s) => {
-        m.set(s.card_name ?? '', (m.get(s.card_name ?? '') ?? 0) + 1);
+        const key = s.card_name ?? '';
+        const cur = m.get(key) ?? { count: 0, onShow: 0 };
+        cur.count += 1;
+        if (s.is_card_show) cur.onShow += 1;
+        m.set(key, cur);
         return m;
-      }, new Map<string, number>())).filter(([n, c]) => n && c > 0)
+      }, new Map<string, { count: number; onShow: number }>())).filter(([n, v]) => n && v.count > 0)
     : [];
 
-  const copies = (copiesData?.data ?? []).filter(
-    c => c.card_name === slot.cardName && !c.is_listed && !c.is_personal_collection
-  );
+  // Sort non-card-show certs first so on-show ones drop to the bottom of the picker.
+  const copies = (copiesData?.data ?? [])
+    .filter(c => c.card_name === slot.cardName && !c.is_listed && !c.is_personal_collection)
+    .sort((a, b) => Number(a.is_card_show) - Number(b.is_card_show));
 
   // Collapsed state — cert has been picked
   if (slot.slab && !open) {
@@ -197,12 +202,17 @@ function SetSlotRow({
             {debounced.length >= 2 && (
               uniqueNames.length > 0 ? (
                 <div className="rounded border border-zinc-700/50 overflow-hidden max-h-36 overflow-y-auto">
-                  {uniqueNames.map(([name, count]) => (
+                  {uniqueNames.map(([name, v]) => (
                     <button key={name} type="button"
                       className="w-full text-left px-3 py-2 hover:bg-zinc-700/40 border-b border-zinc-700/30 last:border-0 flex items-center justify-between gap-2 transition-colors"
                       onClick={() => { onUpdate({ cardName: name, slab: null }); setSearch(''); }}>
                       <span className="text-xs text-zinc-200 truncate">{name}</span>
-                      <span className="text-[10px] text-zinc-500 tabular-nums shrink-0">{count} unsold</span>
+                      <span className="shrink-0 flex items-center gap-1.5">
+                        {v.onShow > 0 && (
+                          <span className="text-[9px] font-bold uppercase tracking-wide bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 rounded px-1 py-0.5 tabular-nums">{v.onShow} on show</span>
+                        )}
+                        <span className="text-[10px] text-zinc-500 tabular-nums">{v.count} unsold</span>
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -238,6 +248,9 @@ function SetSlotRow({
                       </div>
                       <span className="font-mono text-xs text-zinc-200">{formatCertNumber(copy.cert_number)}</span>
                       <span className="text-[11px] text-zinc-500">{copy.grade_label}</span>
+                      {copy.is_card_show && (
+                        <span className="ml-auto text-[9px] font-bold uppercase tracking-wide bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 rounded px-1 py-0.5">On Show</span>
+                      )}
                     </button>
                   );
                 })}

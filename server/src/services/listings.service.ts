@@ -234,27 +234,33 @@ export async function listListings(
     filters.listing_type === 'raw_set'    ? sql`AND sd.id IS NULL AND l.listing_group_id IS NOT NULL` :
     sql``;
 
-  // ── Graded Set: separate query grouped by listing_group_id ──────────────────
+  // ── Graded Set: aggregate by listing_group, then count peers by composition ─
+  // Each row is still one listing_group_id (so $375 and $301.50 stay separate
+  // rows). num_listed / num_sold count distinct groups that share the same set
+  // composition (sorted card_name + grade + company tuples). This lets a sold
+  // set surface as num_sold=1 on the matching active row, and avoids the old
+  // bug where num_listed showed the # of cards in the set.
   if (filters.listing_type === 'graded_set') {
+    const setSearchPattern = filters.search ? `%${filters.search}%` : null;
     const setResult = await sql<ListingAggRow & { total_count: number }>`
-      WITH grouped AS (
+      WITH per_group AS (
         SELECT
           l.listing_group_id,
-          (ARRAY_AGG(l.listing_group_name ORDER BY l.listed_at DESC NULLS LAST))[1]  AS listing_group_name,
-          NULL::text                                                                  AS card_name,
-          NULL::text                                                                  AS set_name,
-          NULL::text                                                                  AS part_number,
-          NULL::text                                                                  AS grade_label,
-          NULL::text                                                                  AS grading_company,
-          NULL::text                                                                  AS condition,
           l.platform,
-          SUM(l.list_price)::int                                                      AS list_price,
           l.currency,
-          (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST))[1]    AS ebay_listing_url,
-          MIN(l.listed_at)                                                            AS listed_at,
-          COUNT(DISTINCT l.id)::int                                                   AS num_listed,
-          0::int                                                                      AS num_sold,
-          NULL::text                                                                  AS raw_purchase_label,
+          BOOL_OR(l.listing_status = 'active')                                          AS has_active,
+          BOOL_AND(l.listing_status = 'sold')                                            AS all_sold,
+          JSONB_AGG(JSONB_BUILD_OBJECT(
+            'n', LOWER(COALESCE(ci.card_name_override, cc.card_name, '')),
+            'g', sd.grade_label,
+            'c', sd.company
+          ) ORDER BY LOWER(COALESCE(ci.card_name_override, cc.card_name, '')), sd.grade_label, sd.company) AS composition,
+          STRING_AGG(LOWER(COALESCE(ci.card_name_override, cc.card_name, '')), ' | ')   AS names_concat,
+          (ARRAY_AGG(l.listing_group_name ORDER BY l.listed_at DESC NULLS LAST))[1]    AS listing_group_name,
+          SUM(l.list_price) FILTER (WHERE l.listing_status = 'active')::int             AS list_price,
+          MIN(l.listed_at)  FILTER (WHERE l.listing_status = 'active')                  AS listed_at,
+          (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST)
+            FILTER (WHERE l.listing_status = 'active'))[1]                              AS ebay_listing_url,
           JSON_AGG(JSON_BUILD_OBJECT(
             'listing_id',       l.id,
             'cert_number',      sd.cert_number,
@@ -266,21 +272,61 @@ export async function listListings(
             'part_number',      cc.sku,
             'company',          sd.company
           ) ORDER BY l.listed_at DESC NULLS LAST)
-          FILTER (WHERE sd.id IS NOT NULL)                                            AS cert_details
+          FILTER (WHERE sd.id IS NOT NULL AND l.listing_status = 'active')              AS cert_details
         FROM listings l
         JOIN card_instances ci ON ci.id = l.card_instance_id
         LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
         LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
         WHERE l.user_id = ${userId}
-        AND l.listing_status = 'active'
-        AND l.platform != 'card_show'
-        AND l.listing_group_id IS NOT NULL
-        AND sd.id IS NOT NULL
-        ${platformCond}
-        ${searchCond}
+          AND l.platform != 'card_show'
+          AND l.listing_group_id IS NOT NULL
+          AND sd.id IS NOT NULL
         GROUP BY l.listing_group_id, l.platform, l.currency
+      ),
+      comp_counts AS (
+        SELECT composition, platform, currency,
+          COUNT(*) FILTER (WHERE has_active)::int AS num_listed,
+          COUNT(*) FILTER (WHERE all_sold)::int    AS num_sold
+        FROM per_group
+        GROUP BY composition, platform, currency
+      ),
+      grouped AS (
+        SELECT
+          pg.listing_group_id,
+          pg.listing_group_name,
+          NULL::text                  AS card_name,
+          NULL::text                  AS set_name,
+          NULL::text                  AS part_number,
+          NULL::text                  AS grade_label,
+          NULL::text                  AS grading_company,
+          NULL::text                  AS condition,
+          pg.platform,
+          pg.list_price,
+          pg.currency,
+          pg.ebay_listing_url,
+          pg.listed_at,
+          cc.num_listed,
+          cc.num_sold,
+          NULL::text                  AS raw_purchase_label,
+          pg.cert_details,
+          pg.names_concat
+        FROM per_group pg
+        JOIN comp_counts cc
+          ON cc.composition = pg.composition
+         AND cc.platform = pg.platform
+         AND cc.currency = pg.currency
+        WHERE pg.has_active = true
+          ${filters.platforms !== undefined
+            ? filters.platforms.length === 0 ? sql`AND 1=0`
+              : sql`AND pg.platform IN (${sql.join(filters.platforms.map((p) => sql.val(p)))})`
+            : sql``}
+          ${setSearchPattern ? sql`AND pg.names_concat ILIKE ${setSearchPattern}` : sql``}
       )
-      SELECT *, COUNT(*) OVER ()::int AS total_count
+      SELECT
+        listing_group_id, listing_group_name, card_name, set_name, part_number,
+        grade_label, grading_company, condition, platform, list_price, currency,
+        ebay_listing_url, listed_at, num_listed, num_sold, raw_purchase_label, cert_details,
+        COUNT(*) OVER ()::int AS total_count
       FROM grouped
       ORDER BY ${sql.raw(sortCol)} ${sortDirSafe}
       LIMIT ${pagination.limit}
