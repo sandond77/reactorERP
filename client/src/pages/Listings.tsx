@@ -1336,16 +1336,16 @@ export function Listings() {
                 const key = rowKey(row);
                 const isExpanded = expandedKeys.has(key);
                 const isGraded = listingTab === 'graded' || listingTab === 'graded_set';
-                const hasExpandable = (row.cert_details?.length ?? 0) > 1 || (isGraded && (row.cert_details?.length ?? 0) > 0);
-                // When a raw row aggregates more than one listing, the parent
-                // row's per-listing fields (purchase id / condition / price /
-                // url) are non-representative — blank them out so the user
-                // expands to see each one. Single-listing raw rows render fully.
-                const collapseRaw = !isGraded && (row.cert_details?.length ?? 0) > 1;
+                const hasExpandable = (row.cert_details?.length ?? 0) > 0;
+                // Raw parent rows always hide per-listing fields (purchase id /
+                // condition / price / url) — those live on the sub-rows under
+                // the aggregation. Matches the graded singles UX: parent is the
+                // summary, sub-row is the listing.
+                const collapseRaw = !isGraded && hasExpandable;
                 return (
                   <React.Fragment key={i}>
                     <tr
-                      onClick={() => (isGraded || collapseRaw) ? toggleExpand(key) : setEditRow(row)}
+                      onClick={() => hasExpandable ? toggleExpand(key) : setEditRow(row)}
                       className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
                       <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>
                         {hasExpandable && (
