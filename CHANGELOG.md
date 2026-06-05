@@ -1,5 +1,14 @@
 # Reactor — Changelog
 
+## June 5, 2026
+
+### Fixes
+
+**Raw listings — expandable rows surface per-listing details**
+- The non-set listings query aggregates by `sku + condition + platform + currency + list_price + ebay_listing_url`, so two raw card_instances of the same SKU at the same condition / price / URL collapse to one row showing `# Listed = 2`. There was no way to drill into which underlying listings rolled up — graded singles got a chevron, raw rows didn't. Now the chevron renders on any row whose `cert_details` has more than one entry, regardless of tab, so multi-listing raw rows expand the same way graded ones do.
+- `cert_details` carries per-listing fields for raw too: removed the `FILTER (WHERE sd.id IS NOT NULL)` guard in the JSON_AGG so raw listings are emitted, and added `condition` and `raw_purchase_label` (the `RP-YYYY-NNN` form) to each element. `CertDetail` on the client picked up both as optional fields.
+- New raw expansion render block: each child row shows `Listing N`, the purchase ID, the per-instance condition, the individual list price, and the individual eBay URL — same layout discipline as the existing graded expansion (vertical-line indicator under Part#, indented Card Name cell, empty Platform / # Listed / # Sold cells so column alignment stays intact).
+
 ## June 4, 2026
 
 ### Fixes

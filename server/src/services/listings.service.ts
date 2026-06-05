@@ -369,14 +369,15 @@ export async function listListings(
         MAX(COALESCE(sa.num_sold, 0))::int                                                                  AS num_sold,
         (ARRAY_AGG(rp.purchase_id ORDER BY l.listed_at DESC NULLS LAST))[1]                                AS raw_purchase_label,
         JSON_AGG(JSON_BUILD_OBJECT(
-          'listing_id',       l.id,
-          'cert_number',      sd.cert_number,
-          'grade_label',      sd.grade_label,
-          'list_price',       l.list_price,
-          'ebay_listing_url', l.ebay_listing_url,
-          'listing_group_id', l.listing_group_id
-        ) ORDER BY l.listed_at DESC NULLS LAST)
-        FILTER (WHERE sd.id IS NOT NULL)                                                                    AS cert_details
+          'listing_id',         l.id,
+          'cert_number',        sd.cert_number,
+          'grade_label',        sd.grade_label,
+          'list_price',         l.list_price,
+          'ebay_listing_url',   l.ebay_listing_url,
+          'listing_group_id',   l.listing_group_id,
+          'condition',          ci.condition,
+          'raw_purchase_label', rp.purchase_id
+        ) ORDER BY l.listed_at DESC NULLS LAST)                                                             AS cert_details
       FROM listings l
       JOIN card_instances ci ON ci.id = l.card_instance_id
       LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id

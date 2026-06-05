@@ -33,6 +33,8 @@ interface CertDetail {
   card_name?: string | null;
   part_number?: string | null;
   company?: string | null;
+  condition?: string | null;
+  raw_purchase_label?: string | null;
 }
 
 interface AggregatedListing {
@@ -1334,13 +1336,14 @@ export function Listings() {
                 const key = rowKey(row);
                 const isExpanded = expandedKeys.has(key);
                 const isGraded = listingTab === 'graded' || listingTab === 'graded_set';
+                const hasExpandable = (row.cert_details?.length ?? 0) > 1 || (isGraded && (row.cert_details?.length ?? 0) > 0);
                 return (
                   <React.Fragment key={i}>
                     <tr
                       onClick={() => isGraded ? toggleExpand(key) : setEditRow(row)}
                       className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
                       <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>
-                        {isGraded && (
+                        {hasExpandable && (
                           <ChevronRight
                             size={11}
                             className={`inline-block mr-1 text-zinc-600 transition-transform shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
@@ -1438,6 +1441,52 @@ export function Listings() {
                         {/* Grade */}
                         <td className="px-3 py-1.5 text-zinc-300 text-[11px]">
                           {cert.grade_label ?? '—'}
+                        </td>
+                        {/* Platform — empty */}
+                        <td className="px-3 py-1.5" />
+                        {/* Price */}
+                        <td className="px-3 py-1.5 text-right text-zinc-400 text-[11px]">
+                          {cert.list_price != null ? formatCurrency(cert.list_price, row.currency) : '—'}
+                        </td>
+                        {/* Link */}
+                        <td className="px-3 py-1.5 text-center">
+                          {cert.ebay_listing_url ? (
+                            isEbayOrderUrl(cert.ebay_listing_url) ? (
+                              <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                                title="Order URL — this may already be sold"
+                                className="inline-flex text-amber-400 hover:text-amber-300 transition-colors">
+                                <AlertTriangle size={12} />
+                              </a>
+                            ) : (
+                              <a href={cert.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors">
+                                <ExternalLink size={12} />
+                              </a>
+                            )
+                          ) : '—'}
+                        </td>
+                        <td colSpan={2} />
+                      </tr>
+                    ))}
+                    {!isGraded && isExpanded && row.cert_details?.map((cert, ci) => (
+                      <tr key={ci}
+                        className="border-b border-zinc-800/40 bg-zinc-900/40 hover:bg-zinc-800/50 cursor-pointer transition-colors"
+                        onClick={() => setEditRow(row)}>
+                        {/* Part # — vertical line */}
+                        <td className="px-3 py-1.5">
+                          <div className="w-px h-3 bg-zinc-700 mx-auto" />
+                        </td>
+                        {/* Card Name — listing # */}
+                        <td className="px-3 py-1.5 pl-5">
+                          <span className="text-[10px] text-zinc-600 mr-1">Listing</span>
+                          <span className="font-mono text-[11px] text-indigo-300/70">{ci + 1}</span>
+                        </td>
+                        {/* Purchase ID */}
+                        <td className="px-3 py-1.5 font-mono text-indigo-300/70 text-[11px] truncate">
+                          {cert.raw_purchase_label ?? '—'}
+                        </td>
+                        {/* Condition */}
+                        <td className="px-3 py-1.5 text-zinc-300 text-[11px]">
+                          {cert.condition ?? '—'}
                         </td>
                         {/* Platform — empty */}
                         <td className="px-3 py-1.5" />
