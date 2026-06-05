@@ -4,10 +4,11 @@
 
 ### Fixes
 
-**Raw listings — expandable rows surface per-listing details**
-- The non-set listings query aggregates by `sku + condition + platform + currency + list_price + ebay_listing_url`, so two raw card_instances of the same SKU at the same condition / price / URL collapse to one row showing `# Listed = 2`. There was no way to drill into which underlying listings rolled up — graded singles got a chevron, raw rows didn't. Now the chevron renders on any row whose `cert_details` has more than one entry, regardless of tab, so multi-listing raw rows expand the same way graded ones do.
-- `cert_details` carries per-listing fields for raw too: removed the `FILTER (WHERE sd.id IS NOT NULL)` guard in the JSON_AGG so raw listings are emitted, and added `condition` and `raw_purchase_label` (the `RP-YYYY-NNN` form) to each element. `CertDetail` on the client picked up both as optional fields.
-- New raw expansion render block: each child row shows `Listing N`, the purchase ID, the per-instance condition, the individual list price, and the individual eBay URL — same layout discipline as the existing graded expansion (vertical-line indicator under Part#, indented Card Name cell, empty Platform / # Listed / # Sold cells so column alignment stays intact).
+**Raw listings — aggregate by part number, expand to per-listing details**
+- The non-set listings query was grouping raw rows by `sku + condition + platform + currency + list_price + ebay_listing_url`, so two listings of the same SKU at the same condition + price + URL collapsed into one row but anything that varied — different conditions, different prices, different eBay URLs — fanned out into separate rows. A card with one LP / one NM / two NM- listings showed as three rows. There was no way to drill into which underlying listings rolled up since the graded chevron didn't render on raw rows. Now raw rows aggregate by `sku + platform + currency` (matches graded single behavior), so all listings of the same card on the same platform collapse to one row.
+- The chevron renders on any row whose `cert_details` has more than one entry, regardless of tab. Raw rows now carry per-listing details: removed the `FILTER (WHERE sd.id IS NOT NULL)` guard on the cert_details `JSON_AGG`, added `condition` and `raw_purchase_label` (the `RP-YYYY-NNN` form) to each element. `CertDetail` on the client picked up both as optional fields.
+- Collapsed parent row blanks out per-listing fields (Purchase ID, Condition, Platform, Price, eBay URL) since they don't represent the aggregation — only Part #, Card Name, # Listed, and # Sold render. Single-listing raw rows are unchanged (still show all fields). Row click toggles expand when aggregated; opens edit modal otherwise.
+- New raw expansion render block matches the graded expansion layout (vertical-line indicator under Part#, indented `Listing N` label, empty trailing cells so column alignment stays intact). Each sub-row shows the purchase ID, condition, individual price, and individual eBay URL; clicking opens the existing `EditListingModal` which already exposes per-listing cancel.
 
 ## June 4, 2026
 

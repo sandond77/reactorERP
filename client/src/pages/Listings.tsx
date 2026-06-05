@@ -1337,10 +1337,15 @@ export function Listings() {
                 const isExpanded = expandedKeys.has(key);
                 const isGraded = listingTab === 'graded' || listingTab === 'graded_set';
                 const hasExpandable = (row.cert_details?.length ?? 0) > 1 || (isGraded && (row.cert_details?.length ?? 0) > 0);
+                // When a raw row aggregates more than one listing, the parent
+                // row's per-listing fields (purchase id / condition / price /
+                // url) are non-representative — blank them out so the user
+                // expands to see each one. Single-listing raw rows render fully.
+                const collapseRaw = !isGraded && (row.cert_details?.length ?? 0) > 1;
                 return (
                   <React.Fragment key={i}>
                     <tr
-                      onClick={() => isGraded ? toggleExpand(key) : setEditRow(row)}
+                      onClick={() => (isGraded || collapseRaw) ? toggleExpand(key) : setEditRow(row)}
                       className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
                       <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>
                         {hasExpandable && (
@@ -1367,7 +1372,7 @@ export function Listings() {
                       </td>
                       {!isGraded && (
                         <td className="px-3 py-2 font-mono text-indigo-300/70 text-[11px] truncate">
-                          {row.raw_purchase_label ?? '—'}
+                          {collapseRaw ? '' : (row.raw_purchase_label ?? '—')}
                         </td>
                       )}
                       {isGraded ? (
@@ -1376,14 +1381,14 @@ export function Listings() {
                           <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.grade_label ?? '—'}</td>
                         </>
                       ) : (
-                        <td className="px-3 py-2 text-zinc-300 text-[11px]">{row.condition ?? '—'}</td>
+                        <td className="px-3 py-2 text-zinc-300 text-[11px]">{collapseRaw ? '' : (row.condition ?? '—')}</td>
                       )}
-                      <td className="px-3 py-2 text-zinc-300 capitalize">{row.platform}</td>
+                      <td className="px-3 py-2 text-zinc-300 capitalize">{collapseRaw ? '' : row.platform}</td>
                       <td className="px-3 py-2 text-right text-zinc-300">
-                        {formatCurrency(row.list_price ?? 0, row.currency)}
+                        {collapseRaw ? '' : formatCurrency(row.list_price ?? 0, row.currency)}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        {row.ebay_listing_url ? (
+                        {collapseRaw ? '' : row.ebay_listing_url ? (
                           isEbayOrderUrl(row.ebay_listing_url) ? (
                             <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
                               title="Order URL — this may already be sold"
