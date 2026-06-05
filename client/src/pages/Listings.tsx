@@ -1383,7 +1383,7 @@ export function Listings() {
                       ) : (
                         <td className="px-3 py-2 text-zinc-300 text-[11px]">{collapseRaw ? '' : (row.condition ?? '—')}</td>
                       )}
-                      <td className="px-3 py-2 text-zinc-300 capitalize">{collapseRaw ? '' : row.platform}</td>
+                      <td className="px-3 py-2 text-zinc-300 capitalize">{row.platform}</td>
                       <td className="px-3 py-2 text-right text-zinc-300">
                         {collapseRaw ? '' : formatCurrency(row.list_price ?? 0, row.currency)}
                       </td>
@@ -1480,10 +1480,10 @@ export function Listings() {
                         <td className="px-3 py-1.5">
                           <div className="w-px h-3 bg-zinc-700 mx-auto" />
                         </td>
-                        {/* Card Name — listing # */}
+                        {/* Card Name — purchase ID label */}
                         <td className="px-3 py-1.5 pl-5">
-                          <span className="text-[10px] text-zinc-600 mr-1">Listing</span>
-                          <span className="font-mono text-[11px] text-indigo-300/70">{ci + 1}</span>
+                          <span className="text-[10px] text-zinc-600 mr-1">Purchase</span>
+                          <span className="font-mono text-[11px] text-indigo-300/70">{cert.raw_purchase_label ?? '—'}</span>
                         </td>
                         {/* Purchase ID */}
                         <td className="px-3 py-1.5 font-mono text-indigo-300/70 text-[11px] truncate">

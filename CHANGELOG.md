@@ -9,7 +9,7 @@
 - The chevron renders on any row whose `cert_details` has more than one entry, regardless of tab. Raw rows now carry per-listing details: removed the `FILTER (WHERE sd.id IS NOT NULL)` guard on the cert_details `JSON_AGG`, added `condition` and `raw_purchase_label` (the `RP-YYYY-NNN` form) to each element. `CertDetail` on the client picked up both as optional fields.
 - Parent row always blanks per-listing fields (Purchase ID, Condition, Platform, Price, eBay URL) regardless of listing count — only Part #, Card Name, # Listed, and # Sold render. Mirrors the graded singles UX where the parent is the summary and the sub-rows are the individual listings.
 - Chevron renders on every raw row with at least one listing (was: only when count > 1). Click on the parent row always toggles inline expansion — the edit modal no longer opens on parent click. To edit a specific listing, expand and click the sub-row, which opens the existing `EditListingModal` with per-listing cancel buttons.
-- New raw expansion render block matches the graded expansion layout (vertical-line indicator under Part#, indented `Listing N` label, empty trailing cells so column alignment stays intact). Each sub-row shows the purchase ID, condition, individual price, and individual eBay URL.
+- New raw expansion render block matches the graded expansion layout (vertical-line indicator under Part#, indented `Purchase 2026R223` label that mirrors the graded `Cert #...` convention, empty trailing cells so column alignment stays intact). Each sub-row shows the purchase ID, condition, individual price, and individual eBay URL. Platform stays on the parent since it's part of the GROUP BY (each row is one platform).
 
 ## June 4, 2026
 
