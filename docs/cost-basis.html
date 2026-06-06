@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cost Basis — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">R</div>
+      <div class="brand-title">Reactor Docs</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Start</div>
+      <nav class="nav">
+        <a href="index.html">Overview</a>
+        <a href="getting-started.html">Getting Started</a>
+      </nav>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Concepts</div>
+      <nav class="nav">
+        <a href="inventory-model.html">Inventory Model</a>
+        <a href="cost-basis.html" class="active">Cost Basis</a>
+        <a href="state-machine.html">State Machine</a>
+      </nav>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Workflows</div>
+      <nav class="nav">
+        <a href="raw-card-flow.html">Raw Card Flow</a>
+        <a href="grading-submission.html">Grading Submission</a>
+        <a href="card-shows.html">Card Show Inventory</a>
+      </nav>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Import</div>
+      <nav class="nav">
+        <a href="csv-import.html">CSV Import</a>
+        <a href="field-reference.html">Field Reference</a>
+      </nav>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Links</div>
+      <nav class="nav">
+        <a href="https://github.com/sandond77/reactorERP" target="_blank" rel="noopener">GitHub ↗</a>
+      </nav>
+    </div>
+  </aside>
+
+  <main class="content">
+    <h1>Cost Basis</h1>
+    <p class="lede">Cost basis is the source of truth for "what did I actually pay for this card." Reactor tracks it through every state transition so profit numbers stay accurate even after grading, splitting, or partial sales.</p>
+
+    <h2>Raw</h2>
+    <p>A raw purchase has a <code>total_cost_usd</code> for the whole order. When the lot is split during inspection into sub-rows by condition, the cost is allocated <strong>proportionally</strong> by quantity:</p>
+    <pre><code>Bulk lot: 50 cards, $1,000 total → $20/card
+Split into:
+  24 NM @ $480
+  20 LP @ $400
+  6  MP @ $120</code></pre>
+    <p>Each split gets its own <code>purchase_cost</code> (per-card) and contributes proportionally.</p>
+
+    <h2>Graded</h2>
+    <p>When a raw card is submitted to grading and comes back as a slab:</p>
+    <pre><code>slab.raw_cost     = raw card's purchase_cost (allocated from lot)
+slab.grading_cost = grading fee + any per-card sub fees
+slab.total_cost   = raw_cost + grading_cost</code></pre>
+    <p>For pre-graded slabs purchased directly (no raw history), <code>raw_cost = full purchase price</code> and <code>grading_cost = 0</code>.</p>
+
+    <h2>Sale</h2>
+    <p>When a sale is recorded:</p>
+    <pre><code>sales.total_cost_basis = the card's total cost at the moment of sale
+sales.net_proceeds     = sale_price − platform_fees − shipping_cost
+profit                 = net_proceeds − total_cost_basis</code></pre>
+    <p><code>total_cost_basis</code> is snapshotted onto the sale row at sale time. Changing the card's cost later (e.g. editing a grading submission's fee) <strong>also recomputes historical sales' total_cost_basis</strong> if the slab is sold — so profit reports stay accurate.</p>
+
+    <h2>What "must reconcile" means</h2>
+    <div class="callout">
+      <p>If you take a raw lot's total cost and follow every card forward — raw sales, grading transformations, slab sales, write-offs — the dollars should add up. No orphaned cost, no lost cost, no double-counting.</p>
+    </div>
+    <p>The places this matters most:</p>
+    <ul>
+      <li><strong>Grading submissions</strong>: edits to <code>grading_cost</code> fan out to every linked slab AND every related historical sale.</li>
+      <li><strong>Inspection splits</strong>: per-card cost = lot cost / lot quantity. Splitting doesn't change the lot's total.</li>
+      <li><strong>Returns / reverts</strong>: if you delete a grading batch, slabs are removed and source raw cards restored from the audit log.</li>
+    </ul>
+
+    <h2>What it doesn't mean</h2>
+    <ul>
+      <li><strong>Card show fees, postage, etc.</strong> don't reduce cost basis. They live on <code>expenses</code> and hit overall P&amp;L, not per-card profit.</li>
+      <li><strong>Listed price != sale price.</strong> Listed price is aspirational. <code>total_cost_basis</code> only matters at sale time.</li>
+      <li><strong>CS Price (card show sticker)</strong> is a display/intent price for the show, not cost basis.</li>
+    </ul>
+
+    <p>Next: <a href="raw-card-flow.html">Raw Card Flow</a></p>
+  </main>
+</div>
+</body>
+</html>

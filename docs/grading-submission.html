@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grading Submission — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">R</div>
+      <div class="brand-title">Reactor Docs</div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Start</div>
+      <nav class="nav">
+        <a href="index.html">Overview</a>
+        <a href="getting-started.html">Getting Started</a>
+      </nav>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Concepts</div>
+      <nav class="nav">
+        <a href="inventory-model.html">Inventory Model</a>
+        <a href="cost-basis.html">Cost Basis</a>
+        <a href="state-machine.html">State Machine</a>
+      </nav>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Workflows</div>
+      <nav class="nav">
+        <a href="raw-card-flow.html">Raw Card Flow</a>
+        <a href="grading-submission.html" class="active">Grading Submission</a>
+        <a href="card-shows.html">Card Show Inventory</a>
+      </nav>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Import</div>
+      <nav class="nav">
+        <a href="csv-import.html">CSV Import</a>
+        <a href="field-reference.html">Field Reference</a>
+      </nav>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Links</div>
+      <nav class="nav">
+        <a href="https://github.com/sandond77/reactorERP" target="_blank" rel="noopener">GitHub ↗</a>
+      </nav>
+    </div>
+  </aside>
+
+  <main class="content">
+    <h1>Grading Submission</h1>
+    <p class="lede">How a raw card becomes a graded slab without losing its cost basis along the way.</p>
+
+    <h2>1. Build the batch</h2>
+    <p><strong>Grading → Submissions → New Batch.</strong></p>
+    <ul>
+      <li>Pick a grading company (PSA, BGS, CGC, ARS, TAG, ACE).</li>
+      <li>Set service level + grading cost per card (what the grader is charging you).</li>
+      <li>Add cards from your <code>raw_for_sale</code> and <code>inspected</code> inventory. Filter by decision = "submit to grading" to find cards routed for it.</li>
+    </ul>
+    <p>When you add a card, its quantity is decremented from the source raw row and added to a new <code>grading_submitted</code> row tied to the batch. The original cost follows along.</p>
+
+    <h2>2. Ship + track</h2>
+    <p>Mark the batch <strong>shipped</strong> when it leaves your hands. Add the tracking number, any sub-batch ID the grader assigned, and the expected return date.</p>
+    <p>While in flight, those cards show as <code>grading_submitted</code> in inventory — visible in Pipeline but not in raw_for_sale lists or in graded inventory yet.</p>
+
+    <h2>3. Process the return</h2>
+    <p>When PSA / BGS / etc. emails the return CSV:</p>
+    <ol>
+      <li><strong>Grading → Submissions → [your batch] → Process Return.</strong></li>
+      <li>Upload the CSV. Reactor matches each return row to a batch item using:
+        <ul>
+          <li>Card name substring match</li>
+          <li>Card # match (extracted from PSA's Description column)</li>
+          <li>Set name token overlap</li>
+          <li>Year match</li>
+          <li>Language match</li>
+          <li>Line position</li>
+        </ul>
+      </li>
+      <li>Review the slot list. Each match has a confidence score: <strong>Strong / Good / Weak / Manual</strong>.</li>
+      <li>For each slot, set the <strong>disposition</strong>:
+        <ul>
+          <li><strong>graded</strong> (default) — creates a new slab. Requires cert # + grade.</li>
+          <li><strong>not_graded</strong> — card came back ungraded. Creates a new raw row in inventory with cost = original + grading_cost.</li>
+          <li><strong>lost</strong> — write-off. No new row.</li>
+          <li><strong>not_submitted</strong> — never actually shipped. Creates a new raw row with cost = original only.</li>
+        </ul>
+      </li>
+      <li>Confirm. Slabs are created with the right cost basis (raw_cost + grading_cost), the original raw row is decremented, and the batch is marked returned.</li>
+    </ol>
+
+    <h2>4. After the fact</h2>
+    <p>If the grader corrects an invoice (you got a different total than expected), edit the batch's <code>grading_cost</code>. The change fans out to:</p>
+    <ul>
+      <li><strong>All slabs</strong> linked to the batch get their <code>grading_cost</code> updated.</li>
+      <li><strong>All historical sales</strong> of those slabs get their <code>total_cost_basis</code> recomputed. Profit reports stay accurate.</li>
+    </ul>
+    <p>Legacy slabs (created before migration 056) have NULL <code>grading_batch_id</code> and stay frozen at their snapshot value.</p>
+
+    <h2>Reverting a batch</h2>
+    <p><strong>Grading → Submissions → [batch] → Delete Batch.</strong></p>
+    <p>If the batch was returned: every slab is removed (unless sold or actively listed) and the source raw cards are restored from the audit log. Sold/listed slabs stay intact — you'd lose revenue records otherwise — and you'll see a warning telling you how many were kept.</p>
+    <p>If the batch was still pending: easier. Cards are routed back to their pre-submission state.</p>
+  </main>
+</div>
+</body>
+</html>
