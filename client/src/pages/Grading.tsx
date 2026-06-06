@@ -237,10 +237,15 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
     enabled: debounced.length >= 2,
   });
 
-  // Exclude cards already in this batch — same card_instance can't be added twice.
+  // Track how many line items each card_instance already has in this batch
+  // (server expands qty into N qty=1 line items, so this counts physical
+  // certs already assigned). Used to cap the per-row qty input below.
   const batchDetail = qc.getQueryData<BatchDetail>(['grading-batch', batchId]);
-  const alreadyInBatch = new Set((batchDetail?.items ?? []).map((it) => it.card_instance_id));
-  const cards = (cardResults?.data ?? []).filter((c) => !alreadyInBatch.has(c.id));
+  const alreadyInBatchQty = new Map<string, number>();
+  for (const it of batchDetail?.items ?? []) {
+    alreadyInBatchQty.set(it.card_instance_id, (alreadyInBatchQty.get(it.card_instance_id) ?? 0) + it.quantity);
+  }
+  const cards = cardResults?.data ?? [];
   const selectedIds = new Set(rows.map(r => r.card.id));
   const atCap = rows.length >= BULK_ADD_MAX;
 
@@ -261,8 +266,10 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
     if (rows.length === 0) { toast.error('Add at least one card'); return; }
     for (const r of rows) {
       const qtyNum = parseInt(r.qty);
-      if (!r.qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > r.card.quantity) {
-        toast.error(`${r.card.card_name ?? 'Card'}: qty must be between 1 and ${r.card.quantity}`);
+      const inBatch = alreadyInBatchQty.get(r.card.id) ?? 0;
+      const remaining = r.card.quantity - inBatch;
+      if (!r.qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > remaining) {
+        toast.error(`${r.card.card_name ?? 'Card'}: qty must be between 1 and ${remaining} (${inBatch} already in batch)`);
         return;
       }
     }

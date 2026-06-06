@@ -360,11 +360,14 @@ export async function deleteBatch(userId: string, id: string): Promise<DeleteBat
   return { deleted: true, kept_slabs: keptSlabs, recredited_to_legacy: recreditedToLegacy };
 }
 
-// Bulk variant — add multiple inventory cards to a batch in one call. Rejects
-// duplicate card_instance_ids in the input (qty on the row is the right knob
-// for "more of the same card"), enforces a per-call cap so the modal can't
-// over-submit, and uses the existing addItem path for each so per-row
-// validation matches the single-add behavior.
+// Bulk variant — add multiple inventory cards to a batch in one call.
+//
+// The same card_instance can be added multiple times (across rows OR across
+// separate add-calls) — useful when a user has qty=N of one card and wants
+// each cert graded as its own line item. We validate that the total qty
+// across all batch_items for a card_instance doesn't exceed its inventory
+// quantity, both within this call and combined with what's already in the
+// batch.
 const BULK_ADD_MAX = 10;
 
 export async function addItemsBulk(
@@ -376,12 +379,31 @@ export async function addItemsBulk(
   if (items.length > BULK_ADD_MAX) {
     throw new AppError(400, `Maximum ${BULK_ADD_MAX} cards per bulk add (got ${items.length})`);
   }
-  const seen = new Set<string>();
+  // Aggregate input qty per card_instance to validate against inventory.
+  const totalRequestedById = new Map<string, number>();
   for (const it of items) {
-    if (seen.has(it.card_instance_id)) {
-      throw new AppError(400, 'Duplicate card in the batch add — pick each card once and use qty on its row');
+    const q = it.quantity ?? 1;
+    if (q < 1) throw new AppError(400, 'Quantity must be >= 1');
+    totalRequestedById.set(it.card_instance_id, (totalRequestedById.get(it.card_instance_id) ?? 0) + q);
+  }
+  for (const [cardId, requested] of totalRequestedById) {
+    const card = await db
+      .selectFrom('card_instances')
+      .select('quantity')
+      .where('id', '=', cardId)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!card) throw new AppError(404, 'Card not found');
+    const existing = await db
+      .selectFrom('grading_batch_items')
+      .select(db.fn.sum('quantity').as('total'))
+      .where('batch_id', '=', batchId)
+      .where('card_instance_id', '=', cardId)
+      .executeTakeFirst();
+    const alreadyInBatch = Number(existing?.total ?? 0);
+    if (alreadyInBatch + requested > card.quantity) {
+      throw new AppError(400, `Cannot add ${requested} — only ${card.quantity - alreadyInBatch} of this card available (${alreadyInBatch} already in batch).`);
     }
-    seen.add(it.card_instance_id);
   }
   const created: Awaited<ReturnType<typeof addItem>>[] = [];
   for (const it of items) {
