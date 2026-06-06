@@ -799,6 +799,7 @@ function CloseSubModal({ batch, onClose }: { batch: Batch; onClose: () => void }
 
 function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void }) {
   const qc = useQueryClient();
+  const [name,             setName]             = useState(batch.name ?? '');
   const [company,          setCompany]          = useState(batch.company);
   const [tier,             setTier]             = useState(batch.tier);
   const [submittedAt,      setSubmittedAt]      = useState(batch.submitted_at?.slice(0, 10) ?? '');
@@ -812,6 +813,7 @@ function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void 
     setSaving(true);
     try {
       await api.patch(`/grading-subs/${batch.id}`, {
+        name:              name.trim() || null,
         company,
         tier:              tier || undefined,
         submitted_at:      submittedAt || undefined,
@@ -833,6 +835,8 @@ function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <Input label="Submission Name" placeholder="e.g. PSA Value Plus 2026-03-02"
+        value={name} onChange={(e) => setName(e.target.value)} />
       <div className="grid grid-cols-2 gap-3">
         <Select label="Company" value={company} onChange={(e) => setCompany(e.target.value)}>
           {GRADING_COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}
