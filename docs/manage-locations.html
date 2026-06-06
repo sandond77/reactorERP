@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Locations — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Locations</h1>
+    <p class="lede">Physical storage spots — binders, slab boxes, shelves, card show table. Assign cards to a location so you can find them.</p>
+
+    <h2>What you see</h2>
+    <p>A tree of locations. Top-level entries (e.g. "Office", "Card Show Table") can have child sub-locations (e.g. "Office → Slab Binder 1", "Office → Slab Binder 2").</p>
+    <p>Each location has a type: <strong>graded</strong>, <strong>raw</strong>, or <strong>both</strong>. The slab modal only offers graded-type locations; the raw modal only offers raw-type.</p>
+    <p>Locations flagged <code>is_card_show = true</code> are special — when you assign a card to one of them, the card's <code>is_card_show</code> flag also flips.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ Add Location</strong> — name + type. Optional parent for nesting.</li>
+      <li><strong>Click a row</strong> — edit name, type, parent, card-show flag.</li>
+      <li><strong>Delete</strong> — only allowed if no cards are assigned. Otherwise reassign first.</li>
+    </ul>
+
+    <h2>Assigning a card to a location</h2>
+    <p>From the slab/raw detail modal, the Location field is a dropdown of valid locations for that card type. Saving fires <code>/locations/assign</code> which writes the assignment and optionally flips the card show flag.</p>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>Use a "Card Show Table" location with <code>is_card_show = true</code> as the canonical place to flag on-show inventory. Moving cards there automatically marks them on-show.</li>
+      <li>For grading-in-flight cards: a "Grading" location works well; remove the assignment when slabs come back.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

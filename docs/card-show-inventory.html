@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Card Show Inventory — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Card Show Inventory</h1>
+    <p class="lede">Cards currently flagged on a card show table. Two tabs: <strong>Graded</strong> and <strong>Raw</strong>.</p>
+
+    <h2>What you see</h2>
+    <p>Inventory rows where <code>is_card_show = true</code>. Same columns as Graded/Slabs or Raw Overall, plus a <strong>CS Price</strong> column (per-card sticker price).</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ Add to Card Show</strong> — opens a search modal. Search by cert # or card name, pick cards, set their CS prices. Max 5 cards per add operation. The flag flips <code>is_card_show = true</code> and stamps <code>card_show_added_at</code>.</li>
+      <li><strong>Click a row</strong> — opens the slab/raw detail modal in card-show mode. The only editable field is CS Price. The Delete button becomes <strong>Remove from Card Show</strong> (flips the flag back, clears the price).</li>
+    </ul>
+
+    <h2>How on-show inventory differs</h2>
+    <ul>
+      <li>Cards stay in your main inventory — the show flag doesn't hide them from Graded/Slabs or Raw Overall.</li>
+      <li>The eBay listing flow shows an <strong>On Show</strong> badge on certs flagged on-show. FIFO auto-pick prefers off-show certs to avoid double-listing.</li>
+      <li>The Sales record-flow can pre-fill the CS Price when platform = Card Show.</li>
+    </ul>
+
+    <h2>After the show</h2>
+    <p>Use the per-row Remove from Card Show or bulk remove unsold cards from the page. Unsold cards return to your main listings unchanged; sold cards already moved to <code>sold</code> status when you recorded the sale.</p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

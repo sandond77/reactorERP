@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Listings — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Listings</h1>
+    <p class="lede">Active marketplace listings. eBay, TCGPlayer, Facebook, Instagram, etc. Three tabs: <strong>Graded</strong>, <strong>Raw</strong>, <strong>Graded Set</strong>.</p>
+
+    <h2>What you see</h2>
+    <p>Aggregated listing rows. Same card + platform + currency collapse into one row showing # Listed and # Sold. Click the chevron to expand into per-listing sub-rows.</p>
+    <ul>
+      <li><strong>Graded tab</strong>: rows are sku + grade + company + platform.</li>
+      <li><strong>Raw tab</strong>: rows are sku + platform. Conditions and prices vary across sub-rows.</li>
+      <li><strong>Graded Set tab</strong>: rows are <code>listing_group_id</code>. The whole set is one eBay listing.</li>
+    </ul>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ Add Listing</strong> — list a card. Pick type (Graded single / Graded set / Raw), search for the card, pick the cert(s), set the price + eBay URL.</li>
+      <li><strong>Click a sub-row</strong> — opens the Edit Listing modal scoped to that listing. Change URL, price, or cancel just that listing.</li>
+      <li><strong>Cancel all</strong> — from the parent row's edit modal, cancel every listing in the aggregation.</li>
+    </ul>
+
+    <h2>FIFO + On Show</h2>
+    <p>When listing a multi-copy graded card, the cert picker auto-selects via FIFO (oldest purchase date first) — but prefers non-on-show certs so you don't double-list one already on a card show table. An <strong>On Show</strong> badge appears on certs flagged <code>is_card_show = true</code>.</p>
+
+    <h2>Tips</h2>
+    <ul>
+      <li><strong>Order URL warning</strong> — if the URL you paste looks like a sold-order URL (not a /itm/ listing URL), Reactor shows an amber warning. eBay's sold order URLs aren't valid for active listings.</li>
+      <li><strong># Sold</strong> on a still-active set listing means a previous identically-composed set has been sold. Useful for spotting trends.</li>
+      <li><strong>Cancelled listings</strong> aren't shown here — they live in the audit log.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

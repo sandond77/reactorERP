@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grading — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Grading</h1>
+    <p class="lede">Every grading submission you've sent out. Track shipping, processing, and returns.</p>
+
+    <h2>What you see</h2>
+    <p>One row per <code>grading_submissions</code> entry. Columns: Submission #, Company (PSA/BGS/CGC/...), Service level, Sub-batch ID, Status, Card count, Total cost, Shipped date, Expected return, Returned date.</p>
+    <p>Status flow: <strong>building → shipped → received_back → returned</strong>.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ New Batch</strong> — open a new submission. Pick company + service level + per-card grading cost.</li>
+      <li><strong>Click a row</strong> — opens the batch detail. See every card in it, edit the per-card grading cost, mark shipped/received, process returns.</li>
+      <li><strong>Process Return</strong> — once cards come back, upload PSA/BGS's return CSV. Each cert becomes a graded slab with cost = raw_cost + grading_cost. See <a href="grading-submission.html">Grading Submission</a> for the full flow.</li>
+      <li><strong>Delete Batch</strong> — reverts a submission. Unsold/un-listed slabs are removed; source raw cards are restored from the audit log. Sold/listed slabs are kept and reported.</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li><strong>Edit grading_cost after the fact</strong> — fans out to every linked slab AND every historical sale's total_cost_basis. P&amp;L stays accurate even when the grader corrects an invoice.</li>
+      <li><strong>Sub-batch ID</strong> — PSA assigns this when they receive your package. Add it to the batch so the return matcher can use it for disambiguation.</li>
+      <li><strong>Legacy slabs</strong> (pre-migration 056) don't have a <code>grading_batch_id</code> and won't auto-update if the batch cost changes.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

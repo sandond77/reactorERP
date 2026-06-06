@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Expenses — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Expenses</h1>
+    <p class="lede">Operating costs that aren't card cost basis — postage, supplies, subscriptions, booth fees. Hits overall P&amp;L but not per-card profit.</p>
+
+    <h2>What you see</h2>
+    <p>One row per <code>expenses</code> entry. Columns: Date, Type, Description, Amount, Currency, Order #, Receipt link.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ Add Expense</strong> — pick a type (Shipping, Supplies, Software, Fees, Travel, Other), enter amount + date + description + optional link.</li>
+      <li><strong>Click a row</strong> — edit any field.</li>
+      <li><strong>Bulk import</strong> — use the <a href="import.html">Import</a> page with type Expenses. Required columns: description, amount, date.</li>
+    </ul>
+
+    <h2>What expenses DON'T do</h2>
+    <ul>
+      <li>Don't reduce <code>total_cost_basis</code> on cards. Per-card cost stays what it was.</li>
+      <li>Don't appear in card-level P&amp;L reports. The Card Show Breakdown won't subtract booth fees from your show profit — you have to mentally reconcile.</li>
+      <li>Do show up in the overall <a href="reports.html">Reports</a> as an aggregate line item.</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>If a fee is per-card (e.g. PSA grading), don't log it here — log it as <code>grading_cost</code> on the submission so it lands in cost basis.</li>
+      <li>Booth fees + travel for card shows are good candidates here. Reconcile them against Card Show Breakdown profit to see true show net.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sub Returns — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Sub Returns</h1>
+    <p class="lede">Process the CSV when grading returns. Each cert becomes a graded slab; non-graded outcomes (lost, not_submitted, not_graded) take their own paths.</p>
+
+    <h2>The flow</h2>
+    <ol>
+      <li><strong>Pick the batch.</strong> Sub Returns lists every submission with status <code>shipped</code> or <code>received_back</code>.</li>
+      <li><strong>Upload the CSV.</strong> PSA, BGS, CGC each have slightly different formats; Reactor parses them.</li>
+      <li><strong>Match.</strong> A scoring matcher pairs each CSV row to a batch item using card name, card number (from PSA's Description column), set tokens, year, language, and line position. Each match has a confidence: <strong>Strong / Good / Weak / Manual</strong>.</li>
+      <li><strong>Review slots.</strong> Each batch slot is editable: card name, cert #, grade, label. CSV-imported values are locked (🔒) by default — click to unlock for override.</li>
+      <li><strong>Set dispositions.</strong> Per slot:
+        <ul>
+          <li><strong>graded</strong> (default) — creates a new slab. Cost = raw_cost + grading_cost.</li>
+          <li><strong>not_graded</strong> — came back ungraded. Creates a new raw card_instance with cost = raw_cost + grading_cost.</li>
+          <li><strong>lost</strong> — write-off. No new row.</li>
+          <li><strong>not_submitted</strong> — wasn't actually sent. Creates a new raw card_instance with cost = raw_cost (no grading fee).</li>
+        </ul>
+      </li>
+      <li><strong>Confirm.</strong> Slabs + raw rows are created; source raw quantities decrement; batch is marked returned.</li>
+    </ol>
+
+    <h2>Remap if matching is wrong</h2>
+    <p>The Remap column on each slot lets you reassign which batch item it maps to without re-uploading. Useful when the matcher is confident-but-wrong.</p>
+
+    <h2>Qty mismatch</h2>
+    <p>If the CSV has fewer rows than the batch's expected cards (some never shipped, some came back partially), use the per-row Ignore (×) button to drop a slot from the payload. The source raw row stays in <code>grading_submitted</code> for a future return.</p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

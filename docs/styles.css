@@ -118,6 +118,18 @@ pre code {
   font-weight: 600;
   padding: 0 0.5rem 0.5rem;
 }
+/* Nested label inside a group — smaller, less prominent */
+.nav-group-label.nested {
+  font-size: 10px;
+  color: var(--text-dim);
+  padding: 0.75rem 0.75rem 0.3rem;
+  opacity: 0.7;
+}
+/* Nested nav items — indented */
+.nav.nested a {
+  padding-left: 1.4rem;
+  font-size: 12.5px;
+}
 .nav a {
   display: block;
   padding: 0.4rem 0.75rem;

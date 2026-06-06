@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inspection — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Inspection</h1>
+    <p class="lede">Where bulk lots become individual raw cards. Pick a lot, walk the cards, assign condition + routing decision per card.</p>
+
+    <h2>The flow</h2>
+    <ol>
+      <li><strong>Pick a lot.</strong> The lot picker shows raw_purchases with unsplit quantity remaining. Filter by received-not-yet-fully-split.</li>
+      <li><strong>Walk the cards.</strong> For each physical card from the lot, fill in:
+        <ul>
+          <li><strong>Card name</strong> — autocomplete from the catalog. If new, a catalog entry is created.</li>
+          <li><strong>Condition</strong> — NM, NM-, LP, LP+, MP, MP-, HP, DMG.</li>
+          <li><strong>Decision</strong> — <strong>Sell Raw</strong> or <strong>Submit to Grading</strong>.</li>
+          <li>Optional: condition notes, image, location.</li>
+        </ul>
+      </li>
+      <li><strong>Save the split.</strong> A new card_instance row is created at qty=1 with cost = lot's per-card cost. The lot's remaining qty decrements.</li>
+    </ol>
+
+    <h2>Bulk-add same-condition rows</h2>
+    <p>If a lot has 20 NM commons that you don't want to inspect individually, use the multi-add form: set condition + decision + quantity (e.g. 20). One card_instance is created at qty=20 instead of 20 separate rows.</p>
+
+    <h2>Tips</h2>
+    <ul>
+      <li><strong>Inspection routing</strong> is recorded as the <code>decision</code> column on the card_instance. The Dashboard's Inspection Routing chart counts Sell Raw vs Grade decisions.</li>
+      <li><strong>You can re-route after the fact</strong> — open the card_instance and change its decision. Cost basis stays put.</li>
+      <li><strong>Catalog matching</strong> — if Reactor can't find a known set code in the card name, you'll get an Unlinked prompt asking you to assign Game / Language / Set Code / Set Name.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

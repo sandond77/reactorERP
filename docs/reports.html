@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reports — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Reports</h1>
+    <p class="lede">Aggregate views of the business — sales by period, by platform, by show, by grade. Drill-downs.</p>
+
+    <h2>Available reports</h2>
+
+    <h3>Sales by Month</h3>
+    <p>Revenue, fees, cost basis, profit, ROI per month. Filterable by year, platform, card type.</p>
+
+    <h3>Sales by Platform</h3>
+    <p>Same metrics rolled up by platform (eBay, TCGPlayer, Card Show, etc). Useful for seeing fee burden by channel.</p>
+
+    <h3>Card Show Breakdown</h3>
+    <p>Per-show summary: slab count + raw count + total inventory value brought, gross revenue, net revenue, total cost basis, profit. Multi-day shows let you slice by day.</p>
+    <p>The AI Agent can generate this on demand: <em>"what's my P&amp;L for the [show name]?"</em></p>
+
+    <h3>Grading ROI</h3>
+    <p>For every grading submission, the ROI of cards that came back graded and were subsequently sold. Useful for evaluating whether a service level is worth the price.</p>
+
+    <h3>Inventory Aging</h3>
+    <p>How long each unsold card has been in inventory. Group by buckets (0–30, 30–90, 90–180, 180+ days). Surfaces dead stock.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>Filter</strong> — date range, platform, card type (graded/raw), specific show.</li>
+      <li><strong>Export CSV</strong> — most reports have a download button.</li>
+      <li><strong>Click a row</strong> — drills into the underlying sales/inventory list.</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>Reports use snapshotted <code>total_cost_basis</code> from the sale row. Editing a card's cost basis after sale recomputes the sale's basis and the report updates accordingly.</li>
+      <li>For tax season: Sales by Month + Expenses gives you the two halves of a P&amp;L statement.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

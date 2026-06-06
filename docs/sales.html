@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sales — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Sales</h1>
+    <p class="lede">Every completed sale. One row per <code>sales</code> entry. Filter by platform, date range, card type.</p>
+
+    <h2>What you see</h2>
+    <p>Columns: Date sold, Cert/ID, Card, Grade/Condition, Qty, Sale method (platform), Order link, Raw cost, Grading cost, Listed price, Strike price, After fees, Net (profit), CS Price (if card show).</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ Record Sale</strong> — log a completed sale. Pick the card (search by cert # or card name), pick the platform, fill in sale price + fees + shipping. <strong>For eBay</strong>: paste the order URL — the order # auto-fills from the URL's <code>orderid</code> param. <strong>For card show</strong>: pick the show + day.</li>
+      <li><strong>Bulk Record Sale</strong> — for card shows. Add multiple cards in one cart, hit the total, splits across cards proportionally.</li>
+      <li><strong>Click a row</strong> — opens the sale detail modal. Edit any field; cost basis recomputes if you change the price/fees.</li>
+      <li><strong>Delete sale</strong> — restores the underlying card to inventory (graded → graded; raw → raw quantity refund). The confirmation label tells you which.</li>
+    </ul>
+
+    <h2>Filters worth knowing</h2>
+    <ul>
+      <li><strong>All / Graded / Raw</strong> top tabs.</li>
+      <li><strong>Platform</strong> filter — eBay, TCGPlayer, Card Show, Facebook, Instagram, Local, Other.</li>
+      <li><strong>Card show</strong> filter — narrow to sales from a specific show.</li>
+      <li><strong>Date range</strong> — sold date.</li>
+    </ul>
+
+    <h2>Editable inline</h2>
+    <p>The <strong>CS Price</strong> (card show sticker price) and <strong>Listed Price</strong> are editable inline from the sale detail modal — they're per-card properties, not sale-row properties, but it's the only place to set them without navigating away.</p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>
