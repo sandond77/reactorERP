@@ -1,5 +1,23 @@
 # Reactor — Changelog
 
+## June 6, 2026
+
+### Fixes
+
+**Grading — revert of a returned sub actually undoes the return**
+- `revertReturn` looked up slabs to delete by `slab_details.source_raw_instance_id`, which has `ON DELETE SET NULL`. When `processReturn` hard-deletes a fully-consumed source raw card (every qty went to grading), the cascade sets every linked slab's `source_raw_instance_id` to NULL. So `revertReturn`'s per-source query returned zero rows, `slabsDeleted` stayed 0, and the per-batch_item `continue` skipped the source-restore step too — while the batch status flip still happened and the success toast still fired. End result: slabs lingered in graded inventory, sources weren't restored, reverted sub came back empty, and the user had to clean up manually.
+- Fix: slab cleanup now keys on `grading_batch_id` (preserved through any source-raw deletes), tracking per-source deletion counts for the restore step. Both restore paths (partial-consumption update; fully-consumed audit-log re-insert) now set `status='inspected', decision='grade'` so the sub reopens with its cards visible and re-routable. Locked slabs (sold or listed) still survive and are reported via `kept_slabs`.
+- One-off prod cleanup: the `26395859` batch on prod had 11 orphan `grading_batch_items` (lines 1–11) pointing at hard-deleted card_instances from the broken revert. Deleted the orphans and renumbered the surviving 11 items down from 12–22 to 1–11 in a scoped transaction (sandond77 only).
+
+**Grading — Edit Submission Details modal now lets you change the name**
+- The Create modal auto-generates a submission name from date + company + tier, but the Edit modal didn't expose it. Once a batch was created you were stuck with whatever auto-name it got. Added a `Submission Name` input at the top of the Edit modal pre-filled with `batch.name`, included in the PATCH body. The server's `updateBatch` already accepts the field; client just wasn't sending it.
+
+**Grading — Add Card to Batch lets you re-add the same card up to inventory qty**
+- PSA grades cards under one line item sequentially (one cert, qtys 1-of-N through N-of-N of the same card). If a user has N copies of a card and wants each graded as its own cert, they need N separate line items at qty=1. The Add Card modal hard-blocked re-adding the same `card_instance` with an `alreadyInBatch` filter — once added at qty=1, the card disappeared from search and the user couldn't add another line item for it.
+- Client: filter removed. Track per-card_instance qty already in the batch and per-card_instance qty already in the current modal selection. Cap the row's qty input at `inventory − in-batch − pending`. Search result rows show `in batch: N` and `pending: N` chips and disable when the remaining qty hits zero.
+- Each `BulkAddRow` now carries a unique `rowId`, so the same `card_instance_id` can appear in multiple selection rows in one add — supporting the workflow where you click the same card 13 times to create 13 separate line items.
+- Server: `addItemsBulk` validates total qty across all batch_items for a `card_instance` can't exceed `card_instance.quantity`, combining this call with what's already in the batch. Returns a clear 400 with the remaining qty if over-allocated.
+
 ## June 5, 2026
 
 ### Features
