@@ -196,6 +196,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
 const BULK_ADD_MAX = 10;
 
 interface BulkAddRow {
+  rowId: string;
   card: CardToGrade;
   qty: string;
   expectedGrade: string;
@@ -246,30 +247,52 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
     alreadyInBatchQty.set(it.card_instance_id, (alreadyInBatchQty.get(it.card_instance_id) ?? 0) + it.quantity);
   }
   const cards = cardResults?.data ?? [];
-  const selectedIds = new Set(rows.map(r => r.card.id));
+  // Per-card_instance qty already chosen in this current modal selection
+  // (separate from what's already in the batch). Used for the qty cap.
+  const selectedQtyById = new Map<string, number>();
+  for (const r of rows) {
+    selectedQtyById.set(r.card.id, (selectedQtyById.get(r.card.id) ?? 0) + (parseInt(r.qty) || 0));
+  }
   const atCap = rows.length >= BULK_ADD_MAX;
 
   function addRow(card: CardToGrade) {
-    if (selectedIds.has(card.id) || atCap) return;
-    setRows(prev => [...prev, { card, qty: '1', expectedGrade: '', estimatedValue: '' }]);
+    if (atCap) return;
+    const inBatch = alreadyInBatchQty.get(card.id) ?? 0;
+    const inSelection = selectedQtyById.get(card.id) ?? 0;
+    if (inBatch + inSelection >= card.quantity) {
+      toast.error(`No more available — ${inBatch} already in batch, ${inSelection} pending in this add.`);
+      return;
+    }
+    setRows(prev => [...prev, { rowId: crypto.randomUUID(), card, qty: '1', expectedGrade: '', estimatedValue: '' }]);
     setSearch('');
   }
-  function removeRow(id: string) {
-    setRows(prev => prev.filter(r => r.card.id !== id));
+  function removeRow(rowId: string) {
+    setRows(prev => prev.filter(r => r.rowId !== rowId));
   }
-  function updateRow(id: string, key: 'qty' | 'expectedGrade' | 'estimatedValue', val: string) {
-    setRows(prev => prev.map(r => r.card.id === id ? { ...r, [key]: val } : r));
+  function updateRow(rowId: string, key: 'qty' | 'expectedGrade' | 'estimatedValue', val: string) {
+    setRows(prev => prev.map(r => r.rowId === rowId ? { ...r, [key]: val } : r));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (rows.length === 0) { toast.error('Add at least one card'); return; }
+    // Aggregate per-card totals (selection + already in batch) so a card that
+    // appears across multiple rows is validated against its true inventory.
+    const totalById = new Map<string, number>();
     for (const r of rows) {
       const qtyNum = parseInt(r.qty);
-      const inBatch = alreadyInBatchQty.get(r.card.id) ?? 0;
-      const remaining = r.card.quantity - inBatch;
-      if (!r.qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > remaining) {
-        toast.error(`${r.card.card_name ?? 'Card'}: qty must be between 1 and ${remaining} (${inBatch} already in batch)`);
+      if (!r.qty || isNaN(qtyNum) || qtyNum < 1) {
+        toast.error(`${r.card.card_name ?? 'Card'}: qty must be >= 1`);
+        return;
+      }
+      totalById.set(r.card.id, (totalById.get(r.card.id) ?? 0) + qtyNum);
+    }
+    for (const [cardId, selectedTotal] of totalById) {
+      const sample = rows.find(r => r.card.id === cardId)!;
+      const inBatch = alreadyInBatchQty.get(cardId) ?? 0;
+      const cap = sample.card.quantity - inBatch;
+      if (selectedTotal > cap) {
+        toast.error(`${sample.card.card_name ?? 'Card'}: ${selectedTotal} selected but only ${cap} available (${inBatch} already in batch)`);
         return;
       }
     }
@@ -328,20 +351,24 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
           ) : (
             <div className="max-h-44 overflow-y-auto divide-y divide-zinc-800">
               {cards.map((card) => {
-                const already = selectedIds.has(card.id);
+                const inBatch = alreadyInBatchQty.get(card.id) ?? 0;
+                const inSelection = selectedQtyById.get(card.id) ?? 0;
+                const remaining = card.quantity - inBatch - inSelection;
+                const exhausted = remaining <= 0;
                 return (
-                  <button key={card.id} type="button" disabled={already}
-                    className={`w-full text-left px-3 py-2 text-sm transition-colors ${already ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-800/60'}`}
+                  <button key={card.id} type="button" disabled={exhausted}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors ${exhausted ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-800/60'}`}
                     onClick={() => addRow(card)}>
                     <div className="flex items-center justify-between gap-2">
                       <span className="font-medium truncate text-zinc-200">{card.card_name ?? 'Unknown'}</span>
                       <span className="text-xs font-mono font-semibold text-zinc-400 shrink-0">
                         {card.raw_purchase_label ?? '—'}
-                        {already && <span className="ml-2 text-[10px] text-indigo-400 font-sans">added</span>}
+                        {inBatch > 0 && <span className="ml-2 text-[10px] text-indigo-400 font-sans">in batch: {inBatch}</span>}
+                        {inSelection > 0 && <span className="ml-2 text-[10px] text-indigo-400 font-sans">pending: {inSelection}</span>}
                       </span>
                     </div>
                     <div className="text-xs text-zinc-500 mt-0.5">
-                      {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{card.quantity} available</span>
+                      {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{remaining} available</span>
                     </div>
                   </button>
                 );
@@ -368,7 +395,7 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
           </div>
           <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
             {rows.map((r) => (
-              <div key={r.card.id} className="grid items-start gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
+              <div key={r.rowId} className="grid items-start gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
                 style={{ gridTemplateColumns: 'minmax(0,1fr) 80px 90px 110px 24px' }}>
                 <div className="min-w-0">
                   <p className="text-xs text-zinc-100 font-medium whitespace-normal break-words leading-snug">{r.card.card_name ?? 'Unknown'}</p>
@@ -383,20 +410,20 @@ function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: 
                   placeholder="1"
                   onChange={(e) => {
                     const v = e.target.value;
-                    if (v === '') { updateRow(r.card.id, 'qty', ''); return; }
+                    if (v === '') { updateRow(r.rowId, 'qty', ''); return; }
                     const n = parseInt(v);
-                    if (!isNaN(n)) updateRow(r.card.id, 'qty', String(Math.min(r.card.quantity, Math.max(1, n))));
+                    if (!isNaN(n)) updateRow(r.rowId, 'qty', String(Math.min(r.card.quantity, Math.max(1, n))));
                   }}
                   className={cellCls} />
                 <input type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
                   value={r.expectedGrade}
-                  onChange={(e) => updateRow(r.card.id, 'expectedGrade', e.target.value)}
+                  onChange={(e) => updateRow(r.rowId, 'expectedGrade', e.target.value)}
                   className={cellCls} />
                 <input type="text" inputMode="decimal" placeholder="0.00"
                   value={r.estimatedValue}
-                  onChange={(e) => updateRow(r.card.id, 'estimatedValue', e.target.value)}
+                  onChange={(e) => updateRow(r.rowId, 'estimatedValue', e.target.value)}
                   className={cellCls} />
-                <button type="button" onClick={() => removeRow(r.card.id)}
+                <button type="button" onClick={() => removeRow(r.rowId)}
                   className="text-zinc-600 hover:text-red-400 transition-colors flex items-center justify-center">
                   <X size={14} />
                 </button>
