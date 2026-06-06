@@ -632,12 +632,17 @@ export function RawOverall() {
 
                   if (!isLot || !lotExpanded) return [mainRow];
 
-                  // Sub-rows show the commerce breakdown of the lot. Pure
-                  // 'inspected' rows (post-inspection, pre-routing) are
-                  // intermediate workflow state and not useful at this view —
-                  // hide them. raw_for_sale, sold, grading_submitted, graded,
-                  // lost_damaged all stay.
-                  const visibleRows = g.rows.filter((r) => r.status !== 'inspected' && r.status !== 'purchased_raw');
+                  // Sub-rows show the commerce breakdown of the lot. Hide
+                  // intermediate workflow state ('inspected' / 'purchased_raw')
+                  // and 'graded' — once a card has graded out it's its own
+                  // slab inventory item, surfacing it under the raw lot is
+                  // confusing and double-counts. grading_submitted stays since
+                  // those are still raw, in flight.
+                  const visibleRows = g.rows.filter((r) =>
+                    r.status !== 'inspected' &&
+                    r.status !== 'purchased_raw' &&
+                    r.status !== 'graded'
+                  );
                   if (visibleRows.length === 0) return [mainRow];
                   const subRows = visibleRows.map((row) => (
                     <tr key={`${g.key}::${row.id}`}

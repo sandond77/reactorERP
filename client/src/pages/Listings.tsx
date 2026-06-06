@@ -905,16 +905,29 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 
 // ── Edit Listing Modal ────────────────────────────────────────────────────────
 
-function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: () => void }) {
+function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert?: CertDetail; onClose: () => void }) {
   const queryClient = useQueryClient();
   const isSet = !!row.listing_group_id;
-  const [price, setPrice] = useState(row.list_price != null ? (row.list_price / 100).toFixed(2) : '');
-  const [ebayUrl, setEbayUrl] = useState(row.ebay_listing_url ?? '');
+  // When opened from a sub-row click on a non-set row, scope to just that one
+  // listing. The shared bottom URL/Price are used as the single-listing inputs.
+  // Sets keep batch behavior (one URL + total price across components).
+  const singleListingId = (!isSet && cert?.listing_id) ? cert.listing_id : null;
+  const initialPrice = singleListingId && cert?.list_price != null
+    ? (cert.list_price / 100).toFixed(2)
+    : row.list_price != null ? (row.list_price / 100).toFixed(2) : '';
+  const initialUrl = singleListingId
+    ? (cert?.ebay_listing_url ?? '')
+    : (row.ebay_listing_url ?? '');
+  const [price, setPrice] = useState(initialPrice);
+  const [ebayUrl, setEbayUrl] = useState(initialUrl);
   const [setName, setSetName] = useState(row.listing_group_name ?? '');
   const [saving, setSaving] = useState(false);
   const [deleteStep, setDeleteStep] = useState<null | 'confirm' | 'deleting'>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
-  const [localCerts, setLocalCerts] = useState(row.cert_details ?? []);
+  // Scoped to the clicked cert when single-listing mode; otherwise full list.
+  const [localCerts, setLocalCerts] = useState(
+    singleListingId ? [cert!] : (row.cert_details ?? [])
+  );
 
   const groupKey = {
     part_number:     row.part_number ?? null,
@@ -935,7 +948,15 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
           ebay_listing_url: ebayUrl || null,
           list_price: price || undefined,
         });
+      } else if (singleListingId) {
+        // Sub-row click: patch only the clicked listing.
+        await api.patch(`/listings/${singleListingId}`, {
+          list_price: price || undefined,
+          ebay_listing_url: ebayUrl || null,
+        });
       } else {
+        // Parent-row click on a single-listing row: patch via group endpoint
+        // (which targets the one underlying listing in this case).
         await api.patch('/listings/group', {
           ...groupKey,
           list_price: price || undefined,
@@ -957,10 +978,15 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
   async function handleDelete() {
     setDeleteStep('deleting');
     try {
-      const res = isSet
-        ? await api.delete(`/listings/set-group/${row.listing_group_id}`)
-        : await api.delete('/listings/group', { data: groupKey });
-      toast.success(`${res.data.cancelled} listing${res.data.cancelled !== 1 ? 's' : ''} cancelled`);
+      if (singleListingId) {
+        await api.delete(`/listings/${singleListingId}`);
+        toast.success('Listing cancelled');
+      } else {
+        const res = isSet
+          ? await api.delete(`/listings/set-group/${row.listing_group_id}`)
+          : await api.delete('/listings/group', { data: groupKey });
+        toast.success(`${res.data.cancelled} listing${res.data.cancelled !== 1 ? 's' : ''} cancelled`);
+      }
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
       onClose();
@@ -1015,28 +1041,27 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
         </div>
         {localCerts.length > 0 && (
           <div className="border-t border-zinc-700/50 divide-y divide-zinc-800/60">
-            {localCerts.map((cert) => (
-              <div key={cert.listing_id ?? cert.cert_number} className="flex items-center gap-3 px-4 py-2">
+            {localCerts.map((c) => (
+              <div key={c.listing_id ?? c.cert_number} className="flex items-center gap-3 px-4 py-2">
                 <div className="flex-1 min-w-0">
-                  {isSet && cert.card_name && (
-                    <p className="text-[11px] text-zinc-300 truncate">{cert.card_name}</p>
+                  {isSet && c.card_name && (
+                    <p className="text-[11px] text-zinc-300 truncate">{c.card_name}</p>
                   )}
                   <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-                    {cert.cert_number && <span className="font-mono text-indigo-300/70">{formatCertNumber(cert.cert_number)}</span>}
-                    {cert.grade_label && <span>{cert.grade_label}</span>}
-                    {cert.list_price != null && <span className="ml-auto text-zinc-400">{formatCurrency(cert.list_price, row.currency)}</span>}
+                    {c.raw_purchase_label && <span className="font-mono text-indigo-300/70">{c.raw_purchase_label}</span>}
+                    {c.cert_number && <span className="font-mono text-indigo-300/70">{formatCertNumber(c.cert_number)}</span>}
+                    {c.condition && <span>{c.condition}</span>}
+                    {c.grade_label && <span>{c.grade_label}</span>}
+                    {c.list_price != null && <span className="ml-auto text-zinc-400">{formatCurrency(c.list_price, row.currency)}</span>}
                   </div>
                 </div>
-                {cert.listing_id && localCerts.length > 1 && (
-                  <button
-                    type="button"
-                    disabled={cancellingId === cert.listing_id}
-                    onClick={() => cancelOneListing(cert.listing_id!)}
+                {c.listing_id && localCerts.length > 1 && !singleListingId && (
+                  <button type="button"
+                    disabled={cancellingId === c.listing_id}
+                    onClick={() => cancelOneListing(c.listing_id!)}
                     className="shrink-0 flex items-center gap-1 text-[11px] text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-40"
                     title="Cancel this listing">
-                    {cancellingId === cert.listing_id
-                      ? <Loader2 size={12} className="animate-spin" />
-                      : <Trash2 size={12} />}
+                    {cancellingId === c.listing_id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                   </button>
                 )}
               </div>
@@ -1068,7 +1093,11 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
         <div>
           {deleteStep === 'confirm' ? (
             <div className="flex items-center gap-2">
-              <span className="text-sm text-red-300">Cancel all {localCerts.length > 1 ? `${localCerts.length} listings` : 'listing'}?</span>
+              <span className="text-sm text-red-300">
+                {singleListingId
+                  ? 'Cancel this listing?'
+                  : `Cancel all ${localCerts.length > 1 ? `${localCerts.length} listings` : 'listing'}?`}
+              </span>
               <Button type="button" size="sm" variant="ghost" onClick={() => setDeleteStep(null)}>No</Button>
               <Button type="button" size="sm"
                 className="bg-red-600 hover:bg-red-500 text-white border-0"
@@ -1082,7 +1111,9 @@ function EditListingModal({ row, onClose }: { row: AggregatedListing; onClose: (
             <button type="button" onClick={() => setDeleteStep('confirm')}
               className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-red-400 transition-colors">
               <Trash2 size={13} />
-              Cancel all {localCerts.length > 1 ? `(${localCerts.length})` : ''}
+              {singleListingId
+                ? 'Cancel this listing'
+                : `Cancel all ${localCerts.length > 1 ? `(${localCerts.length})` : ''}`}
             </button>
           )}
         </div>
@@ -1132,7 +1163,10 @@ export function Listings() {
   const [listingTab, setListingTab] = useState<'graded' | 'raw' | 'graded_set' | 'raw_set'>('graded');
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editRow, setEditRow] = useState<AggregatedListing | null>(null);
+  // Sub-row click sets `editTarget.cert` so the modal scopes to that listing.
+  // Parent-row click (single-listing rows) leaves cert undefined.
+  const [editTarget, setEditTarget] = useState<{ row: AggregatedListing; cert?: CertDetail } | null>(null);
+  const setEditRow = (row: AggregatedListing, cert?: CertDetail) => setEditTarget({ row, cert });
   const queryClient = useQueryClient();
 
   const { mutate: migrateOrderUrls, isPending: migrating } = useMutation({
@@ -1418,7 +1452,7 @@ export function Listings() {
                     {isGraded && isExpanded && row.cert_details?.map((cert, ci) => (
                       <tr key={ci}
                         className="border-b border-zinc-800/40 bg-zinc-900/40 hover:bg-zinc-800/50 cursor-pointer transition-colors"
-                        onClick={() => setEditRow(row)}>
+                        onClick={() => setEditRow(row, cert)}>
                         {/* Part # */}
                         <td className="px-3 py-1.5 font-mono text-[11px] text-zinc-500 truncate">
                           {listingTab === 'graded_set'
@@ -1475,7 +1509,7 @@ export function Listings() {
                     {!isGraded && isExpanded && row.cert_details?.map((cert, ci) => (
                       <tr key={ci}
                         className="border-b border-zinc-800/40 bg-zinc-900/40 hover:bg-zinc-800/50 cursor-pointer transition-colors"
-                        onClick={() => setEditRow(row)}>
+                        onClick={() => setEditRow(row, cert)}>
                         {/* Part # — vertical line */}
                         <td className="px-3 py-1.5">
                           <div className="w-px h-3 bg-zinc-700 mx-auto" />
@@ -1543,8 +1577,8 @@ export function Listings() {
         <AddListingModal onClose={() => setShowAddModal(false)} />
       </Modal>
 
-      <Modal open={!!editRow} onClose={() => setEditRow(null)} title="Edit Listing">
-        {editRow && <EditListingModal row={editRow} onClose={() => setEditRow(null)} />}
+      <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title="Edit Listing">
+        {editTarget && <EditListingModal row={editTarget.row} cert={editTarget.cert} onClose={() => setEditTarget(null)} />}
       </Modal>
     </div>
   );

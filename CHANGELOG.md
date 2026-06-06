@@ -2,7 +2,20 @@
 
 ## June 5, 2026
 
+### Features
+
+**Mass Import — Migration Guide + persistent Field Reference sidebar**
+- Onboarding gap reported by a beta user: the importer assumed you already knew the schema. New users had no scaffolding to prepare their CSV or understand what each column should contain. Added a Migration Guide card on the upload screen that lists the four import types (Graded Cards, Raw Purchases, Bulk Sales, Expenses), each with a one-line "when to use this" description, color-coded required/recommended field chips, and a per-type Template download link. The chips carry per-field `title` tooltips so hovering any field name surfaces what to put in it.
+- New page-level layout splits the Import page into a 3-column main area (75%) and a persistent Field Reference sidebar (25%). Reference is always visible — initial upload state, preview state, and after-result — so users can map columns without losing the field documentation. Uses a CSS Grid with an absolutely-positioned reference Card inside its grid cell, so the row height is determined by the main column alone and the reference fills that height (and scrolls internally when its content is taller). `lg:min-h-[50vh]` keeps the sidebar from collapsing when the main column is short.
+- Field Reference content: every mapping target field gets a one-line description (`card_name` → "Full card name as printed. Required for graded + raw imports. For PSA labels, paste the entire label.", `cost` → "Total cost of the order. Use for raw purchase imports (sums per row × quantity).", etc). Grouped by Card / Graded / Purchase / Sale / Listing / Expense / Bulk Sale. On the mapping screen the same descriptions render inline under each active dropdown, and the `<option>` elements carry per-field `title` tooltips for hover.
+
 ### Fixes
+
+**Edit Listing — sub-row click opens a per-listing modal instead of a batch editor**
+- Clicking a sub-row in the aggregated listings table previously opened the `EditListingModal` in group-edit mode — the modal showed every listing in the rollup and the bottom URL + Price fields would PATCH every one of them. Editing one price rewrote them all. `editRow` state now tracks both the parent row and the clicked `cert`; when a `cert` is provided the modal scopes to just that listing: header reads "1 listing", the listing list shows only the clicked one, bottom URL + Price are pre-filled with that listing's values, and save calls `PATCH /listings/${listingId}` instead of the group endpoint. Delete becomes "Cancel this listing" and routes to the single-listing endpoint. Parent click on a non-aggregated row still opens group-edit (which targets the one underlying listing) and graded set rollups still get the batch flow since a set is one eBay listing with one shared URL + total price.
+
+**Raw Overall — hide graded children from the lot sub-row breakdown**
+- The Raw Overall view expanded each raw lot to show its commerce breakdown (raw_for_sale, sold, grading_submitted, graded, lost_damaged). But `graded` children are also surfaced in graded-slab inventory — leaving them in the raw lot view double-counted them visually and was confusing. Added `'graded'` to the sub-row exclusion list alongside `'inspected'` and `'purchased_raw'`. `grading_submitted` stays since those cards are still raw, in flight to a grader.
 
 **Raw listings — aggregate by part number, expand to per-listing details**
 - The non-set listings query was grouping raw rows by `sku + condition + platform + currency + list_price + ebay_listing_url`, so two listings of the same SKU at the same condition + price + URL collapsed into one row but anything that varied — different conditions, different prices, different eBay URLs — fanned out into separate rows. A card with one LP / one NM / two NM- listings showed as three rows. There was no way to drill into which underlying listings rolled up since the graded chevron didn't render on raw rows. Now raw rows aggregate by `sku + platform + currency` (matches graded single behavior), so all listings of the same card on the same platform collapse to one row.
