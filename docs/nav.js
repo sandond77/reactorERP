@@ -20,6 +20,8 @@ var SIDEBAR_HTML = [
   '    <a href="inventory-model.html">Inventory Model</a>',
   '    <a href="cost-basis.html">Cost Basis</a>',
   '    <a href="state-machine.html">State Machine</a>',
+  '    <a href="catalog-system.html">Catalog System</a>',
+  '    <a href="location-system.html">Location System</a>',
   '  </nav>',
   '</div>',
   '<div class="nav-group">',

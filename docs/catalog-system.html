@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Catalog System — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Catalog System</h1>
+    <p class="lede">How Reactor identifies a card: SKU (Part #) + set code + language. The naming convention that makes every Snivy from every set distinguishable.</p>
+
+    <h2>The SKU format</h2>
+    <pre><code>{GAME}-{LANG}-{SETCODE}-{NUMBER}
+
+PKMN-JP-SV11B-088   ← Snivy from Japanese Black Bolt #088
+PKMN-EN-BS-006      ← Charizard from English Base Set #006
+PKMN-JP-S12a-196    ← Green's Exploration from JP VSTAR Universe #196</code></pre>
+    <p>Each segment narrows the identity:</p>
+    <ul>
+      <li><strong>GAME</strong> — <code>PKMN</code> for Pokemon (most inventory). Future games would get their own codes.</li>
+      <li><strong>LANG</strong> — <code>EN</code> or <code>JP</code>. These same set codes often exist in both languages; language is part of the identity.</li>
+      <li><strong>SETCODE</strong> — the canonical short code for the set (e.g. <code>SV11B</code> for Black Bolt, <code>S12a</code> for VSTAR Universe).</li>
+      <li><strong>NUMBER</strong> — the card number within the set as printed.</li>
+    </ul>
+
+    <h2>How set codes resolve</h2>
+    <p>Set codes are looked up from a shared list of known sets (<code>EN_SETS</code> + <code>JP_SETS</code> in the server). When you enter a card name like "2025 POKEMON JAPANESE SV11B-BLACK BOLT 088 SERVINE", Reactor:</p>
+    <ol>
+      <li>Tries to find a known set code as a substring.</li>
+      <li>If found, picks the language that matches (JP for SV11B; some codes are EN-only).</li>
+      <li>If the same code exists in both languages, prompts you to disambiguate (the Language Ambiguous modal during import).</li>
+      <li>If no known code is found, prompts you to assign Game / Language / Set Code / Set Name (the Unlinked modal).</li>
+    </ol>
+
+    <h2>The card_catalog table</h2>
+    <p>The catalog is a <strong>shared global table</strong> — not user-scoped. Once a card is in the catalog, every user benefits (and every user references the same canonical name + set + image).</p>
+    <p>New catalog entries get created automatically during import or manual entry when a card name + set combo isn't already present. You can curate the catalog directly via <a href="manage-parts.html">Manage → Parts</a>.</p>
+
+    <h2>card_name_override</h2>
+    <p>The catalog stores short canonical names (e.g. "Shining Mew"). Individual <code>card_instances</code> can carry a <code>card_name_override</code> with the full imported name (e.g. "2001 Pokemon Japanese Promo Corocoro Comics 151 Shining Mew Holofoil"). Display logic shows the override when present, falling back to the catalog name.</p>
+    <p>This lets imports preserve full PSA labels and detailed names without polluting the shared catalog.</p>
+
+    <h2>Why this matters</h2>
+    <ul>
+      <li><strong>Multi-language inventory</strong> — same card in EN and JP are separate inventory items with separate cost basis and separate listings.</li>
+      <li><strong>Cross-set lookups</strong> — searching "Shining Mew" finds every set and language it appears in.</li>
+      <li><strong>Listings aggregation</strong> — the Listings page aggregates by SKU + grade + platform. Same SKU means same card.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>
