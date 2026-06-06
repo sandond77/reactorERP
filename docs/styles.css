@@ -130,6 +130,43 @@ pre code {
   padding-left: 1.4rem;
   font-size: 12.5px;
 }
+
+/* Collapsible nav sections (Raw Cards, Selling, Card Shows, Manage, Audit) */
+.nav-collapse {
+  margin: 0;
+}
+.nav-collapse > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  user-select: none;
+  transition: background 0.1s, color 0.1s;
+}
+.nav-collapse > summary::-webkit-details-marker { display: none; }
+.nav-collapse > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 0.85em;
+  margin-right: 0.35em;
+  font-size: 0.7em;
+  color: var(--text-dim);
+  transition: transform 0.15s;
+}
+.nav-collapse[open] > summary::before {
+  transform: rotate(90deg);
+}
+.nav-collapse > summary:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+}
+.nav-collapse > .nav.nested {
+  margin-top: 0.1rem;
+}
 .nav a {
   display: block;
   padding: 0.4rem 0.75rem;
