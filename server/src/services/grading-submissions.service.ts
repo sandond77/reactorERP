@@ -928,7 +928,7 @@ export async function processReturn(userId: string, batchId: string, input: Proc
 
 export interface RevertReturnResult {
   batch: Awaited<ReturnType<typeof getBatch>>;
-  kept_slabs: { card_instance_id: string; line_item_num: number; reason: 'sold' | 'listed' }[];
+  kept_slabs: { card_instance_id: string; line_item_num: number | null; reason: 'sold' | 'listed' }[];
 }
 
 /**
@@ -962,62 +962,67 @@ export async function revertReturn(
 
   const keptSlabs: RevertReturnResult['kept_slabs'] = [];
 
-  for (const batchItem of batchItems) {
-    // Per-cert model produces one slab per physical card — there may be many
-    // slabs per batch_item. Re-collect them all via source_raw_instance_id.
-    const slabs = await db
-      .selectFrom('slab_details')
-      .select(['card_instance_id'])
-      .where('source_raw_instance_id', '=', batchItem.card_instance_id)
-      .execute();
+  // ── Step 1: Delete every slab from this batch ──────────────────────────
+  // Use grading_batch_id (preserved through any source-raw deletes) instead
+  // of source_raw_instance_id — the latter is ON DELETE SET NULL, so slabs
+  // whose source was hard-deleted in processReturn would otherwise be
+  // invisible here. Track per-source counts for the restore step.
+  const allSlabs = await db
+    .selectFrom('slab_details')
+    .select(['card_instance_id', 'source_raw_instance_id'])
+    .where('grading_batch_id', '=', batchId)
+    .execute();
 
-    let slabsDeleted = 0;
-    for (const slab of slabs) {
-      const slabCard = await db
-        .selectFrom('card_instances')
-        .select('status')
-        .where('id', '=', slab.card_instance_id)
-        .executeTakeFirst();
-      const activeListing = await db
-        .selectFrom('listings')
-        .select('id')
-        .where('card_instance_id', '=', slab.card_instance_id)
-        .where('listing_status', '=', 'active')
-        .executeTakeFirst();
-      const locked: 'sold' | 'listed' | null =
-        slabCard?.status === 'sold' ? 'sold' :
-        activeListing                ? 'listed' :
-                                       null;
+  const slabsDeletedBySource = new Map<string, number>();
+  let orphanSlabsDeleted = 0;
 
-      if (locked) {
-        if (!opts.skipLockedSlabs) {
-          throw new AppError(400, `Cannot revert — line ${batchItem.line_item_num} slab is ${locked}. Unwind first or use Delete Batch.`);
-        }
-        keptSlabs.push({
-          card_instance_id: slab.card_instance_id,
-          line_item_num:    batchItem.line_item_num,
-          reason:           locked,
-        });
-        continue;
+  for (const slab of allSlabs) {
+    const slabCard = await db
+      .selectFrom('card_instances')
+      .select('status')
+      .where('id', '=', slab.card_instance_id)
+      .executeTakeFirst();
+    const activeListing = await db
+      .selectFrom('listings')
+      .select('id')
+      .where('card_instance_id', '=', slab.card_instance_id)
+      .where('listing_status', '=', 'active')
+      .executeTakeFirst();
+    const locked: 'sold' | 'listed' | null =
+      slabCard?.status === 'sold' ? 'sold' :
+      activeListing                ? 'listed' :
+                                     null;
+
+    if (locked) {
+      if (!opts.skipLockedSlabs) {
+        throw new AppError(400, `Cannot revert — a slab from this batch is ${locked}. Unwind first or use Delete Batch.`);
       }
-
-      await db
-        .deleteFrom('slab_details')
-        .where('card_instance_id', '=', slab.card_instance_id)
-        .execute();
-      await db
-        .deleteFrom('card_instances')
-        .where('id', '=', slab.card_instance_id)
-        .where('user_id', '=', userId)
-        .execute();
-      slabsDeleted++;
+      keptSlabs.push({
+        card_instance_id: slab.card_instance_id,
+        line_item_num:    null,
+        reason:           locked,
+      });
+      continue;
     }
 
-    // Only restore the source raw for the quantity we actually undid (kept
-    // slabs leave their share of the source unrestored — the slab itself
-    // still represents that physical card in inventory).
-    if (slabsDeleted === 0) continue;
+    await db.deleteFrom('slab_details').where('card_instance_id', '=', slab.card_instance_id).execute();
+    await db.deleteFrom('card_instances')
+      .where('id', '=', slab.card_instance_id)
+      .where('user_id', '=', userId)
+      .execute();
 
+    if (slab.source_raw_instance_id) {
+      slabsDeletedBySource.set(
+        slab.source_raw_instance_id,
+        (slabsDeletedBySource.get(slab.source_raw_instance_id) ?? 0) + 1,
+      );
+    } else {
+      orphanSlabsDeleted++;
+    }
+  }
+
+  // ── Step 2: Restore each batch_item's source raw card to status=inspected.
+  for (const batchItem of batchItems) {
     const original = await db
       .selectFrom('card_instances')
       .selectAll()
@@ -1026,11 +1031,21 @@ export async function revertReturn(
       .executeTakeFirst();
 
     if (original) {
+      // Partial-consumption case: source still exists. Add back the qty for
+      // however many of its slabs we just deleted, and flip back to inspected.
+      const addBack = slabsDeletedBySource.get(batchItem.card_instance_id) ?? 0;
       await db.updateTable('card_instances')
-        .set({ quantity: original.quantity + slabsDeleted, updated_at: new Date() })
+        .set({
+          quantity: original.quantity + addBack,
+          status:   'inspected',
+          decision: 'grade',
+          updated_at: new Date(),
+        })
         .where('id', '=', original.id).execute();
     } else {
-      // Fully consumed — restore the deleted source from the audit snapshot.
+      // Fully-consumed case: source was hard-deleted in processReturn.
+      // Re-insert from the audit snapshot at the original quantity, at
+      // status=inspected so it shows back in the sub as inspected.
       const auditRow = await db
         .selectFrom('audit_log')
         .select('old_data')
@@ -1053,17 +1068,16 @@ export async function revertReturn(
           language: snap.language ?? 'JP',
           variant: snap.variant ?? null,
           rarity: snap.rarity ?? null,
-          status: 'grading_submitted',
-          quantity: slabsDeleted,
+          status: 'inspected',
+          quantity: snap.quantity ?? 1,
           purchase_cost: snap.purchase_cost ?? 0,
           currency: snap.currency ?? 'USD',
           purchase_type: snap.purchase_type ?? 'raw',
           condition: snap.condition ?? null,
-          decision: snap.decision ?? null,
+          decision: 'grade',
           notes: snap.notes ?? null,
           catalog_id: snap.catalog_id ?? null,
           legacy_source_catalog_id: snap.legacy_source_catalog_id ?? null,
-          // Card is at the grader — no physical location while submitted
           location_id: null,
           trade_id: snap.trade_id ?? null,
           purchased_at: snap.purchased_at ? new Date(snap.purchased_at) : null,
@@ -1073,6 +1087,7 @@ export async function revertReturn(
       }
     }
   }
+  void orphanSlabsDeleted;
 
   await db
     .updateTable('grading_batches')
