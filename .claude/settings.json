@@ -71,7 +71,34 @@
       "Bash(git -C /Users/sandon/Documents/reactor add client/src/components/inventory/AddCardForm.tsx client/src/components/inventory/AddSlabForm.tsx client/src/pages/Intake.tsx)",
       "Bash(git -C /Users/sandon/Documents/reactor add server/src/controllers/agent.controller.ts server/src/routes/card-games.routes.ts client/src/components/catalog/AddPartModal.tsx)",
       "Bash(grep -rn \"/lines\\\\b\\\\|addLineMut\\\\|inspectionLine\\\\|raw-purchases/\\\\${.*}/lines\" /Users/sandon/Documents/reactor/client/src --include=\"*.tsx\" --include=\"*.ts\")",
-      "Bash(railway logs *)"
+      "Bash(railway logs *)",
+      "WebFetch(domain:www.cgccards.com)",
+      "WebFetch(domain:www.beckett.com)",
+      "WebFetch(domain:snkrdunk.com)",
+      "WebFetch(domain:legionreport.com)",
+      "WebFetch(domain:phantomdisplay.com)",
+      "WebFetch(domain:www.elitefourum.com)",
+      "WebFetch(domain:www.cardova.co.jp)",
+      "WebFetch(domain:www.ars-grading.com)",
+      "Bash(ls -la /tmp/reactor* 2>/dev/null; ps aux | grep -E \"tsx|node.*server\" | grep -v grep | head -5)",
+      "Read(//private/tmp/**)",
+      "Bash(grep -n \"MAX_SELECT\\\\|capReached\\\\|of \\\\${MAX_SELECT}\" /Users/sandon/Documents/reactor/client/src/components/inventory/AddToCardShowModal.tsx)",
+      "Bash(git log *)",
+      "Bash(railway whoami *)",
+      "Bash(awk 'NR>=1730 && NR<=1760 && /value=\\\\{ebayLink\\\\}/{print NR\": \"$0}' /Users/sandon/Documents/reactor/client/src/pages/Sales.tsx)",
+      "Bash(grep -n \"AGENT_TOOLS\\\\|tools:.*\\\\[\\\\|^  {$\" /Users/sandon/Documents/reactor/server/src/services/agent.service.ts)",
+      "Bash(railway environment *)",
+      "Bash(python3 -c \"import sys,json; v=json.load\\(sys.stdin\\); print\\(v.get\\('DATABASE_PUBLIC_URL'\\) or v.get\\('DATABASE_URL'\\) or 'NOT FOUND'\\)\")",
+      "Bash(PROD_URL=postgresql://postgres:urxVpibJaBvCpahADwsAJxKfRHTBzsFX@shinkansen.proxy.rlwy.net:22787/railway node -e ' *)",
+      "Bash(awk '/^## June 5, 2026/,/^## June 4, 2026/' /Users/sandon/Documents/reactor/CHANGELOG.md)",
+      "Bash(awk 'NR>=1178 && NR<=1340 {print NR\": \"$0}' /Users/sandon/Documents/reactor/client/src/pages/Import.tsx)",
+      "Bash(ruby --version)",
+      "Bash(brew --prefix ruby)",
+      "Bash(/opt/homebrew/opt/ruby/bin/jekyll --version)"
+    ],
+    "additionalDirectories": [
+      "/tmp",
+      "/private/tmp"
     ]
   }
 }

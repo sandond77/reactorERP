@@ -59,6 +59,8 @@ interface BatchItem {
   item_total: number;
   rolling_total: number;
   raw_purchase_label: string | null;
+  slab_cert_number: string | null;
+  slab_grade_label: string | null;
 }
 
 interface BatchDetail extends Batch {
@@ -1076,6 +1078,9 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
                 <th className="px-4 py-2 text-left font-medium">Card #</th>
                 <th className="px-4 py-2 text-left font-medium">ID</th>
                 <th className="px-4 py-2 text-left font-medium">Cond</th>
+                {data.status === 'returned' && (
+                  <th className="px-4 py-2 text-left font-medium">Returned Cert</th>
+                )}
                 <th className="px-4 py-2 text-right font-medium">Qty</th>
                 <th className="px-4 py-2 text-right font-medium">Raw Cost</th>
                 <th className="px-4 py-2 text-right font-medium">Total Raw</th>
@@ -1096,6 +1101,16 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
                   <td className="px-4 py-2 text-zinc-500">{item.card_number ? `#${item.card_number}` : '—'}</td>
                   <td className="px-4 py-2 text-zinc-500 font-mono text-[10px]">{item.raw_purchase_label ?? '—'}</td>
                   <td className="px-4 py-2 text-zinc-400">{item.condition ?? '—'}</td>
+                  {data.status === 'returned' && (
+                    <td className="px-4 py-2">
+                      {item.slab_cert_number ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[11px] text-indigo-300/80">#{item.slab_cert_number}</span>
+                          {item.slab_grade_label && <span className="text-[10px] text-zinc-500">· {item.slab_grade_label}</span>}
+                        </div>
+                      ) : <span className="text-zinc-600">—</span>}
+                    </td>
+                  )}
                   <td className="px-4 py-2 text-right text-zinc-300">{item.quantity}</td>
                   <td className="px-4 py-2 text-right text-zinc-400">
                     {formatCurrency(item.purchase_cost, item.currency)}

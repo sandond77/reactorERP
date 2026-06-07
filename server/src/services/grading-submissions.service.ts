@@ -123,6 +123,12 @@ export async function getBatch(userId: string, id: string) {
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
       'ci.catalog_id',
       'cc.sku',
+      // Returned-slab info — when this batch has been processed, the slab
+      // produced from this source is tied to it via slab_details.source_raw_instance_id.
+      // We surface the cert # + grade label so the sub detail view can show
+      // "what came back" per line item without an extra round trip.
+      sql<string | null>`(SELECT sd.cert_number::text FROM slab_details sd WHERE sd.source_raw_instance_id = ci.id AND sd.grading_batch_id = ${id} LIMIT 1)`.as('slab_cert_number'),
+      sql<string | null>`(SELECT sd.grade_label FROM slab_details sd WHERE sd.source_raw_instance_id = ci.id AND sd.grading_batch_id = ${id} LIMIT 1)`.as('slab_grade_label'),
     ])
     .where('gbi.batch_id', '=', id)
     .orderBy('gbi.line_item_num', 'asc')
