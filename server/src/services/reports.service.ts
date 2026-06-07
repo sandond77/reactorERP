@@ -291,20 +291,21 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
   `.execute(db);
 
   // ── Pipeline ────────────────────────────────────────────────────────────────
+  // graded_out=false on the raw-side counters (at_graders / unsubmitted) so
+  // post-return rows that got soft-converted to slabs (migration 057) don't
+  // get double-counted alongside the slabs they produced. returned counts
+  // status='graded' which only the actual slab rows hold.
   const pipelineQuery = db
     .selectFrom('card_instances as ci')
     .select([
-      // Count physical cards (sum of qty), not card_instance rows. A row with
-      // quantity=10 at status='grading_submitted' represents 10 cards at the
-      // grader, not 1. Same correction applied to cost (cost-per-card × qty).
-      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('at_graders'),
-      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('at_graders_cost'),
-      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw'), 0)::int`.as('unsubmitted'),
-      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw'), 0)::int`.as('unsubmitted_cost'),
+      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'grading_submitted' AND ci.graded_out = false), 0)::int`.as('at_graders'),
+      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.status = 'grading_submitted' AND ci.graded_out = false), 0)::int`.as('at_graders_cost'),
+      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw' AND ci.graded_out = false), 0)::int`.as('unsubmitted'),
+      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw' AND ci.graded_out = false), 0)::int`.as('unsubmitted_cost'),
       sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'graded'), 0)::int`.as('returned'),
       sql<number>`COALESCE(AVG(
         EXTRACT(DAY FROM NOW() - ci.updated_at)
-      ) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('avg_days_at_graders'),
+      ) FILTER (WHERE ci.status = 'grading_submitted' AND ci.graded_out = false), 0)::int`.as('avg_days_at_graders'),
     ])
     .where('ci.user_id', '=', userId)
     .executeTakeFirst();
@@ -542,6 +543,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     WHERE ci.user_id = ${userId}
       AND ci.purchase_type = 'raw'
+      AND ci.graded_out = false
       AND ${noSlabCondition}
       AND ${statusFilter}
       AND ${typeFilter}
@@ -557,6 +559,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     WHERE ci.user_id = ${userId}
       AND ci.purchase_type = 'raw'
+      AND ci.graded_out = false
       AND ${noSlabCondition}
       AND ${statusFilter}
       AND ${typeFilter}
@@ -612,6 +615,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     WHERE ci.user_id = ${userId}
       AND ci.purchase_type = 'raw'
+      AND ci.graded_out = false
       AND ${noSlabCondition}
       AND ${typeFilter}
   `.execute(db);

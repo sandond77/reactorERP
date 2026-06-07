@@ -1,5 +1,21 @@
 # Reactor — Changelog
 
+## June 7, 2026
+
+### Features
+
+**Grading — raw cards are soft-converted on return instead of hard-deleted (migration 057)**
+- `processReturn` used to hard-delete the source raw card_instances when all copies were fully consumed by grading. The deletes cascaded two ways: `slab_details.source_raw_instance_id` (ON DELETE SET NULL) nulled out the slab's link back to its origin, and `grading_batch_items.card_instance_id` (FK dropped in migration 055 to even allow the delete) was left holding a dangling UUID. End result: reverted subs came back empty, audit-log re-insertion was needed to put cards back, and `revertReturn` had a 100-line audit-restore branch with edge cases. Worse, even a successful return left the sub detail page empty because the batch_items pointed at the deleted source.
+- Migration 057 adds `card_instances.graded_out boolean default false` + a partial index on the true subset, and relaxes `card_instances_quantity_check` from `> 0` to `>= 0` so a fully-consumed row can carry `quantity = 0`. `processReturn` now flips the source to `graded_out=true, quantity=0` instead of DELETE. The source row stays alive forever, slab linkage stays valid, batch_items references stay live, and the sub detail page can JOIN through them for lifecycle display.
+- `revertReturn` simplifies dramatically: no more audit-log re-insertion branch. For each batch_item, look up the live source and `UPDATE … SET graded_out=false, quantity = quantity + N, status='inspected', decision='grade'` where N is the count of slabs we just deleted from that source. Slabs are still found via `grading_batch_id` for the delete pass; `source_raw_instance_id` is also valid now (no cascade-to-null), so per-source attribution is exact.
+- Filter rules: raw inventory queries now default to `graded_out = false` so soft-converted rows don't double-count against the slabs they produced. `/cards` list endpoint gains an `include_graded_out` opt-in for lifecycle/audit surfaces that intentionally want them. `listCardsGroupedByPart`, the Raw Cards dashboard's `inventoryByType` / `condition` / `pipeline` / `sales` / `turnover` queries, and the global Pipeline's `at_graders` / `unsubmitted` / `unsubmitted_cost` / `avg_days_at_graders` all picked up the filter.
+- One-off prod cleanup: sub `26395859` had 11 orphan batch_items pointing at hard-deleted card_instances from before this migration. Restored the 11 sources from the audit-log snapshots with original UUIDs at `graded_out=true, quantity=0`, repointed the 11 slabs' `source_raw_instance_id` back via cert-number ordering, in a single Railway transaction. Sub view shows its line items again with correct slab linkage.
+
+### Fixes
+
+**Catalog — set picker token scoring**
+- The Set Name / Set Code combobox in Add Part Number was doing a single substring `.includes(query)` match, so multi-word inputs (e.g. "2025 Taruka Hoppip") returned zero suggestions when the relevant alias only contained "Taruka". Replaced with a small scoring model: 4 pts for full-string substring, 2 for code prefix, 1 per token hit in name or code; pure 4-digit year tokens ignored to avoid year-name pollution; sort score desc, tie-break shortest name.
+
 ## June 6, 2026
 
 ### Fixes

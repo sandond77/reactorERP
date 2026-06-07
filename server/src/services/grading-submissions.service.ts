@@ -925,9 +925,18 @@ export async function processReturn(userId: string, batchId: string, input: Proc
 
     const newQty = original.quantity - totalConsumed;
     if (newQty <= 0) {
-      // All copies consumed — hard-delete the raw instance
-      await logAudit(userId, 'card_instances', original.id, 'deleted', original, null);
-      await db.deleteFrom('card_instances').where('id', '=', original.id).where('user_id', '=', userId).execute();
+      // All copies converted to slabs — flag as graded_out so the row stays
+      // around for lifecycle/audit/sub-display purposes but drops out of any
+      // "active raw inventory" view that filters on graded_out=false. The
+      // slab carries the cost basis now; the raw row is purely historical.
+      await db
+        .updateTable('card_instances')
+        .set({ graded_out: true, quantity: 0, updated_at: new Date() })
+        .where('id', '=', original.id)
+        .where('user_id', '=', userId)
+        .execute();
+      await logAudit(userId, 'card_instances', original.id, 'updated',
+        original, { ...original, graded_out: true, quantity: 0 });
     } else {
       await db
         .updateTable('card_instances')
@@ -985,10 +994,11 @@ export async function revertReturn(
   const keptSlabs: RevertReturnResult['kept_slabs'] = [];
 
   // ── Step 1: Delete every slab from this batch ──────────────────────────
-  // Use grading_batch_id (preserved through any source-raw deletes) instead
-  // of source_raw_instance_id — the latter is ON DELETE SET NULL, so slabs
-  // whose source was hard-deleted in processReturn would otherwise be
-  // invisible here. Track per-source counts for the restore step.
+  // Key on grading_batch_id (always preserved). source_raw_instance_id is
+  // also preserved now that processReturn marks sources graded_out=true
+  // instead of hard-deleting (migration 057) — so the SET NULL cascade no
+  // longer fires. We use it to attribute slab deletions back to the right
+  // source for quantity restoration.
   const allSlabs = await db
     .selectFrom('slab_details')
     .select(['card_instance_id', 'source_raw_instance_id'])
@@ -996,7 +1006,6 @@ export async function revertReturn(
     .execute();
 
   const slabsDeletedBySource = new Map<string, number>();
-  let orphanSlabsDeleted = 0;
 
   for (const slab of allSlabs) {
     const slabCard = await db
@@ -1038,78 +1047,33 @@ export async function revertReturn(
         slab.source_raw_instance_id,
         (slabsDeletedBySource.get(slab.source_raw_instance_id) ?? 0) + 1,
       );
-    } else {
-      orphanSlabsDeleted++;
     }
   }
 
-  // ── Step 2: Restore each batch_item's source raw card to status=inspected.
+  // ── Step 2: Restore each batch_item's source raw card to status=inspected,
+  // graded_out=false. After migration 057 the source row is always present
+  // (graded_out=true at quantity=0 when fully consumed), so a simple UPDATE
+  // covers both partial and full-consumption cases. The earlier audit-log
+  // re-insertion branch is no longer needed.
   for (const batchItem of batchItems) {
+    const addBack = slabsDeletedBySource.get(batchItem.card_instance_id) ?? 0;
     const original = await db
       .selectFrom('card_instances')
       .selectAll()
       .where('id', '=', batchItem.card_instance_id)
       .where('user_id', '=', userId)
       .executeTakeFirst();
-
-    if (original) {
-      // Partial-consumption case: source still exists. Add back the qty for
-      // however many of its slabs we just deleted, and flip back to inspected.
-      const addBack = slabsDeletedBySource.get(batchItem.card_instance_id) ?? 0;
-      await db.updateTable('card_instances')
-        .set({
-          quantity: original.quantity + addBack,
-          status:   'inspected',
-          decision: 'grade',
-          updated_at: new Date(),
-        })
-        .where('id', '=', original.id).execute();
-    } else {
-      // Fully-consumed case: source was hard-deleted in processReturn.
-      // Re-insert from the audit snapshot at the original quantity, at
-      // status=inspected so it shows back in the sub as inspected.
-      const auditRow = await db
-        .selectFrom('audit_log')
-        .select('old_data')
-        .where('entity_type', '=', 'card_instances')
-        .where('entity_id', '=', batchItem.card_instance_id)
-        .where('action', '=', 'deleted')
-        .orderBy('created_at', 'desc')
-        .limit(1)
-        .executeTakeFirst();
-      if (auditRow?.old_data) {
-        const snap = auditRow.old_data as Record<string, any>;
-        await db.insertInto('card_instances').values({
-          id: snap.id,
-          user_id: snap.user_id,
-          raw_purchase_id: snap.raw_purchase_id ?? null,
-          card_name_override: snap.card_name_override ?? null,
-          set_name_override: snap.set_name_override ?? null,
-          card_number_override: snap.card_number_override ?? null,
-          card_game: snap.card_game ?? 'pokemon',
-          language: snap.language ?? 'JP',
-          variant: snap.variant ?? null,
-          rarity: snap.rarity ?? null,
-          status: 'inspected',
-          quantity: snap.quantity ?? 1,
-          purchase_cost: snap.purchase_cost ?? 0,
-          currency: snap.currency ?? 'USD',
-          purchase_type: snap.purchase_type ?? 'raw',
-          condition: snap.condition ?? null,
-          decision: 'grade',
-          notes: snap.notes ?? null,
-          catalog_id: snap.catalog_id ?? null,
-          legacy_source_catalog_id: snap.legacy_source_catalog_id ?? null,
-          location_id: null,
-          trade_id: snap.trade_id ?? null,
-          purchased_at: snap.purchased_at ? new Date(snap.purchased_at) : null,
-          created_at: snap.created_at ? new Date(snap.created_at) : new Date(),
-          updated_at: new Date(),
-        } as any).execute();
-      }
-    }
+    if (!original) continue;
+    await db.updateTable('card_instances')
+      .set({
+        quantity:   original.quantity + addBack,
+        graded_out: false,
+        status:     'inspected',
+        decision:   'grade',
+        updated_at: new Date(),
+      })
+      .where('id', '=', original.id).execute();
   }
-  void orphanSlabsDeleted;
 
   await db
     .updateTable('grading_batches')

@@ -162,6 +162,7 @@ export interface CardInstancesTable {
   card_show_added_at: Date | null;
   card_show_price: number | null;
   is_personal_collection: Generated<boolean>;
+  graded_out: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

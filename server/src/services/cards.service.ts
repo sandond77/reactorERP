@@ -31,6 +31,11 @@ export interface CardFilters {
   exclude_legacy_bucket?: boolean;
   is_card_show?: string;  // 'yes' | 'no'
   is_personal_collection?: string;  // 'yes' | 'no'
+  // Raw cards that have been converted to slabs via grading carry
+  // graded_out=true (see migration 057). Default behavior hides them from
+  // inventory views; set include_graded_out=true to opt in (lifecycle
+  // surfaces like sub detail do).
+  include_graded_out?: boolean;
 }
 
 export async function listCards(
@@ -121,6 +126,7 @@ export async function listCards(
   if (filters.is_card_show === 'no') query = query.where('ci.is_card_show', '=', false);
   if (filters.is_personal_collection === 'yes') query = query.where('ci.is_personal_collection', '=', true);
   if (filters.is_personal_collection === 'no') query = query.where('ci.is_personal_collection', '=', false);
+  if (!filters.include_graded_out) query = query.where('ci.graded_out', '=', false);
   if (filters.search) {
     if (filters.exact) {
       // Strict mode — whole-term case-insensitive equality across the same
@@ -266,6 +272,7 @@ export async function listCardsGroupedByPart(
       'ci.legacy_source_catalog_id',
     ])
     .where('ci.user_id', '=', userId)
+    .where('ci.graded_out', '=', false)
     // Include rows that are either part of a raw lot OR carry a legacy
     // bucket lineage. The second clause picks up returned slabs (which
     // have raw_purchase_id=null) so they cross-tally into their legacy
