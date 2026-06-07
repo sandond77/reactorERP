@@ -91,6 +91,8 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         sql<number>`SUM(quantity) FILTER (WHERE NOT ${sql.raw(slabCheck)} AND status = 'sold')::int`.as('raw_sold'),
         sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true)::int`.as('card_show_total'),
         sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true AND status != 'sold' AND status != 'lost_damaged')::int`.as('card_show_unsold'),
+        sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true AND ${sql.raw(slabCheck)})::int`.as('card_show_graded'),
+        sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true AND NOT ${sql.raw(slabCheck)})::int`.as('card_show_raw'),
       ])
       .where('user_id', '=', req.dataUserId)
       .executeTakeFirst();
@@ -237,7 +239,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         unsold:        { all: Number(cardCounts?.unsold       ?? 0), graded: Number(cardCounts?.graded_unsold ?? 0), raw: Number(cardCounts?.raw_unsold ?? 0) },
         sold:          { all: Number(cardCounts?.sold         ?? 0), graded: Number(cardCounts?.graded_sold   ?? 0), raw: Number(cardCounts?.raw_sold   ?? 0) },
         listed:        { all: Number(listedCount?.total       ?? 0), graded: Number(listedCount?.graded       ?? 0), raw: Number(listedCount?.raw        ?? 0) },
-        card_show:     { all: Number(cardCounts?.card_show_total ?? 0), unsold: Number(cardCounts?.card_show_unsold ?? 0) },
+        card_show:     { all: Number(cardCounts?.card_show_total ?? 0), unsold: Number(cardCounts?.card_show_unsold ?? 0), graded: Number(cardCounts?.card_show_graded ?? 0), raw: Number(cardCounts?.card_show_raw ?? 0) },
       },
       pipeline: {
         needs_inspection:    Number(pipeline?.needs_inspection    ?? 0),

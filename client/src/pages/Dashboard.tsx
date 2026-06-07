@@ -39,7 +39,7 @@ interface SalesSummary {
     unsold:    { all: number; graded: number; raw: number };
     sold:      { all: number; graded: number; raw: number };
     listed:    { all: number; graded: number; raw: number };
-    card_show: { all: number; unsold: number };
+    card_show: { all: number; unsold: number; graded: number; raw: number };
   };
   pipeline: {
     needs_inspection:    number;
@@ -587,7 +587,7 @@ function OverviewTab() {
   const [salesWindow, setSalesWindow] = useState<SalesWindow>('30d');
 
   const grading      = summary?.grading     ?? { sub_count: 0, card_count: 0 };
-  const cards        = summary?.cards       ?? { total: { all: 0, graded: 0, raw: 0 }, unsold: { all: 0, graded: 0, raw: 0 }, sold: { all: 0, graded: 0, raw: 0 }, listed: { all: 0, graded: 0, raw: 0 }, card_show: { all: 0, unsold: 0 } };
+  const cards        = summary?.cards       ?? { total: { all: 0, graded: 0, raw: 0 }, unsold: { all: 0, graded: 0, raw: 0 }, sold: { all: 0, graded: 0, raw: 0 }, listed: { all: 0, graded: 0, raw: 0 }, card_show: { all: 0, unsold: 0, graded: 0, raw: 0 } };
   const pipeline     = summary?.pipeline    ?? { needs_inspection: 0, inspected: 0, pending_grading_sub: 0, grading_submitted: 0 };
   const performance  = summary?.performance ?? { avg_hold_days: null, listings_value: 0, pending_orders: 0 };
   const lifetimeSales = summary?.lifetime   ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0 };
@@ -682,7 +682,7 @@ function OverviewTab() {
                   <p className="text-xs text-zinc-500 mt-0.5">{cards.listed.all} listed &nbsp;·&nbsp; {cards.listed.graded} Graded / {cards.listed.raw} Raw</p>
                 )}
                 {key === 'card_show' && (
-                  <p className="text-xs text-zinc-500 mt-0.5">{cards.card_show.unsold} unsold &nbsp;·&nbsp; {cards.card_show.all} total inventory</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">{cards.card_show.unsold} unsold &nbsp;·&nbsp; {cards.card_show.graded} Graded / {cards.card_show.raw} Raw</p>
                 )}
               </Card>
             );
