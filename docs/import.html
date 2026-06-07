@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Import — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Import</h1>
+    <p class="lede">Upload a CSV or Excel file. AI detects the type, proposes a column mapping, you review and confirm.</p>
+
+    <h2>What you see</h2>
+    <p>Two-column layout: <strong>main flow on the left</strong> (upload, Migration Guide on initial state; AI banner + column mapping + data preview during preview state), and a <strong>persistent Field Reference sidebar on the right</strong>.</p>
+
+    <h2>The flow</h2>
+    <ol>
+      <li><strong>Upload</strong> a CSV or .xlsx. Any columns.</li>
+      <li><strong>AI detects</strong> the import type (Graded Cards / Raw Purchases / Bulk Sales / Expenses) with confidence high/medium/low.</li>
+      <li><strong>Mapping screen</strong> — every CSV column → a target field. Auto-mapped where confident; you fill in the rest. The Field Reference panel explains every field.</li>
+      <li><strong>Resolve prompts</strong>:
+        <ul>
+          <li><strong>Language ambiguous</strong> — when a set code could be EN or JP, pick per row.</li>
+          <li><strong>Unlinked rows</strong> — when a card has no matching set code at all, assign Game/Language/Set Code/Set Name.</li>
+        </ul>
+      </li>
+      <li><strong>Confirm</strong>. The import runs; rows + errors get logged to Import History at the bottom.</li>
+    </ol>
+
+    <h2>Templates</h2>
+    <p>The <strong>Templates</strong> dropdown on the upload screen downloads a canonical CSV for each import type. Recommended starting point for new users.</p>
+
+    <h2>Migration Guide</h2>
+    <p>The Migration Guide card on the upload screen lists all four import types side-by-side with "when to use this", required columns, recommended columns, and a per-type template download. Lets you pick the right one before fiddling with your CSV.</p>
+
+    <h2>Full reference</h2>
+    <ul>
+      <li><a href="csv-import.html">CSV Import</a> — detailed per-type field guide and common problems.</li>
+      <li><a href="field-reference.html">Field Reference</a> — every target field with description.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

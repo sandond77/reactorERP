@@ -72,6 +72,86 @@ const ALL_TARGET_FIELDS: { group: string; fields: string[] }[] = [
   { group: 'Bulk Sale',fields: ['identifier'] },
 ];
 
+// Field-level reference shown in the mapping screen + as <option title>.
+// Keep these single-sentence and concrete (what to put in the column).
+const FIELD_DOCS: Record<string, string> = {
+  // Card
+  card_name:     'Full card name as printed. Required for graded + raw imports. For PSA labels, paste the entire label.',
+  set_name:      'Set name. If a known set-code substring is present, language + set code are auto-resolved.',
+  card_number:   'Card number within the set (e.g. "025/108"). Optional but improves catalog matching.',
+  card_game:     'Defaults to "pokemon". Accepts other game names if you have multi-game inventory.',
+  language:      'EN or JP. If omitted, inferred from card name keywords.',
+  condition:     'NM / NM- / LP / LP+ / MP / HP / DMG. Free text accepted; normalized server-side.',
+  notes:         'Free-text notes preserved on the card_instance.',
+  // Graded
+  cert_number:   'PSA / BGS / CGC certificate number. Required for graded imports.',
+  grade:         'Numeric grade (e.g. 10, 9.5). Range 0–10.',
+  company:       'PSA / BGS / CGC / ARS / TAG / ACE. Defaults to PSA if missing.',
+  grading_cost:  'What you paid to grade the card. Stored in cents server-side; enter as dollars.',
+  // Purchase
+  purchase_cost: 'Per-card raw cost. Use for graded imports where each row is one card.',
+  cost:          'Total cost of the order. Use for raw purchase imports (sums per row × quantity).',
+  quantity:      'Number of cards in this raw/bulk order. Defaults to 1.',
+  currency:      'USD or JPY. Defaults to USD.',
+  purchased_at:  'Date the order was placed. ISO or common US date formats parsed.',
+  order_number:  'Order # from the marketplace (eBay, TCGPlayer, etc).',
+  source:        'Where the order came from (eBay, TCGPlayer, Card Show, etc).',
+  type:          'For raw purchases: "raw" (single card) or "bulk" (lot of N). Defaults to raw.',
+  // Sale
+  sold_at:       'Date the sale completed. ISO or common US date formats parsed.',
+  sale_price:    'Gross sale price before fees. Required for bulk sale imports.',
+  after_fees:    'Net proceeds after platform + shipping fees. If provided, used instead of computing.',
+  net:           'Alias for after_fees.',
+  platform_fees: 'Sum of platform / final-value fees. Defaults to 0.',
+  shipping_cost: 'Shipping you paid. Defaults to 0.',
+  platform:      'eBay / TCGPlayer / Card Show / Facebook / Instagram / Local / Other.',
+  unique_id:     'External order/transaction ID for dedup (eBay order #, etc).',
+  listing_url:   'eBay listing URL (or order details URL) tied to this row.',
+  // Listing
+  is_listed:     'Boolean. Yes/No, true/false, 1/0.',
+  list_price:    'Active list price for the listing.',
+  listed_at:     'When the listing went live.',
+  // Expense
+  description:   'What the expense was for. Required for expense imports.',
+  amount:        'Expense amount. Required for expense imports.',
+  date:          'Expense date. Required for expense imports.',
+  link:          'Receipt / reference URL.',
+  // Bulk sale
+  identifier:    'Cert # (graded) or purchase ID like RP-YYYY-NNN (raw). Used to match the row to existing inventory.',
+};
+
+// Migration guide content surfaced on the initial upload screen.
+const MIGRATION_TYPES: { label: string; type: ImportType; when: string; required: string[]; key_optional: string[] }[] = [
+  {
+    label: 'Graded Cards',
+    type: 'graded',
+    when: 'You already have slabs in inventory and want to load them with cost basis / sale history.',
+    required: ['card_name', 'cert_number', 'grade'],
+    key_optional: ['company', 'grading_cost', 'purchase_cost', 'purchased_at', 'sale_price', 'sold_at', 'platform', 'platform_fees', 'shipping_cost'],
+  },
+  {
+    label: 'Raw Purchases',
+    type: 'raw_purchase',
+    when: 'A history of orders you placed — each row is one order. Single-card orders become inventory rows automatically.',
+    required: ['cost', 'purchased_at'],
+    key_optional: ['type', 'card_name', 'set_name', 'card_number', 'language', 'quantity', 'source', 'order_number'],
+  },
+  {
+    label: 'Bulk Sales',
+    type: 'bulk_sale',
+    when: 'A flat list of completed sales. Each row matches an existing inventory item by cert # or purchase ID.',
+    required: ['identifier', 'sale_price'],
+    key_optional: ['platform', 'platform_fees', 'shipping_cost', 'sold_at', 'currency', 'unique_id'],
+  },
+  {
+    label: 'Expenses',
+    type: 'expenses',
+    when: 'Supplies, postage, subscriptions, anything that should hit P&L outside of cost basis.',
+    required: ['description', 'amount', 'date'],
+    key_optional: ['type', 'currency', 'order_number', 'link'],
+  },
+];
+
 const CONFIDENCE_COLORS: Record<string, string> = {
   high:   'text-green-400',
   medium: 'text-yellow-400',
@@ -983,36 +1063,110 @@ function ImportFlow() {
   // ── Initial upload
   if (!preview && !result) {
     return (
-      <Card>
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-zinc-300 font-medium">Smart Import</p>
-              <p className="text-sm text-zinc-500 mt-0.5">Upload any CSV or Excel file — AI will detect what it is and map the columns automatically.</p>
-            </div>
-            <div className="relative shrink-0 group">
-              <button className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1 border border-zinc-700 rounded-md px-2.5 py-1.5 hover:border-zinc-600">
-                <Download size={11} />
-                Templates
-                <ChevronDown size={11} />
-              </button>
-              <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-10 hidden group-focus-within:block group-hover:block">
-                {IMPORT_TYPES.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => downloadTemplate(key)}
-                    className="w-full text-left text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 px-3 py-2 first:rounded-t-lg last:rounded-b-lg transition-colors flex items-center gap-2"
-                  >
-                    <Download size={10} className="shrink-0" />
-                    {label}
-                  </button>
-                ))}
+      <div className="space-y-4">
+        <Card>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-zinc-300 font-medium">Smart Import</p>
+                <p className="text-sm text-zinc-500 mt-0.5">Upload any CSV or Excel file — AI will detect what it is and map the columns automatically.</p>
+              </div>
+              <div className="relative shrink-0 group">
+                <button className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1 border border-zinc-700 rounded-md px-2.5 py-1.5 hover:border-zinc-600">
+                  <Download size={11} />
+                  Templates
+                  <ChevronDown size={11} />
+                </button>
+                <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl z-10 hidden group-focus-within:block group-hover:block">
+                  {IMPORT_TYPES.map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => downloadTemplate(key)}
+                      className="w-full text-left text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 px-3 py-2 first:rounded-t-lg last:rounded-b-lg transition-colors flex items-center gap-2"
+                    >
+                      <Download size={10} className="shrink-0" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
+            <UploadZone onFile={handleFile} />
           </div>
-          <UploadZone onFile={handleFile} />
-        </div>
-      </Card>
+        </Card>
+
+        {/* Migration Guide — onboarding scaffolding for new users */}
+        <Card>
+          <details open>
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-zinc-200">Migration Guide</p>
+                <ChevronDown size={14} className="text-zinc-500" />
+              </div>
+              <p className="text-xs text-zinc-500 mt-1">
+                Which import type fits your data? What columns should it have? Field reference below.
+              </p>
+            </summary>
+
+            <div className="mt-4 space-y-3">
+              {MIGRATION_TYPES.map((m) => (
+                <div key={m.type} className="border border-zinc-800 rounded-lg p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold text-zinc-200 uppercase tracking-wide">{m.label}</p>
+                    <button onClick={() => downloadTemplate(m.type)}
+                      className="text-[11px] text-indigo-400 hover:text-indigo-300 flex items-center gap-1">
+                      <Download size={10} /> Template
+                    </button>
+                  </div>
+                  <p className="text-xs text-zinc-400 mt-1.5">{m.when}</p>
+                  <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                    <div>
+                      <p className="text-zinc-500 mb-0.5">Required</p>
+                      <div className="flex flex-wrap gap-1">
+                        {m.required.map((f) => (
+                          <span key={f} title={FIELD_DOCS[f] ?? ''}
+                            className="font-mono bg-rose-500/10 text-rose-300 border border-rose-500/30 rounded px-1.5 py-0.5">{f}</span>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-zinc-500 mb-0.5">Recommended</p>
+                      <div className="flex flex-wrap gap-1">
+                        {m.key_optional.map((f) => (
+                          <span key={f} title={FIELD_DOCS[f] ?? ''}
+                            className="font-mono bg-zinc-800 text-zinc-400 border border-zinc-700 rounded px-1.5 py-0.5">{f}</span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              {/* Field reference table */}
+              <details className="mt-2">
+                <summary className="cursor-pointer text-xs text-zinc-400 hover:text-zinc-200 list-none flex items-center gap-1">
+                  <ChevronDown size={11} /> Field reference (what each mapping column does)
+                </summary>
+                <div className="mt-3 space-y-3">
+                  {ALL_TARGET_FIELDS.map(({ group, fields }) => (
+                    <div key={group}>
+                      <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">{group}</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-1">
+                        {fields.map((f) => (
+                          <div key={f} className="text-[11px] flex items-start gap-2">
+                            <span className="font-mono text-indigo-300/80 shrink-0 w-28">{f}</span>
+                            <span className="text-zinc-400">{FIELD_DOCS[f] ?? '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
+          </details>
+        </Card>
+      </div>
     );
   }
 
@@ -1070,26 +1224,34 @@ function ImportFlow() {
 
           <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">Column mapping</h3>
           <div className="grid grid-cols-2 gap-2.5">
-            {preview.columns.map((col) => (
-              <div key={col} className="flex items-center gap-2">
-                <span className="text-xs text-zinc-400 truncate w-28 shrink-0" title={col}>{col}</span>
-                <span className="text-zinc-700 text-xs">→</span>
-                <select
-                  value={mapping[col] ?? ''}
-                  onChange={(e) => setMapping((m) => ({ ...m, [col]: e.target.value }))}
-                  className={`flex-1 text-xs bg-zinc-800 border rounded px-2 py-1 text-zinc-300 focus:outline-none focus:border-indigo-500 ${
-                    mapping[col] ? 'border-indigo-500/40' : 'border-zinc-700'
-                  }`}
-                >
-                  <option value="">Skip</option>
-                  {ALL_TARGET_FIELDS.map(({ group, fields }) => (
-                    <optgroup key={group} label={group}>
-                      {fields.map((f) => <option key={f} value={f}>{f}</option>)}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-            ))}
+            {preview.columns.map((col) => {
+              const mapped = mapping[col];
+              return (
+                <div key={col} className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-400 truncate w-28 shrink-0" title={col}>{col}</span>
+                    <span className="text-zinc-700 text-xs">→</span>
+                    <select
+                      value={mapped ?? ''}
+                      onChange={(e) => setMapping((m) => ({ ...m, [col]: e.target.value }))}
+                      className={`flex-1 text-xs bg-zinc-800 border rounded px-2 py-1 text-zinc-300 focus:outline-none focus:border-indigo-500 ${
+                        mapped ? 'border-indigo-500/40' : 'border-zinc-700'
+                      }`}
+                    >
+                      <option value="">Skip</option>
+                      {ALL_TARGET_FIELDS.map(({ group, fields }) => (
+                        <optgroup key={group} label={group}>
+                          {fields.map((f) => <option key={f} value={f} title={FIELD_DOCS[f] ?? ''}>{f}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </div>
+                  {mapped && FIELD_DOCS[mapped] && (
+                    <p className="text-[10px] text-zinc-500 pl-32">{FIELD_DOCS[mapped]}</p>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <p className="text-xs text-zinc-600 mt-3">
             {Object.values(mapping).filter(Boolean).length} of {preview.columns.length} columns mapped
@@ -1271,12 +1433,45 @@ function ImportHistory() {
 
 export function Import() {
   return (
-    <div className="p-6 space-y-6 max-w-3xl h-full overflow-y-auto">
-      <div>
+    <div className="p-6 h-full overflow-y-auto">
+      <div className="mb-6">
         <h1 className="text-xl font-bold text-zinc-100">Import</h1>
         <p className="text-sm text-zinc-500 mt-0.5">Upload any CSV or Excel file — AI will detect the format and map columns automatically.</p>
       </div>
-      <ImportFlow />
+
+      {/* Top-level 2-column layout: main flow on the left (3/4 width),
+          persistent Field Reference on the right (1/4 width). Default grid
+          item stretching plus an absolutely-positioned reference Card means
+          the row height is determined by the left column only; the reference
+          fills that height exactly and scrolls internally if its content
+          would be taller. min-h-[50vh] enforces a reasonable floor when the
+          left content is short. */}
+      <div className="lg:grid lg:grid-cols-[3fr_1fr] lg:gap-4 space-y-4 lg:space-y-0 mb-6">
+        <div className="space-y-4 min-w-0">
+          <ImportFlow />
+        </div>
+        <aside className="lg:relative lg:min-h-[50vh]">
+          <Card className="lg:absolute lg:inset-0 overflow-y-auto">
+            <p className="text-xs font-semibold text-zinc-200 uppercase tracking-wide mb-3">Field Reference</p>
+            <div className="space-y-3">
+              {ALL_TARGET_FIELDS.map(({ group, fields }) => (
+                <div key={group}>
+                  <p className="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">{group}</p>
+                  <div className="space-y-1.5">
+                    {fields.map((f) => (
+                      <div key={f} className="text-[11px]">
+                        <p className="font-mono text-indigo-300/80">{f}</p>
+                        <p className="text-zinc-500 leading-snug">{FIELD_DOCS[f] ?? '—'}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </aside>
+      </div>
+
       <ImportHistory />
     </div>
   );

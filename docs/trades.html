@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trades — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Trades</h1>
+    <p class="lede">Card-for-card swaps. Track what went out, what came in, and net cash if there was boot involved.</p>
+
+    <h2>What you see</h2>
+    <p>One row per trade. Columns: Date, Counterparty, Out value, In value, Net cash (positive = you got cash, negative = you paid), Notes.</p>
+    <p>Each row expands to show the cards on each side.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ New Trade</strong> — start a trade. Pick "Out" cards from your inventory + "In" cards (which create new card_instances at the agreed cost). Set net cash if applicable.</li>
+      <li><strong>Click a row</strong> — opens the trade detail. Edit either side, change cash, delete the trade.</li>
+    </ul>
+
+    <h2>Cost basis on traded cards</h2>
+    <ul>
+      <li><strong>Out cards</strong>: removed from inventory. The trade records their cost basis at the trade moment so historical P&amp;L stays right.</li>
+      <li><strong>In cards</strong>: created at the agreed value as their cost basis. The "value" you assign becomes their <code>purchase_cost</code>.</li>
+      <li><strong>Net cash</strong>: a separate accounting line; doesn't affect per-card cost.</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>If you're trading down (smaller value out, bigger value in) and paying cash, set net cash as a negative number. P&amp;L treats it like a partial purchase.</li>
+      <li>Trades are a low-friction way to clean out raw inventory you don't want to ship to grading.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

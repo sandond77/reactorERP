@@ -7,6 +7,7 @@ import { Modal } from '../components/ui/Modal';
 import { formatCurrency } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { SlabDetailModal } from '../components/inventory/SlabDetailModal';
+import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { AddToCardShowModal } from '../components/inventory/AddToCardShowModal';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
@@ -165,6 +166,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
 
   // Per-column filters
   const [selectedSlab, setSelectedSlab] = useState<SlabRow | null>(null);
+  const [selectedRawCardId, setSelectedRawCardId] = useState<string | null>(null);
 
   const [fCompany, setFCompany]       = useState<string[] | null>(saved.fCompany);
   const [fGrade, setFGrade]           = useState<string[] | null>(saved.fGrade);
@@ -342,7 +344,9 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                 {!rawData?.data.length ? (
                   <tr><td colSpan={7} className="px-3 py-10 text-center text-zinc-500">No raw cards in card show inventory.</td></tr>
                 ) : rawData.data.map((row) => (
-                  <tr key={row.id} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors">
+                  <tr key={row.id}
+                    onClick={() => setSelectedRawCardId(row.id)}
+                    className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
                     <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
                     <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
                     <td className="px-3 py-1 text-zinc-400 truncate">{row.set_name ?? ''}</td>
@@ -457,6 +461,14 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
       {selectedSlab && (
         <SlabDetailModal slab={selectedSlab} onClose={() => setSelectedSlab(null)} cardShowMode={cardShowMode} />
       )}
+      {selectedRawCardId && (
+        <CardDetailModal
+          cardId={selectedRawCardId}
+          onClose={() => setSelectedRawCardId(null)}
+          onDelete={() => setSelectedRawCardId(null)}
+          cardShowMode={cardShowMode}
+        />
+      )}
       <Modal open={addOpen} onClose={() => setAddOpen(false)} title="Add Slab">
         <AddSlabForm onSuccess={() => { setAddOpen(false); invalidateResources(qc, ['slabs']); }} />
       </Modal>
@@ -464,18 +476,27 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
         <AddToCardShowModal onSuccess={() => setAddToCardShowOpen(false)} />
       </Modal>
 
-      {data && (
-        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
-          <span>{(data.total ?? 0).toLocaleString()} total records</span>
-          {data.total_pages > 1 && (
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
-              <span>{page} / {data.total_pages}</span>
-              <Button variant="ghost" size="sm" disabled={page >= data.total_pages} onClick={() => setPage((p) => p + 1)}>Next</Button>
-            </div>
-          )}
-        </div>
-      )}
+      {(() => {
+        // The pagination footer always read `data` (the graded query). On the
+        // Card Show > Raw tab the graded query is disabled, so the footer was
+        // either invisible or showing stale graded counts — clicking Next would
+        // bump `page` beyond the raw query's actual page count and render empty
+        // rows. Pick the right paged response per active view.
+        const pageData = cardShowMode && cardType === 'raw' ? rawData : data;
+        if (!pageData) return null;
+        return (
+          <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
+            <span>{(pageData.total ?? 0).toLocaleString()} total records</span>
+            {pageData.total_pages > 1 && (
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
+                <span>{page} / {pageData.total_pages}</span>
+                <Button variant="ghost" size="sm" disabled={page >= pageData.total_pages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+              </div>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }

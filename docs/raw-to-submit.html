@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>To Be Submitted — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>To Be Submitted</h1>
+    <p class="lede">Holding bay for raw cards routed to grading but not yet packed into a grading batch. Inspect, decide what's worth the fee, build the batch.</p>
+
+    <h2>What you see</h2>
+    <p>Every raw card_instance with <code>decision = 'grade'</code> and status <code>inspected</code> or <code>raw_for_sale</code> that hasn't been added to a grading_submission yet.</p>
+    <p>Columns: Card name, Set, Card #, Condition, Notes, Cost, Source lot, Date inspected.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>Filter / search</strong> — narrow by card name, set, condition, source lot.</li>
+      <li><strong>Move to a new submission</strong> — select rows, click <strong>Add to Batch</strong>. Pick an existing submission or create a new one. Cards flip to <code>grading_submitted</code> status.</li>
+      <li><strong>Change decision</strong> — click a row → set decision to <code>sell_raw</code> if you change your mind. Card moves to <a href="raw-overall.html">Raw Overall</a> as for-sale inventory.</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>This view is useful when you accumulate slabs-worth of cards over time and want to batch them efficiently for one shipment.</li>
+      <li>For pricing strategy: filter by condition and look at the raw market price vs expected slab price + grading fee. Cards that don't clear the spread shouldn't be submitted.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

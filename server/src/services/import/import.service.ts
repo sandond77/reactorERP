@@ -454,12 +454,18 @@ export async function createCatalogResolver(
       const promoHash  = labelWithoutSetCode.match(/#(\d+)/);
       // codedNum: promo-style like "SM240" or "SV-P 099" — but NOT bare set shorthands
       const codedNum   = labelWithoutSetCode.match(/\b([A-Z]{1,3}\d{1,3}[a-z]?)\b/);
-      const threeDigit = labelWithoutSetCode.match(/\b(\d{3})\b/);
-      const twoDigit   = labelWithoutSetCode.match(/\b(\d{2})\b/);
+      // PSA labels put the card number right before the card name, while
+      // numbers earlier in the string are usually set-name artifacts (e.g.
+      // "Pokemon 151 168 Charmander" — 151 is the set name, 168 is the card
+      // number). Use the LAST N-digit match, not the first.
+      const threeDigitAll = [...labelWithoutSetCode.matchAll(/\b(\d{3})\b/g)];
+      const threeDigit = threeDigitAll.length > 0 ? threeDigitAll[threeDigitAll.length - 1][1] : null;
+      const twoDigitAll  = [...labelWithoutSetCode.matchAll(/\b(\d{2})\b/g)];
+      const twoDigit   = twoDigitAll.length > 0 ? twoDigitAll[twoDigitAll.length - 1][1] : null;
       // Fallback: last 1-3 digit number (excludes 4-digit years via \b boundary)
       const smallNums  = [...labelWithoutSetCode.matchAll(/\b(\d{1,3})\b/g)];
       const lastSmall  = smallNums.length > 0 ? smallNums[smallNums.length - 1][1] : null;
-      resolvedNumber = promoHash?.[1] ?? codedNum?.[1] ?? threeDigit?.[1] ?? twoDigit?.[1] ?? lastSmall ?? null;
+      resolvedNumber = promoHash?.[1] ?? codedNum?.[1] ?? threeDigit ?? twoDigit ?? lastSmall ?? null;
     }
     if (!resolvedNumber) {
       // If the user provided an explicit override for this card, create a catalog entry
@@ -798,7 +804,7 @@ async function executeRawPurchaseImport(
         ? await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex)
         : null;
 
-      await createRawPurchase(userId, {
+      const rp = await createRawPurchase(userId, {
         type: purchaseType,
         source: source ?? undefined,
         order_number: orderNumber ?? undefined,
@@ -813,6 +819,33 @@ async function executeRawPurchaseImport(
         purchased_at: purchasedAt?.toISOString(),
         received_at:  undefined,
       });
+
+      // Raw single-card purchases ARE inventory rows. Bulk purchases are lots
+      // and get split into card_instances during inspection — don't auto-create.
+      if (purchaseType === 'raw') {
+        await db.insertInto('card_instances').values({
+          user_id:              userId,
+          catalog_id:           catalogId ?? null,
+          card_name_override:   cardName || null,
+          set_name_override:    catalogId ? null : (setName ?? null),
+          card_number_override: catalogId ? null : (cardNumber ?? null),
+          card_game:            'pokemon',
+          language,
+          variant: null, rarity: null, notes: null,
+          purchase_type:        'raw' as const,
+          status:               'purchased_raw' as const,
+          quantity:             cardCount,
+          purchase_cost:        Math.round(totalCostUsd * 100),
+          currency:             'USD',
+          source_link:          null,
+          order_number:         orderNumber,
+          condition:            null, condition_notes: null,
+          image_front_url:      null, image_back_url: null,
+          purchased_at:         purchasedAt ?? null,
+          raw_purchase_id:      rp.id,
+          trade_id: null, location_id: null, decision: null,
+        }).execute();
+      }
 
       importedCount++;
       if (importedCount % 10 === 0) onProgress?.(importedCount);

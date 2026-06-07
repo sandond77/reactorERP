@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Raw Overall — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Raw Overall</h1>
+    <p class="lede">A roll-up of every raw lot showing its commerce breakdown — what was split into Sell Raw, what was submitted to grading, what's sold, what's unsold.</p>
+
+    <h2>What you see</h2>
+    <p>One row per raw lot (raw_purchases entry). Columns: Part #, ID (purchase_id), Card name, Total qty, Unsold qty, Sold qty, Condition, Location, Listed?, Listed price, Cost, Strike price, Net, ROI, dates.</p>
+    <p>Click the chevron on a lot to expand its sub-row breakdown:</p>
+    <ul>
+      <li><strong>SOLD</strong> — sub-rows showing each completed sale from this lot.</li>
+      <li><strong>FOR SALE</strong> — current unsold raw inventory split by condition.</li>
+      <li><strong>GRADING SUBMITTED</strong> — what's in flight to a grader.</li>
+      <li><strong>LOST/DAMAGED</strong> — write-offs from this lot.</li>
+    </ul>
+    <p>Sub-rows for <code>graded</code>, <code>inspected</code>, and <code>purchased_raw</code> statuses are hidden — graded children are in <a href="graded-slabs.html">Graded / Slabs</a>; inspected/purchased are intermediate states that aren't useful here.</p>
+
+    <h2>Tabs at the top</h2>
+    <ul>
+      <li><strong>Summary</strong> — high-level totals.</li>
+      <li><strong>All / Unsold / Sold / For Sale / To Grade / Submitted</strong> — filter the lot list by aggregate status.</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li><strong>Cost reconciliation</strong> — Total qty × per-card cost should equal the lot's <code>total_cost_usd</code>. If it doesn't, the lot was edited after splitting.</li>
+      <li><strong>Click a sub-row</strong> to open the card_instance detail modal.</li>
+      <li><strong>Card Show indicator</strong> — sub-rows where <code>is_card_show = true</code> show a "Card Show" label.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

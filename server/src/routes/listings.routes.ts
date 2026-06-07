@@ -189,6 +189,21 @@ listingsRouter.delete('/group', requireAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Per-listing PATCH — currently only list_price (cents). Powers the
+// Record Sale modal's editable Listed Price field. Other fields can be
+// added here as the form expands; the underlying updateListing accepts
+// any subset of NewListing.
+const singleUpdateSchema = z.object({
+  list_price: z.union([z.string(), z.number()]).transform((v) => toCents(v)).optional(),
+});
+listingsRouter.patch('/:listingId', requireAuth, async (req, res, next) => {
+  try {
+    const body = singleUpdateSchema.parse(req.body);
+    const updated = await listingsService.updateListing(req.user!.id, req.params.listingId as string, body);
+    res.json(updated);
+  } catch (err) { next(err); }
+});
+
 listingsRouter.delete('/:listingId', requireAuth, async (req, res, next) => {
   try {
     const result = await listingsService.cancelSingleListing(req.user!.id, req.params.listingId as string);

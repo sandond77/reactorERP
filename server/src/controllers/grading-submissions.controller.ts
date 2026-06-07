@@ -31,14 +31,23 @@ export async function update(req: Request, res: Response, next: NextFunction) {
 
 export async function remove(req: Request, res: Response, next: NextFunction) {
   try {
-    await svc.deleteBatch(req.dataUserId, req.params['id'] as string);
-    res.status(204).send();
+    const result = await svc.deleteBatch(req.dataUserId, req.params['id'] as string);
+    if (!result) return res.status(404).json({ error: 'Not found' });
+    res.json(result);
   } catch (err) { next(err); }
 }
 
 export async function addItem(req: Request, res: Response, next: NextFunction) {
   try {
     res.status(201).json(await svc.addItem(req.dataUserId, req.params['id'] as string, req.body));
+  } catch (err) { next(err); }
+}
+
+export async function addItemsBulk(req: Request, res: Response, next: NextFunction) {
+  try {
+    const items = (req.body && Array.isArray(req.body.items)) ? req.body.items : [];
+    const created = await svc.addItemsBulk(req.dataUserId, req.params['id'] as string, items);
+    res.status(201).json({ data: created });
   } catch (err) { next(err); }
 }
 

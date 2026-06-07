@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Graded / Slabs — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Graded / Slabs</h1>
+    <p class="lede">The complete graded inventory table. One row per slab. Filter, search, sort, export.</p>
+
+    <h2>What you see</h2>
+    <p>Every <code>card_instances</code> row joined to <code>slab_details</code>. Columns include Part #, Cert #, Card Name, Grade, Company, Condition, Listed price, Cost basis, Strike price (if sold), Net, ROI, dates, location, notes.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>Search</strong> — by card name, cert #, or part #.</li>
+      <li><strong>Column filters</strong> — every column header has a filter dropdown (grade, company, listed status, card show flag, etc).</li>
+      <li><strong>Sort</strong> — click a column header.</li>
+      <li><strong>Click a row</strong> — opens the Slab Detail modal. Edit identity (card name, cert, grade, label), grading cost, location, personal-collection flag, or delete.</li>
+      <li><strong>+ Add Slab</strong> — add a single graded card manually (pre-graded purchase flow). Enter cert + grade + cost basis.</li>
+    </ul>
+
+    <h2>Filters worth knowing</h2>
+    <ul>
+      <li><strong>All / Unsold / Sold</strong> top tabs.</li>
+      <li><strong>Personal</strong> — toggles cards flagged <code>is_personal_collection = true</code> (your keeper inventory; excluded from for-sale views).</li>
+      <li><strong>Card Show?</strong> column filter shows on-show inventory only.</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li><strong>Cost basis discrepancies</strong> — if a slab's <code>raw_cost + grading_cost</code> doesn't match its Cost column, check if the source raw lot or grading batch was edited after the slab was created.</li>
+      <li><strong>Stale listing data</strong> — if a slab shows "Listed: Yes" but you can't find the listing, check the Listings page; the listing might have been cancelled mid-edit.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Raw Purchases — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Raw Purchases</h1>
+    <p class="lede">The order log — every raw or bulk purchase you've placed. The entry point for raw inventory.</p>
+
+    <h2>What you see</h2>
+    <p>One row per <code>raw_purchases</code> record. Columns: Purchase ID, Type (raw/bulk), Source, Order #, Card name (raw single) or set (bulk), Card count, Total cost USD, Purchased date, Received date, Status.</p>
+    <p>Status moves through <strong>ordered → received → cancelled</strong>. <code>received_at</code> being set is what flips status to received.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ Add Raw Purchase</strong> — manual order entry. Pick <code>raw</code> (single card, qty=1) or <code>bulk</code> (lot of N).</li>
+      <li><strong>Click a row</strong> — opens the purchase detail. Edit cost, dates, source, type, or status.</li>
+      <li><strong>Mark received</strong> — sets <code>received_at</code> + flips status. For <code>raw</code> orders, this auto-creates a matching card_instance.</li>
+      <li><strong>Upload receipt</strong> — attach a receipt URL or image for record-keeping.</li>
+    </ul>
+
+    <h2>Raw vs Bulk</h2>
+    <ul>
+      <li><strong>Raw single (<code>type=raw</code>)</strong>: each order = one card. The card_instance is created at receive time. Cost = order cost.</li>
+      <li><strong>Bulk lot (<code>type=bulk</code>)</strong>: each order = N cards. No card_instances created automatically — you split them out via <a href="raw-inspection.html">Inspection</a>. Cost is allocated proportionally during split.</li>
+    </ul>
+
+    <h2>Awaiting Intake</h2>
+    <p>Bulk orders marked received but not yet inspected show up in the Dashboard's <strong>Awaiting Intake</strong> counter. Use Inspection to split them.</p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

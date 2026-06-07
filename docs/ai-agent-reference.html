@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Agent Reference — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>AI Agent Reference</h1>
+    <p class="lede">Every tool the agent can call, grouped by area. For the concept overview see <a href="ai-agent.html">AI Agent</a>.</p>
+
+    <h2>Inventory — read</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>list_inventory</td><td>Lists card_instances with filters (status, type, search). Used for "show me my unsold PSA 10s."</td></tr>
+        <tr><td>lookup_catalog</td><td>Resolves a card name / set / number to a Part # (SKU) using the shared card_catalog.</td></tr>
+        <tr><td>list_locations</td><td>Lists physical storage locations.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Inventory — write</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>create_raw_purchase</td><td>Creates a new raw_purchases entry. Type raw or bulk.</td></tr>
+        <tr><td>add_card_to_purchase</td><td>Splits a bulk lot — creates a card_instance tied to an existing purchase.</td></tr>
+        <tr><td>add_graded_card</td><td>Direct add for a graded slab. No raw_purchase needed.</td></tr>
+        <tr><td>update_card</td><td>Edits a card_instance: condition, decision, notes, location, etc.</td></tr>
+        <tr><td>delete_card</td><td>Removes a card_instance. Reversible via audit log.</td></tr>
+        <tr><td>assign_card_to_location</td><td>Updates location_id. May flip is_card_show flag depending on the destination.</td></tr>
+        <tr><td>save_images</td><td>Attaches images uploaded in your message to a card_instance.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Sales</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>list_sales</td><td>Lists sales with filters (platform, date range, card show). Up to 500 rows.</td></tr>
+        <tr><td>record_sale</td><td>Logs a single sale.</td></tr>
+        <tr><td>record_bulk_sale</td><td>Card-show style — multiple cards under one total.</td></tr>
+        <tr><td>update_sale</td><td>Edits an existing sale's fields.</td></tr>
+        <tr><td>delete_sale</td><td>Removes a sale + restores the card to inventory.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Listings</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>list_listings</td><td>Lists active listings with filters.</td></tr>
+        <tr><td>create_listing</td><td>Creates a new listing on a card.</td></tr>
+        <tr><td>update_listing</td><td>Edits URL or price on an existing listing.</td></tr>
+        <tr><td>cancel_listing</td><td>Marks a listing cancelled.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Grading</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>submit_to_grading</td><td>Routes cards to grading + adds them to a batch.</td></tr>
+        <tr><td>list_grading_batches</td><td>Lists submissions with their status.</td></tr>
+        <tr><td>update_grading_batch</td><td>Edits batch metadata. Cost changes fan out to linked slabs + historical sales.</td></tr>
+        <tr><td>process_grading_return</td><td>Processes a return CSV. Creates slabs.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Card Shows</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>list_card_shows</td><td>Lists active + past shows. Used for "what's my next show?"</td></tr>
+        <tr><td>get_card_show_report</td><td>P&amp;L breakdown per show. Multi-day shows prompt for which day.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Expenses + Trades</h2>
+    <table>
+      <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>record_expense</td><td>Logs an expense (postage, supplies, fees).</td></tr>
+        <tr><td>delete_expense</td><td>Removes an expense.</td></tr>
+        <tr><td>record_trade</td><td>Logs a card-for-card trade with both sides + optional cash boot.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Example prompts</h2>
+    <ul>
+      <li><strong>Logging</strong>: "I sold cert 76565619 on eBay for $1500 with $150 in fees and $10 shipping. Order number is 12-34567-89012."</li>
+      <li><strong>Bulk sale</strong>: "At Reading I sold 5 PSA 10 commons at $30 each. Card names: ..."</li>
+      <li><strong>Reporting</strong>: "What was my P&amp;L for the Reading show day 2?"</li>
+      <li><strong>Searching</strong>: "Show me my Charizard inventory. Sort by ROI desc."</li>
+      <li><strong>Bulk update</strong>: "Mark these 10 raw cards as for-sale: ..."</li>
+      <li><strong>Editing</strong>: "Update the grading batch from yesterday — actual cost was $480 not $500."</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

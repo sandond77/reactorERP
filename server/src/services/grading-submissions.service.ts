@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { AppError } from '../middleware/errorHandler';
 import type { GradingCompany } from '../types/db';
 
 // ── ID generation ─────────────────────────────────────────────────────────────
@@ -102,6 +103,20 @@ export async function getBatch(userId: string, id: string) {
       'ci.purchase_cost',
       'ci.currency',
       'ci.condition',
+      'ci.language',
+      'ci.legacy_source_catalog_id',
+      // Remaining stash for a legacy-sourced line — drives the modal's qty
+      // max so the user can pull more from the bucket via Edit Line Item.
+      // Sums grade-decision stash rows (status not in terminal states) under
+      // the same legacy catalog entry. 0 for non-legacy lines.
+      sql<number>`COALESCE((
+        SELECT SUM(stash.quantity)::int
+        FROM card_instances stash
+        WHERE stash.catalog_id = ci.legacy_source_catalog_id
+          AND stash.user_id = ci.user_id
+          AND stash.status NOT IN ('grading_submitted', 'graded', 'sold', 'lost_damaged')
+          AND stash.decision = 'grade'
+      ), 0)`.as('legacy_stash_remaining'),
       'rp.purchase_id as raw_purchase_label',
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
@@ -133,7 +148,7 @@ export async function getBatch(userId: string, id: string) {
   return {
     ...batch,
     items: itemsWithRolling,
-    stats: { rawCost, gradingCost, totalCost, totalValue, maxGain, estimate80 },
+    stats: { totalQty, rawCost, gradingCost, totalCost, totalValue, maxGain, estimate80 },
   };
 }
 
@@ -169,7 +184,14 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
   if (input.company !== undefined)      update.company      = input.company;
   if (input.tier !== undefined)         update.tier         = input.tier;
   if (input.submitted_at !== undefined) update.submitted_at = input.submitted_at ? new Date(input.submitted_at) : null;
-  if (input.grading_cost !== undefined) update.grading_cost = input.grading_cost;
+  // Coerce to integer cents — clients sometimes send strings from form inputs.
+  if (input.grading_cost !== undefined) {
+    const n = Math.round(Number(input.grading_cost));
+    if (!Number.isFinite(n) || n < 0) {
+      throw new AppError(400, `grading_cost must be a non-negative number (cents). Got: ${input.grading_cost}`);
+    }
+    update.grading_cost = n;
+  }
   if (input.status !== undefined)            update.status            = input.status;
   if (input.notes !== undefined)             update.notes             = input.notes;
   if (input.submission_number !== undefined) update.submission_number = input.submission_number;
@@ -182,36 +204,212 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
     .returningAll()
     .executeTakeFirst();
   if (updated) await logAudit(userId, 'grading_batches', id, 'updated', existing, updated);
+
+  // Propagate grading_cost change to every slab created from this batch so
+  // cost basis on still-held slabs reflects the new value. Sold slabs have
+  // a snapshotted total_cost_basis on the sales row — recompute those too.
+  if (
+    updated &&
+    input.grading_cost !== undefined &&
+    existing &&
+    existing.grading_cost !== update.grading_cost
+  ) {
+    const affected = await db
+      .updateTable('slab_details')
+      .set({ grading_cost: update.grading_cost as number, updated_at: new Date() })
+      .where('grading_batch_id', '=', id)
+      .where('user_id', '=', userId)
+      .returning('card_instance_id')
+      .execute();
+
+    if (affected.length > 0) {
+      const cardIds = affected.map((r) => r.card_instance_id);
+      const sales = await db
+        .selectFrom('sales')
+        .select(['id', 'card_instance_id'])
+        .where('user_id', '=', userId)
+        .where('card_instance_id', 'in', cardIds)
+        .execute();
+      const { computeCostBasis } = await import('./cards.service');
+      for (const sale of sales) {
+        const newBasis = await computeCostBasis(sale.card_instance_id);
+        await db
+          .updateTable('sales')
+          .set({ total_cost_basis: newBasis })
+          .where('id', '=', sale.id)
+          .where('user_id', '=', userId)
+          .execute();
+      }
+    }
+  }
+
   return updated;
 }
 
-export async function deleteBatch(userId: string, id: string) {
-  const existing = await db.selectFrom('grading_batches').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
+export interface DeleteBatchResult {
+  deleted: boolean;
+  kept_slabs: RevertReturnResult['kept_slabs'];
+  recredited_to_legacy: number;
+}
 
-  // Revert all card instances in this batch back to inspected
-  const items = await db
-    .selectFrom('grading_batch_items')
-    .select('card_instance_id')
-    .where('batch_id', '=', id)
-    .execute();
-
-  if (items.length > 0) {
-    const instanceIds = items.map((i) => i.card_instance_id);
-    await db
-      .updateTable('card_instances')
-      .set({ status: 'inspected', decision: 'grade' })
-      .where('id', 'in', instanceIds)
-      .where('user_id', '=', userId)
-      .execute();
-  }
-
-  const result = await db
-    .deleteFrom('grading_batches')
+/**
+ * Delete a grading batch, cascading any work that was done on it.
+ *
+ *   pending/submitted → cards revert to inspected/grade-decision (or back into
+ *                       their legacy bucket if they came from one).
+ *   returned         → first chain through revertReturn (deletes slabs +
+ *                       restores source raws), then apply the same revert.
+ *                       Slabs that are sold or actively listed stay intact
+ *                       and are reported via `kept_slabs`.
+ */
+export async function deleteBatch(userId: string, id: string): Promise<DeleteBatchResult | null> {
+  const existing = await db
+    .selectFrom('grading_batches')
+    .selectAll()
     .where('id', '=', id)
     .where('user_id', '=', userId)
     .executeTakeFirst();
-  if (existing) await logAudit(userId, 'grading_batches', id, 'deleted', existing, null);
-  return result;
+  if (!existing) return null;
+
+  let keptSlabs: RevertReturnResult['kept_slabs'] = [];
+
+  // For returned batches, undo the return first (skipping locked slabs).
+  if (existing.status === 'returned') {
+    const revert = await revertReturn(userId, id, { skipLockedSlabs: true });
+    keptSlabs = revert?.kept_slabs ?? [];
+  }
+
+  // Now the batch is conceptually 'submitted' or 'pending'. Each batch_item
+  // points at a card_instance currently in grading_submitted (or in some
+  // earlier state for pending batches). Route them back:
+  //   - Legacy-bucket cards → credit the bucket stash + hard-delete the row
+  //   - Normal cards         → status='inspected', decision='grade'
+  const items = await db
+    .selectFrom('grading_batch_items')
+    .select(['card_instance_id', 'quantity'])
+    .where('batch_id', '=', id)
+    .execute();
+
+  let recreditedToLegacy = 0;
+  for (const item of items) {
+    const card = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', item.card_instance_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!card) continue; // already deleted (e.g. its slab was kept)
+
+    if (card.legacy_source_catalog_id) {
+      const bucketId = card.legacy_source_catalog_id;
+      const qty = card.quantity ?? 1;
+
+      // Find an existing grade-decision stash row under the same bucket and
+      // increment it; otherwise create a fresh stash row.
+      const stash = await db
+        .selectFrom('card_instances')
+        .selectAll()
+        .where('catalog_id', '=', bucketId)
+        .where('user_id', '=', userId)
+        .where('decision', '=', 'grade')
+        .where('status', 'not in', ['grading_submitted', 'graded', 'sold', 'lost_damaged'])
+        .orderBy('quantity', 'desc')
+        .executeTakeFirst();
+
+      if (stash) {
+        await db.updateTable('card_instances')
+          .set({ quantity: stash.quantity + qty, updated_at: new Date() })
+          .where('id', '=', stash.id)
+          .execute();
+      } else {
+        await db.insertInto('card_instances').values({
+          user_id:        userId,
+          catalog_id:     bucketId,
+          card_game:      card.card_game,
+          language:       card.language,
+          status:         'inspected',
+          decision:       'grade',
+          purchase_type:  card.purchase_type,
+          quantity:       qty,
+          purchase_cost:  card.purchase_cost,
+          currency:       card.currency,
+        } as any).execute();
+      }
+
+      await logAudit(userId, 'card_instances', card.id, 'deleted', card, null);
+      await db.deleteFrom('card_instances')
+        .where('id', '=', card.id)
+        .where('user_id', '=', userId)
+        .execute();
+      recreditedToLegacy++;
+    } else {
+      await db.updateTable('card_instances')
+        .set({ status: 'inspected', decision: 'grade' })
+        .where('id', '=', card.id)
+        .where('user_id', '=', userId)
+        .execute();
+    }
+  }
+
+  await db.deleteFrom('grading_batches')
+    .where('id', '=', id)
+    .where('user_id', '=', userId)
+    .execute();
+  await logAudit(userId, 'grading_batches', id, 'deleted', existing, null);
+
+  return { deleted: true, kept_slabs: keptSlabs, recredited_to_legacy: recreditedToLegacy };
+}
+
+// Bulk variant — add multiple inventory cards to a batch in one call.
+//
+// The same card_instance can be added multiple times (across rows OR across
+// separate add-calls) — useful when a user has qty=N of one card and wants
+// each cert graded as its own line item. We validate that the total qty
+// across all batch_items for a card_instance doesn't exceed its inventory
+// quantity, both within this call and combined with what's already in the
+// batch.
+const BULK_ADD_MAX = 10;
+
+export async function addItemsBulk(
+  userId: string,
+  batchId: string,
+  items: AddItemInput[]
+) {
+  if (!items.length) throw new AppError(400, 'No items provided');
+  if (items.length > BULK_ADD_MAX) {
+    throw new AppError(400, `Maximum ${BULK_ADD_MAX} cards per bulk add (got ${items.length})`);
+  }
+  // Aggregate input qty per card_instance to validate against inventory.
+  const totalRequestedById = new Map<string, number>();
+  for (const it of items) {
+    const q = it.quantity ?? 1;
+    if (q < 1) throw new AppError(400, 'Quantity must be >= 1');
+    totalRequestedById.set(it.card_instance_id, (totalRequestedById.get(it.card_instance_id) ?? 0) + q);
+  }
+  for (const [cardId, requested] of totalRequestedById) {
+    const card = await db
+      .selectFrom('card_instances')
+      .select('quantity')
+      .where('id', '=', cardId)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!card) throw new AppError(404, 'Card not found');
+    const existing = await db
+      .selectFrom('grading_batch_items')
+      .select(db.fn.sum('quantity').as('total'))
+      .where('batch_id', '=', batchId)
+      .where('card_instance_id', '=', cardId)
+      .executeTakeFirst();
+    const alreadyInBatch = Number(existing?.total ?? 0);
+    if (alreadyInBatch + requested > card.quantity) {
+      throw new AppError(400, `Cannot add ${requested} — only ${card.quantity - alreadyInBatch} of this card available (${alreadyInBatch} already in batch).`);
+    }
+  }
+  const created: Awaited<ReturnType<typeof addItem>>[] = [];
+  for (const it of items) {
+    created.push(await addItem(userId, batchId, it));
+  }
+  return created;
 }
 
 export async function addItem(userId: string, batchId: string, input: AddItemInput) {
@@ -262,21 +460,29 @@ export interface AddLegacyItemInput {
   language: string;
   condition?: string | null;
   quantity?: number;
-  purchase_cost?: number;       // in cents, defaults to 0 (user has no purchase record)
+  purchase_cost?: number;       // in cents, only used in phantom-lot fallback
   expected_grade?: number;
   estimated_value?: number;     // in cents
-  catalog_id?: string;          // if client already picked or generated a part number
+  catalog_id?: string;          // the REAL part the card is — slab will land under this
+  legacy_catalog_id?: string;   // legacy bucket the stash is pulled from (set_code='LEGACY')
 }
 
 /**
  * Create a card_instance for a card the user owned before tracking purchases
- * in Reactor, and add it directly to a grading batch. To keep accounting
- * balanced, this also creates a backdated `raw_purchases` lot so the per-
- * part-number aggregates show "1 raw acquired (consumed) + 1 graded" once
- * the slab returns, rather than a graded slab with no raw provenance.
+ * in Reactor, and add it directly to a grading batch.
  *
- * catalog_id is intentionally left NULL here — the resolver runs at
- * processReturn time, so the part number lives on the slab once verified.
+ * Two paths:
+ *   1. legacy_catalog_id provided → catalog-based bucket flow. Find the user's
+ *      stash card_instance(s) linked to that legacy catalog entry, decrement
+ *      one by qty, carry that row's purchase_cost onto the grading row. Cost
+ *      basis flows automatically through standard reports (raw rollups shrink
+ *      as the stash decrements; graded rollups grow as the slab returns).
+ *      catalog_id (the real part) is what the new grading row carries so the
+ *      eventual slab lands under the correct part, not the legacy sentinel.
+ *
+ *   2. No legacy_catalog_id → phantom-lot fallback (legacy "no lot" original
+ *      behavior). Creates a backdated raw_purchases lot of size qty so the
+ *      submission still has provenance.
  */
 export async function addLegacyItem(userId: string, batchId: string, input: AddLegacyItemInput) {
   const batch = await db
@@ -285,31 +491,77 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
     .where('id', '=', batchId)
     .where('user_id', '=', userId)
     .executeTakeFirst();
-  if (!batch) throw new Error('Batch not found');
+  if (!batch) throw new AppError(404, 'Batch not found');
 
-  // Phantom raw lot — represents the (untracked) original acquisition. This
-  // makes inventory math balance: when the slab returns, the lot is the
-  // historical record of "where this raw came from".
-  const { createRawPurchase } = await import('./raw-purchases.service');
   const qty = input.quantity ?? 1;
-  const perCardCost = input.purchase_cost ?? 0;
-  const lot = await createRawPurchase(userId, {
-    type: 'legacy',
-    source: 'Legacy (pre-Reactor)',
-    language: input.language,
-    card_name: input.card_name,
-    set_name: input.set_name ?? undefined,
-    card_number: input.card_number ?? undefined,
-    total_cost_usd: perCardCost * qty,
-    card_count: qty,
-    status: 'received',
-    purchased_at: new Date().toISOString(),
-    received_at: new Date().toISOString(),
-    notes: 'Auto-created from legacy grading submission',
-  });
+  let perCardCost: number;
+  let lotId: string | null = null;
 
-  // If the client already picked or generated a part number, use it directly.
-  // Otherwise fall back to the resolver (same path as every other raw card).
+  if (input.legacy_catalog_id) {
+    // ── Catalog-based bucket flow ────────────────────────────────────────────
+    // Verify the picked catalog entry is actually a legacy sentinel.
+    const bucket = await db
+      .selectFrom('card_catalog')
+      .select(['id', 'set_code'])
+      .where('id', '=', input.legacy_catalog_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!bucket) throw new AppError(404, 'Legacy bucket not found');
+    if (!bucket.set_code || bucket.set_code.toUpperCase() !== 'LEGACY') {
+      throw new AppError(400, 'Picked catalog entry is not a legacy bucket (set_code must be LEGACY)');
+    }
+
+    // Find a stash row tied to this catalog entry with enough qty. Only rows
+    // marked decision='grade' count — cards on the same legacy bucket but
+    // destined for raw sale (decision='sell_raw') stay out of the picker so
+    // pulling for grading can't accidentally drain raw-sale inventory.
+    // Largest-first so we drain the bigger pools before fragmenting smaller.
+    const stash = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('catalog_id', '=', input.legacy_catalog_id)
+      .where('user_id', '=', userId)
+      .where('status', 'not in', ['grading_submitted', 'graded', 'sold', 'lost_damaged'])
+      .where('decision', '=', 'grade')
+      .where('quantity', '>=', qty)
+      .orderBy('quantity', 'desc')
+      .executeTakeFirst();
+    if (!stash) {
+      throw new AppError(409, `No 'Grade' decision stash row under this legacy bucket has ${qty} card${qty === 1 ? '' : 's'} available`);
+    }
+    perCardCost = stash.purchase_cost ?? 0;
+    lotId = stash.raw_purchase_id; // preserve lineage if the stash itself came from a lot
+
+    const stashBefore = { ...stash };
+    await db
+      .updateTable('card_instances')
+      .set({ quantity: stash.quantity - qty, updated_at: new Date() })
+      .where('id', '=', stash.id)
+      .execute();
+    await logAudit(userId, 'card_instances', stash.id, 'updated', stashBefore, { ...stashBefore, quantity: stash.quantity - qty });
+  } else {
+    // ── Phantom-lot fallback (legacy "no lot" — pre-bucket behavior) ─────────
+    const { createRawPurchase } = await import('./raw-purchases.service');
+    perCardCost = input.purchase_cost ?? 0;
+    const lot = await createRawPurchase(userId, {
+      type: 'legacy',
+      source: 'Legacy (pre-Reactor)',
+      language: input.language,
+      card_name: input.card_name,
+      set_name: input.set_name ?? undefined,
+      card_number: input.card_number ?? undefined,
+      total_cost_usd: perCardCost * qty,
+      card_count: qty,
+      status: 'received',
+      purchased_at: new Date().toISOString(),
+      received_at: new Date().toISOString(),
+      notes: 'Auto-created from legacy grading submission',
+    });
+    lotId = lot.id;
+  }
+
+  // If the client already picked or generated a part number for the real card
+  // identity, use it directly. Otherwise fall back to the resolver.
   let catalogId: string | null = input.catalog_id ?? null;
   if (!catalogId) {
     const { createCatalogResolver } = await import('./import/import.service');
@@ -348,7 +600,11 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       purchase_cost: perCardCost,
       currency: 'USD',
       condition: input.condition ?? null,
-      raw_purchase_id: lot.id,
+      raw_purchase_id: lotId,
+      // Remember the legacy bucket this card was pulled from. processReturn
+      // copies this onto the slab so the bucket can cross-tally its returned
+      // count even though the slab itself lives under its real catalog_id.
+      legacy_source_catalog_id: input.legacy_catalog_id ?? null,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -367,7 +623,7 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
     .executeTakeFirstOrThrow();
 
   await logAudit(userId, 'card_instances', ci.id, 'created', null, ci);
-  return { card_instance: ci, batch_item: item, raw_purchase: lot };
+  return { card_instance: ci, batch_item: item };
 }
 
 export interface UpdateItemInput {
@@ -377,6 +633,59 @@ export interface UpdateItemInput {
 }
 
 export async function updateItem(userId: string, itemId: string, input: UpdateItemInput) {
+  // For legacy-sourced lines the source card_instance.quantity must stay in
+  // sync with the batch_item.quantity, and the legacy bucket's stash row
+  // absorbs/emits the delta. Fetch the existing item + linked instance up
+  // front so we can detect the legacy case and adjust both sides atomically.
+  const existing = await db
+    .selectFrom('grading_batch_items as gbi')
+    .innerJoin('card_instances as ci', 'ci.id', 'gbi.card_instance_id')
+    .innerJoin('grading_batches as gb', 'gb.id', 'gbi.batch_id')
+    .select([
+      'gbi.id',
+      'gbi.card_instance_id',
+      'gbi.quantity as gbi_qty',
+      'ci.quantity as ci_qty',
+      'ci.legacy_source_catalog_id',
+    ])
+    .where('gbi.id', '=', itemId)
+    .where('gb.user_id', '=', userId)
+    .executeTakeFirst();
+  if (!existing) return null;
+
+  // Adjust stash + card_instance.quantity when a legacy line's qty changes.
+  if (
+    input.quantity !== undefined &&
+    input.quantity !== existing.gbi_qty &&
+    existing.legacy_source_catalog_id
+  ) {
+    const delta = input.quantity - existing.gbi_qty;
+    const stash = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('catalog_id', '=', existing.legacy_source_catalog_id)
+      .where('user_id', '=', userId)
+      .where('status', 'not in', ['grading_submitted', 'graded', 'sold', 'lost_damaged'])
+      .where('decision', '=', 'grade')
+      .orderBy('quantity', 'desc')
+      .executeTakeFirst();
+    if (!stash) {
+      throw new AppError(409, 'No legacy stash row available to pull from / return to');
+    }
+    if (delta > 0 && stash.quantity < delta) {
+      throw new AppError(409, `Only ${stash.quantity} card${stash.quantity === 1 ? '' : 's'} remaining in the legacy stash`);
+    }
+    // Move delta from stash → card_instance (or back if delta < 0)
+    const stashBefore = { ...stash };
+    await db.updateTable('card_instances')
+      .set({ quantity: stash.quantity - delta, updated_at: new Date() })
+      .where('id', '=', stash.id).execute();
+    await logAudit(userId, 'card_instances', stash.id, 'updated', stashBefore, { ...stashBefore, quantity: stash.quantity - delta });
+    await db.updateTable('card_instances')
+      .set({ quantity: existing.ci_qty + delta, updated_at: new Date() })
+      .where('id', '=', existing.card_instance_id).execute();
+  }
+
   const update: Record<string, unknown> = {};
   if (input.quantity        !== undefined) update.quantity        = input.quantity;
   if (input.expected_grade  !== undefined) update.expected_grade  = input.expected_grade;
@@ -398,13 +707,28 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
     .executeTakeFirst();
 }
 
+export type ReturnDisposition = 'graded' | 'lost' | 'not_graded' | 'not_submitted';
+
 export interface ReturnItemInput {
+  // One physical slab per entry. Multiple entries can share batch_item_id
+  // (one sub-line of qty N produces N entries on return). To drop a slot
+  // entirely from a return (qty mismatch — handle later), simply omit it
+  // from input.items; the source stays in grading_submitted.
   batch_item_id: string;
   grade: number;
   grade_label?: string;
   cert_number?: string;
   actual_value?: number;
   card_name_override?: string;
+  // Slot disposition. Defaults to 'graded' (slab created).
+  //   'lost'          — write-off; consumes source, no slab, no new raw
+  //   'not_graded'    — PSA returned ungraded; consumes source; new raw row
+  //                     with cost = original + grading_cost
+  //   'not_submitted' — never shipped; consumes source; new raw row with
+  //                     cost = original (no grading fee)
+  disposition?: ReturnDisposition;
+  // Legacy alias for disposition='lost'. Kept for the agent tool path.
+  lost?: boolean;
 }
 
 export interface ProcessReturnInput {
@@ -422,6 +746,26 @@ export async function processReturn(userId: string, batchId: string, input: Proc
     .executeTakeFirst();
   if (!batch) return null;
 
+  if (!Array.isArray(input.items) || input.items.length === 0) {
+    throw new AppError(400, 'Return must include at least one item');
+  }
+
+  // Validate each item up-front so a bad row can't poison a half-applied
+  // return. cert_number must coerce to a valid BIGINT for the slab insert;
+  // graded slots need a finite grade.
+  for (const it of input.items) {
+    const disp = it.disposition ?? (it.lost ? 'lost' : 'graded');
+    if (disp === 'graded') {
+      if (!it.cert_number || !/^\d{1,12}$/.test(String(it.cert_number).trim())) {
+        throw new AppError(400, `Cert # must be numeric (1-12 digits). Got: "${it.cert_number ?? ''}"`);
+      }
+      const g = Number(it.grade);
+      if (!Number.isFinite(g) || g < 0 || g > 10) {
+        throw new AppError(400, `Grade must be 0-10. Got: ${it.grade}`);
+      }
+    }
+  }
+
   // Lazy-load the catalog resolver — only constructed when needed, but reused
   // across all items in the batch.
   let cachedResolver: ((cardName: string, setName: string | null, cardNum: string | null, lang: string, idx: number) => Promise<string | null>) | null = null;
@@ -433,11 +777,20 @@ export async function processReturn(userId: string, batchId: string, input: Proc
     return cachedResolver;
   }
 
-  for (const item of input.items) {
+  // Group per-cert entries by batch_item_id so we can resolve the source raw
+  // once per sub-line and decrement its quantity by the total returned for it.
+  const grouped = new Map<string, ReturnItemInput[]>();
+  for (const it of input.items) {
+    const arr = grouped.get(it.batch_item_id) ?? [];
+    arr.push(it);
+    grouped.set(it.batch_item_id, arr);
+  }
+
+  for (const [batchItemId, entries] of grouped) {
     const batchItem = await db
       .selectFrom('grading_batch_items')
       .selectAll()
-      .where('id', '=', item.batch_item_id)
+      .where('id', '=', batchItemId)
       .where('batch_id', '=', batchId)
       .executeTakeFirst();
     if (!batchItem) continue;
@@ -450,70 +803,129 @@ export async function processReturn(userId: string, batchId: string, input: Proc
       .executeTakeFirst();
     if (!original) continue;
 
-    // If the source raw had no catalog_id (legacy adds skip resolution at submit
-    // time), try to resolve now that the slab is real. The card name on the
-    // returned slab may have been corrected too, so prefer item.card_name_override.
-    let resolvedCatalogId: string | null = original.catalog_id;
-    if (!resolvedCatalogId) {
-      const cardName = item.card_name_override ?? original.card_name_override;
-      if (cardName) {
-        try {
-          const resolve = await resolveLazy();
-          resolvedCatalogId = await resolve!(
-            cardName,
-            original.set_name_override,
-            original.card_number_override,
-            original.language,
-            0,
-          );
-        } catch { /* fall through unlinked */ }
-      }
+    // Normalize disposition (legacy `lost: true` → 'lost'; missing → 'graded')
+    const normalized = entries.map((e) => ({
+      ...e,
+      disposition: (e.disposition ?? (e.lost ? 'lost' : 'graded')) as ReturnDisposition,
+    }));
+
+    const totalConsumed = normalized.length; // every entry in payload consumes one from source
+
+    // Build new raw card_instances rows for not_graded and not_submitted entries
+    // (returned-raw cards land back in inventory under their original part with
+    // an inspected status so the user can route them to sell_raw or re-submit).
+    for (const item of normalized.filter((e) => e.disposition === 'not_graded' || e.disposition === 'not_submitted')) {
+      const costAddend = item.disposition === 'not_graded' ? batch.grading_cost : 0;
+      const newRaw = await db
+        .insertInto('card_instances')
+        .values({
+          user_id:              userId,
+          catalog_id:           original.catalog_id,
+          card_name_override:   item.card_name_override ?? original.card_name_override,
+          set_name_override:    original.set_name_override,
+          card_number_override: original.card_number_override,
+          card_game:            original.card_game,
+          language:             original.language,
+          variant:              original.variant,
+          rarity:               original.rarity,
+          notes:                original.notes,
+          status:               'inspected',
+          decision:             item.disposition === 'not_graded' ? 'sell_raw' : null,
+          purchase_type:        original.purchase_type,
+          quantity:             1,
+          purchase_cost:        original.purchase_cost + costAddend,
+          currency:             original.currency,
+          raw_purchase_id:      original.raw_purchase_id,
+          condition:            original.condition,
+          legacy_source_catalog_id: original.legacy_source_catalog_id,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+      await logAudit(userId, 'card_instances', newRaw.id, 'created', null, newRaw);
     }
 
-    const newInstance = await db
-      .insertInto('card_instances')
-      .values({
-        user_id:              userId,
-        catalog_id:           resolvedCatalogId,
-        card_name_override:   item.card_name_override ?? original.card_name_override,
-        set_name_override:    original.set_name_override,
-        card_number_override: original.card_number_override,
-        card_game:            original.card_game,
-        language:             original.language,
-        variant:              original.variant,
-        rarity:               original.rarity,
-        notes:                original.notes,
-        status:               'graded',
-        purchase_type:        'pre_graded',
-        quantity:             batchItem.quantity,
-        purchase_cost:        original.purchase_cost,
-        currency:             original.currency,
-        raw_purchase_id:      null,
-      })
-      .returningAll()
-      .executeTakeFirstOrThrow();
+    const slabEntries = normalized.filter((e) => e.disposition === 'graded');
 
-    await db
-      .insertInto('slab_details')
-      .values({
-        card_instance_id:      newInstance.id,
-        user_id:               userId,
-        source_raw_instance_id: original.id,
-        grading_submission_id: null,
-        company:               batch.company as GradingCompany,
-        grade:                 item.grade,
-        grade_label:           item.grade_label ?? null,
-        cert_number:           item.cert_number ? Number(item.cert_number) : null,
-        grading_cost:          batch.grading_cost,
-        additional_cost:       0,
-        currency:              'USD',
-      })
-      .execute();
-    await logAudit(userId, 'card_instances', newInstance.id, 'created', null, newInstance);
+    for (const item of slabEntries) {
+      // Re-resolve the catalog link on return when either:
+      //   (a) the raw had no catalog_id (legacy adds skip resolution at submit), or
+      //   (b) the raw was bucketed under a "legacy" placeholder part.
+      // Prefer the slab's own corrected name when matching.
+      let resolvedCatalogId: string | null = original.catalog_id;
+      const isLegacyLinked = resolvedCatalogId
+        ? !!(await db
+            .selectFrom('card_catalog')
+            .select('id')
+            .where('id', '=', resolvedCatalogId)
+            .where('set_code', 'ilike', 'LEGACY')
+            .executeTakeFirst())
+        : false;
+      if (!resolvedCatalogId || isLegacyLinked) {
+        const cardName = item.card_name_override ?? original.card_name_override;
+        if (cardName) {
+          try {
+            const resolve = await resolveLazy();
+            const resolved = await resolve!(
+              cardName,
+              original.set_name_override,
+              original.card_number_override,
+              original.language,
+              0,
+            );
+            if (resolved) resolvedCatalogId = resolved;
+          } catch { /* keep existing link (legacy or null) */ }
+        }
+      }
 
-    const newQty = original.quantity - batchItem.quantity;
+      const newInstance = await db
+        .insertInto('card_instances')
+        .values({
+          user_id:              userId,
+          catalog_id:           resolvedCatalogId,
+          card_name_override:   item.card_name_override ?? original.card_name_override,
+          set_name_override:    original.set_name_override,
+          card_number_override: original.card_number_override,
+          card_game:            original.card_game,
+          language:             original.language,
+          variant:              original.variant,
+          rarity:               original.rarity,
+          notes:                original.notes,
+          status:               'graded',
+          purchase_type:        'pre_graded',
+          quantity:             1,
+          purchase_cost:        original.purchase_cost,
+          currency:             original.currency,
+          raw_purchase_id:      null,
+          // Preserve legacy-bucket lineage so the bucket can cross-tally this
+          // slab into its returned_count even though catalog_id is the real part.
+          legacy_source_catalog_id: original.legacy_source_catalog_id,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+
+      await db
+        .insertInto('slab_details')
+        .values({
+          card_instance_id:      newInstance.id,
+          user_id:               userId,
+          source_raw_instance_id: original.id,
+          grading_submission_id: null,
+          grading_batch_id:      batchId,
+          company:               batch.company as GradingCompany,
+          grade:                 item.grade,
+          grade_label:           item.grade_label ?? null,
+          cert_number:           item.cert_number ? Number(item.cert_number) : null,
+          grading_cost:          batch.grading_cost,
+          additional_cost:       0,
+          currency:              'USD',
+        })
+        .execute();
+      await logAudit(userId, 'card_instances', newInstance.id, 'created', null, newInstance);
+    }
+
+    const newQty = original.quantity - totalConsumed;
     if (newQty <= 0) {
-      // All copies sent to grading — hard-delete the raw instance
+      // All copies consumed — hard-delete the raw instance
       await logAudit(userId, 'card_instances', original.id, 'deleted', original, null);
       await db.deleteFrom('card_instances').where('id', '=', original.id).where('user_id', '=', userId).execute();
     } else {
@@ -536,7 +948,25 @@ export async function processReturn(userId: string, batchId: string, input: Proc
   return getBatch(userId, batchId);
 }
 
-export async function revertReturn(userId: string, batchId: string) {
+export interface RevertReturnResult {
+  batch: Awaited<ReturnType<typeof getBatch>>;
+  kept_slabs: { card_instance_id: string; line_item_num: number | null; reason: 'sold' | 'listed' }[];
+}
+
+/**
+ * Undo a processed return.
+ *   - Deletes slabs created from this batch + restores the source raw cards.
+ *   - Sets the batch status back to 'submitted'.
+ *
+ * skipLockedSlabs (default false): when true, slabs that are sold or actively
+ * listed are left in place and reported back via `kept_slabs` instead of
+ * blocking the whole operation. Used by deleteBatch for cascading delete.
+ */
+export async function revertReturn(
+  userId: string,
+  batchId: string,
+  opts: { skipLockedSlabs?: boolean } = {},
+): Promise<RevertReturnResult | null> {
   const batch = await db
     .selectFrom('grading_batches')
     .selectAll()
@@ -546,35 +976,75 @@ export async function revertReturn(userId: string, batchId: string) {
     .executeTakeFirst();
   if (!batch) return null;
 
-  // Get all batch items to find the original raw instances
   const batchItems = await db
     .selectFrom('grading_batch_items')
     .selectAll()
     .where('batch_id', '=', batchId)
     .execute();
 
-  for (const batchItem of batchItems) {
-    // Find the graded instance created for this raw source
-    const slabDetail = await db
-      .selectFrom('slab_details')
-      .select(['card_instance_id'])
-      .where('source_raw_instance_id', '=', batchItem.card_instance_id)
-      .executeTakeFirst();
+  const keptSlabs: RevertReturnResult['kept_slabs'] = [];
 
-    if (slabDetail) {
-      // Delete the slab detail and the graded card instance
-      await db
-        .deleteFrom('slab_details')
-        .where('card_instance_id', '=', slabDetail.card_instance_id)
-        .execute();
-      await db
-        .deleteFrom('card_instances')
-        .where('id', '=', slabDetail.card_instance_id)
-        .where('user_id', '=', userId)
-        .execute();
+  // ── Step 1: Delete every slab from this batch ──────────────────────────
+  // Use grading_batch_id (preserved through any source-raw deletes) instead
+  // of source_raw_instance_id — the latter is ON DELETE SET NULL, so slabs
+  // whose source was hard-deleted in processReturn would otherwise be
+  // invisible here. Track per-source counts for the restore step.
+  const allSlabs = await db
+    .selectFrom('slab_details')
+    .select(['card_instance_id', 'source_raw_instance_id'])
+    .where('grading_batch_id', '=', batchId)
+    .execute();
+
+  const slabsDeletedBySource = new Map<string, number>();
+  let orphanSlabsDeleted = 0;
+
+  for (const slab of allSlabs) {
+    const slabCard = await db
+      .selectFrom('card_instances')
+      .select('status')
+      .where('id', '=', slab.card_instance_id)
+      .executeTakeFirst();
+    const activeListing = await db
+      .selectFrom('listings')
+      .select('id')
+      .where('card_instance_id', '=', slab.card_instance_id)
+      .where('listing_status', '=', 'active')
+      .executeTakeFirst();
+    const locked: 'sold' | 'listed' | null =
+      slabCard?.status === 'sold' ? 'sold' :
+      activeListing                ? 'listed' :
+                                     null;
+
+    if (locked) {
+      if (!opts.skipLockedSlabs) {
+        throw new AppError(400, `Cannot revert — a slab from this batch is ${locked}. Unwind first or use Delete Batch.`);
+      }
+      keptSlabs.push({
+        card_instance_id: slab.card_instance_id,
+        line_item_num:    null,
+        reason:           locked,
+      });
+      continue;
     }
 
-    // Restore the original raw instance
+    await db.deleteFrom('slab_details').where('card_instance_id', '=', slab.card_instance_id).execute();
+    await db.deleteFrom('card_instances')
+      .where('id', '=', slab.card_instance_id)
+      .where('user_id', '=', userId)
+      .execute();
+
+    if (slab.source_raw_instance_id) {
+      slabsDeletedBySource.set(
+        slab.source_raw_instance_id,
+        (slabsDeletedBySource.get(slab.source_raw_instance_id) ?? 0) + 1,
+      );
+    } else {
+      orphanSlabsDeleted++;
+    }
+  }
+
+  // ── Step 2: Restore each batch_item's source raw card to status=inspected.
+  for (const batchItem of batchItems) {
     const original = await db
       .selectFrom('card_instances')
       .selectAll()
@@ -583,14 +1053,21 @@ export async function revertReturn(userId: string, batchId: string) {
       .executeTakeFirst();
 
     if (original) {
-      // Partially consumed — original still exists, add quantity back
-      if (slabDetail) {
-        await db.updateTable('card_instances')
-          .set({ quantity: original.quantity + batchItem.quantity, updated_at: new Date() })
-          .where('id', '=', original.id).execute();
-      }
+      // Partial-consumption case: source still exists. Add back the qty for
+      // however many of its slabs we just deleted, and flip back to inspected.
+      const addBack = slabsDeletedBySource.get(batchItem.card_instance_id) ?? 0;
+      await db.updateTable('card_instances')
+        .set({
+          quantity: original.quantity + addBack,
+          status:   'inspected',
+          decision: 'grade',
+          updated_at: new Date(),
+        })
+        .where('id', '=', original.id).execute();
     } else {
-      // Fully consumed — was hard-deleted, restore from audit log
+      // Fully-consumed case: source was hard-deleted in processReturn.
+      // Re-insert from the audit snapshot at the original quantity, at
+      // status=inspected so it shows back in the sub as inspected.
       const auditRow = await db
         .selectFrom('audit_log')
         .select('old_data')
@@ -613,16 +1090,16 @@ export async function revertReturn(userId: string, batchId: string) {
           language: snap.language ?? 'JP',
           variant: snap.variant ?? null,
           rarity: snap.rarity ?? null,
-          status: 'grading_submitted',
-          quantity: batchItem.quantity,
+          status: 'inspected',
+          quantity: snap.quantity ?? 1,
           purchase_cost: snap.purchase_cost ?? 0,
           currency: snap.currency ?? 'USD',
           purchase_type: snap.purchase_type ?? 'raw',
           condition: snap.condition ?? null,
-          decision: snap.decision ?? null,
+          decision: 'grade',
           notes: snap.notes ?? null,
           catalog_id: snap.catalog_id ?? null,
-          // Card is at the grader — no physical location while submitted
+          legacy_source_catalog_id: snap.legacy_source_catalog_id ?? null,
           location_id: null,
           trade_id: snap.trade_id ?? null,
           purchased_at: snap.purchased_at ? new Date(snap.purchased_at) : null,
@@ -632,6 +1109,7 @@ export async function revertReturn(userId: string, batchId: string) {
       }
     }
   }
+  void orphanSlabsDeleted;
 
   await db
     .updateTable('grading_batches')
@@ -639,7 +1117,7 @@ export async function revertReturn(userId: string, batchId: string) {
     .where('id', '=', batchId)
     .execute();
 
-  return getBatch(userId, batchId);
+  return { batch: await getBatch(userId, batchId), kept_slabs: keptSlabs };
 }
 
 export async function removeItem(userId: string, itemId: string) {

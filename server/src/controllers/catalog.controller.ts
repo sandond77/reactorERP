@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from 'express';
 import { db } from '../config/database';
-import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog, linkUnlinkedByCardName, reassignCatalogRow } from '../services/catalog.service';
+import { getInventorySummary, listTCGdexSets, fetchSetCards, upsertCatalogCard, updateCatalogCard, deleteCatalogCard, createCatalogCard, getEmptyCatalogEntries, searchCatalog, linkUnlinkedByCardName, reassignCatalogRow, reassignAllInstances, listLegacyBuckets } from '../services/catalog.service';
 
 export async function inventorySummary(req: Request, res: Response, next: NextFunction) {
   try {
@@ -56,6 +56,20 @@ export async function reassignRow(req: Request, res: Response, next: NextFunctio
   } catch (err) { next(err); }
 }
 
+export async function reassignPart(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { old_catalog_id, new_catalog_id } = req.body;
+    if (!old_catalog_id || !new_catalog_id) {
+      return res.status(400).json({ error: 'old_catalog_id and new_catalog_id are required' });
+    }
+    if (old_catalog_id === new_catalog_id) {
+      return res.status(400).json({ error: 'Source and target parts must be different' });
+    }
+    const result = await reassignAllInstances(req.dataUserId, old_catalog_id, new_catalog_id);
+    res.json(result);
+  } catch (err) { next(err); }
+}
+
 export async function linkByName(req: Request, res: Response, next: NextFunction) {
   try {
     const { card_name, match_card_name, game, sku, set_name, set_code, card_number, language, rarity, variant } = req.body;
@@ -73,6 +87,13 @@ export async function linkByName(req: Request, res: Response, next: NextFunction
     if (err?.code === '23505') return res.status(409).json({ error: 'A catalog entry with this SKU already exists.' });
     next(err);
   }
+}
+
+export async function legacyBuckets(req: Request, res: Response, next: NextFunction) {
+  try {
+    const rows = await listLegacyBuckets(req.dataUserId);
+    res.json({ data: rows });
+  } catch (err) { next(err); }
 }
 
 export async function emptyCatalog(req: Request, res: Response, next: NextFunction) {

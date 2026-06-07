@@ -15,13 +15,16 @@ interface CardDetailModalProps {
   cardId: string;
   onClose: () => void;
   onDelete: (id: string) => void;
+  cardShowMode?: boolean;
 }
 
-export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalProps) {
+export function CardDetailModal({ cardId, onClose, onDelete, cardShowMode = false }: CardDetailModalProps) {
   const qc = useQueryClient();
   const [deleteStep, setDeleteStep] = useState<0 | 1 | 2>(0);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editCsPrice, setEditCsPrice] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const { data: card, isLoading } = useQuery({
     queryKey: ['card', cardId],
@@ -31,7 +34,6 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   // Edit state — initialized when editing starts
   const [editDecision,    setEditDecision]    = useState('');
   const [editCondition,   setEditCondition]   = useState('');
-  const [editQuantity,    setEditQuantity]     = useState('');
   const [editPurchasedAt, setEditPurchasedAt] = useState('');
   const [editCost,        setEditCost]         = useState('');
   const [editNotes,       setEditNotes]        = useState('');
@@ -58,20 +60,25 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
   function startEdit() {
     setEditDecision(card.decision ?? '');
     setEditCondition(card.condition ?? '');
-    setEditQuantity(String(card.quantity ?? 1));
     setEditPurchasedAt(card.purchased_at ? card.purchased_at.slice(0, 10) : '');
     setEditCost(card.purchase_cost != null ? String(card.purchase_cost / 100) : '');
     setEditNotes(card.notes ?? '');
     setEditLocationId(card.location_id ?? '');
+    setEditCsPrice(card.card_show_price != null ? (card.card_show_price / 100).toFixed(2) : '');
     setEditing(true);
   }
 
   const saveMut = useMutation({
     mutationFn: async () => {
+      if (cardShowMode) {
+        await api.patch(`/cards/${card.id}`, {
+          card_show_price: editCsPrice ? Math.round(parseFloat(editCsPrice) * 100) : null,
+        });
+        return;
+      }
       await api.patch(`/cards/${card.id}`, {
         decision:     editDecision    || undefined,
         condition:    editCondition   || undefined,
-        quantity:     parseInt(editQuantity) || undefined,
         purchased_at: editPurchasedAt || undefined,
         purchase_cost: editCost ? Math.round(parseFloat(editCost) * 100) : undefined,
         notes: editNotes || null,
@@ -88,8 +95,25 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
       qc.invalidateQueries({ queryKey: ['ungraded-inventory'] });
       qc.invalidateQueries({ queryKey: ['raw-inventory'] });
       qc.invalidateQueries({ queryKey: ['raw-overall'] });
+      qc.invalidateQueries({ queryKey: ['card-show-raw'] });
+      toast.success('Saved');
       setEditing(false);
+      if (cardShowMode) onClose();
     },
+    onError: () => toast.error('Failed to save'),
+  });
+
+  const removeFromShowMut = useMutation({
+    mutationFn: () =>
+      api.patch(`/cards/${card.id}`, { is_card_show: false, card_show_price: null }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['card-show-raw'] });
+      qc.invalidateQueries({ queryKey: ['raw-inventory'] });
+      toast.success('Removed from card show');
+      onDelete(card.id);
+      onClose();
+    },
+    onError: () => toast.error('Failed to remove'),
   });
 
   async function handleDelete() {
@@ -172,6 +196,19 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
               </div>
 
               {editing ? (
+                cardShowMode ? (
+                  <div className="space-y-3 pt-1">
+                    <p className="text-xs text-zinc-500">
+                      Only the card show price is editable here. To change card details, edit from <span className="text-zinc-300">Raw Overall</span>.
+                    </p>
+                    <div>
+                      <label className="block text-xs text-zinc-500 mb-1">Card Show Price (USD)</label>
+                      <input type="text" inputMode="decimal" value={editCsPrice}
+                        onChange={(e) => setEditCsPrice(e.target.value.replace(/[^\d.]/g, ''))}
+                        placeholder="0.00" className={inputCls} autoFocus />
+                    </div>
+                  </div>
+                ) : (
                 <div className="grid grid-cols-2 gap-3 pt-1">
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Intent</label>
@@ -187,14 +224,6 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                       <option value="">—</option>
                       {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs text-zinc-500 mb-1">Quantity</label>
-                    <input
-                      type="number" min={1} value={editQuantity}
-                      onChange={(e) => setEditQuantity(e.target.value)}
-                      className={inputCls + ' [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'}
-                    />
                   </div>
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Purchase Date</label>
@@ -239,6 +268,7 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                     )}
                   </div>
                 </div>
+                )
               ) : (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                   {card.sku && (
@@ -263,6 +293,13 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
                   {card.location_name && (
                     <div><span className="text-zinc-500">Location:</span> <span className="text-zinc-300">{card.location_name}</span></div>
                   )}
+                  {cardShowMode && (
+                    <div className="col-span-2"><span className="text-zinc-500">CS Price:</span>{' '}
+                      <span className="text-emerald-400 font-medium">
+                        {card.card_show_price != null ? formatCurrency(card.card_show_price, card.currency) : '—'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -274,16 +311,40 @@ export function CardDetailModal({ cardId, onClose, onDelete }: CardDetailModalPr
 
           <div className="flex justify-between pt-2 border-t border-zinc-800">
             <div className="flex items-center gap-2">
-              {!editing && (
-                <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleting}>
-                  <Trash2 size={14} /> {deleteLabel}
-                </Button>
-              )}
-              {deleteStep > 0 && !editing && (
-                <button onClick={() => setDeleteStep(0)} className="text-xs text-zinc-500 hover:text-zinc-300">
-                  Cancel
-                </button>
-              )}
+              {!editing && (cardShowMode ? (
+                confirmRemove ? (
+                  <>
+                    <span className="text-sm text-red-300">Remove from card show?</span>
+                    <Button size="sm" variant="ghost" onClick={() => setConfirmRemove(false)}>Cancel</Button>
+                    <Button
+                      size="sm"
+                      className="bg-red-600 hover:bg-red-500 text-white border-0"
+                      disabled={removeFromShowMut.isPending}
+                      onClick={() => removeFromShowMut.mutate()}
+                    >
+                      <Trash2 size={13} /> {removeFromShowMut.isPending ? 'Removing…' : 'Remove'}
+                    </Button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setConfirmRemove(true)}
+                    className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-red-400 transition-colors"
+                  >
+                    <Trash2 size={13} /> Remove from Card Show
+                  </button>
+                )
+              ) : (
+                <>
+                  <Button variant="danger" size="sm" onClick={handleDelete} disabled={deleting}>
+                    <Trash2 size={14} /> {deleteLabel}
+                  </Button>
+                  {deleteStep > 0 && (
+                    <button onClick={() => setDeleteStep(0)} className="text-xs text-zinc-500 hover:text-zinc-300">
+                      Cancel
+                    </button>
+                  )}
+                </>
+              ))}
             </div>
             <div className="flex items-center gap-2">
               {editing ? (

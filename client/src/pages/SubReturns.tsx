@@ -1,10 +1,10 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, PackageCheck, Plus, X, Upload } from 'lucide-react';
+import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen } from 'lucide-react';
 import { api } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import { formatDate } from '../lib/utils';
+import { formatDate, formatCurrency } from '../lib/utils';
 import toast from 'react-hot-toast';
 
 const BATCH_STATUS_COLORS: Record<string, string> = {
@@ -39,76 +39,225 @@ interface BatchItem {
   card_name: string | null;
   set_name: string | null;
   card_number: string | null;
+  language: string | null;
   quantity: number;
   expected_grade: number | null;
   purchase_cost: number;
   currency: string;
   catalog_id: string | null;
   sku: string | null;
+  raw_purchase_label: string | null;
 }
 
 interface BatchDetail extends Batch {
   items: BatchItem[];
 }
 
-type ReturnRow = {
+// One physical slab = one slot. A sub line of qty=3 produces 3 slots.
+type Disposition = 'graded' | 'not_graded' | 'lost' | 'not_submitted';
+
+type Slot = {
+  // Stable identity within the form
+  key: string;
   batch_item_id: string;
-  grade: string;
+  copy_index: number;
+  // Filled from CSV or user input
   cert_number: string;
+  grade: string;
+  csv_grade_label?: string;
   card_name_override?: string;
-  csv_grade_label?: string;  // label from CSV (e.g. "NEAR MINT-MINT"), overrides computed label
+  // What happened to this physical card
+  disposition: Disposition;
+  // Match metadata for display
+  match_score?: number;
+  match_confidence?: 'strong' | 'good' | 'weak' | 'none';
+  matched_csv_index?: number;
+  // CSV-import lock state. cert# and grade come from PSA's CSV as the
+  // authoritative values; until override=true, those inputs are read-only
+  // so a user can't accidentally (or intentionally) retype them.
+  from_csv: boolean;
+  override: boolean;
+};
+
+const DISPOSITION_LABELS: Record<Disposition, string> = {
+  graded:        'Graded',
+  not_graded:    'Not graded',
+  lost:          'Lost',
+  not_submitted: 'Not submitted',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+// Mirrors server/src/utils/grade-labels.ts — keep in sync. Returns the LABEL
+// PART only (no grade number suffix), except ARS which uses grade-inclusive
+// strings ("ARS10", "ARS 9"); handleConfirm detects that and skips re-appending.
 function gradeLabel(company: string, grade: number): string {
   const co = company.toUpperCase();
   if (co === 'PSA') {
     const map: Record<number, string> = {
-      10: 'GEM MT', 9: 'MINT', 8: 'NM-MT', 7: 'NM', 6: 'EX-MT',
-      5: 'EX', 4: 'VG-EX', 3: 'VG', 2: 'GOOD', 1.5: 'FAIR', 1: 'POOR',
+      10:  'GEM MINT',
+      9:   'MINT',
+      8:   'NEAR MINT-MINT',
+      7:   'NEAR MINT',
+      6:   'EXCELLENT-MINT',
+      5:   'EXCELLENT',
+      4:   'VERY GOOD-EXCELLENT',
+      3:   'VERY GOOD',
+      2:   'GOOD',
+      1.5: 'FAIR',
+      1:   'POOR',
     };
-    return map[grade] ?? `PSA ${grade}`;
+    return map[grade] ?? '';
   }
   if (co === 'BGS') {
     const map: Record<number, string> = {
-      10: 'PRISTINE', 9.5: 'GEM MINT', 9: 'MINT+', 8.5: 'NM-MT+',
-      8: 'NM-MT', 7.5: 'NM+', 7: 'NM', 6.5: 'EX-MT+', 6: 'EX-MT',
-      5.5: 'EX+', 5: 'EX', 4.5: 'VG-EX+', 4: 'VG-EX', 3.5: 'VG+',
-      3: 'VG', 2.5: 'GOOD+', 2: 'GOOD', 1.5: 'FAIR', 1: 'POOR',
+      10:  'PRISTINE',
+      9.5: 'GEM MINT',
+      9:   'MINT',
+      8.5: 'NEAR MINT-MINT+',
+      8:   'NEAR MINT-MINT',
+      7.5: 'NEAR MINT+',
+      7:   'NEAR MINT',
+      6.5: 'EXCELLENT-MINT+',
+      6:   'EXCELLENT-MINT',
+      5.5: 'EXCELLENT+',
+      5:   'EXCELLENT',
+      4.5: 'VERY GOOD-EXCELLENT+',
+      4:   'VERY GOOD-EXCELLENT',
+      3.5: 'VERY GOOD+',
+      3:   'VERY GOOD',
+      2.5: 'GOOD+',
+      2:   'GOOD',
+      1.5: 'FAIR',
+      1:   'POOR',
     };
-    return map[grade] ?? `BGS ${grade}`;
+    return map[grade] ?? '';
   }
   if (co === 'CGC') {
     const map: Record<number, string> = {
-      10: 'PRISTINE', 9.5: 'GEM MINT', 9: 'MINT+', 8.5: 'NM-MT+',
-      8: 'NM-MT', 7.5: 'NM+', 7: 'NM', 6.5: 'EX-MT+', 6: 'EX-MT',
-      5.5: 'EX+', 5: 'EX', 4.5: 'VG-EX+', 4: 'VG-EX', 3.5: 'VG+',
-      3: 'VG', 2.5: 'GOOD+', 2: 'GOOD', 1.5: 'FAIR', 1: 'POOR',
+      10:  'GEM MINT',
+      9.5: 'MINT+',
+      9:   'MINT',
+      8.5: 'NEAR MINT/MINT+',
+      8:   'NEAR MINT/MINT',
+      7.5: 'NEAR MINT+',
+      7:   'NEAR MINT',
+      6.5: 'FINE/NEAR MINT+',
+      6:   'FINE/NEAR MINT',
+      5.5: 'FINE+',
+      5:   'FINE',
+      4.5: 'VERY GOOD/FINE+',
+      4:   'VERY GOOD/FINE',
+      3.5: 'VERY GOOD+',
+      3:   'VERY GOOD',
+      2.5: 'GOOD+',
+      2:   'GOOD',
+      1.5: 'FAIR',
+      1:   'POOR',
     };
-    return map[grade] ?? `CGC ${grade}`;
+    return map[grade] ?? '';
   }
-  if (co === 'SGC') {
-    const map: Record<number, string> = {
-      10: 'PRISTINE', 9.5: 'MINT+', 9: 'MINT', 8.5: 'NM-MT+',
-      8: 'NM-MT', 7.5: 'NM+', 7: 'NM', 6.5: 'EX-MT+', 6: 'EX-MT',
-      5.5: 'EX+', 5: 'EX', 4.5: 'VG-EX+', 4: 'VG-EX', 3.5: 'VG+',
-      3: 'VG', 2.5: 'GOOD+', 2: 'GOOD', 1.5: 'FAIR', 1: 'POOR', 0.5: 'AUTHENTIC',
-    };
-    return map[grade] ?? `SGC ${grade}`;
+  if (co === 'ARS') {
+    // ARS labels are grade-inclusive — return the canonical full string.
+    if (grade === 10) return 'ARS10';
+    const intGrade = Math.floor(grade);
+    if ([5, 6, 7, 8, 9].includes(intGrade)) return `ARS ${intGrade}`;
+    return '';
   }
-  if (co === 'HGA') {
-    const map: Record<number, string> = {
-      10: 'GEM MINT', 9: 'MINT', 8: 'NEAR MINT', 7: 'EXCELLENT',
-      6: 'FINE', 5: 'VERY GOOD', 4: 'GOOD', 3: 'FAIR', 2: 'POOR',
-    };
-    return map[grade] ?? `HGA ${grade}`;
-  }
-  return String(grade);
+  return '';
 }
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+// Per-company, per-grade canonical label strings (full forms as they appear
+// on slabs / in return CSVs). The first entry is the preferred default; any
+// alternates are accepted so a CSV-imported label that uses a short form
+// like "NM-MT" still finds itself in the dropdown.
+// Verified per company against published grading scales + sample slab labels.
+//   PSA  — no 9.5; CSV uses long forms ("NEAR MINT-MINT 8"); slab uses short
+//          ("NM-MT 8"). Both included so either matches.
+//   BGS  — full half-grades. 10 Pristine has Black Label (perfect subgrades)
+//          + Gold Label variants.
+//   CGC  — 2024 rebrand consolidated old "Gem Mint 9.5" → new "Gem Mint 10".
+//          Both old (Perfect 10, Gem Mint 9.5) and new (Pristine 10, Gem Mint
+//          10, Mint+ 9.5) forms are included so legacy slabs map cleanly.
+//   ARS  — numeric-only labels (no descriptive words). The "label" is just
+//          the grade number; dropdown stays empty so the UI shows grade only.
+// Mirrors server/src/utils/grade-labels.ts (the canonical dashboard labels).
+// Long forms ("NEAR MINT-MINT", not "NM-MT") keep returns aligned with the
+// Grade Distribution chart and existing slab_details rows.
+// CGC has two valid 10 labels (Pristine top tier; Gem Mint = old 9.5 promoted).
+// ARS uses numeric-only labels — no dropdown.
+const COMPANY_LABEL_MAP: Record<string, Record<number, string[]>> = {
+  PSA: {
+    10:  ['GEM MINT'],
+    9:   ['MINT'],
+    8:   ['NEAR MINT-MINT'],
+    7:   ['NEAR MINT'],
+    6:   ['EXCELLENT-MINT'],
+    5:   ['EXCELLENT'],
+    4:   ['VERY GOOD-EXCELLENT'],
+    3:   ['VERY GOOD'],
+    2:   ['GOOD'],
+    1.5: ['FAIR'],
+    1:   ['POOR'],
+  },
+  BGS: {
+    10:  ['PRISTINE'],
+    9.5: ['GEM MINT'],
+    9:   ['MINT'],
+    8.5: ['NEAR MINT-MINT+'],
+    8:   ['NEAR MINT-MINT'],
+    7.5: ['NEAR MINT+'],
+    7:   ['NEAR MINT'],
+    6.5: ['EXCELLENT-MINT+'],
+    6:   ['EXCELLENT-MINT'],
+    5.5: ['EXCELLENT+'],
+    5:   ['EXCELLENT'],
+    4.5: ['VERY GOOD-EXCELLENT+'],
+    4:   ['VERY GOOD-EXCELLENT'],
+    3.5: ['VERY GOOD+'],
+    3:   ['VERY GOOD'],
+    2.5: ['GOOD+'],
+    2:   ['GOOD'],
+    1.5: ['FAIR'],
+    1:   ['POOR'],
+  },
+  CGC: {
+    10:  ['GEM MINT', 'PRISTINE'],
+    9.5: ['MINT+'],
+    9:   ['MINT'],
+    8.5: ['NEAR MINT/MINT+'],
+    8:   ['NEAR MINT/MINT'],
+    7.5: ['NEAR MINT+'],
+    7:   ['NEAR MINT'],
+    6.5: ['FINE/NEAR MINT+'],
+    6:   ['FINE/NEAR MINT'],
+    5.5: ['FINE+'],
+    5:   ['FINE'],
+    4.5: ['VERY GOOD/FINE+'],
+    4:   ['VERY GOOD/FINE'],
+    3.5: ['VERY GOOD+'],
+    3:   ['VERY GOOD'],
+    2.5: ['GOOD+'],
+    2:   ['GOOD'],
+    1.5: ['FAIR'],
+    1:   ['POOR'],
+  },
+  ARS: {},
+};
+
+function labelOptionsForGrade(company: string, grade: number): string[] {
+  const co = company.toUpperCase();
+  const map = COMPANY_LABEL_MAP[co];
+  return map?.[grade] ?? [];
+}
+
+function companyHasLabels(company: string): boolean {
+  const map = COMPANY_LABEL_MAP[company.toUpperCase()];
+  return !!map && Object.keys(map).length > 0;
 }
 
 // ── CSV parsing ───────────────────────────────────────────────────────────────
@@ -163,6 +312,142 @@ function parseGradeStr(s: string): { grade: number | null; label: string } {
   const m = clean.match(/^(.*?)\s+(\d+(?:\.\d+)?)$/);
   if (m) return { grade: parseFloat(m[2]), label: m[1].trim() };
   return { grade: null, label: clean };
+}
+
+// ── Match scoring ─────────────────────────────────────────────────────────────
+
+type CsvCandidate = {
+  csv_index: number;
+  cert: string;
+  grade: number | null;
+  grade_label?: string;
+  subject: string;
+  set_name?: string;
+  card_number?: string;
+  language?: string;
+  line_num?: number;
+};
+
+function normalizeCardNum(s: string): string {
+  return s.replace(/[^0-9a-z]/gi, '').toLowerCase();
+}
+
+function inferLangFromText(s: string): 'JP' | 'EN' | undefined {
+  if (!s) return undefined;
+  if (/japanese|\bjp\b|\bjpn\b/i.test(s)) return 'JP';
+  return undefined; // don't force EN; only flag when clearly JP
+}
+
+// Pull the first 4-digit year (1980-2039) from a string.
+function extractYear(s: string): string | undefined {
+  if (!s) return undefined;
+  const m = s.match(/\b(19[89]\d|20[0-3]\d)\b/);
+  return m?.[1];
+}
+
+// Pull a plausible card # from a PSA description. Year is the first digit run
+// and we skip past it; the next short digit run is almost always the card #.
+function extractCardNumFromText(s: string): string | undefined {
+  if (!s) return undefined;
+  const matches = Array.from(s.matchAll(/\b(\d{1,4})\b/g));
+  for (const m of matches) {
+    const n = parseInt(m[1]);
+    if (n >= 1980 && n <= 2039) continue; // skip the year
+    return m[1];
+  }
+  return undefined;
+}
+
+const TOKEN_STOPWORDS = new Set([
+  'pokemon','japanese','english','promo','holo','holofoil','foil',
+  'card','cards','the','of','and','set','series','edition',
+  'mint','near','gem','excellent','good','fair','poor','fine','authentic',
+]);
+
+function tokenize(s: string): Set<string> {
+  return new Set(
+    s.toLowerCase()
+     .split(/[^a-z0-9]+/)
+     .filter((t) => t.length >= 3 && !TOKEN_STOPWORDS.has(t))
+  );
+}
+
+// Score breakdown (max ~10.5, can go negative on card# mismatch):
+//   name substring  4   |  name jaccard  up to 2
+//   card #          3   |  card # mismatch  -3
+//   year            1
+//   set tokens      up to 1.5
+//   language        1
+//   line position   1
+function scoreMatch(item: BatchItem, c: CsvCandidate): number {
+  let s = 0;
+
+  // ── Card name (substring 4, else token Jaccard up to 2) ─────────────────
+  if (item.card_name && c.subject) {
+    const a = item.card_name.toLowerCase();
+    const b = c.subject.toLowerCase();
+    if (b.includes(a) || a.includes(b)) {
+      s += 4;
+    } else {
+      const aT = tokenize(item.card_name);
+      const bT = tokenize(c.subject);
+      if (aT.size && bT.size) {
+        const inter = [...aT].filter((t) => bT.has(t)).length;
+        const union = new Set([...aT, ...bT]).size;
+        const jacc = inter / union;
+        if (jacc >= 0.5) s += 2;
+        else if (jacc >= 0.25) s += 1;
+      }
+    }
+  }
+
+  // ── Card # (extract from subject if no column; mismatch is a deal-breaker) ─
+  const candCardNum = c.card_number || extractCardNumFromText(c.subject);
+  if (item.card_number && candCardNum) {
+    const a = normalizeCardNum(item.card_number);
+    const b = normalizeCardNum(candCardNum);
+    if (a && b) {
+      if (a === b || a.endsWith(b) || b.endsWith(a)) s += 3;
+      else s -= 3;
+    }
+  }
+
+  // ── Year (extracted from either side) ────────────────────────────────────
+  const itemYear = extractYear(item.card_name ?? '');
+  const candYear = extractYear(c.subject);
+  if (itemYear && candYear && itemYear === candYear) s += 1;
+
+  // ── Set token overlap (item set_name vs subject tokens) ─────────────────
+  if (item.set_name) {
+    const setT = tokenize(item.set_name);
+    if (setT.size) {
+      const subT = tokenize(c.subject);
+      const hits = [...setT].filter((t) => subT.has(t)).length;
+      if (hits >= 2) s += 1.5;
+      else if (hits === 1) s += 0.75;
+    }
+  }
+
+  // ── Language (1) ─────────────────────────────────────────────────────────
+  const itemLang = (item.language ?? '').toLowerCase();
+  const candLang = (c.language ?? inferLangFromText(c.subject) ?? '').toLowerCase();
+  if (itemLang && candLang) {
+    const itemIsJP = itemLang.startsWith('jp') || itemLang === 'ja';
+    const candIsJP = candLang.startsWith('jp') || candLang === 'ja';
+    if (itemIsJP === candIsJP) s += 1;
+  }
+
+  // ── Position via line number (1) — only fires if CSV has a Line column ──
+  if (c.line_num != null && c.line_num === item.line_item_num) s += 1;
+
+  return s;
+}
+
+function confidenceFor(score: number): 'strong' | 'good' | 'weak' | 'none' {
+  if (score >= 8) return 'strong';
+  if (score >= 5) return 'good';
+  if (score >= 2) return 'weak';
+  return 'none';
 }
 
 // ── Select Batch Modal ─────────────────────────────────────────────────────────
@@ -226,14 +511,26 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [returnedAt, setReturnedAt] = useState(todayIso());
-  const [rows, setRows] = useState<ReturnRow[]>(() =>
-    batch.items.map((item) => ({
-      batch_item_id: item.id,
-      grade: '',
-      cert_number: '',
-    }))
+
+  // Expand each sub-line of quantity N into N slots (one per physical slab).
+  const [slots, setSlots] = useState<Slot[]>(() =>
+    batch.items.flatMap((item) =>
+      Array.from({ length: item.quantity }, (_, i) => ({
+        key: `${item.id}-${i}`,
+        batch_item_id: item.id,
+        copy_index: i,
+        cert_number: '',
+        grade: '',
+        disposition: 'graded' as Disposition,
+        from_csv: false,
+        override: false,
+      }))
+    )
   );
   const [reviewing, setReviewing] = useState(false);
+
+  // Lookup helpers
+  const itemById = new Map(batch.items.map((it) => [it.id, it]));
 
   function handleCsvUpload(file: File) {
     const reader = new FileReader();
@@ -250,53 +547,93 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
       const colGrade = findCol(headers, 'Grade', 'PSA Grade', 'Numeric Grade', 'Final Grade', 'Grd');
       const colDesc  = findCol(headers, 'Grade Description', 'Qualifier', 'Grade Label', 'Label', 'Description');
       const colSubj  = findCol(headers, 'Subject', 'Card Name', 'Card', 'Name', 'Description', 'Item Description');
+      const colSet   = findCol(headers, 'Set', 'Set Name', 'Brand', 'Series');
+      const colCard  = findCol(headers, 'Card Number', 'Card #', 'Card No', 'No', 'Number');
+      const colLang  = findCol(headers, 'Language', 'Lang');
 
-      let matched = 0;
-
-      setRows((prev) => prev.map((row, idx) => {
-        const item = batch.items[idx];
-
-        // Match by line item number first, then by card name
-        let csvRow = colLine !== -1
-          ? dataRows.find((r) => parseInt(r[colLine] ?? '') === item.line_item_num)
-          : undefined;
-
-        if (!csvRow && colSubj !== -1 && item.card_name) {
-          const name = item.card_name.toLowerCase();
-          csvRow = dataRows.find((r) => {
-            const subj = (r[colSubj] ?? '').toLowerCase();
-            return subj.includes(name) || name.includes(subj);
-          });
+      // Build candidate list from CSV rows
+      const candidates: CsvCandidate[] = dataRows.map((r, csv_index) => {
+        let grade: number | null = null;
+        let grade_label: string | undefined;
+        if (colGrade !== -1 && r[colGrade]) {
+          const p = parseGradeStr(r[colGrade]);
+          grade = p.grade;
+          if (p.label) grade_label = p.label;
         }
-
-        if (!csvRow) return row;
-        matched++;
-
-        let grade = row.grade;
-
-        let csv_grade_label = row.csv_grade_label;
-
-        // Grade column — may be plain number or "NEAR MINT-MINT 8"
-        if (colGrade !== -1 && csvRow[colGrade]) {
-          const { grade: g, label } = parseGradeStr(csvRow[colGrade]);
-          if (g !== null) grade = String(g);
-          if (label) csv_grade_label = label;
+        if (grade === null && colDesc !== -1 && r[colDesc]) {
+          const p = parseGradeStr(r[colDesc]);
+          grade = p.grade;
+          if (p.label && !grade_label) grade_label = p.label;
         }
+        return {
+          csv_index,
+          cert:        colCert !== -1 ? (r[colCert] ?? '') : '',
+          grade,
+          grade_label,
+          subject:     colSubj !== -1 ? (r[colSubj] ?? '') : '',
+          set_name:    colSet  !== -1 ? r[colSet]  : undefined,
+          card_number: colCard !== -1 ? r[colCard] : undefined,
+          language:    colLang !== -1 ? r[colLang] : undefined,
+          line_num:    colLine !== -1 ? parseInt(r[colLine] ?? '') || undefined : undefined,
+        };
+      });
 
-        // Grade description column as fallback for grade number
-        if (!grade && colDesc !== -1 && csvRow[colDesc]) {
-          const { grade: g, label } = parseGradeStr(csvRow[colDesc]);
-          if (g !== null) grade = String(g);
-          if (label && !csv_grade_label) csv_grade_label = label;
-        }
+      // Score every (slot, candidate) pair, then greedily assign by score desc.
+      const pairs: Array<{ slotIdx: number; candIdx: number; score: number }> = [];
+      slots.forEach((slot, slotIdx) => {
+        const item = itemById.get(slot.batch_item_id);
+        if (!item) return;
+        candidates.forEach((c, candIdx) => {
+          const s = scoreMatch(item, c);
+          if (s > 0) pairs.push({ slotIdx, candIdx, score: s });
+        });
+      });
+      pairs.sort((a, b) => b.score - a.score);
 
-        const cert_number = colCert !== -1 ? (csvRow[colCert] ?? row.cert_number) : row.cert_number;
-        const card_name_override = colSubj !== -1 && csvRow[colSubj] ? csvRow[colSubj] : row.card_name_override;
+      const usedSlots  = new Set<number>();
+      const usedCands  = new Set<number>();
+      const assignment = new Map<number, { candIdx: number; score: number }>();
+      for (const p of pairs) {
+        if (usedSlots.has(p.slotIdx) || usedCands.has(p.candIdx)) continue;
+        if (p.score < 2) continue;  // below this, leave unassigned
+        usedSlots.add(p.slotIdx);
+        usedCands.add(p.candIdx);
+        assignment.set(p.slotIdx, { candIdx: p.candIdx, score: p.score });
+      }
 
-        return { ...row, grade, cert_number, card_name_override, csv_grade_label };
-      }));
+      setSlots((prev) =>
+        prev.map((slot, slotIdx) => {
+          const a = assignment.get(slotIdx);
+          if (!a) {
+            return {
+              ...slot,
+              match_score: undefined,
+              match_confidence: undefined,
+              matched_csv_index: undefined,
+              from_csv: false,
+              override: false,
+            };
+          }
+          const c = candidates[a.candIdx];
+          return {
+            ...slot,
+            cert_number:        c.cert || slot.cert_number,
+            grade:              c.grade !== null ? String(c.grade) : slot.grade,
+            csv_grade_label:    c.grade_label ?? slot.csv_grade_label,
+            card_name_override: c.subject || slot.card_name_override,
+            match_score:        a.score,
+            match_confidence:   confidenceFor(a.score),
+            matched_csv_index:  c.csv_index,
+            // CSV is now the authoritative source for cert # and grade.
+            // Override resets to false — user must opt in to edit again.
+            from_csv: true,
+            override: false,
+          };
+        })
+      );
 
-      toast.success(`Matched ${matched} of ${batch.items.length} line items from CSV`);
+      const strongCount = Array.from(assignment.values()).filter((a) => a.score >= 7).length;
+      toast.success(`Matched ${assignment.size}/${slots.length} slabs (${strongCount} strong)`);
     };
     reader.readAsText(file);
   }
@@ -312,24 +649,52 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
     onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to process return'),
   });
 
-  function updateRow(idx: number, field: keyof ReturnRow, value: string) {
-    setRows((prev) => {
+  function updateSlot(idx: number, patch: Partial<Slot>) {
+    setSlots((prev) => {
       const next = [...prev];
-      next[idx] = { ...next[idx], [field]: value };
+      next[idx] = { ...next[idx], ...patch };
       return next;
     });
   }
 
+  // Remap a slot to a different batch_item_id (keeps cert/grade, moves the slab
+  // under a different sub-line). Used to fix mis-assignments without re-uploading.
+  function remapSlot(idx: number, newBatchItemId: string) {
+    setSlots((prev) => {
+      const next = [...prev];
+      // Pick the lowest unused copy_index for this batch_item_id
+      const used = new Set(next.filter((_, i) => i !== idx && _.batch_item_id === newBatchItemId).map((s) => s.copy_index));
+      let copyIdx = 0;
+      while (used.has(copyIdx)) copyIdx++;
+      next[idx] = {
+        ...next[idx],
+        batch_item_id: newBatchItemId,
+        copy_index: copyIdx,
+        key: `${newBatchItemId}-${copyIdx}-${Date.now()}`,
+      };
+      return next;
+    });
+  }
+
+  function ignoreSlot(idx: number) {
+    setSlots((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   function handleReview(e: React.FormEvent) {
     e.preventDefault();
-    const missingGrade = rows.filter((r) => !r.grade || isNaN(parseFloat(r.grade)));
-    if (missingGrade.length) {
-      toast.error(`${missingGrade.length} item${missingGrade.length > 1 ? 's' : ''} missing a grade`);
+    if (slots.length === 0) {
+      toast.error('No slabs to process — add at least one or cancel');
       return;
     }
-    const missingCert = rows.filter((r) => !r.cert_number.trim());
+    const graded = slots.filter((s) => s.disposition === 'graded');
+    const missingGrade = graded.filter((s) => !s.grade || isNaN(parseFloat(s.grade)));
+    if (missingGrade.length) {
+      toast.error(`${missingGrade.length} graded slab${missingGrade.length > 1 ? 's' : ''} missing a grade`);
+      return;
+    }
+    const missingCert = graded.filter((s) => !s.cert_number.trim());
     if (missingCert.length) {
-      toast.error(`${missingCert.length} item${missingCert.length > 1 ? 's' : ''} missing a cert #`);
+      toast.error(`${missingCert.length} graded slab${missingCert.length > 1 ? 's' : ''} missing a cert #`);
       return;
     }
     setReviewing(true);
@@ -338,15 +703,31 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
   function handleConfirm() {
     processReturn.mutate({
       returned_at: returnedAt || undefined,
-      items: rows.map((row) => {
-        const g = parseFloat(row.grade);
-        const lbl = row.csv_grade_label || gradeLabel(batch.company, g);
+      items: slots.map((slot) => {
+        if (slot.disposition !== 'graded') {
+          return {
+            batch_item_id: slot.batch_item_id,
+            grade: 0,
+            disposition: slot.disposition,
+            card_name_override: slot.card_name_override ?? undefined,
+          };
+        }
+        const g = parseFloat(slot.grade);
+        const lbl = slot.csv_grade_label || gradeLabel(batch.company, g);
+        // ARS labels are grade-inclusive ("ARS10", "ARS 9"); don't re-append.
+        const gStr = String(g);
+        const final = !lbl
+          ? gStr
+          : new RegExp(`(^|\\s)${gStr.replace('.', '\\.')}\\+?$`).test(lbl)
+            ? lbl
+            : `${lbl} ${gStr}`;
         return {
-          batch_item_id: row.batch_item_id,
+          batch_item_id: slot.batch_item_id,
           grade: g,
-          grade_label: lbl ? `${lbl} ${g}` : String(g),
-          cert_number: row.cert_number,
-          card_name_override: row.card_name_override ?? undefined,
+          grade_label: final,
+          cert_number: slot.cert_number,
+          card_name_override: slot.card_name_override ?? undefined,
+          disposition: 'graded' as const,
         };
       }),
     });
@@ -410,69 +791,185 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
           <table className="w-full text-xs border-collapse">
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-400 uppercase tracking-wide text-[10px]">
-                <th className="px-4 py-2 text-left font-medium w-8">#</th>
-                <th className="px-4 py-2 text-left font-medium">Cert #</th>
-                <th className="px-4 py-2 text-left font-medium">Grade</th>
-                <th className="px-4 py-2 text-right font-medium">Exp. Grade</th>
-                <th className="px-4 py-2 text-left font-medium">Card</th>
-                <th className="px-4 py-2 text-left font-medium">Set</th>
-                <th className="px-4 py-2 text-left font-medium">Card #</th>
-                <th className="px-4 py-2 text-right font-medium">Qty</th>
-                <th className="px-4 py-2 text-left font-medium">Label</th>
+                <th className="px-2 py-2 text-left  font-medium w-10">Line</th>
+                <th className="px-3 py-2 text-left  font-medium min-w-[260px]">Card</th>
+                <th className="px-2 py-2 text-left  font-medium">ID</th>
+                <th className="px-2 py-2 text-right font-medium">Cost</th>
+                <th className="px-2 py-2 text-right font-medium">Exp</th>
+                <th className="px-1 py-2 text-center font-medium w-6" title="Override CSV — unlock cert # and grade for editing" />
+                <th className="px-2 py-2 text-left  font-medium">Cert #</th>
+                <th className="px-2 py-2 text-left  font-medium">Grade</th>
+                <th className="px-2 py-2 text-left  font-medium">Label</th>
+                <th className="px-2 py-2 text-left  font-medium">Match</th>
+                <th className="px-2 py-2 text-left  font-medium min-w-[220px]">Remap</th>
+                <th className="px-2 py-2 text-left  font-medium">Disposition</th>
+                <th className="px-2 py-2 text-center font-medium w-8" />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {batch.items.map((item, idx) => (
-                <tr key={item.id} className="hover:bg-zinc-800/20">
-                  <td className="px-4 py-2 text-zinc-500 text-[10px] font-mono">{item.line_item_num}</td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="text"
-                      placeholder="Required"
-                      value={rows[idx]?.cert_number ?? ''}
-                      onChange={(e) => updateRow(idx, 'cert_number', e.target.value)}
-                      className={`w-28 px-2 py-1 text-xs bg-zinc-900 border rounded text-zinc-100 focus:outline-none focus:border-indigo-500 ${rows[idx]?.cert_number ? 'border-zinc-700' : 'border-zinc-600'}`}
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="number"
-                      step="0.5"
-                      min="1"
-                      max="10"
-                      placeholder="10"
-                      value={rows[idx]?.grade ?? ''}
-                      onChange={(e) => updateRow(idx, 'grade', e.target.value)}
-                      className={`w-20 px-2 py-1 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 ${noSpinner}`}
-                    />
-                  </td>
-                  <td className="px-4 py-2 text-right text-zinc-600">{item.expected_grade ?? '—'}</td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="text"
-                      value={rows[idx]?.card_name_override ?? item.card_name ?? ''}
-                      onChange={(e) => setRows((prev) => {
-                        const next = [...prev];
-                        next[idx] = { ...next[idx], card_name_override: e.target.value };
-                        return next;
-                      })}
-                      className="w-full min-w-32 px-2 py-1 text-xs bg-transparent border border-transparent hover:border-zinc-700 focus:border-indigo-500 focus:bg-zinc-900 rounded text-zinc-200 font-medium focus:outline-none transition-colors"
-                    />
-                  </td>
-                  <td className="px-4 py-2 text-zinc-500">{item.set_name ?? '—'}</td>
-                  <td className="px-4 py-2 text-zinc-500">{item.card_number ? `#${item.card_number}` : '—'}</td>
-                  <td className="px-4 py-2 text-right text-zinc-300">{item.quantity}</td>
-                  <td className="px-4 py-2 text-zinc-500">
-                    {rows[idx]?.grade && !isNaN(parseFloat(rows[idx].grade))
-                      ? (() => {
-                          const g = parseFloat(rows[idx].grade);
-                          const lbl = rows[idx].csv_grade_label || gradeLabel(batch.company, g);
-                          return lbl ? `${lbl} ${g}` : String(g);
-                        })()
-                      : <span className="text-zinc-700">—</span>}
-                  </td>
-                </tr>
-              ))}
+              {slots.map((slot, idx) => {
+                const item = itemById.get(slot.batch_item_id);
+                if (!item) return null;
+                const conf = slot.match_confidence;
+                const confDot =
+                  conf === 'strong' ? 'bg-emerald-500' :
+                  conf === 'good'   ? 'bg-lime-500'    :
+                  conf === 'weak'   ? 'bg-amber-500'   :
+                                      'bg-zinc-600';
+                const confLabel =
+                  conf === 'strong' ? `Strong (${slot.match_score?.toFixed(1)})` :
+                  conf === 'good'   ? `Good (${slot.match_score?.toFixed(1)})`   :
+                  conf === 'weak'   ? `Weak (${slot.match_score?.toFixed(1)})`   :
+                                      'Manual';
+                const isGraded = slot.disposition === 'graded';
+                const dispDot =
+                  slot.disposition === 'graded'        ? 'bg-emerald-500' :
+                  slot.disposition === 'not_graded'    ? 'bg-sky-500'     :
+                  slot.disposition === 'lost'          ? 'bg-red-500'     :
+                                                         'bg-zinc-500';
+                return (
+                  <tr key={slot.key} className={`hover:bg-zinc-800/20 align-top ${!isGraded ? 'opacity-70' : ''}`}>
+                    <td className="px-2 py-2 text-zinc-500 text-[10px] font-mono">
+                      {item.line_item_num}
+                      {item.quantity > 1 && <span className="text-zinc-700">·{slot.copy_index + 1}</span>}
+                    </td>
+                    <td className="px-3 py-2">
+                      <textarea
+                        rows={2}
+                        value={slot.card_name_override ?? item.card_name ?? ''}
+                        onChange={(e) => updateSlot(idx, { card_name_override: e.target.value })}
+                        className="w-full px-2 py-1 text-xs bg-transparent border border-transparent hover:border-zinc-700 focus:border-indigo-500 focus:bg-zinc-900 rounded text-zinc-200 font-medium focus:outline-none transition-colors resize-none whitespace-normal break-words leading-snug"
+                      />
+                      <p className="text-[10px] text-zinc-600 px-2">
+                        {item.set_name ?? '—'}{item.card_number ? ` · #${item.card_number}` : ''}
+                      </p>
+                    </td>
+                    <td className="px-2 py-2 text-zinc-500 font-mono text-[10px] whitespace-nowrap">
+                      {item.raw_purchase_label ?? '—'}
+                    </td>
+                    <td className="px-2 py-2 text-right text-zinc-400 whitespace-nowrap">
+                      {formatCurrency(item.purchase_cost, item.currency)}
+                    </td>
+                    <td className="px-2 py-2 text-right text-zinc-500">
+                      {item.expected_grade ?? '—'}
+                    </td>
+                    <td className="px-1 py-2 text-center">
+                      {slot.from_csv && (
+                        <button
+                          type="button"
+                          onClick={() => updateSlot(idx, { override: !slot.override })}
+                          title={slot.override ? 'Re-lock CSV values' : 'Override CSV — unlock cert # and grade'}
+                          className={`transition-colors ${slot.override ? 'text-amber-400 hover:text-amber-300' : 'text-zinc-500 hover:text-zinc-300'}`}
+                        >
+                          {slot.override ? <LockOpen size={12} /> : <Lock size={12} />}
+                        </button>
+                      )}
+                    </td>
+                    <td className="px-2 py-2">
+                      <input
+                        type="text"
+                        placeholder={isGraded ? 'Required' : '—'}
+                        disabled={!isGraded || (slot.from_csv && !slot.override)}
+                        readOnly={slot.from_csv && !slot.override}
+                        value={slot.cert_number}
+                        onChange={(e) => updateSlot(idx, { cert_number: e.target.value })}
+                        className={`w-24 px-2 py-1 text-xs bg-zinc-900 border rounded text-zinc-100 focus:outline-none focus:border-indigo-500 disabled:opacity-40 read-only:bg-zinc-900/50 read-only:text-zinc-400 read-only:cursor-not-allowed ${slot.cert_number ? 'border-zinc-700' : 'border-zinc-600'}`}
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <input
+                        type="number"
+                        step="0.5"
+                        min="1"
+                        max="10"
+                        placeholder={isGraded ? '10' : '—'}
+                        disabled={!isGraded || (slot.from_csv && !slot.override)}
+                        readOnly={slot.from_csv && !slot.override}
+                        value={slot.grade}
+                        onChange={(e) => updateSlot(idx, { grade: e.target.value })}
+                        className={`w-14 px-2 py-1 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-100 focus:outline-none focus:border-indigo-500 disabled:opacity-40 read-only:bg-zinc-900/50 read-only:text-zinc-400 read-only:cursor-not-allowed ${noSpinner}`}
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      {(() => {
+                        if (!isGraded) return <span className="text-zinc-700 text-[11px]">—</span>;
+                        const g = parseFloat(slot.grade);
+                        const validGrade = slot.grade && !isNaN(g);
+                        const hasLabels = companyHasLabels(batch.company);
+                        // Companies without descriptive labels (e.g. ARS) just
+                        // show the grade as plaintext.
+                        if (!hasLabels) {
+                          return <span className="text-zinc-500 text-[11px]">{validGrade ? g : <span className="text-zinc-700">—</span>}</span>;
+                        }
+                        const options = validGrade ? labelOptionsForGrade(batch.company, g) : [];
+                        // Preserve any existing label even if it's not in the
+                        // canonical list (custom CSV imports, qualifiers, etc).
+                        const current = slot.csv_grade_label ?? '';
+                        const allOptions = current && !options.includes(current)
+                          ? [...options, current]
+                          : options;
+                        const locked = slot.from_csv && !slot.override;
+                        return (
+                          <select
+                            disabled={locked || !validGrade}
+                            value={current}
+                            onChange={(e) => updateSlot(idx, { csv_grade_label: e.target.value })}
+                            className="px-2 py-1 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 focus:outline-none focus:border-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <option value="">{validGrade ? `(auto: ${gradeLabel(batch.company, g)})` : '—'}</option>
+                            {allOptions.map((lbl) => (
+                              <option key={lbl} value={lbl}>{lbl}</option>
+                            ))}
+                          </select>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-2 py-2">
+                      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 whitespace-nowrap">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${confDot}`} />
+                        {confLabel}
+                      </div>
+                    </td>
+                    <td className="px-2 py-2">
+                      <select
+                        value={slot.batch_item_id}
+                        onChange={(e) => remapSlot(idx, e.target.value)}
+                        className="w-full px-1.5 py-1 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 focus:outline-none focus:border-indigo-500 truncate"
+                      >
+                        {batch.items.map((bi) => (
+                          <option key={bi.id} value={bi.id}>
+                            #{bi.line_item_num} {bi.card_name ?? '(unnamed)'}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td className="px-2 py-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dispDot}`} />
+                        <select
+                          value={slot.disposition}
+                          onChange={(e) => updateSlot(idx, { disposition: e.target.value as Disposition })}
+                          className="px-1.5 py-1 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 focus:outline-none focus:border-indigo-500"
+                        >
+                          {(Object.keys(DISPOSITION_LABELS) as Disposition[]).map((d) => (
+                            <option key={d} value={d}>{DISPOSITION_LABELS[d]}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2 text-center">
+                      <button
+                        type="button"
+                        onClick={() => ignoreSlot(idx)}
+                        title="Ignore this slot — drop from return (source stays at PSA)"
+                        className="text-zinc-600 hover:text-red-400 transition-colors"
+                      >
+                        <X size={13} />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -489,7 +986,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
       {/* Review modal */}
       {reviewing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setReviewing(false)}>
-          <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
               <h2 className="text-sm font-semibold text-zinc-100">Review Return — {batch.company} · {batch.batch_id}</h2>
               <button onClick={() => setReviewing(false)} className="text-zinc-500 hover:text-zinc-300 transition-colors">
@@ -501,28 +998,58 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
               <table className="w-full text-xs border-collapse">
                 <thead className="sticky top-0 bg-zinc-900">
                   <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wide text-[10px]">
-                    <th className="px-4 py-2 text-left font-medium w-6">#</th>
-                    <th className="px-4 py-2 text-left font-medium">Cert #</th>
-                    <th className="px-4 py-2 text-left font-medium">Grade</th>
-                    <th className="px-4 py-2 text-left font-medium">Label</th>
-                    <th className="px-4 py-2 text-left font-medium">Card</th>
+                    <th className="px-4 py-2 text-left  font-medium w-12">Line</th>
+                    <th className="px-4 py-2 text-left  font-medium">Card</th>
+                    <th className="px-4 py-2 text-left  font-medium">ID</th>
+                    <th className="px-4 py-2 text-right font-medium">Cost</th>
+                    <th className="px-4 py-2 text-right font-medium">Exp</th>
+                    <th className="px-4 py-2 text-left  font-medium">Cert #</th>
+                    <th className="px-4 py-2 text-left  font-medium">Grade</th>
+                    <th className="px-4 py-2 text-left  font-medium">Label</th>
+                    <th className="px-4 py-2 text-left  font-medium">Disposition</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50">
-                  {batch.items.map((item, idx) => {
-                    const row = rows[idx];
-                    const grade = parseFloat(row.grade);
+                  {slots.map((slot) => {
+                    const item = itemById.get(slot.batch_item_id);
+                    if (!item) return null;
+                    const isGraded = slot.disposition === 'graded';
+                    const grade = parseFloat(slot.grade);
+                    const dispColor =
+                      slot.disposition === 'graded'        ? 'text-emerald-400' :
+                      slot.disposition === 'not_graded'    ? 'text-sky-400'     :
+                      slot.disposition === 'lost'          ? 'text-red-400'     :
+                                                             'text-zinc-400';
                     return (
-                      <tr key={item.id} className="hover:bg-zinc-800/20">
-                        <td className="px-4 py-2.5 text-zinc-600 font-mono text-[10px]">{item.line_item_num}</td>
-                        <td className="px-4 py-2.5 text-zinc-400 font-mono">{row.cert_number}</td>
-                        <td className="px-4 py-2.5">
-                          <span className="text-emerald-400 font-semibold">{grade}</span>
+                      <tr key={slot.key} className={`hover:bg-zinc-800/20 ${!isGraded ? 'opacity-70' : ''}`}>
+                        <td className="px-4 py-2.5 text-zinc-600 font-mono text-[10px]">
+                          {item.line_item_num}
+                          {item.quantity > 1 && <span className="text-zinc-700">·{slot.copy_index + 1}</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-zinc-400">{(() => { const lbl = row.csv_grade_label || gradeLabel(batch.company, grade); return lbl ? `${lbl} ${grade}` : String(grade); })()}</td>
                         <td className="px-4 py-2.5">
-                          <p className="text-zinc-200 font-medium">{row.card_name_override ?? item.card_name ?? '—'}</p>
+                          <p className="text-zinc-200 font-medium">{slot.card_name_override ?? item.card_name ?? '—'}</p>
                           {item.set_name && <p className="text-[10px] text-zinc-600">{item.set_name}{item.card_number ? ` · #${item.card_number}` : ''}</p>}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-500 font-mono text-[10px]">
+                          {item.raw_purchase_label ?? '—'}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-zinc-400">
+                          {formatCurrency(item.purchase_cost, item.currency)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right text-zinc-500">
+                          {item.expected_grade ?? '—'}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-400 font-mono">
+                          {isGraded ? slot.cert_number : '—'}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {isGraded ? <span className="text-emerald-400 font-semibold">{grade}</span> : <span className="text-zinc-600">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-400">
+                          {isGraded ? (() => { const lbl = slot.csv_grade_label || gradeLabel(batch.company, grade); return lbl ? `${lbl} ${grade}` : String(grade); })() : '—'}
+                        </td>
+                        <td className={`px-4 py-2.5 text-[11px] font-medium ${dispColor}`}>
+                          {DISPOSITION_LABELS[slot.disposition]}
                         </td>
                       </tr>
                     );
@@ -532,7 +1059,11 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
             </div>
 
             <div className="flex items-center justify-between px-5 py-4 border-t border-zinc-800">
-              <p className="text-xs text-zinc-500">{batch.items.length} card{batch.items.length !== 1 ? 's' : ''} · returned {returnedAt}</p>
+              <p className="text-xs text-zinc-500">
+                {(['graded', 'not_graded', 'lost', 'not_submitted'] as Disposition[])
+                  .map((d) => `${slots.filter((s) => s.disposition === d).length} ${DISPOSITION_LABELS[d].toLowerCase()}`)
+                  .join(' · ')} · returned {returnedAt}
+              </p>
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" onClick={() => setReviewing(false)}>Edit</Button>
                 <Button size="sm" disabled={processReturn.isPending} onClick={handleConfirm}>
@@ -570,7 +1101,8 @@ export function SubReturns() {
       qc.invalidateQueries({ queryKey: ['grading-subs'] });
       setConfirmRevertId(null);
     },
-    onError:    () => toast.error('Failed to revert return'),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onError:    (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to revert return'),
     onSettled:  () => setRevertingId(null),
   });
 

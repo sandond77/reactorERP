@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSV Import — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <h1>CSV Import</h1>
+    <p class="lede">Bringing existing inventory or transaction history into Reactor. Four import types; pick the one that matches what your CSV represents.</p>
+
+    <h2>How the import works</h2>
+    <ol>
+      <li><strong>Upload</strong> your CSV or Excel (.xlsx, .xls). Any format, any columns.</li>
+      <li><strong>AI detects</strong> the import type and proposes a column mapping. Confidence shown next to the detected type.</li>
+      <li><strong>Review</strong> the mapping. The Field Reference sidebar explains every target field. Unmapped columns are skipped.</li>
+      <li><strong>Confirm</strong>. Reactor processes the file. Ambiguous rows (e.g. set codes that could be EN or JP) trigger modal prompts.</li>
+      <li><strong>Import History</strong> at the bottom tracks every import you've done, with row counts and error counts.</li>
+    </ol>
+
+    <h2>The four import types</h2>
+
+    <h3>Graded Cards</h3>
+    <p>You have slabs already. Each row = one slab.</p>
+    <ul>
+      <li><span class="badge badge-required">Required</span> <code>card_name</code>, <code>cert_number</code>, <code>grade</code></li>
+      <li><span class="badge badge-recommended">Recommended</span> <code>company</code>, <code>grading_cost</code>, <code>purchase_cost</code>, <code>purchased_at</code>, <code>sale_price</code>, <code>sold_at</code>, <code>platform</code>, <code>platform_fees</code>, <code>shipping_cost</code></li>
+    </ul>
+    <p>If you include sale columns, the row creates a sold slab. If you don't, it creates an unsold slab in inventory.</p>
+
+    <h3>Raw Purchases</h3>
+    <p>A history of orders. Each row = one order.</p>
+    <ul>
+      <li><span class="badge badge-required">Required</span> <code>cost</code>, <code>purchased_at</code></li>
+      <li><span class="badge badge-recommended">Recommended</span> <code>type</code>, <code>card_name</code>, <code>set_name</code>, <code>card_number</code>, <code>language</code>, <code>quantity</code>, <code>source</code>, <code>order_number</code></li>
+    </ul>
+    <p><code>type=raw</code> rows auto-create a matching card_instance in inventory. <code>type=bulk</code> rows stay as orders pending intake — you'll split them during inspection.</p>
+
+    <h3>Bulk Sales</h3>
+    <p>A flat list of completed sales matching existing inventory.</p>
+    <ul>
+      <li><span class="badge badge-required">Required</span> <code>identifier</code> (cert # for graded, or purchase ID like <code>RP-2025-001</code> for raw), <code>sale_price</code></li>
+      <li><span class="badge badge-recommended">Recommended</span> <code>platform</code>, <code>platform_fees</code>, <code>shipping_cost</code>, <code>sold_at</code>, <code>currency</code>, <code>unique_id</code></li>
+    </ul>
+    <p>Each row finds the existing card by identifier and records a sale.</p>
+
+    <h3>Expenses</h3>
+    <p>Supplies, postage, subscriptions — anything that hits P&amp;L outside of cost basis.</p>
+    <ul>
+      <li><span class="badge badge-required">Required</span> <code>description</code>, <code>amount</code>, <code>date</code></li>
+      <li><span class="badge badge-recommended">Recommended</span> <code>type</code>, <code>currency</code>, <code>order_number</code>, <code>link</code></li>
+    </ul>
+
+    <h2>Common problems</h2>
+    <div class="callout callout-warn">
+      <ul>
+        <li><strong>"Unlinked rows"</strong> — Reactor couldn't find a known set code for one or more rows. A modal prompts you to assign Game, Language, Set Code, and Set Name. Required to proceed.</li>
+        <li><strong>"Language ambiguous"</strong> — set codes that exist in both EN and JP (e.g. some Sword &amp; Shield codes) need disambiguation. Modal prompts per ambiguous row.</li>
+        <li><strong>Bulk sale "no inventory found"</strong> — the identifier doesn't match an existing slab or raw purchase. Common causes: cert # has leading zeros, purchase ID is wrong format, the card was already sold.</li>
+        <li><strong>Costs look wrong after import</strong> — for raw purchases, <code>cost</code> is the <em>total</em> order cost; per-card is computed from <code>cost / quantity</code>.</li>
+      </ul>
+    </div>
+
+    <p>See <a href="field-reference.html">Field Reference</a> for every field's description.</p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

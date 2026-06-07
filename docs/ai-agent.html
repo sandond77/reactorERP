@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Agent — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>AI Agent</h1>
+    <p class="lede">Reactor has a built-in Claude-powered agent that can read your inventory and take actions on your behalf. It's not a chatbot grafted on top — it calls the same APIs the UI does.</p>
+
+    <h2>How it works</h2>
+    <p>The agent runs an <strong>agentic loop</strong> with up to 5 iterations. You send a message; the model decides if it needs to call a tool; if so it calls one (or several in parallel), reads the result, decides again. Loop ends when the model returns a final answer.</p>
+    <p>Under the hood it uses Anthropic Claude Sonnet for the main agent, with Claude Haiku doing a fast pre-screen on every message for abuse / off-topic content. Tool calls hit your normal app endpoints with your session — the agent only has access to data you have access to.</p>
+
+    <h2>What it can do</h2>
+    <p>Roughly: anything the app's UI lets you do. The agent has tools for:</p>
+    <ul>
+      <li><strong>Inventory</strong> — list, search, update, delete cards. Add raw purchases. Add graded cards directly.</li>
+      <li><strong>Sales</strong> — record single sales, bulk card-show sales, edit existing sales, delete sales.</li>
+      <li><strong>Listings</strong> — list, create, update, cancel.</li>
+      <li><strong>Grading</strong> — submit cards to grading, list batches, update batch costs, process returns.</li>
+      <li><strong>Trades</strong> — record card-for-card swaps.</li>
+      <li><strong>Card shows</strong> — list shows, generate per-show P&amp;L reports.</li>
+      <li><strong>Expenses</strong> — record + delete expenses.</li>
+      <li><strong>Locations</strong> — list locations, assign cards.</li>
+      <li><strong>Catalog</strong> — look up Part #s.</li>
+      <li><strong>Images</strong> — attach card scans uploaded with your message.</li>
+    </ul>
+    <p>Full tool reference: <a href="ai-agent-reference.html">AI Agent Reference</a>.</p>
+
+    <h2>What's enforced</h2>
+    <ul>
+      <li><strong>Org scope</strong> — the agent only sees data scoped to your <code>dataUserId</code>. Other orgs are invisible.</li>
+      <li><strong>State machine</strong> — same rules as the UI. Can't move a sold card back to <code>raw_for_sale</code> without going through a delete-sale.</li>
+      <li><strong>Cost reconciliation</strong> — same. Agent edits to grading costs fan out to slabs + historical sales.</li>
+      <li><strong>Audit log</strong> — every agent action is logged as actor = AI so you can distinguish them from your own.</li>
+      <li><strong>Abuse pre-screen</strong> — Haiku checks every incoming message for prompt injection or off-topic content before the main loop fires.</li>
+    </ul>
+
+    <h2>When to use the agent vs the UI</h2>
+    <p>Use the UI when:</p>
+    <ul>
+      <li>You need to see a list and make decisions while looking at it (Listings, Sales, Raw Overall).</li>
+      <li>You're doing visual work (slab images, image uploads, location assignment via dropdowns).</li>
+      <li>You want speed for a one-off action you know exactly how to do.</li>
+    </ul>
+    <p>Use the agent when:</p>
+    <ul>
+      <li>You want a report ("P&amp;L for last month", "show me my best ROI cards").</li>
+      <li>You're doing a multi-step action that would take several UI navigations.</li>
+      <li>You want to log something while in conversational flow ("just sold a Charizard at the show for $400").</li>
+      <li>You want to bulk-attach images you took on your phone.</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>Conversation history is kept locally in your browser. Refreshing keeps it; clearing site data resets it.</li>
+      <li>Card-show sales are easiest via the agent — "I sold cert 12345678 for $200 at Reading" parses cleanly.</li>
+      <li>If the agent does something wrong, ask it to undo. It has delete tools for sales / expenses / cards.</li>
+      <li>The agent can read but not delete trades. Trades require manual UI action for now.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

@@ -21,6 +21,8 @@ interface RawRow {
   set_name: string | null;
   card_number: string | null;
   condition: string | null;
+  quantity: number;
+  status: string;
   is_listed: boolean;
   listed_price: number | null;
   listing_url: string | null;
@@ -121,6 +123,9 @@ export function RawOverall() {
     sku:               colMinWidth('Part #',        true,  false),
     card_name:         colMinWidth('Card',          true,  false),
     condition:         colMinWidth('Condition',     true,  true),
+    total:             colMinWidth('Total',         true,  false),
+    unsold:            colMinWidth('Unsold',        true,  false),
+    sold:              colMinWidth('Sold',          true,  false),
     is_listed:         colMinWidth('Listed?',       true,  true),
     listed_price:      colMinWidth('Listed',        true,  false),
     listing:           colMinWidth('Link',          false, false),
@@ -141,6 +146,9 @@ export function RawOverall() {
     sku:               Math.max(MINS.sku,               190),
     card_name:         Math.max(MINS.card_name,          500),
     condition:         Math.max(MINS.condition,           90),
+    total:             Math.max(MINS.total,                65),
+    unsold:            Math.max(MINS.unsold,               65),
+    sold:              Math.max(MINS.sold,                 65),
     is_listed:         Math.max(MINS.is_listed,           80),
     listed_price:      Math.max(MINS.listed_price,        80),
     listing:           Math.max(MINS.listing,             55),
@@ -475,6 +483,9 @@ export function RawOverall() {
                 <ColHeader label="Part #"           col="sku"                {...sh} {...rz('sku')}               minWidth={MINS.sku} />
                 <ColHeader label="ID"               col="raw_purchase_label" {...sh} {...rz('id')}               minWidth={MINS.id} />
                 <ColHeader label="Card"             col="card_name"          {...sh} {...rz('card_name')}         minWidth={MINS.card_name} />
+                <ColHeader label="Total"            col="quantity"           {...sh} {...rz('total')}             minWidth={MINS.total} align="right" />
+                <ColHeader label="Unsold"                                    {...sh} {...rz('unsold')}            minWidth={MINS.unsold} align="right" />
+                <ColHeader label="Sold"                                      {...sh} {...rz('sold')}              minWidth={MINS.sold} align="right" />
                 <ColHeader label="Condition"        col="condition"          {...sh} {...rz('condition')}         minWidth={MINS.condition}
                   filterOptions={filterOptions?.conditions} filterSelected={fCondition} onFilterChange={(v) => { setFCondition(v); setPage(1); }} />
                 <ColHeader label="Location"                                  {...sh} {...rz('location')}          minWidth={MINS.location} />
@@ -501,36 +512,183 @@ export function RawOverall() {
             </thead>
             <tbody>
               {!data?.data.length ? (
-                <tr><td colSpan={17} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
-              ) : data.data.map((row) => (
-                <tr key={row.id} onClick={() => setSelectedRow(row)} className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
-                  <td className="px-3 py-1 font-mono text-[11px] text-zinc-400">{row.sku ?? '—'}</td>
-                  <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{row.raw_purchase_label ?? ''}</td>
-                  <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{row.card_name ?? ''}</td>
-                  <td className="px-3 py-1 text-zinc-300">{row.condition ?? ''}</td>
-                  <td className="px-3 py-1 text-zinc-400 truncate" title={row.location_name ?? ''}>{row.location_name ?? ''}</td>
-                  <td className="px-3 py-1 text-center">
-                    {row.is_listed ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}
-                  </td>
-                  <td className="px-3 py-1 text-right text-zinc-300">{fmt(row.listed_price)}</td>
-                  <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
-                    {row.order_details_link ? (
-                      <a href={row.order_details_link} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="Order details"><ExternalLink size={11} /></a>
-                    ) : row.listing_url ? (
-                      <a href={row.listing_url} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="eBay listing"><ExternalLink size={11} /></a>
-                    ) : ''}
-                  </td>
-                  <td className="px-3 py-1 text-right text-zinc-400">{fmt(row.raw_cost)}</td>
-                  <td className="px-3 py-1 text-right text-zinc-300">{fmt(row.strike_price)}</td>
-                  <td className="px-3 py-1 text-right text-zinc-300">{fmt(row.after_ebay)}</td>
-                  <td className="px-3 py-1 text-right"><NetCell afterEbay={row.after_ebay} raw={row.raw_cost} /></td>
-                  <td className="px-3 py-1 text-zinc-500">{fmtDate(row.raw_purchase_date)}</td>
-                  <td className="px-3 py-1 text-zinc-500">{fmtDate(row.date_listed)}</td>
-                  <td className="px-3 py-1 text-zinc-500">{fmtDate(row.date_sold)}</td>
-                  <td className="px-3 py-1 text-right"><RoiCell roi={row.roi_pct} afterEbay={row.after_ebay} raw={row.raw_cost} /></td>
-                  <td className="px-3 py-1 text-zinc-500 truncate" title={row.notes ?? ''}>{row.notes ?? ''}</td>
-                </tr>
-              ))}
+                <tr><td colSpan={20} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
+              ) : (() => {
+                // Group consecutive rows by (raw_purchase_label, condition) so
+                // a lot that's been split by partial sales (e.g. qty=2 unsold
+                // sibling + qty=1 sold sibling) shows as ONE main row with
+                // aggregate qty + sale tallies, and expands to reveal the
+                // underlying instances. Single-instance lots render flat.
+                const groups: { key: string; rows: typeof data.data }[] = [];
+                const seen = new Map<string, number>();
+                for (const row of data.data) {
+                  const key = `${row.raw_purchase_label ?? '_'}::${row.condition ?? '_'}`;
+                  const idx = seen.get(key);
+                  if (idx == null) {
+                    seen.set(key, groups.length);
+                    groups.push({ key, rows: [row] });
+                  } else {
+                    groups[idx].rows.push(row);
+                  }
+                }
+                return groups.flatMap((g) => {
+                  const isLot = g.rows.length > 1;
+                  const first = g.rows[0];
+                  const totalQty = g.rows.reduce((s, r) => s + r.quantity, 0);
+                  const soldQty = g.rows.filter(r => r.status === 'sold').reduce((s, r) => s + r.quantity, 0);
+                  const unsoldQty = totalQty - soldQty;
+                  // Sum across siblings: strike/fees/net are stored per-instance
+                  // and represent the sale for THAT instance's qty. Per-card
+                  // cost is the same across siblings.
+                  const sumStrike = g.rows.reduce((s, r) => s + (r.strike_price ?? 0), 0) || null;
+                  const sumAfter  = g.rows.reduce((s, r) => s + (r.after_ebay ?? 0), 0) || null;
+                  const lotExpanded = expandedLots.has(g.key);
+
+                  const mainCells = isLot ? (
+                    <>
+                      <td className="px-3 py-1 font-mono text-[11px] text-zinc-400">{first.sku ?? '—'}</td>
+                      <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">
+                        <span className="inline-flex items-center gap-1">
+                          <ChevronRight size={11} className={`text-zinc-500 transition-transform ${lotExpanded ? 'rotate-90' : ''}`} />
+                          {first.raw_purchase_label ?? ''}
+                          <span className="text-[9px] text-zinc-600 uppercase tracking-wide ml-1">×{g.rows.length}</span>
+                        </span>
+                      </td>
+                      <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{first.card_name ?? ''}</td>
+                      <td className="px-3 py-1 text-right tabular-nums text-zinc-300">{totalQty}</td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={unsoldQty > 0 ? 'text-zinc-300' : 'text-zinc-600'}>{unsoldQty}</span>
+                      </td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={soldQty > 0 ? 'text-rose-400/80' : 'text-zinc-600'}>{soldQty}</span>
+                      </td>
+                      <td className="px-3 py-1 text-zinc-300">{first.condition ?? ''}</td>
+                      <td className="px-3 py-1 text-zinc-400 truncate" title={first.location_name ?? ''}>{first.location_name ?? ''}</td>
+                      <td className="px-3 py-1 text-center">
+                        {g.rows.some(r => r.is_listed) ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}
+                      </td>
+                      <td className="px-3 py-1 text-right text-zinc-300">{fmt(first.listed_price)}</td>
+                      <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
+                        {first.order_details_link ? (
+                          <a href={first.order_details_link} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="Order details"><ExternalLink size={11} /></a>
+                        ) : first.listing_url ? (
+                          <a href={first.listing_url} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="eBay listing"><ExternalLink size={11} /></a>
+                        ) : ''}
+                      </td>
+                      <td className="px-3 py-1 text-right text-zinc-400">{fmt(first.raw_cost * totalQty)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-300">{fmt(sumStrike)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-300">{fmt(sumAfter)}</td>
+                      <td className="px-3 py-1 text-right"><NetCell afterEbay={sumAfter} raw={first.raw_cost * soldQty} /></td>
+                      <td className="px-3 py-1 text-zinc-500">{fmtDate(first.raw_purchase_date)}</td>
+                      <td className="px-3 py-1 text-zinc-500">{fmtDate(first.date_listed)}</td>
+                      <td className="px-3 py-1 text-zinc-500">{fmtDate(first.date_sold)}</td>
+                      <td className="px-3 py-1 text-right"><RoiCell roi={null} afterEbay={sumAfter} raw={first.raw_cost * soldQty} /></td>
+                      <td className="px-3 py-1 text-zinc-500 truncate" title={first.notes ?? ''}>{first.notes ?? ''}</td>
+                    </>
+                  ) : (
+                    <>
+                      <td className="px-3 py-1 font-mono text-[11px] text-zinc-400">{first.sku ?? '—'}</td>
+                      <td className="px-3 py-1 font-mono text-[11px] text-indigo-300/70">{first.raw_purchase_label ?? ''}</td>
+                      <td className="px-3 py-1 text-zinc-200 whitespace-normal break-words">{first.card_name ?? ''}</td>
+                      <td className="px-3 py-1 text-right tabular-nums text-zinc-300">{first.quantity}</td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={first.status !== 'sold' ? 'text-zinc-300' : 'text-zinc-600'}>{first.status !== 'sold' ? first.quantity : 0}</span>
+                      </td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={first.status === 'sold' ? 'text-rose-400/80' : 'text-zinc-600'}>{first.status === 'sold' ? first.quantity : 0}</span>
+                      </td>
+                      <td className="px-3 py-1 text-zinc-300">{first.condition ?? ''}</td>
+                      <td className="px-3 py-1 text-zinc-400 truncate" title={first.location_name ?? ''}>{first.location_name ?? ''}</td>
+                      <td className="px-3 py-1 text-center">
+                        {first.is_listed ? <span className="text-green-400">Yes</span> : <span className="text-zinc-600">No</span>}
+                      </td>
+                      <td className="px-3 py-1 text-right text-zinc-300">{fmt(first.listed_price)}</td>
+                      <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
+                        {first.order_details_link ? (
+                          <a href={first.order_details_link} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="Order details"><ExternalLink size={11} /></a>
+                        ) : first.listing_url ? (
+                          <a href={first.listing_url} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400 hover:text-indigo-300 transition-colors" title="eBay listing"><ExternalLink size={11} /></a>
+                        ) : ''}
+                      </td>
+                      <td className="px-3 py-1 text-right text-zinc-400">{fmt(first.raw_cost * first.quantity)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-300">{fmt(first.strike_price)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-300">{fmt(first.after_ebay)}</td>
+                      <td className="px-3 py-1 text-right"><NetCell afterEbay={first.after_ebay} raw={first.raw_cost * first.quantity} /></td>
+                      <td className="px-3 py-1 text-zinc-500">{fmtDate(first.raw_purchase_date)}</td>
+                      <td className="px-3 py-1 text-zinc-500">{fmtDate(first.date_listed)}</td>
+                      <td className="px-3 py-1 text-zinc-500">{fmtDate(first.date_sold)}</td>
+                      <td className="px-3 py-1 text-right"><RoiCell roi={first.roi_pct} afterEbay={first.after_ebay} raw={first.raw_cost * first.quantity} /></td>
+                      <td className="px-3 py-1 text-zinc-500 truncate" title={first.notes ?? ''}>{first.notes ?? ''}</td>
+                    </>
+                  );
+
+                  const mainRow = (
+                    <tr key={g.key}
+                      onClick={() => { if (isLot) toggleLot(g.key); else setSelectedRow(first); }}
+                      className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
+                      {mainCells}
+                    </tr>
+                  );
+
+                  if (!isLot || !lotExpanded) return [mainRow];
+
+                  // Sub-rows show the commerce breakdown of the lot. Hide
+                  // intermediate workflow state ('inspected' / 'purchased_raw')
+                  // and 'graded' — once a card has graded out it's its own
+                  // slab inventory item, surfacing it under the raw lot is
+                  // confusing and double-counts. grading_submitted stays since
+                  // those are still raw, in flight.
+                  const visibleRows = g.rows.filter((r) =>
+                    r.status !== 'inspected' &&
+                    r.status !== 'purchased_raw' &&
+                    r.status !== 'graded'
+                  );
+                  if (visibleRows.length === 0) return [mainRow];
+                  const subRows = visibleRows.map((row) => (
+                    <tr key={`${g.key}::${row.id}`}
+                      onClick={() => setSelectedRow(row)}
+                      className="border-b border-zinc-800/30 bg-zinc-950/60 hover:bg-zinc-800/30 transition-colors cursor-pointer">
+                      <td className="px-3 py-1 font-mono text-[10px] text-zinc-600 pl-6">└─</td>
+                      <td className="px-3 py-1">
+                        <span className={`text-[10px] uppercase tracking-wide ${row.status === 'sold' ? 'text-rose-400/70' : 'text-zinc-500'}`}>
+                          {row.status.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td />
+                      <td className="px-3 py-1 text-right tabular-nums text-[11px] text-zinc-500">{row.quantity}</td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={row.status !== 'sold' ? 'text-zinc-400 text-[11px]' : 'text-zinc-700 text-[11px]'}>{row.status !== 'sold' ? row.quantity : 0}</span>
+                      </td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        <span className={row.status === 'sold' ? 'text-rose-400/80 text-[11px]' : 'text-zinc-700 text-[11px]'}>{row.status === 'sold' ? row.quantity : 0}</span>
+                      </td>
+                      <td className="px-3 py-1 text-zinc-500 text-[11px]">{row.condition ?? ''}</td>
+                      <td className="px-3 py-1 text-zinc-500 text-[11px] truncate" title={row.location_name ?? ''}>{row.location_name ?? ''}</td>
+                      <td className="px-3 py-1 text-center text-[11px]">
+                        {row.is_listed ? <span className="text-green-400/80">Yes</span> : <span className="text-zinc-700">—</span>}
+                      </td>
+                      <td className="px-3 py-1 text-right text-zinc-500 text-[11px]">{fmt(row.listed_price)}</td>
+                      <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
+                        {row.order_details_link ? (
+                          <a href={row.order_details_link} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400/80 hover:text-indigo-300 transition-colors" title="Order details"><ExternalLink size={10} /></a>
+                        ) : row.listing_url ? (
+                          <a href={row.listing_url} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400/80 hover:text-indigo-300 transition-colors" title="eBay listing"><ExternalLink size={10} /></a>
+                        ) : ''}
+                      </td>
+                      <td className="px-3 py-1 text-right text-zinc-500 text-[11px]">{fmt(row.raw_cost)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-400 text-[11px]">{fmt(row.strike_price)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-400 text-[11px]">{fmt(row.after_ebay)}</td>
+                      <td className="px-3 py-1 text-right"><NetCell afterEbay={row.after_ebay} raw={row.raw_cost} /></td>
+                      <td className="px-3 py-1 text-zinc-600 text-[11px]">{fmtDate(row.raw_purchase_date)}</td>
+                      <td className="px-3 py-1 text-zinc-600 text-[11px]">{fmtDate(row.date_listed)}</td>
+                      <td className="px-3 py-1 text-zinc-600 text-[11px]">{fmtDate(row.date_sold)}</td>
+                      <td className="px-3 py-1 text-right"><RoiCell roi={row.roi_pct} afterEbay={row.after_ebay} raw={row.raw_cost} /></td>
+                      <td className="px-3 py-1 text-zinc-600 text-[10px] truncate" title={row.notes ?? ''}>{row.notes ?? ''}</td>
+                    </tr>
+                  ));
+                  return [mainRow, ...subRows];
+                });
+              })()}
             </tbody>
           </table>
         )}

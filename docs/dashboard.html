@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Dashboard</h1>
+    <p class="lede">The home screen. Three tabs: <strong>Overview</strong>, <strong>Graded</strong>, and <strong>Raw Cards</strong>. Each one summarizes inventory + pipeline + sales for that segment.</p>
+
+    <h2>Overview tab</h2>
+    <p>Top-line numbers across the whole business: total inventory value, total sold YTD, profit, and the active order/grading pipeline.</p>
+    <ul>
+      <li><strong>Inventory value</strong> — sum of cost basis of every unsold card_instance.</li>
+      <li><strong>Active grading</strong> — count + cost of cards in <code>grading_submitted</code> status.</li>
+      <li><strong>Awaiting Intake</strong> (amber row) — sum of <code>card_count</code> from received raw_purchases that don't have matching card_instances yet. Tells you how many cards from received bulk lots are still un-split.</li>
+    </ul>
+
+    <h2>Graded tab</h2>
+    <p>Same shape as Overview, scoped to graded slabs only. Pipeline shows ordered → received → graded → listed → sold.</p>
+
+    <h2>Raw Cards tab</h2>
+    <p>Scoped to raw inventory. The Pipeline column has stages <strong>Purchased / Inspected / For Sale / To Grade</strong>. Filter by <strong>Both / Raw / Bulk</strong> at the top to slice by purchase type.</p>
+    <ul>
+      <li><strong>Inspection Routing</strong> chart shows how many cards routed to Sell Raw vs. Grade after inspection.</li>
+      <li><strong>Awaiting Intake</strong> on this tab is type-filtered (only counts the selected raw/bulk segment).</li>
+    </ul>
+
+    <h2>View toggles</h2>
+    <p>Most rows have an <strong>All / Unsold / Sold</strong> toggle that switches the underlying query. Default is Unsold (current inventory).</p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

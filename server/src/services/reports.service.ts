@@ -562,18 +562,31 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
   `.execute(db);
 
   // ── Orders (type-filtered, not view/status filtered) ──────────────────────
-  const ordersQuery = db
-    .selectFrom('raw_purchases as rp')
-    .select([
-      sql<number>`COUNT(*)::int`.as('total'),
-      sql<number>`COUNT(*) FILTER (WHERE rp.status = 'ordered')::int`.as('pending'),
-      sql<number>`COUNT(*) FILTER (WHERE rp.status = 'received')::int`.as('received'),
-      sql<number>`COUNT(*) FILTER (WHERE rp.status = 'cancelled')::int`.as('canceled'),
-      sql<number>`COALESCE(SUM(rp.card_count) FILTER (WHERE rp.status = 'received'), 0)::int`.as('cards_received'),
-    ])
-    .where('rp.user_id', '=', userId)
-    .$if(type !== 'both', (qb) => qb.where('rp.type', '=', type as 'raw' | 'bulk'))
-    .executeTakeFirst();
+  // awaiting_intake = sum over received rps of MAX(0, card_count - sum(ci.quantity)).
+  // Bulk lots of N split into card_instances during inspection; the gap is what
+  // hasn't been split yet. Raw single-card imports are 1:1 so they're 0 once intaked.
+  const ordersQuery = sql<{
+    total: number; pending: number; received: number; canceled: number;
+    cards_received: number; awaiting_intake: number;
+  }>`
+    WITH rp_intake AS (
+      SELECT rp.id, rp.status, rp.card_count,
+        GREATEST(rp.card_count - COALESCE((
+          SELECT SUM(ci.quantity) FROM card_instances ci WHERE ci.raw_purchase_id = rp.id
+        ), 0), 0) AS gap
+      FROM raw_purchases rp
+      WHERE rp.user_id = ${userId}
+        ${type !== 'both' ? sql`AND rp.type = ${type}` : sql``}
+    )
+    SELECT
+      COUNT(*)::int as total,
+      COUNT(*) FILTER (WHERE status = 'ordered')::int as pending,
+      COUNT(*) FILTER (WHERE status = 'received')::int as received,
+      COUNT(*) FILTER (WHERE status = 'cancelled')::int as canceled,
+      COALESCE(SUM(card_count) FILTER (WHERE status = 'received'), 0)::int as cards_received,
+      COALESCE(SUM(gap) FILTER (WHERE status = 'received'), 0)::int as awaiting_intake
+    FROM rp_intake
+  `.execute(db);
 
   // ── Pipeline (always full, not view-filtered, but type-filtered) ────────────
   const pipelineQuery = sql<{
@@ -670,7 +683,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
   const pl = pipelineResult.rows[0];
   const s = salesResult.rows[0];
   const t = turnoverResult.rows[0];
-  const o = ordersResult;
+  const o = ordersResult.rows[0];
 
   return {
     inventory: {
@@ -684,6 +697,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
       received: o?.received ?? 0,
       canceled: o?.canceled ?? 0,
       cards_received: o?.cards_received ?? 0,
+      awaiting_intake: o?.awaiting_intake ?? 0,
     },
     pipeline: {
       purchased_raw: pl?.purchased_raw ?? 0,
@@ -814,10 +828,27 @@ export async function cardTrendSearch(userId: string, q: string) {
 }
 
 export async function getCardTrend(userId: string, catalogId: string) {
+  // Resolve the selected catalog row's SKU and match all card_instances that
+  // link to ANY catalog row sharing that SKU. Imports occasionally produce
+  // duplicate catalog entries for the same physical card (e.g. "Squirtle"
+  // canonical + "2023 Pokemon Japanese... Squirtle" PSA-label variant), so
+  // matching by catalog_id alone misses sales that were linked to the
+  // alternate entry. SKU is the stable identity.
+  const seed = await db
+    .selectFrom('card_catalog')
+    .select(['sku', 'card_name', 'set_code', 'card_number'])
+    .where('id', '=', catalogId)
+    .executeTakeFirst();
+  const sku = seed?.sku ?? null;
+  const seedName = seed?.card_name ?? null;
+  const setCode = seed?.set_code ?? null;
+  const cardNumber = seed?.card_number ?? null;
+
   // Sales history — one row per sale
   const sales = await db
     .selectFrom('sales as s')
     .innerJoin('card_instances as ci', 'ci.id', 's.card_instance_id')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .select([
       's.id',
@@ -833,13 +864,22 @@ export async function getCardTrend(userId: string, catalogId: string) {
       sql<string | null>`ci.condition`.as('condition'),
     ])
     .where('s.user_id', '=', userId)
-    .where('ci.catalog_id', '=', catalogId)
+    .where((eb) => {
+      const arms: ReturnType<typeof eb> [] = [eb('ci.catalog_id', '=', catalogId)];
+      if (sku) arms.push(eb('cc.sku', '=', sku));
+      if (setCode && cardNumber) {
+        arms.push(eb.and([eb('cc.set_code', '=', setCode), eb('cc.card_number', '=', cardNumber)]));
+      }
+      if (seedName) arms.push(eb('ci.card_name_override', 'ilike', `%${seedName}%`));
+      return eb.or(arms);
+    })
     .orderBy('s.sold_at', 'asc')
     .execute();
 
   // Cost/purchase history — one row per card instance
   const costs = await db
     .selectFrom('card_instances as ci')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
     .select([
       'ci.id',
@@ -853,7 +893,11 @@ export async function getCardTrend(userId: string, catalogId: string) {
       sql<string | null>`ci.condition`.as('condition'),
     ])
     .where('ci.user_id', '=', userId)
-    .where('ci.catalog_id', '=', catalogId)
+    .$if(sku !== null, (qb) => qb.where((eb) => eb.or([
+      eb('ci.catalog_id', '=', catalogId),
+      eb('cc.sku', '=', sku!),
+    ])))
+    .$if(sku === null, (qb) => qb.where('ci.catalog_id', '=', catalogId))
     .where('ci.purchased_at', 'is not', null)
     .orderBy('ci.purchased_at', 'asc')
     .execute();

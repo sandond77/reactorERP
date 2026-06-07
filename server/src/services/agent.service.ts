@@ -10,7 +10,8 @@ import { auditContext } from '../utils/audit-context';
 import { normalizeGradeLabel } from '../utils/grade-labels';
 import { createRawPurchase, saveReceiptUrl as saveRawPurchaseReceiptUrl } from './raw-purchases.service';
 import { createCard, updateCard, transitionCardStatus, softDeleteCard } from './cards.service';
-import { recordSale, listSales } from './sales.service';
+import { recordSale, listSales, updateSale, deleteSale } from './sales.service';
+import { getCardShowBreakdown } from './reports.service';
 import { createExpense, deleteExpense, saveReceiptUrl as saveExpenseReceiptUrl } from './expenses.service';
 import { saveReceiptFromBase64 } from '../utils/save-receipt';
 import * as gradingService from './grading-submissions.service';
@@ -625,17 +626,72 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'list_sales',
-    description: 'Search completed sales history. Use for questions about what sold, revenue, profit, counts of sold cards, or price history.',
+    description: 'Search completed sales history. Use for questions about what sold, revenue, profit, counts of sold cards, or price history. Default sort is most-recent first. Use card_show_id (from list_card_shows) plus a high limit when summarising a specific show — the default limit will truncate older shows.',
     input_schema: {
       type: 'object' as const,
       properties: {
         search: { type: 'string', description: 'Filter by card name (partial match)' },
         platform: { type: 'string', enum: ['ebay', 'tcgplayer', 'card_show', 'facebook', 'instagram', 'local', 'other'], description: 'Filter by platform' },
+        card_show_id: { type: 'string', description: 'UUID of a specific card show (from list_card_shows). Returns only sales linked to that show.' },
         from: { type: 'string', description: 'Start date YYYY-MM-DD (inclusive)' },
         to: { type: 'string', description: 'End date YYYY-MM-DD (inclusive)' },
         card_type: { type: 'string', enum: ['graded', 'raw'], description: 'Filter to graded or raw sales' },
-        limit: { type: 'number', description: 'Max results (default 20, max 50)' },
+        limit: { type: 'number', description: 'Max results (default 50, max 500). Use a high value when totalling sales for a show.' },
       },
+    },
+  },
+  {
+    name: 'get_card_show_report',
+    description: 'Generate a profit/revenue report for a specific card show — same data the Reports page surfaces. Returns slab + raw counts, revenue, net proceeds, cost basis. For multi-day shows, call without `day` first to discover the days_available; then ASK the user whether they want the overall totals or a specific day (Day 1, Day 2, …) and call again with `day=N`. For single-day shows the overall totals are the only sensible answer.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        card_show_id: { type: 'string', description: 'UUID of the card show (from list_card_shows)' },
+        day:          { type: 'number', description: 'Optional 1-indexed day number for multi-day shows. Omit to get overall totals + the list of available days.' },
+      },
+      required: ['card_show_id'],
+    },
+  },
+  {
+    name: 'list_card_shows',
+    description: 'List the user\'s card shows. Use first when the user references a specific show by name or date — get its id, then pass card_show_id into list_sales to summarise that show\'s sales without truncation.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        search: { type: 'string', description: 'Filter by show name (partial match)' },
+        limit: { type: 'number', description: 'Max results (default 20, max 100)' },
+      },
+    },
+  },
+  {
+    name: 'update_sale',
+    description: 'Edit fields on an existing sale (price, fees, platform, sold date, notes, etc.). Use list_sales first to find the sale_id. Cost basis is recomputed automatically from the source card.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        sale_id:           { type: 'string', description: 'UUID of the sale (from list_sales)' },
+        sale_price:        { type: 'number', description: 'New sale price in dollars' },
+        platform_fees:     { type: 'number', description: 'New platform fees in dollars' },
+        shipping_cost:     { type: 'number', description: 'New shipping cost in dollars' },
+        platform:          { type: 'string', enum: ['ebay', 'tcgplayer', 'card_show', 'facebook', 'instagram', 'local', 'other'], description: 'New platform' },
+        sold_at:           { type: 'string', description: 'New sold date YYYY-MM-DD' },
+        unique_id:         { type: 'string', description: 'New order number / transaction ID' },
+        order_details_link:{ type: 'string', description: 'New order details URL' },
+        card_show_id:      { type: 'string', description: 'New card show UUID (only when platform=card_show)' },
+        currency:          { type: 'string', enum: ['USD', 'JPY'], description: 'New currency' },
+      },
+      required: ['sale_id'],
+    },
+  },
+  {
+    name: 'delete_sale',
+    description: 'Delete a sale and return the underlying card to inventory (graded → graded; raw → raw_for_sale). Use list_sales first to find the sale_id. Confirm with the user before calling on shared / production data.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        sale_id: { type: 'string', description: 'UUID of the sale (from list_sales)' },
+      },
+      required: ['sale_id'],
     },
   },
   {
@@ -1151,14 +1207,18 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   }
 
   if (toolName === 'list_sales') {
-    const { search, platform, from, to, card_type, limit: rawLimit } =
-      toolInput as { search?: string; platform?: string; from?: string; to?: string; card_type?: 'graded' | 'raw'; limit?: number };
-    const limit = Math.min(rawLimit ?? 20, 50);
+    const { search, platform, card_show_id, from, to, card_type, limit: rawLimit } =
+      toolInput as { search?: string; platform?: string; card_show_id?: string; from?: string; to?: string; card_type?: 'graded' | 'raw'; limit?: number };
+    // Bumped from 50 → 500 so summarising a card show with many sales
+    // doesn't silently truncate older entries the user added via the
+    // browser flow. Default stays modest so casual queries aren't slow.
+    const limit = Math.min(rawLimit ?? 50, 500);
     const result = await listSales(
       userId,
       {
         search,
         platforms: platform ? [platform] : undefined,
+        cardShowIds: card_show_id ? [card_show_id] : undefined,
         from: from ? new Date(from) : undefined,
         to: to ? new Date(to + 'T23:59:59') : undefined,
         cardType: card_type ?? 'all',
@@ -1188,6 +1248,111 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         purchase_label: s.raw_purchase_label,
       })),
     };
+  }
+
+  if (toolName === 'get_card_show_report') {
+    const { card_show_id, day } = toolInput as { card_show_id: string; day?: number };
+    const report = await getCardShowBreakdown(userId, card_show_id);
+    const isMultiDay = report.days.length > 1;
+    // Format the slab/raw rollup once — used for both scopes.
+    const fmt = (r: typeof report | (typeof report.days)[number]) => ({
+      slab_count:        r.slab_count,
+      slab_revenue_usd:  (r.slab_revenue / 100).toFixed(2),
+      slab_net_usd:      (r.slab_net     / 100).toFixed(2),
+      slab_cost_usd:     (r.slab_cost    / 100).toFixed(2),
+      slab_profit_usd:   ((r.slab_net - r.slab_cost) / 100).toFixed(2),
+      raw_count:         r.raw_count,
+      raw_revenue_usd:   (r.raw_revenue  / 100).toFixed(2),
+      raw_net_usd:       (r.raw_net      / 100).toFixed(2),
+      raw_cost_usd:      (r.raw_cost     / 100).toFixed(2),
+      raw_profit_usd:    ((r.raw_net - r.raw_cost) / 100).toFixed(2),
+      total_count:       r.slab_count + r.raw_count,
+      total_revenue_usd: ((r.slab_revenue + r.raw_revenue) / 100).toFixed(2),
+      total_net_usd:     ((r.slab_net     + r.raw_net)     / 100).toFixed(2),
+      total_cost_usd:    ((r.slab_cost    + r.raw_cost)    / 100).toFixed(2),
+      total_profit_usd:  (((r.slab_net + r.raw_net) - (r.slab_cost + r.raw_cost)) / 100).toFixed(2),
+    });
+
+    if (day != null) {
+      const found = report.days.find(d => d.day_number === day);
+      if (!found) {
+        return {
+          success: false,
+          error: `Day ${day} not found for this show. Available: ${report.days.map(d => `Day ${d.day_number} (${d.show_date})`).join(', ')}`,
+        };
+      }
+      return {
+        scope: `day_${day}`,
+        show_date: found.show_date,
+        ...fmt(found),
+      };
+    }
+
+    // No day specified — return overall and surface the days list so the
+    // agent can prompt the user to drill in if it's multi-day.
+    return {
+      scope: 'overall',
+      is_multi_day: isMultiDay,
+      ...(isMultiDay && {
+        days_available: report.days.map(d => ({
+          day_number: d.day_number,
+          show_date:  d.show_date,
+        })),
+        note: 'Multi-day show — ask the user whether they want the overall totals returned here or a specific day (Day 1, Day 2, …). Call again with `day=N` to get a per-day breakdown.',
+      }),
+      ...fmt(report),
+    };
+  }
+
+  if (toolName === 'list_card_shows') {
+    const { search, limit: rawLimit } = toolInput as { search?: string; limit?: number };
+    const limit = Math.min(rawLimit ?? 20, 100);
+    let q = db.selectFrom('card_shows')
+      .select(['id', 'name', 'show_date', 'end_date', 'location'])
+      .where('user_id', '=', userId);
+    if (search) q = q.where('name', 'ilike', `%${search}%`);
+    const rows = await q
+      .orderBy('show_date', 'desc')
+      .limit(limit)
+      .execute();
+    return {
+      count: rows.length,
+      shows: rows.map(r => ({
+        id:       r.id,
+        name:     r.name,
+        location: r.location ?? null,
+        show_date: r.show_date instanceof Date ? r.show_date.toISOString().slice(0, 10) : r.show_date,
+        end_date:  r.end_date  ? (r.end_date  instanceof Date ? r.end_date.toISOString().slice(0, 10)  : r.end_date) : null,
+      })),
+    };
+  }
+
+  if (toolName === 'update_sale') {
+    const { sale_id, sale_price, platform_fees, shipping_cost, platform, sold_at, unique_id, order_details_link, card_show_id, currency } =
+      toolInput as { sale_id: string; sale_price?: number; platform_fees?: number; shipping_cost?: number; platform?: string; sold_at?: string; unique_id?: string; order_details_link?: string; card_show_id?: string; currency?: string };
+    const updated = await updateSale(userId, sale_id, {
+      ...(sale_price       !== undefined && { sale_price:       Math.round(sale_price * 100) }),
+      ...(platform_fees    !== undefined && { platform_fees:    Math.round(platform_fees * 100) }),
+      ...(shipping_cost    !== undefined && { shipping_cost:    Math.round(shipping_cost * 100) }),
+      ...(platform         !== undefined && { platform:         platform as any }),
+      ...(sold_at          !== undefined && { sold_at:          new Date(sold_at) }),
+      ...(unique_id        !== undefined && { unique_id }),
+      ...(order_details_link !== undefined && { order_details_link }),
+      ...(card_show_id     !== undefined && { card_show_id }),
+      ...(currency         !== undefined && { currency }),
+    });
+    return {
+      success: true,
+      sale_id,
+      sale_price_usd:   ((updated?.sale_price ?? 0)   / 100).toFixed(2),
+      net_proceeds_usd: ((updated?.net_proceeds ?? 0) / 100).toFixed(2),
+    };
+  }
+
+  if (toolName === 'delete_sale') {
+    const { sale_id } = toolInput as { sale_id: string };
+    await deleteSale(userId, sale_id);
+    return { success: true, sale_id, restored_to_inventory: true };
   }
 
   if (toolName === 'record_sale') {

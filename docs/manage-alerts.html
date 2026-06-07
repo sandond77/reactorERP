@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Alerts — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Alerts</h1>
+    <p class="lede">Automated reminders + triggered notifications. Tell Reactor what events you want to know about; it surfaces them when they happen.</p>
+
+    <h2>Alert types</h2>
+    <ul>
+      <li><strong>Aging inventory</strong> — a card has been unsold for N days.</li>
+      <li><strong>Grading return overdue</strong> — a submission has been shipped longer than its expected return.</li>
+      <li><strong>Listed but not sold</strong> — a listing has been active for N days without a sale.</li>
+      <li><strong>Awaiting intake</strong> — bulk orders received but never inspected.</li>
+      <li><strong>Custom thresholds</strong> — set by you (e.g. "alert if any single card has been on show table 90+ days").</li>
+    </ul>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>+ New Alert</strong> — pick a type, set a threshold, give it a name.</li>
+      <li><strong>Click a row</strong> — edit thresholds or disable.</li>
+      <li><strong>Snooze</strong> — silence an alert for N days without disabling.</li>
+    </ul>
+
+    <h2>Where alerts surface</h2>
+    <ul>
+      <li><strong>Dashboard banner</strong> — active alerts show at the top of the dashboard.</li>
+      <li><strong>Email</strong> (optional) — daily digest of new alerts if configured.</li>
+      <li><strong>AI Agent</strong> can read active alerts and report on them: <em>"what's overdue?"</em></li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

@@ -154,6 +154,7 @@ export interface CardInstancesTable {
   image_back_url: string | null;
   purchased_at: Date | null;
   raw_purchase_id: string | null;
+  legacy_source_catalog_id: string | null;
   trade_id: string | null;
   location_id: string | null;
   decision: string | null;
@@ -189,6 +190,7 @@ export interface SlabDetailsTable {
   user_id: string;
   source_raw_instance_id: string | null;
   grading_submission_id: string | null;
+  grading_batch_id: string | null;
   company: GradingCompany;
   cert_number: number | null;
   grade: number | null;

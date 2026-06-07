@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Parts — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Parts</h1>
+    <p class="lede">The card catalog. Every distinct card the system knows about, identified by a SKU (Part #).</p>
+
+    <h2>What you see</h2>
+    <p>One row per <code>card_catalog</code> entry. Columns: SKU (Part #), Card name, Set name, Card number, Game, Language, Image URL.</p>
+    <p>The catalog is <strong>shared globally</strong> across users — it's not user-scoped. New cards get added when imports or manual additions encounter a name + set combo not already in the catalog.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>Search</strong> — by SKU, card name, or set.</li>
+      <li><strong>Click a row</strong> — edit the canonical card name, set name, card number, image. Card_instances that reference this catalog row pick up the changes (display only — the override fields on individual cards stay).</li>
+      <li><strong>Add image</strong> — upload a card scan that becomes the default thumbnail across the app.</li>
+    </ul>
+
+    <h2>SKU naming convention</h2>
+    <p>Reactor's SKUs follow <code>GAME-LANG-SETCODE-NUMBER</code>, e.g. <code>PKMN-JP-SV11B-088</code>. The catalog tries to derive SKU from inputs; you can override.</p>
+
+    <h2>Tips</h2>
+    <ul>
+      <li><strong>Don't edit display names lightly</strong> — many existing card_instances reference this row. The display name change propagates everywhere.</li>
+      <li>If a card has a wrong set assignment, fix it in the catalog and all dependent card_instances will reflect the corrected set.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

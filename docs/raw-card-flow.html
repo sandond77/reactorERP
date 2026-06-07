@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Raw Card Flow — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <h1>Raw Card Flow</h1>
+    <p class="lede">The raw card lifecycle from purchase to sale (or grading). The longest, branchiest flow in the app.</p>
+
+    <div class="callout">
+      <p><strong>Shortcut: skip purchase + inspection.</strong> If a card is already in your hands and you don't need to track its lot history, add it directly from <strong>Raw Cards → Raw Overall → + Add Card</strong>. Set condition + cost + decision in one shot; a card_instance is created at status <code>raw_for_sale</code> (or <code>inspected</code> if no decision yet) with no parent raw_purchase. Useful for cards from trades, gifts, or one-off pickups.</p>
+    </div>
+
+    <h2>1. Create the purchase</h2>
+    <p><strong>Raw Cards → Add Raw Purchase.</strong> Choose the purchase type:</p>
+    <ul>
+      <li><code>raw</code> — a single named card. Each raw order = 1 card.</li>
+      <li><code>bulk</code> — a lot of N cards bought together. Quantity matters; individual identification happens during inspection.</li>
+    </ul>
+    <p>When status flips to <strong>received</strong>, the system creates a matching <code>card_instances</code> row in <code>purchased_raw</code> status. <code>raw</code> orders = one row at qty=1; <code>bulk</code> = one row at qty=N to be split during inspection.</p>
+    <div class="callout">
+      <p>CSV imports follow the same logic. A <code>type=raw</code> imported row auto-creates a card_instance; bulk does not (it stays a lot pending intake).</p>
+    </div>
+
+    <h2>2. Inspect</h2>
+    <p><strong>Raw Cards → Inspection Panel.</strong> Pick a lot. For each split:</p>
+    <ul>
+      <li>Set <strong>condition</strong> (NM, NM-, LP, LP+, MP, MP-, HP, DMG).</li>
+      <li>Set <strong>decision</strong>: <strong>Sell Raw</strong> or <strong>Submit to Grading</strong>.</li>
+      <li>Optional: condition notes, image, location.</li>
+    </ul>
+    <p>Each (condition + decision) becomes its own <code>card_instances</code> row. The bulk row's quantity goes down as you split. Cost is allocated proportionally.</p>
+
+    <h2>3a. Sell raw</h2>
+    <p>If you decided <strong>Sell Raw</strong>, the card is now in <code>raw_for_sale</code> status. You can:</p>
+    <ul>
+      <li><strong>List it</strong> on eBay (Listings → Add Listing).</li>
+      <li><strong>Take it to a card show</strong> (Card Shows → Add to Card Show).</li>
+      <li><strong>Record a sale</strong> directly (Sales → Record Sale).</li>
+    </ul>
+    <p>Selling moves status to <code>sold</code> and writes a <code>sales</code> row with <code>total_cost_basis</code> snapshotted from the card's <code>purchase_cost</code>.</p>
+
+    <h2>3b. Submit to grading</h2>
+    <p>If you decided <strong>Submit to Grading</strong>, see <a href="grading-submission.html">Grading Submission</a> for the batch flow.</p>
+
+    <h2>4. Track the outcome</h2>
+    <p><strong>Raw Cards → Raw Overall</strong> shows every raw lot with its sub-row breakdown: split routing, sold counts, revenue, and what's still in flight. Graded children don't appear here — they live in <strong>Graded/Slabs</strong> as their own inventory.</p>
+
+    <h2>Common edge cases</h2>
+    <ul>
+      <li><strong>Bulk order received but never intaked</strong>: the <strong>Awaiting Intake</strong> row on the Dashboard tells you how many cards from received bulk lots haven't been split yet.</li>
+      <li><strong>Wrong condition assigned</strong>: edit the row in Raw Overall. Cost basis stays correct since condition isn't a cost driver.</li>
+      <li><strong>Card lost or damaged</strong>: set status to <code>lost_damaged</code>. Terminal — cost is written off and excluded from P&amp;L.</li>
+      <li><strong>Wrong purchase cost on the lot</strong>: edit the parent raw_purchase. Child <code>card_instances</code> do NOT auto-update (would invalidate sold rows). Adjust manually if needed.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

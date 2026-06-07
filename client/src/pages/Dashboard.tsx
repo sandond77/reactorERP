@@ -65,6 +65,7 @@ interface RawOrders {
   received: number;
   canceled: number;
   cards_received: number;
+  awaiting_intake: number;
 }
 interface RawPipeline {
   purchased_raw: number; inspected: number; raw_for_sale: number; grading_submitted: number;
@@ -742,7 +743,7 @@ function RawCardsTab() {
   if (isLoading || !data?.inventory) return <div className="text-zinc-500 text-sm py-8">Loading…</div>;
 
   const { inventory: INV, pipeline: PL, sales: S, turnover: T } = data;
-  const ORD = data.orders ?? { total: 0, pending: 0, received: 0, canceled: 0, cards_received: 0 };
+  const ORD = data.orders ?? { total: 0, pending: 0, received: 0, canceled: 0, cards_received: 0, awaiting_intake: 0 };
 
   const TYPE_COLORS: Record<string, string> = { raw: C.indigo, bulk: C.amber };
 
@@ -891,6 +892,12 @@ function RawCardsTab() {
               <span className="text-zinc-500">Cards received</span>
               <span className="text-zinc-300 font-medium">{ORD.cards_received}</span>
             </div>
+            {ORD.awaiting_intake > 0 && (
+              <div className="flex justify-between text-xs mt-0.5">
+                <span className="text-amber-400/80">Awaiting intake</span>
+                <span className="text-amber-400 font-medium tabular-nums">{ORD.awaiting_intake}</span>
+              </div>
+            )}
             {ORD.canceled > 0 && (
               <div className="flex justify-between text-xs mt-0.5">
                 <span className="text-zinc-500">Canceled</span>

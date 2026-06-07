@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Field Reference — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <h1>Field Reference</h1>
+    <p class="lede">Every CSV import target field, grouped by category. Same content as the in-app Field Reference sidebar — here for offline reading and search.</p>
+
+    <h2>Card</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>card_name</td><td>Full card name as printed. Required for graded + raw imports. For PSA labels, paste the entire label.</td></tr>
+        <tr><td>set_name</td><td>Set name. If a known set-code substring is present, language + set code are auto-resolved.</td></tr>
+        <tr><td>card_number</td><td>Card number within the set (e.g. "025/108"). Optional but improves catalog matching.</td></tr>
+        <tr><td>card_game</td><td>Defaults to "pokemon". Accepts other game names if you have multi-game inventory.</td></tr>
+        <tr><td>language</td><td>EN or JP. If omitted, inferred from card name keywords.</td></tr>
+        <tr><td>condition</td><td>NM / NM- / LP / LP+ / MP / HP / DMG. Free text accepted; normalized server-side.</td></tr>
+        <tr><td>notes</td><td>Free-text notes preserved on the card_instance.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Graded</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>cert_number</td><td>PSA / BGS / CGC certificate number. Required for graded imports.</td></tr>
+        <tr><td>grade</td><td>Numeric grade (e.g. 10, 9.5). Range 0–10.</td></tr>
+        <tr><td>company</td><td>PSA / BGS / CGC / ARS / TAG / ACE. Defaults to PSA if missing.</td></tr>
+        <tr><td>grading_cost</td><td>What you paid to grade the card. Enter as dollars.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Purchase</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>purchase_cost</td><td>Per-card raw cost. Use for graded imports where each row is one card.</td></tr>
+        <tr><td>cost</td><td>Total cost of the order. Use for raw purchase imports (sums per row × quantity).</td></tr>
+        <tr><td>quantity</td><td>Number of cards in this raw/bulk order. Defaults to 1.</td></tr>
+        <tr><td>currency</td><td>USD or JPY. Defaults to USD.</td></tr>
+        <tr><td>purchased_at</td><td>Date the order was placed. ISO or common US date formats parsed.</td></tr>
+        <tr><td>order_number</td><td>Order # from the marketplace (eBay, TCGPlayer, etc).</td></tr>
+        <tr><td>source</td><td>Where the order came from (eBay, TCGPlayer, Card Show, etc).</td></tr>
+        <tr><td>type</td><td>For raw purchases: "raw" (single card) or "bulk" (lot of N). Defaults to raw.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Sale</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>sold_at</td><td>Date the sale completed. ISO or common US date formats parsed.</td></tr>
+        <tr><td>sale_price</td><td>Gross sale price before fees. Required for bulk sale imports.</td></tr>
+        <tr><td>after_fees</td><td>Net proceeds after platform + shipping fees. If provided, used instead of computing.</td></tr>
+        <tr><td>net</td><td>Alias for after_fees.</td></tr>
+        <tr><td>platform_fees</td><td>Sum of platform / final-value fees. Defaults to 0.</td></tr>
+        <tr><td>shipping_cost</td><td>Shipping you paid. Defaults to 0.</td></tr>
+        <tr><td>platform</td><td>eBay / TCGPlayer / Card Show / Facebook / Instagram / Local / Other.</td></tr>
+        <tr><td>unique_id</td><td>External order/transaction ID for dedup (eBay order #, etc).</td></tr>
+        <tr><td>listing_url</td><td>eBay listing URL (or order details URL) tied to this row.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Listing</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>is_listed</td><td>Boolean. Yes/No, true/false, 1/0.</td></tr>
+        <tr><td>list_price</td><td>Active list price for the listing.</td></tr>
+        <tr><td>listed_at</td><td>When the listing went live.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Expense</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>description</td><td>What the expense was for. Required for expense imports.</td></tr>
+        <tr><td>amount</td><td>Expense amount. Required for expense imports.</td></tr>
+        <tr><td>date</td><td>Expense date. Required for expense imports.</td></tr>
+        <tr><td>link</td><td>Receipt / reference URL.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Bulk Sale</h2>
+    <table>
+      <thead><tr><th>Field</th><th>Description</th></tr></thead>
+      <tbody>
+        <tr><td>identifier</td><td>Cert # (graded) or purchase ID like RP-YYYY-NNN (raw). Used to match the row to existing inventory.</td></tr>
+      </tbody>
+    </table>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

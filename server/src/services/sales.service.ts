@@ -167,7 +167,7 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
 
 export async function recordBulkSale(
   userId: string,
-  items: Array<{ card_instance_id: string; listing_id?: string; sale_price: number; platform_fees?: number }>,
+  items: Array<{ card_instance_id: string; listing_id?: string; sale_price: number; platform_fees?: number; quantity?: number }>,
   shared: {
     platform: ListingPlatform;
     card_show_id?: string;
@@ -178,6 +178,37 @@ export async function recordBulkSale(
     unique_id_2?: string;
   }
 ) {
+  // Pre-flight: surface every already-sold card up front instead of failing
+  // mid-loop and leaving the batch partially committed. Tells the user
+  // exactly which cards to remove from the cart on retry.
+  const sourceCards = await db
+    .selectFrom('card_instances as ci')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .select([
+      'ci.id',
+      'ci.status',
+      'ci.is_personal_collection',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      'sd.cert_number',
+    ])
+    .where('ci.user_id', '=', userId)
+    .where('ci.id', 'in', items.map((i) => i.card_instance_id))
+    .execute();
+  const byId = new Map(sourceCards.map((c) => [c.id, c]));
+  const blocked: string[] = [];
+  for (const it of items) {
+    const c = byId.get(it.card_instance_id);
+    if (!c) { blocked.push(`Unknown card (${it.card_instance_id.slice(0, 8)}…)`); continue; }
+    if (c.status === 'sold') {
+      const label = c.card_name ?? (c.cert_number ? `cert #${c.cert_number}` : `card ${it.card_instance_id.slice(0, 8)}…`);
+      blocked.push(label);
+    }
+  }
+  if (blocked.length) {
+    throw new AppError(409, `${blocked.length} card${blocked.length === 1 ? '' : 's'} already sold — remove from cart: ${blocked.slice(0, 5).join(', ')}${blocked.length > 5 ? '…' : ''}`);
+  }
+
   const sales = [];
   for (const item of items) {
     const sale = await recordSale(userId, {
@@ -192,6 +223,7 @@ export async function recordBulkSale(
       currency: shared.currency,
       sold_at: shared.sold_at,
       unique_id_2: shared.unique_id_2,
+      quantity: item.quantity,
     });
     sales.push(sale);
   }
@@ -205,6 +237,7 @@ const SALES_SORT_COLS: Record<string, string> = {
   net_proceeds: 's.net_proceeds',
   profit: `(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`,
   sold_at: 's.sold_at',
+  quantity: 'ci.quantity',
 };
 
 export async function getSaleFilterOptions(userId: string) {
@@ -218,7 +251,7 @@ export async function getSaleFilterOptions(userId: string) {
 
 export async function listSales(
   userId: string,
-  filters: { platforms?: string[]; search?: string; from?: Date; to?: Date; cardType?: 'all' | 'graded' | 'raw'; soldDates?: string[] },
+  filters: { platforms?: string[]; cardShowIds?: string[]; search?: string; from?: Date; to?: Date; cardType?: 'all' | 'graded' | 'raw'; soldDates?: string[] },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
@@ -234,6 +267,11 @@ export async function listSales(
       filters.platforms!.length === 0
         ? qb.where(sql<boolean>`1=0` as any)
         : qb.where('s.platform', 'in', filters.platforms! as any)
+    )
+    .$if(filters.cardShowIds !== undefined, (qb) =>
+      filters.cardShowIds!.length === 0
+        ? qb.where(sql<boolean>`1=0` as any)
+        : qb.where('s.card_show_id', 'in', filters.cardShowIds! as any)
     )
     .$if(!!filters.search, (qb) => {
       const q = `%${filters.search}%`;
@@ -283,6 +321,8 @@ export async function listSales(
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       'ci.card_game',
+      'ci.condition',
+      'ci.quantity',
       'sd.grade',
       'sd.grade_label',
       'sd.company as grading_company',
@@ -293,6 +333,18 @@ export async function listSales(
       // card, not the eBay list price. Show whichever matches the platform.
       sql<number | null>`CASE WHEN s.platform = 'card_show' THEN ci.card_show_price ELSE l.list_price END`.as('listed_price'),
       sql<number>`(s.net_proceeds - COALESCE(s.total_cost_basis, 0))`.as('profit'),
+      // Remaining quantity in the same lot (raw_purchase + condition + catalog)
+      // that the Edit Sale modal can grow into. Used to enforce the invariant
+      // that the lot's inspection-set total stays constant on qty edits.
+      sql<number>`COALESCE((
+        SELECT SUM(ci2.quantity)::integer FROM card_instances ci2
+        WHERE ci2.user_id = ci.user_id
+          AND ci2.id <> ci.id
+          AND ci2.status <> 'sold'
+          AND ci2.raw_purchase_id IS NOT DISTINCT FROM ci.raw_purchase_id
+          AND ci2.condition IS NOT DISTINCT FROM ci.condition
+          AND ci2.catalog_id IS NOT DISTINCT FROM ci.catalog_id
+      ), 0)`.as('lot_available_qty'),
     ])
     .orderBy(sql.raw(SALES_SORT_COLS[sortBy ?? ''] ?? 's.sold_at'), sortDir ?? 'desc')
     .limit(pagination.limit)
@@ -317,6 +369,81 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
     ...(input.unique_id_2 !== undefined && { unique_id_2: input.unique_id_2 }),
     ...(input.order_details_link !== undefined && { order_details_link: input.order_details_link }),
   }).where('id', '=', saleId).where('user_id', '=', userId).execute();
+
+  // Quantity edit: rebalance against the source sibling in the same lot so
+  // the lot's original for-sale total (set at inspection) stays invariant.
+  // Delta is applied to the linked sold sibling AND its source counterpart;
+  // increases beyond what the source still has are rejected.
+  if (input.quantity !== undefined) {
+    if (input.quantity < 1) throw new AppError(400, 'Sale quantity must be at least 1');
+    const sold = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', existing.card_instance_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!sold) throw new AppError(404, 'Sale card not found');
+    const delta = input.quantity - sold.quantity;
+    if (delta !== 0) {
+      // Find a sibling source row in the same lot+condition+catalog that we
+      // can take from (delta>0) or return to (delta<0).
+      const source = await db
+        .selectFrom('card_instances')
+        .selectAll()
+        .where('user_id', '=', userId)
+        .where('id', '!=', sold.id)
+        .where('status', '!=', 'sold')
+        .$if(sold.raw_purchase_id != null, (qb) => qb.where('raw_purchase_id', '=', sold.raw_purchase_id!))
+        .$if(sold.raw_purchase_id == null, (qb) => qb.where('raw_purchase_id', 'is', null))
+        .$if(sold.catalog_id != null, (qb) => qb.where('catalog_id', '=', sold.catalog_id!))
+        .$if(sold.catalog_id == null, (qb) => qb.where('catalog_id', 'is', null))
+        .$if(sold.condition != null, (qb) => qb.where('condition', '=', sold.condition!))
+        .$if(sold.condition == null, (qb) => qb.where('condition', 'is', null))
+        .executeTakeFirst();
+      if (delta > 0) {
+        if (!source) throw new AppError(409, `No remaining inventory in this lot to draw ${delta} more from`);
+        if (source.quantity < delta) throw new AppError(409, `Only ${source.quantity} remaining in this lot; can't increase sale by ${delta}`);
+        await db.updateTable('card_instances').set({ quantity: source.quantity - delta }).where('id', '=', source.id).execute();
+        await db.updateTable('card_instances').set({ quantity: input.quantity }).where('id', '=', sold.id).execute();
+      } else {
+        // delta < 0 — return the difference to the source, or recreate one
+        // if the whole lot had been sold off.
+        const returnQty = -delta;
+        if (source) {
+          await db.updateTable('card_instances').set({ quantity: source.quantity + returnQty }).where('id', '=', source.id).execute();
+        } else {
+          await db.insertInto('card_instances').values({
+            user_id: userId,
+            catalog_id: sold.catalog_id,
+            raw_purchase_id: sold.raw_purchase_id,
+            purchase_type: sold.purchase_type,
+            card_game: sold.card_game,
+            status: 'raw_for_sale',
+            decision: sold.decision,
+            condition: sold.condition,
+            quantity: returnQty,
+            purchase_cost: sold.purchase_cost,
+            currency: sold.currency,
+            language: sold.language,
+            card_name_override: sold.card_name_override,
+            set_name_override: sold.set_name_override,
+            card_number_override: sold.card_number_override,
+            location_id: null,
+            notes: sold.notes,
+            purchased_at: sold.purchased_at,
+            is_personal_collection: sold.is_personal_collection,
+          } as any).execute();
+        }
+        await db.updateTable('card_instances').set({ quantity: input.quantity }).where('id', '=', sold.id).execute();
+      }
+    }
+    // computeCostBasis multiplies purchase_cost × quantity (+grading_cost),
+    // so after the qty change we recompute and persist the new basis on the
+    // sale row. Without this, net stays anchored to the pre-edit qty and
+    // the displayed profit goes wildly negative on a downward edit.
+    const newBasis = await computeCostBasis(existing.card_instance_id);
+    await db.updateTable('sales').set({ total_cost_basis: newBasis }).where('id', '=', saleId).where('user_id', '=', userId).execute();
+  }
 
   const updated = await getSaleById(userId, saleId);
   await logAudit(userId, 'sales', saleId, 'updated', existing, updated);

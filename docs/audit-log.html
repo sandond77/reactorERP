@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Audit Log — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Audit Log</h1>
+    <p class="lede">Every state-changing event in the system, in chronological order. Created, updated, deleted, transformed.</p>
+
+    <h2>What you see</h2>
+    <p>One row per <code>audit_log</code> entry. Columns: Timestamp, Actor (user or agent), Entity type (card_instance, sales, listings, etc), Entity ID, Action (created / updated / deleted / restored), Before / After (diff).</p>
+    <p>Click any row to see the full before/after JSON of the changed record.</p>
+
+    <h2>Filters</h2>
+    <ul>
+      <li><strong>Entity type</strong> — card_instances, sales, listings, raw_purchases, grading_submissions, etc.</li>
+      <li><strong>Action</strong> — created, updated, deleted, restored.</li>
+      <li><strong>Date range</strong> — when the change happened.</li>
+      <li><strong>Actor</strong> — user or AI agent.</li>
+      <li><strong>Entity ID</strong> — search by specific card or sale ID.</li>
+    </ul>
+
+    <h2>Why it matters</h2>
+    <ul>
+      <li><strong>Reverts</strong> — deleting a grading batch restores raw cards from this log. Same for sale deletes.</li>
+      <li><strong>Investigation</strong> — when a number looks wrong, the audit log shows when it changed and what it changed to.</li>
+      <li><strong>Trust</strong> — no soft-delete fields; the log is the source of truth for "did this card ever exist?"</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>Audit entries aren't editable. If a log shows something incorrect, the only fix is to write a new state-changing event.</li>
+      <li>The agent's actions are tagged with actor = AI so you can distinguish them from your own.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

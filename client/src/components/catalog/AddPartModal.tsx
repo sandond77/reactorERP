@@ -8,7 +8,7 @@ import { SetCombobox, useMergedSets } from './SetCombobox';
 const ADD_GAME_SENTINEL = '__add_new_game__';
 
 interface CardGame {
-  id: string;
+  id: string | null;
   name: string;
   abbreviation: string | null;
 }
@@ -49,6 +49,7 @@ interface Props {
     set_name?: string;
     card_number?: string;
     language?: string;
+    unnumbered?: boolean;
   };
 }
 
@@ -94,12 +95,15 @@ const LANGUAGES = [
 
 export function AddPartModal({ onClose, onCreated, prefill }: Props) {
   const queryClient = useQueryClient();
-  const { data: gamesData } = useQuery<{ data: CardGame[] }>({
+  // Shares the ['card-games'] query key with the catalog page — both MUST hit
+  // the same endpoint. /sets/games returns a bare array; /card-games returns
+  // { data: [...] }. Mixing them under one key poisons the cache and crashes
+  // whichever consumer reads the wrong shape.
+  const { data: games = [] } = useQuery<CardGame[]>({
     queryKey: ['card-games'],
-    queryFn: () => api.get('/card-games').then(r => r.data),
+    queryFn: () => api.get('/sets/games').then(r => r.data),
     staleTime: 5 * 60 * 1000,
   });
-  const games = gamesData?.data ?? [];
   const gamePrefixes = new Map(games.map(g => [g.name.toLowerCase(), g.abbreviation || fallbackPrefix(g.name)]));
   const [form, setForm] = useState({
     game:        'pokemon',
@@ -112,7 +116,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     rarity:      '',
     variant:     '',
   });
-  const [unnumbered, setUnnumbered] = useState(false);
+  const [unnumbered, setUnnumbered] = useState(prefill?.unnumbered ?? false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addingGame, setAddingGame] = useState(false);
@@ -129,7 +133,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     if (games.length === 0) return;
     setForm((prev) => ({
       ...prev,
-      sku: autoSku(prev.game, prev.language, prev.set_code, prev.card_number, unnumbered),
+      sku: autoSku(prev.game, prev.language, prev.set_code, prev.card_number, prev.card_name, unnumbered),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [games.length]);
@@ -156,18 +160,24 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     }
   }
 
-  function autoSku(game: string, lang: string, setCode: string, cardNum: string, isUnnumbered: boolean) {
-    if (!setCode && !cardNum) return '';
+  function autoSku(game: string, lang: string, setCode: string, cardNum: string, cardName: string, isUnnumbered: boolean) {
     const prefix = gamePrefixes.get(game.toLowerCase()) ?? fallbackPrefix(game);
-    if (isUnnumbered) return '';
-    return [prefix, lang.toUpperCase(), setCode.toUpperCase(), cardNum.toUpperCase()].filter(Boolean).join('-');
+    // When unnumbered, substitute a normalized card name for the card-number
+    // segment so each unnumbered card under the same set still gets a unique,
+    // addressable SKU (e.g. PKMN-JP-LEGACY-LEGACYCARDS). Strips non-ASCII-alnum
+    // and uppercases; truncated to keep the SKU readable. Falls back gracefully
+    // to just prefix-lang-setcode if the name doesn't yield any ASCII chars.
+    const nameKey = (cardName ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
+    const tail = isUnnumbered ? nameKey : cardNum.toUpperCase();
+    if (!setCode && !tail) return '';
+    return [prefix, lang.toUpperCase(), setCode.toUpperCase(), tail].filter(Boolean).join('-');
   }
 
   const field = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const val = e.target.value;
     setForm(prev => {
       const next = { ...prev, [key]: val };
-      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
+      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
       return next;
     });
   };
@@ -245,7 +255,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
               >
                 {games.length === 0
                   ? <option value="pokemon">Pokémon</option>
-                  : games.map(g => <option key={g.id} value={g.name}>{gameLabel(g.name)}</option>)}
+                  : games.map(g => <option key={g.id ?? g.name} value={g.name}>{gameLabel(g.name)}</option>)}
                 <option value={ADD_GAME_SENTINEL}>+ Add new game…</option>
               </select>
               {addingGame && (
@@ -280,11 +290,11 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                       disabled={!newGameName.trim() || !newGameAbbrev.trim()}
                       onClick={async () => {
                         try {
-                          const res = await api.post('/card-games', {
+                          const res = await api.post('/sets/games', {
                             name: newGameName.trim(),
                             abbreviation: newGameAbbrev.trim(),
                           });
-                          const created = res.data?.data;
+                          const created = res.data;
                           if (!created?.name) throw new Error('No game returned');
                           // Wait for the refetch to complete BEFORE we update
                           // form.game, so the dropdown has an <option> for
@@ -353,7 +363,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                 onTyped={(name) => setForm((prev) => ({ ...prev, set_name: name }))}
                 onSelect={(entry) => setForm((prev) => {
                   const next = { ...prev, set_name: entry.name, set_code: entry.code };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
                   return next;
                 })}
                 onAddNew={handleAddNewSet}
@@ -370,12 +380,12 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                 typedSetCode={form.set_code}
                 onTyped={(code) => setForm((prev) => {
                   const next = { ...prev, set_code: code };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
                   return next;
                 })}
                 onSelect={(entry) => setForm((prev) => {
                   const next = { ...prev, set_code: entry.code, set_name: entry.name };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
                   return next;
                 })}
                 onAddNew={handleAddNewSet}
@@ -398,7 +408,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                     setUnnumbered(checked);
                     setForm((prev) => {
                       const next = checked ? { ...prev, card_number: '' } : prev;
-                      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, checked);
+                      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, checked);
                       return next;
                     });
                   }}

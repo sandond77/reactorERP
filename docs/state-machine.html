@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>State Machine — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <h1>State Machine</h1>
+    <p class="lede">Every card row has a <code>status</code> that moves through the lifecycle. State transitions are explicit — no implicit movement between stages.</p>
+
+    <h2>The flow</h2>
+    <pre><code>purchased_raw → inspected → grading_submitted → graded → sold
+                         → raw_for_sale → sold
+                                       → lost_damaged (terminal)</code></pre>
+
+    <h2>State definitions</h2>
+    <ul>
+      <li><strong>purchased_raw</strong>: just intaked, hasn't been inspected.</li>
+      <li><strong>inspected</strong>: condition assigned, awaiting routing decision (sell raw or submit to grading).</li>
+      <li><strong>raw_for_sale</strong>: routed to sell raw — listed or unlisted.</li>
+      <li><strong>grading_submitted</strong>: routed to a grading company, awaiting return. Counts as in-flight inventory.</li>
+      <li><strong>graded</strong>: came back from grading, now a slab. Has a <code>slab_details</code> row joined.</li>
+      <li><strong>sold</strong>: revenue recorded. The matching <code>sales</code> row has the snapshotted cost basis.</li>
+      <li><strong>lost_damaged</strong>: terminal write-off. Excluded from P&amp;L going forward.</li>
+    </ul>
+
+    <h2>Lot traceability</h2>
+    <p>Every card traces back to a <code>purchase_id</code> (format: <code>RP-YYYY-NNN</code>). This is the lot-level key. A raw bulk lot's <code>purchase_id</code> follows that card through inspection, grading, and final sale — including onto the slab's cost basis as <code>raw_cost</code>.</p>
+    <p>So when you ask "what did I pay for <em>this PSA 10 cert</em>?", the answer is:</p>
+    <pre><code>total_cost_basis = raw_cost (from lot RP-2025-B1) + grading_cost (from submission #...)</code></pre>
+
+    <p>Next: <a href="raw-card-flow.html">Raw Card Flow</a></p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

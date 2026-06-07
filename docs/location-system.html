@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Location System — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Location System</h1>
+    <p class="lede">How physical storage maps to the data model. Hierarchical, typed, and able to flag card show inventory automatically.</p>
+
+    <h2>The model</h2>
+    <p>A location is a tree node with these properties:</p>
+    <ul>
+      <li><strong>Name</strong> — human-friendly label ("Slab Binder A", "Office Shelf 2", "Card Show Table").</li>
+      <li><strong>Type</strong> — <code>graded</code>, <code>raw</code>, or <code>both</code>. Restricts which cards can be assigned. The slab modal only offers <code>graded</code> + <code>both</code> locations; the raw modal only offers <code>raw</code> + <code>both</code>.</li>
+      <li><strong>Parent</strong> — optional. Makes the location a child of another (e.g. "Office Shelf 2" parented under "Office").</li>
+      <li><strong>is_card_show</strong> — boolean. Locations flagged here behave specially (see below).</li>
+    </ul>
+    <p>Card_instances reference a location via <code>location_id</code>. The slab/raw detail modals expose the Location dropdown for assignment.</p>
+
+    <h2>The Card Show side-effect</h2>
+    <p>When you assign a card to a location with <code>is_card_show = true</code>, the card's own <code>is_card_show</code> flag flips to true and <code>card_show_added_at</code> is stamped. This is how cards "go on the show table" automatically — you just move them to the show location.</p>
+    <p>Conversely, removing a card from a card-show location (or assigning it elsewhere) clears the on-show flag.</p>
+    <p>This means you can structure your physical workflow as: "Move the binder to the Show location" → cards auto-flag for the show. Move it back → flag clears.</p>
+
+    <h2>Why typed locations matter</h2>
+    <ul>
+      <li><strong>Avoids misclicks</strong> — you can't accidentally assign a slab to a raw-only location.</li>
+      <li><strong>Surfaces structure</strong> — the dropdown only shows valid options for that card.</li>
+      <li><strong>Inventory audits</strong> — when reconciling a binder, you scope by location and only get the right card type.</li>
+    </ul>
+
+    <h2>Hierarchies in practice</h2>
+    <pre><code>Office (both)
+├─ Slab Binder A (graded)
+├─ Slab Binder B (graded)
+├─ Raw Box 1 (raw)
+└─ Raw Box 2 (raw)
+
+Card Show Table (both, is_card_show=true)
+├─ Show Slab Display (graded)
+└─ Show Raw Bin (raw)</code></pre>
+    <p>Nesting is one level deep for assignment purposes — cards reference the leaf node directly, not the parent. The parent exists for grouping in the UI.</p>
+
+    <h2>Deletion + reassignment</h2>
+    <p>A location can only be deleted if no cards reference it. If you want to retire a location, first reassign all its cards (or leave them with <code>location_id = null</code>).</p>
+
+    <h2>Tips</h2>
+    <ul>
+      <li><strong>Don't over-nest</strong> — flat structures are easier to navigate. "Slab Binder A" works better than "Office → Cabinet → Top Shelf → Slab Binder A".</li>
+      <li><strong>One Card Show location per show</strong> isn't necessary — most users have one "Card Show Table" and use it for whatever show is current. The show identity is tracked separately on each sale.</li>
+      <li><strong>Manage UI</strong> — see <a href="manage-locations.html">Manage → Locations</a> for the page walkthrough.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

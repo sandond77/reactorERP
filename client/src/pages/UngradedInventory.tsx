@@ -30,6 +30,7 @@ export function UngradedInventory() {
     total:     colMinWidth('Total',     true, false),
     to_grade:  colMinWidth('To Grade',  true, false),
     submitted: colMinWidth('Submitted', true, false),
+    returned:  colMinWidth('Returned',  true, false),
     sold:      colMinWidth('Sold',      true, false),
   };
 
@@ -41,6 +42,7 @@ export function UngradedInventory() {
     total:     Math.max(MINS.total,      60),
     to_grade:  Math.max(MINS.to_grade,   70),
     submitted: Math.max(MINS.submitted,  80),
+    returned:  Math.max(MINS.returned,   75),
     sold:      Math.max(MINS.sold,       60),
   });
 
@@ -90,6 +92,7 @@ export function UngradedInventory() {
         else if (sortCol === 'total')     { av = a.total;              bv = b.total; }
         else if (sortCol === 'to_grade')  { av = a.to_grade_count;     bv = b.to_grade_count; }
         else if (sortCol === 'submitted') { av = a.grading_count;      bv = b.grading_count; }
+        else if (sortCol === 'returned')  { av = a.returned_count;     bv = b.returned_count; }
         else if (sortCol === 'sold')      { av = a.sold_count;         bv = b.sold_count; }
         const cmp = typeof av === 'string' ? av.localeCompare(bv as string) : (av as number) - (bv as number);
         return sortDir === 'asc' ? cmp : -cmp;
@@ -166,6 +169,7 @@ export function UngradedInventory() {
                 <ColHeader label="Total"     col="total"       {...sh} {...rz('total')}     minWidth={MINS.total}     align="right" />
                 <ColHeader label="To Grade"  col="to_grade"    {...sh} {...rz('to_grade')}  minWidth={MINS.to_grade}  align="right" />
                 <ColHeader label="Submitted" col="submitted"   {...sh} {...rz('submitted')} minWidth={MINS.submitted} align="right" />
+                <ColHeader label="Returned"  col="returned"    {...sh} {...rz('returned')}  minWidth={MINS.returned}  align="right" />
                 <ColHeader label="Sold"      col="sold"        {...sh} {...rz('sold')}      minWidth={MINS.sold}      align="right" />
               </tr>
             </thead>
@@ -187,6 +191,7 @@ export function UngradedInventory() {
                       <td className="px-3 py-2 text-right tabular-nums text-zinc-200 font-medium">{group.total}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{num(group.to_grade_count)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{num(group.grading_count)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{num(group.returned_count)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{num(group.sold_count)}</td>
                     </tr>
 

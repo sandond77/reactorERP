@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inventory Model — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <h1>Inventory Model</h1>
+    <p class="lede">Reactor distinguishes two fundamentally different ways inventory exists, and they behave differently throughout the system.</p>
+
+    <h2>Raw cards — quantity-based</h2>
+    <p>A raw card record is a <strong>lot</strong>: grouped by purchase + condition, with a quantity field. One row can represent 24 NM cards from the same source.</p>
+    <ul>
+      <li>Stored in <code>card_instances</code> with <code>purchase_type = 'raw'</code></li>
+      <li>Each row gets its own decision: <strong>sell raw</strong> or <strong>submit to grading</strong></li>
+      <li>Cost basis is allocated proportionally across splits</li>
+      <li>Multiple raw rows for the same Part # at different conditions stay separate — Reactor doesn't collapse them</li>
+    </ul>
+    <p>Raw purchases come in two shapes — <strong>raw</strong> (single named card) or <strong>bulk</strong> (lot of N). They behave differently at intake. See <a href="raw-card-flow.html">Raw Card Flow</a> for the full breakdown.</p>
+
+    <h2>Graded slabs — item-based</h2>
+    <p>A graded slab is <strong>one physical card</strong>: cert #, grade, grading company, cost basis. Always quantity = 1.</p>
+    <ul>
+      <li>Stored in <code>card_instances</code> with <code>purchase_type = 'pre_graded'</code> (or transformed from raw via grading)</li>
+      <li>Joined 1:1 to <code>slab_details</code> (cert number, grade, label, company)</li>
+      <li>Cost basis = raw cost (if it came from a raw lot) + grading cost</li>
+    </ul>
+    <p>Never flattened into a quantity-based model. A 5-card eBay set listing is 5 separate <code>card_instances</code> rows linked by a shared <code>listing_group_id</code>.</p>
+
+    <h2>What this means for users</h2>
+    <ul>
+      <li><strong>Don't try to track raw cards as individual items.</strong> They're lots until you split them during inspection.</li>
+      <li><strong>Don't try to track slabs as a quantity.</strong> Each cert is its own row, period.</li>
+      <li><strong>The state machine is enforced.</strong> The UI won't let you skip a state; the agent won't either.</li>
+      <li><strong>Cost basis is real money, not an estimate.</strong> If something doesn't reconcile, that's a bug, not a rounding error.</li>
+    </ul>
+
+    <p>Next: <a href="cost-basis.html">Cost Basis</a> → <a href="state-machine.html">State Machine</a></p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

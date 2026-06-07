@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Plus, ArrowLeft, Loader2, Trash2, CheckCircle, AlertCircle } from 'lucide-react';
+import { Plus, ArrowLeft, Loader2, Trash2, X, Sparkles } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
+import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
 import { formatCurrency, formatDate } from '../lib/utils';
 import toast from 'react-hot-toast';
 
@@ -47,8 +48,10 @@ interface BatchItem {
   set_name: string | null;
   card_number: string | null;
   condition: string | null;
-  quantity: number;           // qty submitted to this batch
-  available_quantity: number; // total qty on the card instance
+  quantity: number;                       // qty submitted to this batch
+  available_quantity: number;             // total qty on the card instance
+  legacy_source_catalog_id: string | null; // non-null when line was pulled via Legacy tab
+  legacy_stash_remaining: number;          // remaining grade-decision stash under the legacy bucket
   purchase_cost: number;
   currency: string;
   estimated_value: number | null;
@@ -61,6 +64,7 @@ interface BatchItem {
 interface BatchDetail extends Batch {
   items: BatchItem[];
   stats: {
+    totalQty: number;
     rawCost: number;
     gradingCost: number;
     totalCost: number;
@@ -168,6 +172,21 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
 
 function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => void }) {
   const [mode, setMode] = useState<'inventory' | 'legacy'>('inventory');
+  // Tracks how many rows the From Inventory tab has staged. Used to warn
+  // before switching to Legacy, since that swap unmounts the child and
+  // wipes its selection state.
+  const [pendingInventoryRows, setPendingInventoryRows] = useState(0);
+
+  function trySwitch(next: 'inventory' | 'legacy') {
+    if (next === mode) return;
+    if (next === 'legacy' && pendingInventoryRows > 0) {
+      const ok = window.confirm(
+        `Switching to Legacy will discard the ${pendingInventoryRows} card${pendingInventoryRows === 1 ? '' : 's'} staged on the From Inventory tab. Continue?`
+      );
+      if (!ok) return;
+    }
+    setMode(next);
+  }
 
   return (
     <div className="space-y-3">
@@ -176,167 +195,284 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
           { key: 'inventory', label: 'From Inventory' },
           { key: 'legacy',    label: 'Legacy (no lot)' },
         ] as const).map(t => (
-          <button key={t.key} type="button" onClick={() => setMode(t.key)}
+          <button key={t.key} type="button" onClick={() => trySwitch(t.key)}
             className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${mode === t.key ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
             {t.label}
           </button>
         ))}
       </div>
       {mode === 'inventory'
-        ? <AddCardFromInventory batchId={batchId} onClose={onClose} />
+        ? <AddCardFromInventory batchId={batchId} onClose={onClose} onPendingCountChange={setPendingInventoryRows} />
         : <AddCardLegacy        batchId={batchId} onClose={onClose} />}
     </div>
   );
 }
 
-function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: () => void }) {
+const BULK_ADD_MAX = 10;
+
+interface BulkAddRow {
+  rowId: string;
+  card: CardToGrade;
+  qty: string;
+  expectedGrade: string;
+  estimatedValue: string;
+}
+
+function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batchId: string; onClose: () => void; onPendingCountChange?: (n: number) => void }) {
   const qc = useQueryClient();
-  const [search, setSearch]                 = useState('');
-  const [debounced, setDebounced]           = useState('');
-  const [selected, setSelected]             = useState<CardToGrade | null>(null);
-  const [qty, setQty]                       = useState<string>('');
-  const [expectedGrade, setExpectedGrade]   = useState('');
-  const [estimatedValue, setEstimatedValue] = useState('');
-  const [saving, setSaving]                 = useState(false);
+  const [search, setSearch]       = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [strict, setStrict]       = useState(false);
+  const [rows, setRows]           = useState<BulkAddRow[]>([]);
+  const [saving, setSaving]       = useState(false);
+
+  // Bubble row count up so the parent modal can warn before tab-switching.
+  useEffect(() => { onPendingCountChange?.(rows.length); }, [rows.length, onPendingCountChange]);
+  useEffect(() => () => { onPendingCountChange?.(0); }, [onPendingCountChange]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  // Reset qty when card changes
-  useEffect(() => { setQty(''); }, [selected]);
-
   const { data: cardResults, isLoading } = useQuery<PaginatedResult<CardToGrade>>({
-    queryKey: ['card-picker-grading', debounced],
+    queryKey: ['card-picker-grading', debounced, strict],
     queryFn:  () => api.get('/cards', {
-      params: { search: debounced, limit: 50, status: 'inspected,grading_submitted', decision: 'grade' },
+      // Broader status filter — anything that hasn't been terminated. The
+      // decision='grade' filter (now actually applied server-side after the
+      // schema fix) narrows back to grading-bound cards. Catches edge cases
+      // where a Grade-decision card is sitting in purchased_raw or another
+      // non-terminal status the original tight filter missed.
+      params: {
+        search: debounced,
+        ...(strict ? { exact: 'true' } : {}),
+        limit: 50,
+        status: 'purchased_raw,inspected,grading_submitted',
+        decision: 'grade',
+        // Legacy stash rows live in the Legacy (no lot) tab; suppress them
+        // here so they don't pollute the From Inventory search results.
+        exclude_legacy_bucket: 'true',
+      },
     }).then((r) => r.data),
     enabled: debounced.length >= 2,
   });
 
+  // Track how many line items each card_instance already has in this batch
+  // (server expands qty into N qty=1 line items, so this counts physical
+  // certs already assigned). Used to cap the per-row qty input below.
+  const batchDetail = qc.getQueryData<BatchDetail>(['grading-batch', batchId]);
+  const alreadyInBatchQty = new Map<string, number>();
+  for (const it of batchDetail?.items ?? []) {
+    alreadyInBatchQty.set(it.card_instance_id, (alreadyInBatchQty.get(it.card_instance_id) ?? 0) + it.quantity);
+  }
+  const cards = cardResults?.data ?? [];
+  // Per-card_instance qty already chosen in this current modal selection
+  // (separate from what's already in the batch). Used for the qty cap.
+  const selectedQtyById = new Map<string, number>();
+  for (const r of rows) {
+    selectedQtyById.set(r.card.id, (selectedQtyById.get(r.card.id) ?? 0) + (parseInt(r.qty) || 0));
+  }
+  const atCap = rows.length >= BULK_ADD_MAX;
+
+  function addRow(card: CardToGrade) {
+    if (atCap) return;
+    const inBatch = alreadyInBatchQty.get(card.id) ?? 0;
+    const inSelection = selectedQtyById.get(card.id) ?? 0;
+    if (inBatch + inSelection >= card.quantity) {
+      toast.error(`No more available — ${inBatch} already in batch, ${inSelection} pending in this add.`);
+      return;
+    }
+    setRows(prev => [...prev, { rowId: crypto.randomUUID(), card, qty: '1', expectedGrade: '', estimatedValue: '' }]);
+    setSearch('');
+  }
+  function removeRow(rowId: string) {
+    setRows(prev => prev.filter(r => r.rowId !== rowId));
+  }
+  function updateRow(rowId: string, key: 'qty' | 'expectedGrade' | 'estimatedValue', val: string) {
+    setRows(prev => prev.map(r => r.rowId === rowId ? { ...r, [key]: val } : r));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected) { toast.error('Select a card'); return; }
-    const qtyNum = parseInt(qty);
-    if (!qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > selected.quantity) { toast.error(`Quantity must be between 1 and ${selected.quantity}`); return; }
+    if (rows.length === 0) { toast.error('Add at least one card'); return; }
+    // Aggregate per-card totals (selection + already in batch) so a card that
+    // appears across multiple rows is validated against its true inventory.
+    const totalById = new Map<string, number>();
+    for (const r of rows) {
+      const qtyNum = parseInt(r.qty);
+      if (!r.qty || isNaN(qtyNum) || qtyNum < 1) {
+        toast.error(`${r.card.card_name ?? 'Card'}: qty must be >= 1`);
+        return;
+      }
+      totalById.set(r.card.id, (totalById.get(r.card.id) ?? 0) + qtyNum);
+    }
+    for (const [cardId, selectedTotal] of totalById) {
+      const sample = rows.find(r => r.card.id === cardId)!;
+      const inBatch = alreadyInBatchQty.get(cardId) ?? 0;
+      const cap = sample.card.quantity - inBatch;
+      if (selectedTotal > cap) {
+        toast.error(`${sample.card.card_name ?? 'Card'}: ${selectedTotal} selected but only ${cap} available (${inBatch} already in batch)`);
+        return;
+      }
+    }
     setSaving(true);
     try {
-      await api.post(`/grading-subs/${batchId}/items`, {
-        card_instance_id: selected.id,
-        quantity:         qtyNum,
-        expected_grade:   expectedGrade ? parseFloat(expectedGrade) : undefined,
-        estimated_value:  estimatedValue ? Math.round(parseFloat(estimatedValue) * 100) : undefined,
+      await api.post(`/grading-subs/${batchId}/items/bulk`, {
+        items: rows.map(r => ({
+          card_instance_id: r.card.id,
+          quantity:         parseInt(r.qty),
+          expected_grade:   r.expectedGrade ? parseFloat(r.expectedGrade) : undefined,
+          estimated_value:  r.estimatedValue ? Math.round(parseFloat(r.estimatedValue) * 100) : undefined,
+        })),
       });
-      toast.success('Card added to batch');
+      toast.success(rows.length === 1 ? 'Card added to batch' : `${rows.length} cards added to batch`);
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       onClose();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to add card');
+      toast.error(err?.response?.data?.error ?? 'Failed to add cards');
     } finally {
       setSaving(false);
     }
   }
 
-  const cards = cardResults?.data ?? [];
+  const cellCls = 'w-full px-2 py-1.5 text-xs bg-zinc-900 border border-zinc-700 rounded text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
 
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       {/* Search */}
-      <input
-        type="text"
-        placeholder="Search by card name or purchase ID…"
-        value={search}
-        onChange={(e) => { setSearch(e.target.value); setSelected(null); }}
-        className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
-        autoComplete="off"
-      />
-
-      {/* Card list */}
-      <div className="border border-zinc-700 rounded-lg overflow-hidden">
-        {debounced.length < 2 ? (
-          <div className="px-4 py-6 text-center text-zinc-600 text-sm">Type For Search Results</div>
-        ) : isLoading ? (
-          <div className="px-4 py-6 text-center text-zinc-600 text-sm">Loading…</div>
-        ) : cards.length === 0 ? (
-          <div className="px-4 py-6 text-center text-zinc-500 text-sm">No cards found.</div>
-        ) : (
-          <div className="max-h-52 overflow-y-auto divide-y divide-zinc-800">
-            {cards.map((card) => {
-              const active = selected?.id === card.id;
-              return (
-                <button key={card.id} type="button"
-                  className={`w-full text-left px-3 py-2 text-sm transition-colors ${active ? 'bg-indigo-600/20 border-l-2 border-indigo-500' : 'hover:bg-zinc-800/60'}`}
-                  onClick={() => setSelected(active ? null : card)}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`font-medium truncate ${active ? 'text-indigo-300' : 'text-zinc-200'}`}>
-                      {card.card_name ?? 'Unknown'}
-                    </span>
-                    <span className="text-xs font-mono font-semibold text-zinc-400 shrink-0">
-                      {card.raw_purchase_label ?? '—'}
-                    </span>
-                  </div>
-                  <div className="text-xs text-zinc-500 mt-0.5">
-                    {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{card.quantity} available</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
+      <div className="space-y-1.5">
+        <input
+          type="text"
+          placeholder={atCap ? `Maximum ${BULK_ADD_MAX} cards per batch add` : 'Search by card name or purchase ID…'}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          disabled={atCap}
+          className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+          autoComplete="off"
+        />
+        <label className="flex items-center gap-1.5 text-[10px] text-zinc-500 cursor-pointer select-none">
+          <input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)}
+            className="accent-indigo-500" />
+          Strict match <span className="text-zinc-600">(whole-term — e.g. <span className="font-mono">2026R2</span> won't match <span className="font-mono">2026R20</span>)</span>
+        </label>
       </div>
 
-      {/* Qty + estimated value — only shown once a card is selected */}
-      {selected && (
-        <div className="space-y-3 pt-1 border-t border-zinc-800">
-          <div className="grid gap-3" style={{ gridTemplateColumns: '1fr 1fr 1.4fr' }}>
-            <div>
-              <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">
-                Qty <span className="text-zinc-600 normal-case">(max {selected.quantity})</span>
-              </label>
-              <input
-                type="number" min={1} max={selected.quantity} value={qty}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === '') { setQty(''); return; }
-                  const n = parseInt(v);
-                  if (!isNaN(n)) setQty(String(Math.min(selected.quantity, Math.max(1, n))));
-                }}
-                className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-              />
+      {/* Card list — click to add to selection */}
+      {!atCap && (
+        <div className="border border-zinc-700 rounded-lg overflow-hidden">
+          {debounced.length < 2 ? (
+            <div className="px-4 py-4 text-center text-zinc-600 text-sm">Type to search</div>
+          ) : isLoading ? (
+            <div className="px-4 py-4 text-center text-zinc-600 text-sm">Loading…</div>
+          ) : cards.length === 0 ? (
+            <div className="px-4 py-4 text-center text-zinc-500 text-sm">No cards found.</div>
+          ) : (
+            <div className="max-h-44 overflow-y-auto divide-y divide-zinc-800">
+              {cards.map((card) => {
+                const inBatch = alreadyInBatchQty.get(card.id) ?? 0;
+                const inSelection = selectedQtyById.get(card.id) ?? 0;
+                const remaining = card.quantity - inBatch - inSelection;
+                const exhausted = remaining <= 0;
+                return (
+                  <button key={card.id} type="button" disabled={exhausted}
+                    className={`w-full text-left px-3 py-2 text-sm transition-colors ${exhausted ? 'opacity-40 cursor-not-allowed' : 'hover:bg-zinc-800/60'}`}
+                    onClick={() => addRow(card)}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium truncate text-zinc-200">{card.card_name ?? 'Unknown'}</span>
+                      <span className="text-xs font-mono font-semibold text-zinc-400 shrink-0">
+                        {card.raw_purchase_label ?? '—'}
+                        {inBatch > 0 && <span className="ml-2 text-[10px] text-indigo-400 font-sans">in batch: {inBatch}</span>}
+                        {inSelection > 0 && <span className="ml-2 text-[10px] text-indigo-400 font-sans">pending: {inSelection}</span>}
+                      </span>
+                    </div>
+                    <div className="text-xs text-zinc-500 mt-0.5">
+                      {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{remaining} available</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-            <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
-              value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)}
-              className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
-            <Input label="Est. Value / Card" type="text" inputMode="decimal" placeholder="0.00"
-              value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)}
-              className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+          )}
+        </div>
+      )}
+
+      {/* Selected rows — per-card qty/grade/value */}
+      {rows.length > 0 && (
+        <div className="space-y-2 pt-2 border-t border-zinc-800">
+          <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+            Selected ({rows.length}/{BULK_ADD_MAX})
+          </p>
+          {/* Column headers — match the row grid below */}
+          <div className="grid items-center gap-2 px-2.5 text-[10px] text-zinc-500 uppercase tracking-wide font-medium"
+            style={{ gridTemplateColumns: 'minmax(0,1fr) 80px 90px 110px 24px' }}>
+            <span>Card</span>
+            <span>Qty</span>
+            <span>Expected Grade</span>
+            <span>Est. Value / Card</span>
+            <span />
+          </div>
+          <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+            {rows.map((r) => (
+              <div key={r.rowId} className="grid items-start gap-2 rounded border border-zinc-800 bg-zinc-900/40 px-2.5 py-2"
+                style={{ gridTemplateColumns: 'minmax(0,1fr) 80px 90px 110px 24px' }}>
+                <div className="min-w-0">
+                  <p className="text-xs text-zinc-100 font-medium whitespace-normal break-words leading-snug">{r.card.card_name ?? 'Unknown'}</p>
+                  <p className="text-[10px] text-zinc-500 whitespace-normal break-words leading-snug mt-0.5">
+                    {r.card.set_name ?? '—'}{r.card.card_number ? ` · #${r.card.card_number}` : ''}
+                    {r.card.condition ? ` · ${r.card.condition}` : ''}
+                    {' · '}<span className="font-mono text-zinc-400">{r.card.raw_purchase_label ?? '—'}</span>
+                    {' · '}max {r.card.quantity}
+                  </p>
+                </div>
+                <input type="number" min={1} max={r.card.quantity} value={r.qty}
+                  placeholder="1"
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === '') { updateRow(r.rowId, 'qty', ''); return; }
+                    const n = parseInt(v);
+                    if (!isNaN(n)) updateRow(r.rowId, 'qty', String(Math.min(r.card.quantity, Math.max(1, n))));
+                  }}
+                  className={cellCls} />
+                <input type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
+                  value={r.expectedGrade}
+                  onChange={(e) => updateRow(r.rowId, 'expectedGrade', e.target.value)}
+                  className={cellCls} />
+                <input type="text" inputMode="decimal" placeholder="0.00"
+                  value={r.estimatedValue}
+                  onChange={(e) => updateRow(r.rowId, 'estimatedValue', e.target.value)}
+                  className={cellCls} />
+                <button type="button" onClick={() => removeRow(r.rowId)}
+                  className="text-zinc-600 hover:text-red-400 transition-colors flex items-center justify-center">
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={saving || !selected}>
+        <Button type="submit" disabled={saving || rows.length === 0}>
           {saving && <Loader2 size={14} className="animate-spin" />}
-          Add to Batch
+          Add {rows.length > 0 ? `${rows.length} ` : ''}to Batch
         </Button>
       </div>
     </form>
   );
 }
 
-// ── Legacy Add (no raw lot) ───────────────────────────────────────────────────
+// ── Legacy Add (catalog-bucket flow) ──────────────────────────────────────────
 
-interface CatalogSearchResult {
+interface LegacyBucket {
   id: string;
   sku: string | null;
   card_name: string;
   set_name: string;
-  set_code: string | null;
-  card_number: string | null;
   language: string;
+  stash_qty: number;
+  per_card_cost: number;
 }
 
 function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => void }) {
@@ -352,98 +488,95 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
     expected_grade: '',
     estimated_value: '',
   });
-  const [searchLabel, setSearchLabel] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [pickedCatalog, setPickedCatalog] = useState<CatalogSearchResult | null>(null);
-  const [creatingPart, setCreatingPart] = useState(false);
+  const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(null);
+  const [catalogId, setCatalogId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [legacyBucketId, setLegacyBucketId] = useState<string>('');
+  const [autoFillText, setAutoFillText] = useState('');
+  const [autoFilling, setAutoFilling] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
     setForm(prev => ({ ...prev, [k]: e.target.value }));
 
-  // Debounce the search input
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedSearch(searchLabel), 250);
-    return () => clearTimeout(t);
-  }, [searchLabel]);
-
-  const { data: matches = [], isFetching: searching } = useQuery<CatalogSearchResult[]>({
-    queryKey: ['catalog-search-legacy', debouncedSearch],
-    queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 8 } }).then(r => r.data.data),
-    enabled: debouncedSearch.trim().length >= 2 && !pickedCatalog,
+  // Legacy buckets — catalog entries with set_code='LEGACY' and their stash
+  // snapshot (qty across child card_instances, per-card cost from the stash row).
+  const { data: legacyBuckets = [] } = useQuery<LegacyBucket[]>({
+    queryKey: ['legacy-buckets'],
+    queryFn: () => api.get('/catalog/legacy-buckets').then(r => r.data.data),
   });
+  const legacyBucket = legacyBuckets.find(b => b.id === legacyBucketId) ?? null;
 
-  function pickMatch(m: CatalogSearchResult) {
-    setPickedCatalog(m);
+  // When a legacy bucket is picked, sync language + per-card cost from it
+  // (cost auto-fills read-only). User still assigns the REAL card identity
+  // via the PartNumberField below.
+  useEffect(() => {
+    if (!legacyBucket) return;
     setForm(prev => ({
       ...prev,
-      card_name: m.card_name,
-      set_name: m.set_name,
-      card_number: m.card_number ?? prev.card_number,
-      language: m.language ?? prev.language,
+      language: legacyBucket.language,
+      purchase_cost: (legacyBucket.per_card_cost / 100).toFixed(2),
     }));
-    setSearchLabel(m.sku ?? m.card_name);
-  }
+  }, [legacyBucket]);
 
-  function clearPick() {
-    setPickedCatalog(null);
-    setSearchLabel('');
-  }
-
-  async function generatePart() {
-    if (!form.card_name.trim() || !form.set_name.trim()) {
-      toast.error('Card name and set name required to generate a part number');
-      return;
-    }
-    setCreatingPart(true);
+  // Auto-fill: paste a PSA-label-style card name (or part of one), agent
+  // parses card_name/set_name/card_number/language and fills the form
+  // fields below. PartNumberField then auto-resolves against the catalog.
+  async function autoFill(name: string) {
+    if (!name.trim()) return;
+    setAutoFilling(true);
     try {
-      const res = await api.post('/catalog', {
-        game: 'pokemon',
-        card_name: form.card_name.trim(),
-        set_name: form.set_name.trim(),
-        card_number: form.card_number.trim() || null,
-        language: form.language,
-      });
-      const created = res.data?.data ?? res.data;
-      const newPick: CatalogSearchResult = {
-        id: created.id,
-        sku: created.sku ?? null,
-        card_name: created.card_name,
-        set_name: created.set_name,
-        set_code: created.set_code ?? null,
-        card_number: created.card_number ?? null,
-        language: created.language,
-      };
-      setPickedCatalog(newPick);
-      setSearchLabel(newPick.sku ?? newPick.card_name);
-      toast.success('Part number created');
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to create part number');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await api.post('/agent/auto-fill', { partial_name: name, game: 'pokemon' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = (res.data as any)?.data?.suggestions?.[0];
+      if (s) {
+        setForm(prev => ({
+          ...prev,
+          card_name:   (s.catalog_exists && s.catalog_card_name) ? s.catalog_card_name : (s.card_name ?? prev.card_name),
+          set_name:    s.set_name    ?? prev.set_name,
+          card_number: s.card_number ?? prev.card_number,
+          language:    s.language    ?? prev.language,
+        }));
+        toast.success('Auto-filled from card database');
+      } else {
+        toast('No match found — fill manually', { icon: '🔍' });
+      }
+    } catch {
+      toast.error('Unable to auto-fill — fill manually');
     } finally {
-      setCreatingPart(false);
+      setAutoFilling(false);
     }
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!legacyBucketId) { toast.error('Pick a Legacy Part # to draw from'); return; }
     if (!form.card_name.trim()) { toast.error('Card name is required'); return; }
     const qtyNum = parseInt(form.quantity);
     if (!qtyNum || qtyNum < 1) { toast.error('Quantity must be at least 1'); return; }
+    if (legacyBucket && qtyNum > legacyBucket.stash_qty) {
+      toast.error(`Only ${legacyBucket.stash_qty} card${legacyBucket.stash_qty === 1 ? '' : 's'} in this legacy bucket`);
+      return;
+    }
     setSaving(true);
     try {
       await api.post(`/grading-subs/${batchId}/items/legacy`, {
-        card_name:       form.card_name.trim(),
-        set_name:        form.set_name.trim() || null,
-        card_number:     form.card_number.trim() || null,
-        language:        form.language,
-        condition:       form.condition || null,
-        quantity:        qtyNum,
-        purchase_cost:   form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
-        expected_grade:  form.expected_grade ? parseFloat(form.expected_grade) : undefined,
-        estimated_value: form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
-        catalog_id:      pickedCatalog?.id,
+        card_name:         form.card_name.trim(),
+        set_name:          form.set_name.trim() || null,
+        card_number:       form.card_number.trim() || null,
+        language:          form.language,
+        condition:         form.condition || null,
+        quantity:          qtyNum,
+        // When pulling from a legacy bucket, server derives cost from the
+        // stash row; purchase_cost is only used in the phantom-lot fallback.
+        purchase_cost:     form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
+        expected_grade:    form.expected_grade ? parseFloat(form.expected_grade) : undefined,
+        estimated_value:   form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
+        catalog_id:        catalogId ?? undefined,        // REAL card identity — slab lands here
+        legacy_catalog_id: legacyBucketId || undefined,   // legacy bucket — stash drawn from here
       });
       toast.success('Legacy card added to batch');
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
+      qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
       onClose();
     } catch (err: any) {
       toast.error(err?.response?.data?.error ?? 'Failed to add legacy card');
@@ -457,73 +590,58 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
   return (
     <form onSubmit={handleSubmit} className="space-y-3">
       <p className="text-xs text-zinc-500 leading-relaxed">
-        For cards you owned before tracking purchases in Reactor. Search to find or generate a part number,
-        then fill in the rest. A backdated raw purchase lot is auto-created so cost basis stays accurate.
+        For cards you owned before tracking purchases in Reactor. Pick a <span className="text-zinc-300">Legacy Part #</span> to draw from your stash (cost + inventory tracked there),
+        then assign the <span className="text-zinc-300">Card Part #</span> for what this specific card actually is — that's the part the slab lands under.
       </p>
 
-      {/* Part number search */}
+      {/* Legacy Part # — bucket source (required) */}
       <div>
-        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">Part Number</label>
-        <div className="relative">
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">
+          Legacy Part # <span className="text-red-500">*</span>
+        </label>
+        <select
+          value={legacyBucketId}
+          onChange={(e) => setLegacyBucketId(e.target.value)}
+          className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500"
+        >
+          <option value="">— Pick a legacy bucket to pull from —</option>
+          {legacyBuckets.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.sku ?? b.card_name} · {b.stash_qty} left · ${(b.per_card_cost / 100).toFixed(2)}/card
+            </option>
+          ))}
+        </select>
+        {legacyBucket && (
+          <p className="text-[10px] text-zinc-500 mt-1">
+            Pulling from this bucket. The stash row decrements by the qty you pull; cost moves to the slab when it returns.
+          </p>
+        )}
+      </div>
+
+      {/* Auto-fill — paste a card name (PSA-label style) and the agent parses
+          it into the form fields below */}
+      <div className="flex flex-col gap-2">
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+          Auto-fill <span className="normal-case text-zinc-600">(optional — paste card name to populate fields below)</span>
+        </label>
+        <div className="flex gap-2 items-center">
           <input
             type="text"
-            value={searchLabel}
-            onChange={(e) => { setSearchLabel(e.target.value); if (pickedCatalog) setPickedCatalog(null); }}
-            placeholder="Search by part #, card name, or set…"
-            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+            value={autoFillText}
+            onChange={(e) => setAutoFillText(e.target.value)}
+            placeholder="e.g. 2024 Pokemon Indonesian SV-P Promo 154 Pikachu"
+            className="flex-1 rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           />
-          {/* Search results dropdown */}
-          {!pickedCatalog && debouncedSearch.trim().length >= 2 && (
-            <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-lg bg-zinc-900 border border-zinc-700 shadow-xl divide-y divide-zinc-800">
-              {searching ? (
-                <div className="px-3 py-2 text-xs text-zinc-500">Searching…</div>
-              ) : matches.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-zinc-500">
-                  No matching part number. Fill in fields below and click <span className="text-yellow-400">Generate part</span>.
-                </div>
-              ) : matches.map(m => (
-                <button key={m.id} type="button" onClick={() => pickMatch(m)}
-                  className="w-full text-left px-3 py-2 hover:bg-zinc-800/60 transition-colors">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-xs text-indigo-300">{m.sku ?? '(no sku)'}</span>
-                    <span className="text-[10px] text-zinc-500">{m.language}</span>
-                  </div>
-                  <div className="text-xs text-zinc-200 truncate">{m.card_name}</div>
-                  <div className="text-[10px] text-zinc-500 truncate">{m.set_name}{m.card_number ? ` · #${m.card_number}` : ''}</div>
-                </button>
-              ))}
-            </div>
-          )}
+          <Button type="button" variant="secondary" size="sm" className="shrink-0"
+            onClick={() => autoFill(autoFillText)}
+            disabled={autoFilling || !autoFillText.trim()}>
+            {autoFilling ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            Auto-fill
+          </Button>
         </div>
       </div>
 
-      {/* Selected part number badge */}
-      {pickedCatalog ? (
-        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm border bg-green-950/40 border-green-800/50">
-          <div className="flex items-center gap-2 min-w-0">
-            <CheckCircle size={14} className="text-green-400 shrink-0" />
-            <span className="font-mono text-xs text-zinc-200 shrink-0">{pickedCatalog.sku ?? '(no sku)'}</span>
-            <span className="text-xs text-zinc-400 truncate">{pickedCatalog.card_name} · {pickedCatalog.set_name}</span>
-          </div>
-          <button type="button" onClick={clearPick} className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0 ml-2">Clear</button>
-        </div>
-      ) : (form.card_name.trim() && form.set_name.trim()) ? (
-        <div className="flex items-center justify-between rounded-lg px-3 py-2 text-sm border bg-yellow-950/40 border-yellow-700/50">
-          <div className="flex items-center gap-2">
-            <AlertCircle size={14} className="text-yellow-400 shrink-0" />
-            <span className="text-xs text-yellow-400">No part number assigned — generate one from the fields below?</span>
-          </div>
-          <button
-            type="button"
-            onClick={generatePart}
-            disabled={creatingPart}
-            className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
-          >
-            {creatingPart ? 'Creating…' : 'Generate part'}
-          </button>
-        </div>
-      ) : null}
-
+      {/* Card identity fields — drive the PartNumberField search */}
       <div className="grid grid-cols-2 gap-3">
         <Input label="Card Name *" value={form.card_name} onChange={set('card_name')} placeholder="e.g. Charizard" />
         <Input label="Set Name"   value={form.set_name}  onChange={set('set_name')}  placeholder="e.g. Base Set" />
@@ -534,19 +652,60 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
           <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">Language</label>
           <select value={form.language} onChange={set('language')}
             className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500">
-            <option value="EN">EN</option>
-            <option value="JP">JP</option>
-            <option value="KR">KR</option>
-            <option value="ZH-TW">ZH-TW</option>
-            <option value="ZH-CN">ZH-CN</option>
+            <option value="EN">EN — English</option>
+            <option value="JP">JP — Japanese</option>
+            <option value="KR">KR — Korean</option>
+            <option value="ZH-TW">ZH-TW — Chinese (Traditional)</option>
+            <option value="ZH-CN">ZH-CN — Chinese (Simplified)</option>
+            <option value="FR">FR — French</option>
+            <option value="DE">DE — German</option>
+            <option value="IT">IT — Italian</option>
+            <option value="ES">ES — Spanish</option>
+            <option value="PT">PT — Portuguese</option>
+            <option value="PL">PL — Polish</option>
+            <option value="NL">NL — Dutch</option>
+            <option value="RU">RU — Russian</option>
+            <option value="TH">TH — Thai</option>
+            <option value="ID">ID — Indonesian</option>
           </select>
         </div>
         <Input label="Condition" value={form.condition} onChange={set('condition')} placeholder="NM" />
       </div>
 
+      {/* Card Part # — real card identity, same picker pattern as Add Card / Add Slab */}
+      <PartNumberField
+        form={{ card_name: form.card_name, set_name: form.set_name, card_number: form.card_number, language: form.language }}
+        catalogMatch={catalogMatch}
+        catalogId={catalogId}
+        onSelect={(m) => {
+          setCatalogMatch(m);
+          setCatalogId(m.id);
+          // Fill any blank form fields from the picked catalog row
+          setForm(prev => ({
+            ...prev,
+            card_name:   prev.card_name   || m.card_name,
+            set_name:    prev.set_name    || m.set_name,
+            card_number: prev.card_number || (m.card_number ?? ''),
+            language:    m.language       || prev.language,
+          }));
+        }}
+        onClear={() => { setCatalogMatch(null); setCatalogId(null); }}
+      />
+
       <div className="grid grid-cols-2 gap-3">
-        <Input label="Quantity *" type="number" min="1" value={form.quantity} onChange={set('quantity')} className={noSpinner} />
-        <Input label="Cost / Card (USD)" type="text" inputMode="decimal" value={form.purchase_cost} onChange={set('purchase_cost')} placeholder="0.00" className={noSpinner} />
+        <Input
+          label={`Quantity *${legacyBucket ? ` (max ${legacyBucket.stash_qty})` : ''}`}
+          type="number" min="1" max={legacyBucket?.stash_qty}
+          value={form.quantity} onChange={set('quantity')} className={noSpinner}
+        />
+        <Input
+          label={`Cost / Card (USD)${legacyBucket ? ' — from legacy bucket' : ''}`}
+          type="text" inputMode="decimal"
+          value={form.purchase_cost} onChange={set('purchase_cost')}
+          placeholder="0.00"
+          readOnly={!!legacyBucket}
+          className={`${noSpinner} ${legacyBucket ? 'opacity-60 cursor-not-allowed' : ''}`}
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800">
@@ -558,7 +717,7 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
 
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="submit" disabled={saving || !form.card_name.trim()}>
+        <Button type="submit" disabled={saving || !form.card_name.trim() || !legacyBucketId}>
           {saving && <Loader2 size={14} className="animate-spin" />}
           Add to Batch
         </Button>
@@ -576,11 +735,17 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
   const [estimatedValue, setEstimatedValue] = useState(item.estimated_value != null ? String(item.estimated_value / 100) : '');
   const [saving, setSaving] = useState(false);
 
+  // For legacy-sourced lines, qty can climb beyond the current available_quantity
+  // by pulling additional cards from the bucket's stash row. The server adjusts
+  // both sides on save (stash decrements, card_instance increments).
+  const isLegacy = !!item.legacy_source_catalog_id;
+  const maxQty = isLegacy ? item.available_quantity + item.legacy_stash_remaining : item.available_quantity;
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const qtyNum = parseInt(qty);
-    if (!qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > item.available_quantity) {
-      toast.error(`Qty must be 1–${item.available_quantity}`); return;
+    if (!qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > maxQty) {
+      toast.error(`Qty must be 1–${maxQty}`); return;
     }
     setSaving(true);
     try {
@@ -590,8 +755,10 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
         estimated_value: estimatedValue ? Math.round(parseFloat(estimatedValue) * 100) : null,
       });
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
+      qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
       onClose();
-    } catch { toast.error('Failed to update'); }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) { toast.error(err?.response?.data?.error ?? 'Failed to update'); }
     finally { setSaving(false); }
   }
 
@@ -604,14 +771,17 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
         {item.set_name ? <span className="text-zinc-500"> · {item.set_name}</span> : null}
         {item.card_number ? <span className="text-zinc-500"> #{item.card_number}</span> : null}
       </p>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-3 items-start">
         <div>
-          <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">
-            Qty <span className="text-zinc-600 normal-case">(max {item.available_quantity})</span>
+          <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1 whitespace-nowrap">
+            Qty <span className="text-zinc-600 normal-case">(max {maxQty})</span>
           </label>
-          <input type="number" min={1} max={item.available_quantity} value={qty}
-            onChange={(e) => { const v = e.target.value; if (v === '') { setQty(''); return; } const n = parseInt(v); if (!isNaN(n)) setQty(String(Math.min(item.available_quantity, Math.max(1, n)))); }}
+          <input type="number" min={1} max={maxQty} value={qty}
+            onChange={(e) => { const v = e.target.value; if (v === '') { setQty(''); return; } const n = parseInt(v); if (!isNaN(n)) setQty(String(Math.min(maxQty, Math.max(1, n)))); }}
             className={`w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500 ${noSpinner}`} />
+          {isLegacy && (
+            <p className="text-[10px] text-zinc-500 mt-1">{item.legacy_stash_remaining} in bucket</p>
+          )}
         </div>
         <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
           value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)} className={noSpinner} />
@@ -682,6 +852,7 @@ function CloseSubModal({ batch, onClose }: { batch: Batch; onClose: () => void }
 
 function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void }) {
   const qc = useQueryClient();
+  const [name,             setName]             = useState(batch.name ?? '');
   const [company,          setCompany]          = useState(batch.company);
   const [tier,             setTier]             = useState(batch.tier);
   const [submittedAt,      setSubmittedAt]      = useState(batch.submitted_at?.slice(0, 10) ?? '');
@@ -695,6 +866,7 @@ function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void 
     setSaving(true);
     try {
       await api.patch(`/grading-subs/${batch.id}`, {
+        name:              name.trim() || null,
         company,
         tier:              tier || undefined,
         submitted_at:      submittedAt || undefined,
@@ -716,6 +888,8 @@ function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <Input label="Submission Name" placeholder="e.g. PSA Value Plus 2026-03-02"
+        value={name} onChange={(e) => setName(e.target.value)} />
       <div className="grid grid-cols-2 gap-3">
         <Select label="Company" value={company} onChange={(e) => setCompany(e.target.value)}>
           {GRADING_COMPANIES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -769,9 +943,22 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
   });
 
   const deleteBatch = useMutation({
-    mutationFn: () => api.delete(`/grading-subs/${batchId}`),
-    onSuccess:  () => {
-      toast.success('Batch deleted');
+    mutationFn: () => api.delete(`/grading-subs/${batchId}`).then((r) => r.data),
+    onSuccess:  (data: { kept_slabs?: { reason: 'sold' | 'listed' }[]; recredited_to_legacy?: number } | undefined) => {
+      const kept = data?.kept_slabs?.length ?? 0;
+      const credited = data?.recredited_to_legacy ?? 0;
+      if (kept > 0) {
+        const sold   = data?.kept_slabs?.filter((s) => s.reason === 'sold').length   ?? 0;
+        const listed = data?.kept_slabs?.filter((s) => s.reason === 'listed').length ?? 0;
+        const parts: string[] = [];
+        if (sold)   parts.push(`${sold} sold`);
+        if (listed) parts.push(`${listed} listed`);
+        toast(`Batch deleted. ${parts.join(', ')} slab${kept === 1 ? '' : 's'} kept in inventory.`, { icon: '⚠️', duration: 6000 });
+      } else if (credited > 0) {
+        toast.success(`Batch deleted. ${credited} card${credited === 1 ? '' : 's'} credited back to legacy bucket.`);
+      } else {
+        toast.success('Batch deleted');
+      }
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
       onBack();
     },
@@ -832,11 +1019,12 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
           <Button size="sm" variant="ghost" onClick={() => setShowEdit(true)}>
             Edit Details
           </Button>
-          {data.status === 'submitted' ? (
+          {data.status === 'submitted' && (
             <Button size="sm" variant="ghost" onClick={() => setStatus.mutate('pending')} disabled={setStatus.isPending}>
               Unlock Sub
             </Button>
-          ) : (
+          )}
+          {data.status === 'pending' && (
             <>
               <Button size="sm" variant="ghost" onClick={() => setShowCloseSub(true)}>
                 Close Sub
@@ -851,7 +1039,8 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
 
       {/* Stats bar */}
       <div className="flex gap-6 px-6 py-2.5 border-b border-zinc-800 text-xs text-zinc-400">
-        <span>Cards: <span className="text-zinc-200">{data.items.length}</span></span>
+        <span>Line Items: <span className="text-zinc-200">{data.items.length}</span></span>
+        <span>Total Cards: <span className="text-zinc-200">{data.stats.totalQty}</span></span>
         <span>Raw Cost: <span className="text-zinc-200">{formatCurrency(data.stats.rawCost, 'USD')}</span></span>
         <span>Grading: <span className="text-zinc-200">{formatCurrency(data.stats.gradingCost, 'USD')}</span></span>
         <span>Total In: <span className="text-zinc-200">{formatCurrency(data.stats.totalCost, 'USD')}</span></span>
@@ -951,7 +1140,7 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
         {editingItem && <EditItemModal item={editingItem} batchId={batchId} onClose={() => setEditingItem(null)} />}
       </Modal>
 
-      <Modal open={showAddCard} onClose={() => setShowAddCard(false)} title="Add Card to Batch">
+      <Modal open={showAddCard} onClose={() => setShowAddCard(false)} title="Add Card to Batch" className="max-w-4xl">
         <AddCardModal batchId={batchId} onClose={() => setShowAddCard(false)} />
       </Modal>
 
@@ -1003,7 +1192,8 @@ export function Grading() {
               <col style={{ minWidth: 200 }} />
               <col style={{ minWidth: 70 }} />
               <col style={{ minWidth: 100 }} />
-              <col style={{ minWidth: 55 }} />
+              <col style={{ minWidth: 75 }} />
+              <col style={{ minWidth: 75 }} />
               <col style={{ minWidth: 105 }} />
               <col style={{ minWidth: 105 }} />
               <col style={{ minWidth: 105 }} />
@@ -1018,7 +1208,8 @@ export function Grading() {
                 <th className="px-4 py-2 text-left font-medium">Batch</th>
                 <th className="px-4 py-2 text-left font-medium">Company</th>
                 <th className="px-4 py-2 text-left font-medium">Tier</th>
-                <th className="px-4 py-2 text-right font-medium">Cards</th>
+                <th className="px-4 py-2 text-right font-medium">Line Items</th>
+                <th className="px-4 py-2 text-right font-medium">Total Cards</th>
                 <th className="px-4 py-2 text-right font-medium">Cost/Card</th>
                 <th className="px-4 py-2 text-right font-medium">Raw Cost</th>
                 <th className="px-4 py-2 text-right font-medium">Grade Cost</th>
@@ -1046,6 +1237,7 @@ export function Grading() {
                     <td className="px-4 py-2.5 text-zinc-300">{batch.company}</td>
                     <td className="px-4 py-2.5 text-zinc-400">{batch.tier}</td>
                     <td className="px-4 py-2.5 text-right text-zinc-300">{batch.item_count}</td>
+                    <td className="px-4 py-2.5 text-right text-zinc-300">{batch.total_qty}</td>
                     <td className="px-4 py-2.5 text-right text-zinc-400">
                       {batch.grading_cost ? formatCurrency(batch.grading_cost, 'USD') : '—'}
                     </td>

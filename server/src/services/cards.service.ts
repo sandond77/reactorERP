@@ -21,12 +21,14 @@ const VALID_TRANSITIONS: Record<CardStatus, CardStatus[]> = {
 export interface CardFilters {
   status?: CardStatus;
   search?: string;
+  exact?: boolean;  // when true, search matches whole-term equality instead of ILIKE '%term%'
   card_game?: string;
   language?: string;
   condition?: string;
   purchase_type?: string;
   decision?: string;
   exclude_decision?: string;
+  exclude_legacy_bucket?: boolean;
   is_card_show?: string;  // 'yes' | 'no'
   is_personal_collection?: string;  // 'yes' | 'no'
 }
@@ -43,7 +45,7 @@ export async function listCards(
     .leftJoin('raw_purchases as rp', 'rp.id', 'ci.raw_purchase_id')
     .leftJoin('locations as loc', 'loc.id', 'ci.location_id')
     .leftJoin(
-      db.selectFrom('listings').select('card_instance_id').where('listing_status', '=', 'active').as('al'),
+      db.selectFrom('listings').select(['id', 'card_instance_id', 'list_price']).where('listing_status', '=', 'active').as('al'),
       'al.card_instance_id', 'ci.id'
     )
     .select([
@@ -53,6 +55,7 @@ export async function listCards(
       'ci.card_game',
       'ci.language',
       'ci.condition',
+      'ci.condition_notes',
       'ci.purchase_cost',
       'ci.currency',
       'ci.quantity',
@@ -73,6 +76,8 @@ export async function listCards(
       'ci.notes',
       'rp.purchase_id as raw_purchase_label',
       sql<boolean>`(al.card_instance_id IS NOT NULL)`.as('is_listed'),
+      'al.list_price as listed_price',
+      'al.id as listing_id',
       'loc.name as location_name',
       'ci.is_card_show',
       'ci.card_show_price',
@@ -105,24 +110,49 @@ export async function listCards(
     eb('ci.decision', 'is', null),
     eb('ci.decision', '!=', filters.exclude_decision as any),
   ]));
+  // Hide legacy bucket stash rows from generic pickers — those should only
+  // be drawn from via the Legacy tab in Add Card to Batch, not picked
+  // directly as "From Inventory".
+  if (filters.exclude_legacy_bucket) query = query.where((eb) => eb.or([
+    eb('cc.set_code', 'is', null),
+    eb('cc.set_code', 'not ilike', 'LEGACY'),
+  ]));
   if (filters.is_card_show === 'yes') query = query.where('ci.is_card_show', '=', true);
   if (filters.is_card_show === 'no') query = query.where('ci.is_card_show', '=', false);
   if (filters.is_personal_collection === 'yes') query = query.where('ci.is_personal_collection', '=', true);
   if (filters.is_personal_collection === 'no') query = query.where('ci.is_personal_collection', '=', false);
   if (filters.search) {
-    const words = filters.search.trim().split(/\s+/).filter(Boolean);
-    for (const word of words) {
-      const term = `%${word}%`;
+    if (filters.exact) {
+      // Strict mode — whole-term case-insensitive equality across the same
+      // fields. No tokenization, no substring. Cuts noise on a large catalog
+      // when you know the exact value (e.g. typing '2026R2' to find ONLY
+      // purchase_id 2026R2, not 2026R248).
+      const term = filters.search.trim();
       query = query.where((eb) =>
         eb.or([
           eb('cc.card_name', 'ilike', term),
           eb('ci.card_name_override', 'ilike', term),
           eb('cc.set_name', 'ilike', term),
           eb('ci.set_name_override', 'ilike', term),
-          sql<boolean>`sd.cert_number::text ilike ${term}`,
+          sql<boolean>`sd.cert_number::text = ${term}`,
           eb('rp.purchase_id', 'ilike', term),
         ])
       );
+    } else {
+      const words = filters.search.trim().split(/\s+/).filter(Boolean);
+      for (const word of words) {
+        const term = `%${word}%`;
+        query = query.where((eb) =>
+          eb.or([
+            eb('cc.card_name', 'ilike', term),
+            eb('ci.card_name_override', 'ilike', term),
+            eb('cc.set_name', 'ilike', term),
+            eb('ci.set_name_override', 'ilike', term),
+            sql<boolean>`sd.cert_number::text ilike ${term}`,
+            eb('rp.purchase_id', 'ilike', term),
+          ])
+        );
+      }
     }
   }
 
@@ -233,9 +263,17 @@ export async function listCardsGroupedByPart(
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
       sql<number>`COALESCE(gbi.batch_qty, 0)`.as('batch_qty'),
       'loc.name as location_name',
+      'ci.legacy_source_catalog_id',
     ])
     .where('ci.user_id', '=', userId)
-    .where('ci.raw_purchase_id', 'is not', null)
+    // Include rows that are either part of a raw lot OR carry a legacy
+    // bucket lineage. The second clause picks up returned slabs (which
+    // have raw_purchase_id=null) so they cross-tally into their legacy
+    // bucket's returned_count.
+    .where((eb) => eb.or([
+      eb('ci.raw_purchase_id',          'is not', null),
+      eb('ci.legacy_source_catalog_id', 'is not', null),
+    ]))
     .orderBy('ci.purchased_at', 'desc');
 
   if (pipeline === 'sell') {
@@ -332,6 +370,18 @@ export async function listCardsGroupedByPart(
     else if (row.status === 'raw_for_sale')       group.for_sale_count += qty;
     else if (row.decision === 'grade')            group.to_grade_count += qty;
     group.instances.push(row);
+
+    // Legacy-bucket cross-tally — slabs that came from a legacy bucket
+    // also count toward THAT bucket's returned_count (in addition to their
+    // primary catalog group). The bucket's `total` is untouched: the slab
+    // physically lives under its real catalog_id, this is just an
+    // audit/tracking dimension. Only fires for status='graded' (i.e. the
+    // slab has actually returned).
+    const legacySource = (row as { legacy_source_catalog_id?: string | null }).legacy_source_catalog_id;
+    if (legacySource && row.status === 'graded' && legacySource !== row.catalog_id) {
+      const legacyGroup = groupMap.get(legacySource);
+      if (legacyGroup) legacyGroup.returned_count += qty;
+    }
   }
 
   return Array.from(groupMap.values());
@@ -451,6 +501,11 @@ export async function updateCard(
 
   const { slab_cert_number, slab_grade, slab_grade_label, slab_grading_cost, ...instanceData } = data;
 
+  // Quantity is invariant outside intake/inspection/sales — it's set at
+  // purchase and only adjusted through sale splits. Strip any client-supplied
+  // qty so a stale caller can't desync the lot pool.
+  if ('quantity' in instanceData) delete (instanceData as any).quantity;
+
   // When decision changes to sell_raw on a raw card, promote status to raw_for_sale
   if (instanceData.decision === 'sell_raw' && ['purchased_raw', 'inspected'].includes(existing.status)) {
     (instanceData as any).status = 'raw_for_sale';
@@ -553,12 +608,15 @@ export async function softDeleteCard(userId: string, cardId: string, actor: 'use
 export async function computeCostBasis(cardId: string): Promise<number> {
   const card = await db
     .selectFrom('card_instances')
-    .select(['purchase_cost', 'purchase_type'])
+    .select(['purchase_cost', 'quantity', 'purchase_type'])
     .where('id', '=', cardId)
     .executeTakeFirst();
 
   if (!card) return 0;
-  let basis = card.purchase_cost;
+  // purchase_cost is per-card; multiply by the row's quantity so partial-sale
+  // siblings (qty>1) carry the full cost basis for the sold cards. Slabs are
+  // always qty=1 so this is a no-op for graded.
+  let basis = card.purchase_cost * (card.quantity ?? 1);
 
   const slab = await db
     .selectFrom('slab_details')
@@ -742,6 +800,8 @@ export async function listRawFlat(
       COALESCE(cc.set_name, ci.set_name_override)        AS set_name,
       COALESCE(cc.card_number, ci.card_number_override)  AS card_number,
       ci.condition,
+      ci.quantity,
+      ci.status,
       (l.id IS NOT NULL)                                 AS is_listed,
       l.list_price                                       AS listed_price,
       l.ebay_listing_url                                 AS listing_url,

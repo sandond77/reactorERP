@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Getting Started — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <h1>Getting Started</h1>
+    <p class="lede">A fresh Reactor account has zero inventory. There are three paths to populate it; pick the one that fits how much existing data you have.</p>
+
+    <h2>Path 1 — You have a spreadsheet</h2>
+    <p>You've been tracking sales / purchases / inventory in Google Sheets, Excel, Numbers, or similar.</p>
+    <ol>
+      <li>Go to <strong>Import</strong> in the sidebar.</li>
+      <li>Look at the <strong>Migration Guide</strong> — pick the import type that matches your sheet (Graded Cards, Raw Purchases, Bulk Sales, Expenses).</li>
+      <li>Click <strong>Template</strong> next to that type to download the canonical CSV format.</li>
+      <li>Reshape your sheet to match the template's columns. The <strong>Field Reference</strong> panel (right side of the page) explains every column.</li>
+      <li>Upload your CSV. The AI auto-detects the import type and proposes column mappings. Review and adjust.</li>
+      <li>Confirm. Reactor processes the file; rows appear under Graded/Slabs or Raw Cards immediately.</li>
+    </ol>
+    <p>See <a href="csv-import.html">CSV Import</a> for the full reference.</p>
+
+    <h2>Path 2 — You're entering inventory manually</h2>
+    <p>If you have a small inventory, manual entry is often faster than wrestling with a CSV.</p>
+    <ul>
+      <li><strong>Graded slab</strong>: Graded/Slabs → <strong>+ Add Slab</strong>. Enter cert #, grade, company, cost basis.</li>
+      <li><strong>Raw purchase</strong>: Raw Cards → <strong>+ Add Raw Purchase</strong>. Pick <code>raw</code> (single card) or <code>bulk</code> (multi-card lot).</li>
+      <li><strong>Raw card from a bulk lot</strong>: Raw Cards → Inspection Panel → pick the lot → split out individual cards by condition + decision (sell raw / submit to grading).</li>
+    </ul>
+
+    <h2>Path 3 — You want to try Reactor with no real data</h2>
+    <p>Use the <strong>AI Agent</strong> (bottom right) to populate test data:</p>
+    <blockquote>
+      <p>"Add a raw purchase for 10 1999 Base Set cards at $200 total."</p>
+    </blockquote>
+    <p>The agent calls the same APIs the UI uses, so anything it does is real and reversible.</p>
+
+    <h2>Next reads</h2>
+    <ul>
+      <li><a href="inventory-model.html">Inventory Model</a> — how raw and graded differ in the data model</li>
+      <li><a href="cost-basis.html">Cost Basis</a> — what "total_cost_basis" actually contains on a sale</li>
+      <li><a href="raw-card-flow.html">Raw Card Flow</a> — the end-to-end raw workflow</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

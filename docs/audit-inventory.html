@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Inventory Audit — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Inventory Audit</h1>
+    <p class="lede">Physical-vs-system reconciliation. Walk your binders / boxes, mark what's actually there, surface discrepancies.</p>
+
+    <h2>The flow</h2>
+    <ol>
+      <li><strong>Start an audit.</strong> Pick a scope (entire inventory, by location, by purchase lot, by date range).</li>
+      <li><strong>Reactor generates the expected list</strong> — every card_instance in scope, with its current location.</li>
+      <li><strong>Walk the physical inventory.</strong> For each card you find, mark it confirmed. The UI accepts cert # scans or manual ticks.</li>
+      <li><strong>Submit.</strong> Reactor diffs confirmed vs expected and flags:
+        <ul>
+          <li><strong>Missing</strong> — expected but not confirmed. Possibly lost or misfiled.</li>
+          <li><strong>Found unexpected</strong> — confirmed but not in scope. Possibly wrong location, or a card you forgot to log.</li>
+          <li><strong>Match</strong> — everything reconciled.</li>
+        </ul>
+      </li>
+    </ol>
+
+    <h2>Resolving discrepancies</h2>
+    <p>For each flagged item:</p>
+    <ul>
+      <li><strong>Misfiled?</strong> Update its location.</li>
+      <li><strong>Genuinely lost?</strong> Set status to <code>lost_damaged</code>.</li>
+      <li><strong>Found but not logged?</strong> Create the card_instance retroactively (you'll need to assign a cost basis manually).</li>
+    </ul>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>Smaller scopes (one binder) are easier to reconcile than full-inventory audits.</li>
+      <li>Audit findings are written to the audit log as a special <code>inventory_audit</code> event so you can trace decisions later.</li>
+      <li>For grading-in-flight cards, the system knows they're "expected absent" — won't flag them as missing.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

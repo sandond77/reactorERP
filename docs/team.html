@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Team — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar"></aside>
+  <main class="content">
+    <h1>Team</h1>
+    <p class="lede">Organization membership. Add collaborators to your Reactor org so they can see and update your inventory.</p>
+
+    <h2>How orgs work</h2>
+    <p>Every user is the owner of their own organization by default. Inventory is scoped to an <code>organization_id</code>. When you invite someone to your org, they share access to your inventory — they sign in with their own account, see your data.</p>
+    <p>Under the hood: <code>req.dataUserId</code> resolves to the org owner's user_id for org members. So org members read/write the same data as the owner.</p>
+
+    <h2>Common actions</h2>
+    <ul>
+      <li><strong>Invite member</strong> — send an invite via email. They sign in with Google OAuth; if their account exists, they join immediately. Otherwise the invite waits until they sign up.</li>
+      <li><strong>Remove member</strong> — they lose access to your org's inventory. Their own org (if they have one) is untouched.</li>
+      <li><strong>Transfer ownership</strong> — pass org ownership to another member. Rare; useful when handing off the business.</li>
+    </ul>
+
+    <h2>Roles (current state)</h2>
+    <p>Currently there's only one role — full read/write. Future versions may add role granularity (e.g. read-only, no-delete).</p>
+
+    <h2>Tips</h2>
+    <ul>
+      <li>Multiple people working the same inventory? One person owns the org; the rest are members.</li>
+      <li>If you want to run multiple businesses with separate inventories, sign up multiple accounts — each gets its own org. Org boundaries are hard walls; data never crosses.</li>
+    </ul>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>

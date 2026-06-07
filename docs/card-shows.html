@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Card Show Inventory — Reactor Docs</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="layout">
+
+  <aside class="sidebar"></aside>
+
+  <main class="content">
+    <h1>Card Show Inventory</h1>
+    <p class="lede">How to prep for a card show, track on-show inventory separately from your main listings, and report on the day(s).</p>
+
+    <h2>1. Set up the show</h2>
+    <p><strong>Card Shows → New Show.</strong> Name it, set the date(s) (single or multi-day), location.</p>
+
+    <h2>2. Add inventory</h2>
+    <p><strong>Card Show Inventory → Add to Card Show.</strong></p>
+    <ul>
+      <li><strong>Graded slabs</strong>: search by cert # or card name. Pick the cards you're bringing. Each gets <code>is_card_show = true</code> and an optional <code>card_show_price</code> (the sticker price you're hoping to get).</li>
+      <li><strong>Raw</strong>: same flow, slightly different table (raw cards have condition, no cert).</li>
+    </ul>
+    <p>Cards on the show table aren't hidden from your main inventory — they're still listed as available. They carry the on-show flag so:</p>
+    <ul>
+      <li>The eBay listing flow shows an "On Show" badge so you don't double-list one.</li>
+      <li>The Card Show Inventory page can show only on-show cards.</li>
+      <li>Reports can filter by show.</li>
+    </ul>
+
+    <h2>3. During the show</h2>
+    <p>Record sales as they happen via <strong>Sales → Record Sale → Card Show platform</strong>. Pick the show + day. The sale uses the card show price as the default.</p>
+    <p>You can also bulk-record sales after the fact from the Card Show Inventory page.</p>
+
+    <h2>4. After the show</h2>
+    <p><strong>Reports → Card Show Breakdown → [your show].</strong> You get:</p>
+    <ul>
+      <li>Slab + raw counts</li>
+      <li>Gross revenue</li>
+      <li>Net (after fees, though card show fees are usually 0 unless you split)</li>
+      <li>Total cost basis</li>
+      <li>Profit</li>
+    </ul>
+    <p>For multi-day shows, you can pick a specific day or see the overall.</p>
+    <p>The <strong>AI Agent</strong> can also generate this report on demand: ask it <em>"what's my P&amp;L for the [show name]?"</em></p>
+
+    <h2>Removing cards from the show</h2>
+    <p>After the show:</p>
+    <ul>
+      <li><strong>Card Show Inventory → Raw or Graded tab → click a row → Remove from Card Show.</strong> The card flips <code>is_card_show</code> back to false and clears the sticker price.</li>
+      <li>Or bulk-remove via the Remove All Unsold button.</li>
+    </ul>
+    <p>Unsold cards return to your main inventory automatically — they were never removed, just flagged.</p>
+  </main>
+</div>
+<script src="nav.js"></script>
+</body>
+</html>
