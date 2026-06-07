@@ -635,7 +635,11 @@ function OverviewTab() {
                   { label: 'Net Profit (After Exp)', value: (netProfit >= 0 ? '+' : '') + formatCurrency(netProfit),                  cls: netProfit >= 0 ? 'text-emerald-400' : 'text-red-400' },
                   { label: '# of Sales',             value: String(windowData.count),                                                 cls: 'text-zinc-100' },
                 ]).map(({ label, value, cls }, i) => (
-                  <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
+                  <div key={label} className={cn(
+                    'py-3 lg:py-0',
+                    i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
+                    i === 5 ? 'lg:pr-0' : '',
+                  )}>
                     <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
                     <p className={cn('text-xl font-bold', cls)}>{value}</p>
                   </div>
@@ -654,7 +658,11 @@ function OverviewTab() {
               { label: 'Unsold Cards', value: cards.unsold.all, sub: `Graded ${cards.unsold.graded}  ·  Raw ${cards.unsold.raw}` },
               { label: 'Sold Cards',   value: cards.sold.all,   sub: `Graded ${cards.sold.graded}  ·  Raw ${cards.sold.raw}` },
             ]).map(({ label, value, sub }, i) => (
-              <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
+              <div key={label} className={cn(
+                'py-3 lg:py-0',
+                i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
+                i === 2 ? 'lg:pr-0' : '',
+              )}>
                 <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
                 <p className="text-xl font-bold text-zinc-100">{value}</p>
                 <p className="text-xs text-zinc-600 mt-0.5">{sub}</p>
@@ -693,22 +701,22 @@ function OverviewTab() {
         <Card>
           <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Pipeline</p>
           <div className="grid grid-cols-1 lg:grid-cols-4 lg:divide-x lg:divide-zinc-800 divide-y divide-zinc-800/40 lg:divide-y-0">
-            <div className="pr-6">
+            <div className="py-3 lg:py-0 lg:pr-6 lg:pt-0">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
               <p className="text-xl font-bold text-zinc-100">{sellThrough != null ? `${sellThrough}%` : '—'}</p>
               <p className="text-xs text-zinc-600 mt-0.5">sold / (sold + unsold)</p>
             </div>
-            <div className="px-6">
+            <div className="py-3 lg:py-0 lg:px-6">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Pending Orders</p>
               <p className={cn('text-xl font-bold', performance.pending_orders > 0 ? 'text-amber-400' : 'text-zinc-100')}>{performance.pending_orders}</p>
               <p className="text-xs text-zinc-600 mt-0.5">purchases ordered, not received</p>
             </div>
-            <div className="px-6">
+            <div className="py-3 lg:py-0 lg:px-6">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Needs Inspection</p>
               <p className={cn('text-xl font-bold', pipeline.needs_inspection > 0 ? 'text-amber-400' : 'text-zinc-100')}>{pipeline.needs_inspection}</p>
               <p className="text-xs text-zinc-600 mt-0.5">purchased, not yet inspected</p>
             </div>
-            <div className="pl-6">
+            <div className="py-3 lg:py-0 lg:pl-6 lg:pb-0">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">At Graders</p>
               <p className="text-xl font-bold text-zinc-100">{grading.card_count}</p>
               <p className="text-xs text-zinc-600 mt-0.5">{grading.sub_count} {grading.sub_count === 1 ? 'submission' : 'submissions'}</p>

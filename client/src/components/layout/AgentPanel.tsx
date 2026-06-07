@@ -180,8 +180,8 @@ export function AgentPanel() {
   return (
     <>
       {open && (
-        <div className="fixed bottom-16 right-5 z-50 w-96 flex flex-col bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
-          style={{ height: '520px' }}>
+        <div className="fixed bottom-16 right-5 z-50 w-96 max-w-[calc(100vw-2.5rem)] flex flex-col bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
+          style={{ height: 'min(520px, calc(100vh - 6rem))' }}>
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 bg-zinc-800 border-b border-zinc-700">
             <div className="flex items-center gap-3">
