@@ -172,6 +172,21 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
 
 function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => void }) {
   const [mode, setMode] = useState<'inventory' | 'legacy'>('inventory');
+  // Tracks how many rows the From Inventory tab has staged. Used to warn
+  // before switching to Legacy, since that swap unmounts the child and
+  // wipes its selection state.
+  const [pendingInventoryRows, setPendingInventoryRows] = useState(0);
+
+  function trySwitch(next: 'inventory' | 'legacy') {
+    if (next === mode) return;
+    if (next === 'legacy' && pendingInventoryRows > 0) {
+      const ok = window.confirm(
+        `Switching to Legacy will discard the ${pendingInventoryRows} card${pendingInventoryRows === 1 ? '' : 's'} staged on the From Inventory tab. Continue?`
+      );
+      if (!ok) return;
+    }
+    setMode(next);
+  }
 
   return (
     <div className="space-y-3">
@@ -180,14 +195,14 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
           { key: 'inventory', label: 'From Inventory' },
           { key: 'legacy',    label: 'Legacy (no lot)' },
         ] as const).map(t => (
-          <button key={t.key} type="button" onClick={() => setMode(t.key)}
+          <button key={t.key} type="button" onClick={() => trySwitch(t.key)}
             className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${mode === t.key ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
             {t.label}
           </button>
         ))}
       </div>
       {mode === 'inventory'
-        ? <AddCardFromInventory batchId={batchId} onClose={onClose} />
+        ? <AddCardFromInventory batchId={batchId} onClose={onClose} onPendingCountChange={setPendingInventoryRows} />
         : <AddCardLegacy        batchId={batchId} onClose={onClose} />}
     </div>
   );
@@ -203,13 +218,17 @@ interface BulkAddRow {
   estimatedValue: string;
 }
 
-function AddCardFromInventory({ batchId, onClose }: { batchId: string; onClose: () => void }) {
+function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batchId: string; onClose: () => void; onPendingCountChange?: (n: number) => void }) {
   const qc = useQueryClient();
   const [search, setSearch]       = useState('');
   const [debounced, setDebounced] = useState('');
   const [strict, setStrict]       = useState(false);
   const [rows, setRows]           = useState<BulkAddRow[]>([]);
   const [saving, setSaving]       = useState(false);
+
+  // Bubble row count up so the parent modal can warn before tab-switching.
+  useEffect(() => { onPendingCountChange?.(rows.length); }, [rows.length, onPendingCountChange]);
+  useEffect(() => () => { onPendingCountChange?.(0); }, [onPendingCountChange]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search), 300);

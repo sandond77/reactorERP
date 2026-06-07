@@ -1591,28 +1591,30 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                         <span className="text-[10px] text-zinc-500">/ {item.lot_quantity}</span>
                       </div>
                     )}
-                    {/* Standing CS sticker on the underlying card. Sale price
-                        ($/strike) is entered on the next step (bulk-review);
-                        we no longer render the per-row strike input here so
-                        the cart panel stays focused on cards + sticker. */}
-                    <div className="flex items-center gap-1.5 shrink-0" title="Card's standing CS sticker price — saves on blur">
-                      <span className="text-[11px] font-medium text-emerald-500/80 uppercase tracking-wide">CS&nbsp;Price</span>
-                      <input
-                        type="text" inputMode="decimal"
-                        value={item.cs_price_draft !== undefined
-                          ? item.cs_price_draft
-                          : item.card_show_price != null ? (item.card_show_price / 100).toFixed(2) : ''}
-                        placeholder="—"
-                        onFocus={() => setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, cs_price_draft: c.card_show_price != null ? (c.card_show_price / 100).toFixed(2) : '' } : c))}
-                        onChange={(e) => {
-                          const val = e.target.value.replace(/[^0-9.]/g, '');
-                          setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, cs_price_draft: val } : c));
-                        }}
-                        onBlur={() => commitCartCsPrice(item.cart_entry_id)}
-                        disabled={csPriceMut.isPending}
-                        className="w-20 text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-emerald-400 focus:outline-none focus:border-indigo-500"
-                      />
-                    </div>
+                    {/* Standing CS sticker on the underlying card. Hidden on
+                        eBay bulk sales — the relevant reference there is the
+                        eBay List Price (rendered next), and showing both is
+                        redundant (matches single-sale behavior). */}
+                    {!bulkIsEbay && (
+                      <div className="flex items-center gap-1.5 shrink-0" title="Card's standing CS sticker price — saves on blur">
+                        <span className="text-[11px] font-medium text-emerald-500/80 uppercase tracking-wide">CS&nbsp;Price</span>
+                        <input
+                          type="text" inputMode="decimal"
+                          value={item.cs_price_draft !== undefined
+                            ? item.cs_price_draft
+                            : item.card_show_price != null ? (item.card_show_price / 100).toFixed(2) : ''}
+                          placeholder="—"
+                          onFocus={() => setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, cs_price_draft: c.card_show_price != null ? (c.card_show_price / 100).toFixed(2) : '' } : c))}
+                          onChange={(e) => {
+                            const val = e.target.value.replace(/[^0-9.]/g, '');
+                            setBulkCart(prev => prev.map((c, idx) => idx === i ? { ...c, cs_price_draft: val } : c));
+                          }}
+                          onBlur={() => commitCartCsPrice(item.cart_entry_id)}
+                          disabled={csPriceMut.isPending}
+                          className="w-20 text-xs bg-zinc-900 border border-zinc-700 rounded px-2 py-1 text-emerald-400 focus:outline-none focus:border-indigo-500"
+                        />
+                      </div>
+                    )}
                     {/* Listed price — only on eBay bulk sales. Disabled with a
                         dash when the source card has no active listing. */}
                     {bulkIsEbay && (
