@@ -294,11 +294,14 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
   const pipelineQuery = db
     .selectFrom('card_instances as ci')
     .select([
-      sql<number>`COUNT(*) FILTER (WHERE ci.status = 'grading_submitted')::int`.as('at_graders'),
-      sql<number>`COALESCE(SUM(ci.purchase_cost) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('at_graders_cost'),
-      sql<number>`COUNT(*) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw')::int`.as('unsubmitted'),
-      sql<number>`COALESCE(SUM(ci.purchase_cost) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw'), 0)::int`.as('unsubmitted_cost'),
-      sql<number>`COUNT(*) FILTER (WHERE ci.status = 'graded')::int`.as('returned'),
+      // Count physical cards (sum of qty), not card_instance rows. A row with
+      // quantity=10 at status='grading_submitted' represents 10 cards at the
+      // grader, not 1. Same correction applied to cost (cost-per-card × qty).
+      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('at_graders'),
+      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('at_graders_cost'),
+      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw'), 0)::int`.as('unsubmitted'),
+      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw'), 0)::int`.as('unsubmitted_cost'),
+      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'graded'), 0)::int`.as('returned'),
       sql<number>`COALESCE(AVG(
         EXTRACT(DAY FROM NOW() - ci.updated_at)
       ) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('avg_days_at_graders'),
