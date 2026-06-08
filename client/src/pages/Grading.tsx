@@ -178,14 +178,15 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
   // before switching to Legacy, since that swap unmounts the child and
   // wipes its selection state.
   const [pendingInventoryRows, setPendingInventoryRows] = useState(0);
+  // Modal-driven confirm — replaces window.confirm (forbidden by CLAUDE.md
+  // UI rules). Holds the target mode while we wait for user decision.
+  const [confirmSwitchTo, setConfirmSwitchTo] = useState<'inventory' | 'legacy' | null>(null);
 
   function trySwitch(next: 'inventory' | 'legacy') {
     if (next === mode) return;
     if (next === 'legacy' && pendingInventoryRows > 0) {
-      const ok = window.confirm(
-        `Switching to Legacy will discard the ${pendingInventoryRows} card${pendingInventoryRows === 1 ? '' : 's'} staged on the From Inventory tab. Continue?`
-      );
-      if (!ok) return;
+      setConfirmSwitchTo(next);
+      return;
     }
     setMode(next);
   }
@@ -206,6 +207,34 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
       {mode === 'inventory'
         ? <AddCardFromInventory batchId={batchId} onClose={onClose} onPendingCountChange={setPendingInventoryRows} />
         : <AddCardLegacy        batchId={batchId} onClose={onClose} />}
+
+      <Modal
+        open={!!confirmSwitchTo}
+        onClose={() => setConfirmSwitchTo(null)}
+        title="Discard staged cards?">
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-300 leading-relaxed">
+            Switching to <span className="text-zinc-100 font-medium">Legacy</span> will discard
+            the <span className="text-zinc-100 font-medium">{pendingInventoryRows}</span> card
+            {pendingInventoryRows === 1 ? '' : 's'} staged on the From Inventory tab.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setConfirmSwitchTo(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-red-600 hover:bg-red-500 text-white border-0"
+              onClick={() => {
+                const next = confirmSwitchTo;
+                setConfirmSwitchTo(null);
+                if (next) setMode(next);
+              }}>
+              Discard &amp; switch
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
