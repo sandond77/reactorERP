@@ -330,7 +330,11 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
       sql<number>`COALESCE(EXTRACT(DAY FROM NOW() - gb.submitted_at), 0)::int`.as('days_elapsed'),
     ])
     .where('gb.user_id', '=', userId)
-    .where('gb.status', '!=', 'returned')
+    // Active means actually at the grader. Pending batches (still being
+    // assembled, no submit date) and reverted-back-to-pending batches
+    // shouldn't appear here even though they're not yet returned —
+    // they're counted under "Unsubmitted" in the pipeline tile above.
+    .where('gb.status', '=', 'submitted')
     .groupBy('gb.id')
     .orderBy('gb.submitted_at', 'asc')
     .execute();
