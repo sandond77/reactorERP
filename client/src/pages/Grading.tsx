@@ -1018,13 +1018,20 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
               <Trash2 size={13} /> Delete
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => setShowEdit(true)}>
-            Edit Details
-          </Button>
+          {data.status === 'pending' && (
+            <Button size="sm" variant="ghost" onClick={() => setShowEdit(true)}>
+              Edit Details
+            </Button>
+          )}
           {data.status === 'submitted' && (
             <Button size="sm" variant="ghost" onClick={() => setStatus.mutate('pending')} disabled={setStatus.isPending}>
               Unlock Sub
             </Button>
+          )}
+          {data.status === 'returned' && (
+            <span className="text-[10px] text-zinc-500 italic">
+              Locked — revert the return to unlock
+            </span>
           )}
           {data.status === 'pending' && (
             <>
@@ -1126,7 +1133,7 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
                   </td>
                   <td className="px-4 py-2 text-right text-zinc-400">{item.rolling_total}</td>
                   <td className="px-4 py-2">
-                    {data.status !== 'submitted' && (confirmingId === item.id ? (
+                    {data.status === 'pending' && (confirmingId === item.id ? (
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => setConfirmingId(null)}
                           className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors">
