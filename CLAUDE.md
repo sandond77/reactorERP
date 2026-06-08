@@ -12,6 +12,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **No comments on unchanged code** — only add comments where logic isn't self-evident.
 - **Migrations are plain SQL files** — sequential numbered files in `server/src/db/migrations/`. When the migration runner has ordering issues, apply SQL directly via the Node.js pg Pool.
 
+## Secret handling (non-negotiable)
+
+This codebase had a GitGuardian incident in June 2026 where a Railway Postgres URL was leaked via `.claude/settings.json`. To prevent recurrence:
+
+- **Never write a literal secret anywhere outside `server/.env`** — no DB URLs with passwords, no API keys, no `SESSION_SECRET`, no OAuth client secrets, no Anthropic keys. Not in source files, not in markdown, not in commit messages, not in `.claude/settings.json` auto-allow patterns, not in shell history examples in docs.
+- **For prod DB access, always resolve via `railway variables --kv`** at runtime: `PROD_URL=$(railway variables --kv 2>/dev/null | grep DATABASE_PUBLIC_URL | head -1 | cut -d= -f2-)`. The literal URL must never appear in a Bash command that could be saved (auto-allow patterns, scripts, snippets).
+- **Local DB access uses `DATABASE_URL` from `server/.env`** via `require('dotenv').config({ path: 'server/.env' })`. Never inline the local URL either, even though it's a Docker localhost — `localhost:5432` with a password is still a credential pattern, and the password may match another env.
+- **`.claude/settings.json` is gitignored** and must stay that way. If a Bash command needs approval at the user's tier, write the pattern as a wildcard (`Bash(node -e *)`) — never paste the actual command with secrets in it.
+- **When in doubt, ask before committing anything containing the strings**: `postgres://`, `postgresql://`, `Bearer `, `sk-`, `password=`, `_SECRET=`, `_KEY=`, `_TOKEN=`. These are tripwires; pause and verify the file going into the commit has no literal value attached.
+- **If a leak happens anyway**: rotate the credential *first* (the only thing that actually fixes it), scrub the file in a new commit, and add the source to `.gitignore`. Don't rely on `git filter-repo` + force-push to undo the exposure — by then it's already cached.
+
 ---
 
 ## System Overview
