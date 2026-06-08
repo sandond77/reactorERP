@@ -1172,9 +1172,18 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+type StatusFilter = 'all' | 'pending' | 'submitted' | 'returned';
+const STATUS_TABS: { value: StatusFilter; label: string }[] = [
+  { value: 'all',       label: 'All' },
+  { value: 'pending',   label: 'Adding' },
+  { value: 'submitted', label: 'Submitted' },
+  { value: 'returned',  label: 'Returned' },
+];
+
 export function Grading() {
   const [selectedId, setSelectedId]     = useState<string | null>(null);
   const [showCreate, setShowCreate]     = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   const { data, isLoading } = useQuery<Batch[]>({
     queryKey: ['grading-batches'],
@@ -1185,10 +1194,35 @@ export function Grading() {
     return <BatchDetailPanel batchId={selectedId} onBack={() => setSelectedId(null)} />;
   }
 
+  const counts = (data ?? []).reduce<Record<StatusFilter, number>>(
+    (acc, b) => { acc.all++; acc[b.status as StatusFilter] = (acc[b.status as StatusFilter] ?? 0) + 1; return acc; },
+    { all: 0, pending: 0, submitted: 0, returned: 0 },
+  );
+  const filtered = statusFilter === 'all' ? (data ?? []) : (data ?? []).filter((b) => b.status === statusFilter);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <h1 className="text-xl font-bold text-zinc-100">Grading Submissions</h1>
+        <div className="flex items-center gap-6">
+          <h1 className="text-xl font-bold text-zinc-100">Grading Submissions</h1>
+          <div className="flex items-center gap-1 text-xs">
+            {STATUS_TABS.map((t) => (
+              <button
+                key={t.value}
+                onClick={() => setStatusFilter(t.value)}
+                className={`px-3 py-1.5 rounded-md transition-colors ${
+                  statusFilter === t.value
+                    ? 'bg-indigo-600 text-white'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+                }`}>
+                {t.label}
+                <span className={`ml-1.5 text-[10px] ${statusFilter === t.value ? 'text-indigo-200' : 'text-zinc-600'}`}>
+                  {counts[t.value] ?? 0}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
           <Plus size={14} /> Start Sub
         </Button>
@@ -1197,9 +1231,9 @@ export function Grading() {
       <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
-        ) : !data?.length ? (
+        ) : !filtered.length ? (
           <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">
-            No grading batches yet.
+            {data?.length ? `No ${statusFilter === 'all' ? '' : STATUS_TABS.find(t => t.value === statusFilter)?.label.toLowerCase() + ' '}batches.` : 'No grading batches yet.'}
           </div>
         ) : (
           <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', minWidth: '100%', width: 'max-content' }}>
@@ -1236,7 +1270,7 @@ export function Grading() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {data.map((batch) => {
+              {filtered.map((batch) => {
                 const totalGrading = (batch.grading_cost ?? 0) * (batch.total_qty ?? batch.item_count);
                 const totalCost    = batch.raw_cost + totalGrading;
                 const estGain      = batch.estimated_total - totalCost;
