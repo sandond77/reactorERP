@@ -69,6 +69,33 @@ interface SlabResult {
 
 type SortDir = 'asc' | 'desc';
 
+// Every React Query key whose data becomes stale the moment a sale is
+// recorded. The single sale path only invalidated ['sales'] which left
+// just-sold certs visible in the picker/bulk-search caches until they
+// became stale on their own — letting a user click through and re-attempt
+// a sale that the server then 409'd. Call this from every recordSale /
+// /sales/batch completion site so the next picker open is fresh.
+function invalidateAfterSale(qc: ReturnType<typeof useQueryClient>) {
+  for (const key of [
+    'sales',
+    'card-name-search',         // graded single-sale name dropdown
+    'card-copies',              // graded single-sale FIFO picker
+    'sale-raw-search',          // raw single-sale search
+    'bulk-sale-search',         // bulk graded search (eBay set + card show)
+    'bulk-sale-raw-search',     // bulk raw search
+    'card-show-raw',            // card show raw inventory chip
+    'inventory-slabs',          // /grading/slabs paginated tables
+    'raw-inventory-grouped',    // Raw Overall + grouped queries
+    'raw-overall',              // dashboard raw counts
+    'listings',                 // listings page (status flips to sold)
+    'inventory-summary',        // top-level dashboard counts
+    'sales-summary',            // dashboard sales totals
+    'audit-log',                // shows the new entry
+  ]) {
+    qc.invalidateQueries({ queryKey: [key] });
+  }
+}
+
 const PLATFORMS = [
   { value: 'ebay',       label: 'eBay' },
   { value: 'card_show',  label: 'Card Show' },
@@ -575,7 +602,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         quantity: qtyToSell,
       });
       toast.success('Sale recorded!');
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+      invalidateAfterSale(queryClient);
       onClose();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
@@ -2105,7 +2132,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           unique_id_2: notes || undefined,
         });
         toast.success(`${itemsWithFinal.length} sales recorded!`);
-        queryClient.invalidateQueries({ queryKey: ['sales'] });
+        invalidateAfterSale(queryClient);
         onClose();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {

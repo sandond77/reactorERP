@@ -37,6 +37,26 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
   if (card.status === 'sold') throw new AppError(409, 'Card already marked as sold');
   if (card.is_personal_collection) throw new AppError(400, 'Personal collection cards cannot be sold. Remove from personal collection first.');
 
+  // Belt + suspenders for slabs: any existing sale row for a slab card_instance
+  // means the slab is already sold, period. Catches the edge case where the
+  // card_instance.status was reset off 'sold' (manual edit, buggy revert path,
+  // etc.) without deleting its sale row — the status check alone would let a
+  // duplicate sale through. Raw lots with quantity>1 legitimately accumulate
+  // multiple sales rows so this guard is slab-only.
+  const slabRow = await db
+    .selectFrom('slab_details')
+    .select('card_instance_id')
+    .where('card_instance_id', '=', input.card_instance_id)
+    .executeTakeFirst();
+  if (slabRow) {
+    const existingSale = await db
+      .selectFrom('sales')
+      .select('id')
+      .where('card_instance_id', '=', input.card_instance_id)
+      .executeTakeFirst();
+    if (existingSale) throw new AppError(409, 'A sale already exists for this slab — delete the existing sale first if you need to record a new one.');
+  }
+
   // Partial-sale split: if caller asked to sell fewer cards than the row holds,
   // shave the sold qty off the source row and insert a sibling "sold" row that
   // the sale will reference. Avoids the old behavior of marking a whole stack

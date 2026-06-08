@@ -174,8 +174,17 @@ export async function listListings(
         : sql`AND l.platform IN (${sql.join(filters.platforms.map((p) => sql.val(p)))})`
       : sql``;
 
+  // Search hits multiple identifiers: card name (substring), slab cert
+  // number (exact-substring on the text rep), part number (SKU), and the
+  // parent raw_purchase id (e.g. "2026R49"). Lets the user paste a cert,
+  // SKU, or purchase id into the same box that takes card names.
   const searchCond = filters.search
-    ? sql`AND COALESCE(ci.card_name_override, cc.card_name) ILIKE ${`%${filters.search}%`}`
+    ? sql`AND (
+        COALESCE(ci.card_name_override, cc.card_name) ILIKE ${`%${filters.search}%`}
+        OR sd.cert_number::text ILIKE ${`%${filters.search}%`}
+        OR cc.sku ILIKE ${`%${filters.search}%`}
+        OR rp.purchase_id ILIKE ${`%${filters.search}%`}
+      )`
     : sql``;
 
   const gradeCond =
@@ -256,6 +265,7 @@ export async function listListings(
             'c', sd.company
           ) ORDER BY LOWER(COALESCE(ci.card_name_override, cc.card_name, '')), sd.grade_label, sd.company) AS composition,
           STRING_AGG(LOWER(COALESCE(ci.card_name_override, cc.card_name, '')), ' | ')   AS names_concat,
+          STRING_AGG(COALESCE(sd.cert_number::text, ''), ' | ')                         AS certs_concat,
           (ARRAY_AGG(l.listing_group_name ORDER BY l.listed_at DESC NULLS LAST))[1]    AS listing_group_name,
           SUM(l.list_price) FILTER (WHERE l.listing_status = 'active')::int             AS list_price,
           MIN(l.listed_at)  FILTER (WHERE l.listing_status = 'active')                  AS listed_at,
@@ -320,7 +330,7 @@ export async function listListings(
             ? filters.platforms.length === 0 ? sql`AND 1=0`
               : sql`AND pg.platform IN (${sql.join(filters.platforms.map((p) => sql.val(p)))})`
             : sql``}
-          ${setSearchPattern ? sql`AND pg.names_concat ILIKE ${setSearchPattern}` : sql``}
+          ${setSearchPattern ? sql`AND (pg.names_concat ILIKE ${setSearchPattern} OR pg.certs_concat ILIKE ${setSearchPattern})` : sql``}
       )
       SELECT
         listing_group_id, listing_group_name, card_name, set_name, part_number,
