@@ -58,6 +58,7 @@ interface SlabResult {
   raw_purchase_date: string | null;
   listed_price: number | null;
   listing_id: string | null;
+  listing_url: string | null;
   is_listed: boolean;
   is_personal_collection: boolean;
   location_name: string | null;
@@ -1438,32 +1439,55 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               const added = alreadyAdded.has(r.id);
               return (
                 <button key={r.id} type="button" disabled={added}
-                  onClick={() => {
+                  onClick={async () => {
                     if (added) return;
-                    const stickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
-                    const discPct = parseFloat(bulkDiscount || '0');
-                    const finalStr = stickerStr && discPct > 0
-                      ? (parseFloat(stickerStr) * (1 - discPct / 100)).toFixed(2)
-                      : stickerStr;
-                    setBulkCart(prev => [...prev, {
-                      cart_entry_id: crypto.randomUUID(),
-                      id: r.id,
-                      listing_id: r.listing_id ?? null,
-                      card_name: r.card_name,
-                      set_name: r.set_name,
-                      cert_number: r.cert_number,
-                      grade_label: r.grade_label,
-                      company: r.company,
-                      raw_purchase_label: null,
-                      sticker_price_input: stickerStr,
-                      final_price_input: finalStr,
-                      card_type: 'graded',
-                      quantity: 1,
-                      lot_quantity: 1,
-                      card_show_price: r.card_show_price ?? null,
-                      listed_price: r.listed_price ?? null,
-                      is_listed: r.is_listed ?? false,
-                    }]);
+                    const buildEntry = (row: SlabResult) => {
+                      const stickerStr = row.card_show_price ? (row.card_show_price / 100).toFixed(2) : '';
+                      const discPct = parseFloat(bulkDiscount || '0');
+                      const finalStr = stickerStr && discPct > 0
+                        ? (parseFloat(stickerStr) * (1 - discPct / 100)).toFixed(2)
+                        : stickerStr;
+                      return {
+                        cart_entry_id: crypto.randomUUID(),
+                        id: row.id,
+                        listing_id: row.listing_id ?? null,
+                        card_name: row.card_name,
+                        set_name: row.set_name,
+                        cert_number: row.cert_number,
+                        grade_label: row.grade_label,
+                        company: row.company,
+                        raw_purchase_label: null,
+                        sticker_price_input: stickerStr,
+                        final_price_input: finalStr,
+                        card_type: 'graded' as const,
+                        quantity: 1,
+                        lot_quantity: 1,
+                        card_show_price: row.card_show_price ?? null,
+                        listed_price: row.listed_price ?? null,
+                        is_listed: row.is_listed ?? false,
+                      };
+                    };
+
+                    // eBay set-listing auto-pull: if this slab's listing has
+                    // siblings under the same listing URL, fetch all of them
+                    // and add the whole set in one click. Falls back to a
+                    // single-card add if no URL (card show, private sale) or
+                    // the fetch fails.
+                    if (bulkIsEbay && r.listing_url) {
+                      try {
+                        const res = await api.get('/listings/by-url/all', { params: { url: r.listing_url } });
+                        const siblings = (res.data?.data ?? []) as SlabResult[];
+                        const toAdd = siblings
+                          .filter(s => !alreadyAdded.has(s.id))
+                          .map(buildEntry);
+                        if (toAdd.length > 1) {
+                          setBulkCart(prev => [...prev, ...toAdd]);
+                          toast.success(`Added ${toAdd.length} cards from set listing`);
+                          return;
+                        }
+                      } catch { /* fall through to single-add */ }
+                    }
+                    setBulkCart(prev => [...prev, buildEntry(r)]);
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
                   <div className="min-w-0">
