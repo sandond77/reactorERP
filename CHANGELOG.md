@@ -1,5 +1,57 @@
 # Reactor — Changelog
 
+## June 8, 2026
+
+### Features
+
+**Dashboard — Today pill on the revenue window selector**
+- Added a Today option in front of 30D / 60D / 90D / This Year / Lifetime on the Overview revenue strip. Boundary is calendar-day midnight server-local, not a rolling 24h — matches how a card-show / POS day is read (clean $0 morning, no carry-over from yesterday's afternoon). Server gains a `queryToday` + `channelQueryToday` that hit the same SQL with `sold_at >= todayStart` and reuses the existing `expensesQuery` from-date branch. Response gets a `today` arm at top level and inside `by_channel`. Client added one arm to the `SalesWindow` union, the `wk`-key derivation, and the `SALES_WINDOWS` array — no render changes; the stat-tile grid was already keyed off `windowData`.
+
+**Dashboard — Card Shows by-channel tile shows graded/raw breakdown**
+- eBay tile already displayed `N listed · X Graded / Y Raw` but Card Shows only had `N unsold · M total inventory`. `cardCounts` query now also returns `card_show_graded` and `card_show_raw` via the existing `slabCheck` EXISTS pattern. Dashboard renders the new breakdown in place of the old total-inventory line.
+
+**Grading — returned-cert column + status filter tabs on sub detail / list**
+- Sub detail items table renders a Returned Cert column only when `data.status === 'returned'`. Server `getBatch` selects the slab's cert number + grade label via two scalar subqueries on `slab_details` (`source_raw_instance_id` matched in scope — kept live by migration 057's soft-convert refactor).
+- Sub list header gains All / Adding / Submitted / Returned tabs next to the title (later moved to the right side of the header next to the Start Sub button to match the Intake page's title-left/filters-right pattern). Each tab carries its own count. 'Adding' maps to `status='pending'` which already displayed as "Adding Cards". Empty state text adapts to the active filter.
+
+**Sales — clicking a cert in eBay set sale auto-pulls the whole set**
+- Recording a Set Listing sale required adding every cert one by one even though they all share the same eBay listing URL. Picking a graded row now: if `bulkIsEbay && r.listing_url` is non-null, GET `/listings/by-url/all`, add every sibling (deduped against the current cart) in one click. Toast confirms `Added N cards from set listing`. Falls back to single-card add if no URL or the fetch errors. `SlabResult` gained `listing_url`; URL-mode (Listing URL tab) was already a whole-set lookup and is unchanged.
+
+### Fixes
+
+**Sales — recordSale's slab guard + cache invalidation after sale + listings cert search**
+- Three connected issues. (1) `recordSale` only checked `card.status === 'sold'`. Confirmed on prod: cert 141640159 had a May-6 card_show sale; audit shows the card was silently reverted to `'inspected'` on May 23 without the sale row being deleted; today a second card_show sale was recorded against the same card. Added a slab-only secondary guard: if `slab_details` exists for this `card_instance_id` and any sale row exists, reject with `"A sale already exists for this slab"`. Raw lots with quantity>1 legitimately accumulate multiple sales so the guard is slab-gated. Prod data for the affected card was fixed via direct UPDATE (`status -> 'sold'`); zero other orphan slabs found.
+- (2) Only `['sales']` was invalidated on sale completion, leaving the card-name search, copies picker, bulk search, slab inventory, raw inventory, listings, and dashboard summary caches stale — letting the just-sold cert reappear in the picker on reopen until React Query's own `staleTime` kicked in. Centralized into `invalidateAfterSale()` covering all relevant keys and wired into the single-sale and bulk-sale completion sites.
+- (3) Listings page search box matched only against card name. Searching cert `152584770` returned "No listings found" even though the cert was listed under that name. Extended `searchCond` to OR against `sd.cert_number::text`, `cc.sku`, and `rp.purchase_id`. The graded-set CTE gained a `certs_concat` STRING_AGG and matches it under the same ILIKE so set rows surface when any sub-cert matches the query.
+
+**Grading — guard revert-to-inspected updates on batch_item removal (root cause of the May 23 corruption)**
+- `deleteBatch` and `removeBatchItem` unconditionally set the linked card's `status='inspected', decision='grade'` when reverting a batch item, regardless of what state the card was actually at. A back-linked sold slab (`decision='already_graded'`, `status='sold'`) that ever passed through a batch and got removed would have its terminal status silently clobbered to `'inspected'` without anyone touching its sale row — producing the exact `sold -> inspected` audit event on cert 141640159 that set up today's double-sell pretext. Added a `WHERE status='grading_submitted'` clause to both UPDATEs so the revert only fires when the card is actually in flight to the grader. Terminal states (sold, graded, lost_damaged) are left alone.
+
+**Sales — single-sale picker skips set-listing certs + auto-jumps on cert match**
+- Two footguns in the single graded sale flow. (1) FIFO auto-picked set-listing certs. Detection moved server-side via `is_set_listing` on `/grading/slabs`: TRUE iff the slab's `ebay_listing_url` has at least one sibling active listing for a different card. Same-card multi-qty listings correctly do *not* trip the flag; real cross-card sets are flagged regardless of which card the picker is filtered to. Client renders a rose SET badge alongside any FIFO badge with a rose-tinted card border; FIFO auto-pick uses `firstNonSetCopy`. Clicking a SET row or hitting Continue with a SET selection opens a Modal-driven confirm (rose action button) explaining the orphan-listing risk and offering the Set Listing flow. (2) Typing a numeric cert (3+ digits) that exactly matches a row's `cert_number` now skips the names dropdown and navigates directly to the copies step with the cert pre-selected; SET-cert guard on Continue still applies.
+
+**Sales — strike price re-pulls when switching certs in the picker**
+- Auto-fill effect bailed with `if (strikePrice) return`, so the FIFO copy's listed price would set strikePrice once and subsequent cert clicks couldn't update it. User picked a $1,484.99 cert and got the FIFO's $1,169.99 in Strike. Replaced with a `strikePriceDirty` flag that flips true only on user keypress. Auto-fill effects now re-pull on every `selectedCard` / `selectedRawCard` change unless dirty, so picker switches keep Strike in sync and manual edits are preserved. Dirty flag set from the three Strike onChange handlers. Modal unmount-on-close resets the flag naturally for the next sale.
+
+**Grading — lock line + details edits when sub is not pending**
+- Two leaks on the sub detail page allowed edits to a locked sub. Per-row trash gate was `data.status !== 'submitted'`, so it still rendered on `'returned'` subs and any future intermediate status. Edit Details button had no gate at all. Both now require `data.status === 'pending'`. For submitted subs the existing Unlock Sub button reverts to pending. For returned subs, unlocking requires reverting the return first (separate flow); the header shows a small *"Locked — revert the return to unlock"* note in place of the gone buttons so the path is obvious.
+
+### Refactor
+
+**UI — every native dialog call replaced with the styled Modal**
+- `window.confirm` / `window.alert` / `window.prompt` produce un-styled OS chrome that breaks the dark theme and is generally bad JS practice (blocks main thread, untestable, inconsistent across browsers). Converted the three remaining sites: (1) Sales single-sale set-cert confirm now uses a `setConfirm` state with `'pick' | 'continue'` context so OK does the right thing; (2) Grading Add Card tab-switch warning uses a `confirmSwitchTo` state with a red "Discard & switch" action; (3) Intake `addNewSetForLine` uses a Modal with a styled uppercase input, Enter-to-submit / Escape-to-cancel, and a saving spinner. CLAUDE.md gained a hard rule forbidding native dialogs with rationale and Modal/toast pointers. Codebase verified free of `window.confirm` / `alert` / `prompt` calls.
+
+### Security
+
+**GitGuardian incident — Railway Postgres URL leak**
+- `.claude/settings.json` got committed with a literal `postgresql://postgres:<password>@shinkansen.proxy.rlwy.net:22787/railway` baked into one of the auto-allow Bash patterns. GitGuardian flagged it within minutes of push. Credential rotated in Railway (auto-propagated to linked services). File scrubbed in a follow-up commit; `git rm --cached` untracked it; `.claude/settings.json` + `settings.local.json` added to `.gitignore`. Secret still exists in commit `6f08968` history but the credential is dead so it no longer matters.
+- CLAUDE.md gained a "Secret handling (non-negotiable)" section: never inline literal secrets anywhere outside `server/.env`; always resolve prod DB via `railway variables --kv` at runtime; tripwire substrings (`postgres://`, `sk-`, `_SECRET=`, etc.) that should pause before any commit; rotate-first recovery playbook.
+
+### Docs
+
+**CLAUDE.md — header layout, filter-pill styling, and dialog rules**
+- Recurring back-and-forth on filter placement and button styling (twice in the same session for the Grading page alone) prompted a mandatory pattern in CLAUDE.md. Header is `flex items-center justify-between px-6 py-4 border-b border-zinc-800` — title left, filters + primary action grouped right in a single `flex items-center gap-3` wrapper, modeled on `Intake.tsx`. Filter pills use exact class set: `px-3 py-1 text-xs rounded-md font-medium transition-colors` with `bg-indigo-600 text-white` active / `bg-zinc-800 text-zinc-400 hover:text-zinc-200` inactive. Count spans inside pills use `ml-1.5 text-[10px]` with `text-indigo-200` / `text-zinc-500`. Variations explicitly forbidden.
+
 ## June 7, 2026
 
 ### Features
