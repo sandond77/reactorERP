@@ -134,6 +134,34 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
     };
 
     const yearStart = new Date(new Date().getFullYear(), 0, 1);
+    // Calendar-day "today" boundary (server local time). Matches how a card
+    // show / point-of-sale day is read by the user — sales reset at midnight,
+    // not 24 hours after the last visit.
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+
+    const queryToday = () => db
+      .selectFrom('sales')
+      .select([
+        sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(sale_price)::int`.as('total_gross'),
+        sql<number>`SUM(net_proceeds)::int`.as('total_net'),
+        sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
+        sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
+      ])
+      .where('user_id', '=', req.dataUserId)
+      .where('sold_at', '>=', todayStart)
+      .executeTakeFirst();
+
+    const channelQueryToday = () => (db
+      .selectFrom('sales')
+      .select([
+        sql<string>`platform`.as('platform'),
+        sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
+      ])
+      .where('user_id', '=', req.dataUserId)
+      .where('sold_at', '>=', todayStart) as any)
+      .groupBy('platform').execute();
 
     const queryYear = () => db
       .selectFrom('sales')
@@ -197,10 +225,10 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
          WHERE user_id = ${req.dataUserId} AND status = 'ordered') AS pending_orders
     `.execute(db);
 
-    const [d30, d60, d90, dYear, lifetime, ch30, ch60, ch90, chYear, chLifetime, exp30, exp60, exp90, expYear, expLifetime, pipeline, perfResult] = await Promise.all([
-      query(30), query(60), query(90), queryYear(), query(null),
-      channelQuery(30), channelQuery(60), channelQuery(90), channelQueryYear(), channelQuery(null),
-      expensesQuery(30), expensesQuery(60), expensesQuery(90), expensesQuery(null, yearStart), expensesQuery(null),
+    const [dToday, d30, d60, d90, dYear, lifetime, chToday, ch30, ch60, ch90, chYear, chLifetime, expToday, exp30, exp60, exp90, expYear, expLifetime, pipeline, perfResult] = await Promise.all([
+      queryToday(), query(30), query(60), query(90), queryYear(), query(null),
+      channelQueryToday(), channelQuery(30), channelQuery(60), channelQuery(90), channelQueryYear(), channelQuery(null),
+      expensesQuery(null, todayStart), expensesQuery(30), expensesQuery(60), expensesQuery(90), expensesQuery(null, yearStart), expensesQuery(null),
       pipelineQuery, performanceQuery,
     ]);
     const perf = perfResult.rows[0] ?? { avg_hold_days: null, avg_listed_days: null, listings_value: 0 };
@@ -221,12 +249,14 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       total_expenses: Number(exp?.total ?? 0),
     });
     res.json({
+      today:        snap(dToday, expToday),
       last_30_days: snap(d30, exp30),
       last_60_days: snap(d60, exp60),
       last_90_days: snap(d90, exp90),
       this_year:    snap(dYear, expYear),
       lifetime:     snap(lifetime, expLifetime),
       by_channel: {
+        today:        channelGroup(chToday as CRow[]),
         last_30_days: channelGroup(ch30 as CRow[]),
         last_60_days: channelGroup(ch60 as CRow[]),
         last_90_days: channelGroup(ch90 as CRow[]),

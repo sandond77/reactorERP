@@ -27,12 +27,13 @@ interface SalesRow { count: number; total_gross: number; total_net: number; tota
 interface ChannelRow { count: number; total_profit: number }
 interface ChannelBreakdown { ebay: ChannelRow; card_show: ChannelRow; other: ChannelRow }
 interface SalesSummary {
+  today: SalesRow;
   last_30_days: SalesRow;
   last_60_days: SalesRow;
   last_90_days: SalesRow;
   this_year: SalesRow;
   lifetime: SalesRow;
-  by_channel: { last_30_days: ChannelBreakdown; last_60_days: ChannelBreakdown; last_90_days: ChannelBreakdown; this_year: ChannelBreakdown; lifetime: ChannelBreakdown };
+  by_channel: { today: ChannelBreakdown; last_30_days: ChannelBreakdown; last_60_days: ChannelBreakdown; last_90_days: ChannelBreakdown; this_year: ChannelBreakdown; lifetime: ChannelBreakdown };
   grading: { sub_count: number; card_count: number };
   cards: {
     total:     { all: number; graded: number; raw: number };
@@ -140,8 +141,9 @@ function MiniDonutChart({ pieData, formatter }: { pieData: PieEntry[]; formatter
 }
 
 // ── Tab: Overview ─────────────────────────────────────────────────────────────
-type SalesWindow = '30d' | '60d' | '90d' | 'this_year' | 'lifetime';
+type SalesWindow = 'today' | '30d' | '60d' | '90d' | 'this_year' | 'lifetime';
 const SALES_WINDOWS: { key: SalesWindow; label: string }[] = [
+  { key: 'today',     label: 'Today' },
   { key: '30d',       label: '30D' },
   { key: '60d',       label: '60D' },
   { key: '90d',       label: '90D' },
@@ -596,13 +598,14 @@ function OverviewTab() {
     ? ((cards.sold.all / (cards.sold.all + cards.unsold.all)) * 100).toFixed(1)
     : null;
   const EMPTY_ROW: SalesRow = { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0 };
-  const windowData: SalesRow = salesWindow === '30d' ? (summary?.last_30_days ?? EMPTY_ROW)
+  const windowData: SalesRow = salesWindow === 'today' ? (summary?.today ?? EMPTY_ROW)
+    : salesWindow === '30d'      ? (summary?.last_30_days ?? EMPTY_ROW)
     : salesWindow === '60d'      ? (summary?.last_60_days ?? EMPTY_ROW)
     : salesWindow === '90d'      ? (summary?.last_90_days ?? EMPTY_ROW)
     : salesWindow === 'this_year'? (summary?.this_year    ?? EMPTY_ROW)
     : lifetimeSales;
 
-  const wk = salesWindow === '30d' ? 'last_30_days' : salesWindow === '60d' ? 'last_60_days' : salesWindow === '90d' ? 'last_90_days' : salesWindow === 'this_year' ? 'this_year' : 'lifetime';
+  const wk = salesWindow === 'today' ? 'today' : salesWindow === '30d' ? 'last_30_days' : salesWindow === '60d' ? 'last_60_days' : salesWindow === '90d' ? 'last_90_days' : salesWindow === 'this_year' ? 'this_year' : 'lifetime';
 
   return (
     <div className="flex flex-col gap-4 h-full min-h-0">
