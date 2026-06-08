@@ -215,6 +215,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [cardShowId, setCardShowId] = useState<string>('');
   const [showArchived, setShowArchived] = useState(false);
   const [strikePrice, setStrikePrice] = useState('');
+  // Becomes true once the user actually types into the Strike input. The
+  // auto-fill effects below check this instead of `if (strikePrice)` so
+  // switching certs in the picker re-pulls the strike from the newly
+  // selected card; only a user-typed value is left alone.
+  const [strikePriceDirty, setStrikePriceDirty] = useState(false);
   const [rawSaleQty, setRawSaleQty] = useState('1');
   // Reset Sell qty whenever the picked raw card changes so a stale value
   // (e.g. '5' typed for a prior 5-card lot) can't quietly flip the whole
@@ -225,27 +230,27 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   // Auto-fill Strike Price from the card's existing reference price when a
   // raw card is picked — CS sticker for card_show, list price for ebay.
-  // Matches what the bulk-sale cart already does on add. Only fires when
-  // Strike is still empty so user-typed values aren't clobbered.
+  // Always re-pulls when the selected card changes; only the user-typed
+  // dirty flag suppresses it so manual edits aren't clobbered.
   useEffect(() => {
     if (!selectedRawCard) return;
-    if (strikePrice) return;
+    if (strikePriceDirty) return;
     const ref = platform === 'card_show'
       ? selectedRawCard.card_show_price
       : platform === 'ebay'
         ? selectedRawCard.listed_price
         : null;
-    if (ref && ref > 0) setStrikePrice((ref / 100).toFixed(2));
+    setStrikePrice(ref && ref > 0 ? (ref / 100).toFixed(2) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRawCard?.id, platform]);
 
-  // Same auto-fill for graded — defaults strike from the slab's active
-  // listing price when present and Strike is empty.
+  // Same auto-fill for graded — keep strike in sync with whichever cert is
+  // selected unless the user has typed a custom value.
   useEffect(() => {
     if (!selectedCard) return;
-    if (strikePrice) return;
+    if (strikePriceDirty) return;
     const ref = selectedCard.listed_price;
-    if (ref && ref > 0) setStrikePrice((ref / 100).toFixed(2));
+    setStrikePrice(ref && ref > 0 ? (ref / 100).toFixed(2) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCard?.id]);
 
@@ -1376,7 +1381,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <Input label={strikeLabel} type="text" inputMode="decimal" placeholder="0.00"
-                value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+                value={strikePrice} onChange={(e) => { setStrikePrice(e.target.value); setStrikePriceDirty(true); }} />
               {perCard && <p className="text-[11px] text-zinc-500">≈ ${perCard} per card</p>}
             </div>
             <Input label="Order Earnings (After Fees)" type="text" inputMode="decimal" placeholder="0.00"
@@ -1385,7 +1390,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         ) : (
           <div className="flex flex-col gap-1">
             <Input label={strikeLabel} type="text" inputMode="decimal" placeholder="0.00"
-              value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+              value={strikePrice} onChange={(e) => { setStrikePrice(e.target.value); setStrikePriceDirty(true); }} />
             {perCard && <p className="text-[11px] text-zinc-500">≈ ${perCard} per card</p>}
           </div>
         );
@@ -1843,7 +1848,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <p className="text-xs font-medium text-zinc-400 mb-2">Set Listing Totals — split evenly across {n} card{n !== 1 ? 's' : ''}</p>
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Total Strike Price" type="text" inputMode="decimal" placeholder="0.00"
-                  value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+                  value={strikePrice} onChange={(e) => { setStrikePrice(e.target.value); setStrikePriceDirty(true); }} />
                 <Input label="Total After Fees" type="text" inputMode="decimal" placeholder="0.00"
                   value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
               </div>
