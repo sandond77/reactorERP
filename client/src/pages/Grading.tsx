@@ -1203,8 +1203,8 @@ export function Grading() {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-        <div className="flex items-center gap-6">
-          <h1 className="text-xl font-bold text-zinc-100">Grading Submissions</h1>
+        <h1 className="text-xl font-bold text-zinc-100">Grading Submissions</h1>
+        <div className="flex items-center gap-3">
           <div className="flex gap-1">
             {STATUS_TABS.map((t) => (
               <button
@@ -1220,10 +1220,10 @@ export function Grading() {
               </button>
             ))}
           </div>
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            <Plus size={14} /> Start Sub
+          </Button>
         </div>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          <Plus size={14} /> Start Sub
-        </Button>
       </div>
 
       <div className="flex-1 overflow-auto">
