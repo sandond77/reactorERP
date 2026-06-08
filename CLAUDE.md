@@ -149,6 +149,11 @@ No test suite exists. Validate changes by running the dev server.
 
 **Page consistency rule:** All inventory pages must have: search input, Add button, Clear Filters button, filter pattern, and empty state in `<tbody>`.
 
+**Header + filter layout (mandatory pattern):** Every list page header is `flex items-center justify-between px-6 py-4 border-b border-zinc-800`. **Title goes on the left**, **filter pill group + primary action button go on the right** inside a single `flex items-center gap-3` wrapper. Never split filters away from the action button; never left-align filters next to the title. Reference implementation: `Intake.tsx` (Raw/Bulk + status filters + Add button). When adding tabs to a new page, copy this layout exactly — do not invent a new one.
+
+**Filter pill styling (mandatory):** Filter tabs use this exact class set:
+`px-3 py-1 text-xs rounded-md font-medium transition-colors` then conditionally `bg-indigo-600 text-white` when active, `bg-zinc-800 text-zinc-400 hover:text-zinc-200` when inactive. Group buttons with `flex gap-1` (or `flex gap-1 border-l border-zinc-800 pl-3` when adjacent to another filter group). Counts inside a pill use `ml-1.5 text-[10px]` with `text-indigo-200` (active) or `text-zinc-500` (inactive). **Do not invent variations** (`py-1.5`, `bg-zinc-800/60` hover, rounded-lg, etc.) — they all need to look identical across pages.
+
 **Environment:** Server runs on port 3001. Vite dev server on 5173 and proxies `/api` and `/uploads` to `localhost:3001`. Server `.env` needs `DATABASE_URL`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `CLIENT_URL`.
 
 ---
