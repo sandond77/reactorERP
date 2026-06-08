@@ -1205,18 +1205,16 @@ export function Grading() {
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
         <div className="flex items-center gap-6">
           <h1 className="text-xl font-bold text-zinc-100">Grading Submissions</h1>
-          <div className="flex items-center gap-1 text-xs">
+          <div className="flex gap-1">
             {STATUS_TABS.map((t) => (
               <button
                 key={t.value}
                 onClick={() => setStatusFilter(t.value)}
-                className={`px-3 py-1.5 rounded-md transition-colors ${
-                  statusFilter === t.value
-                    ? 'bg-indigo-600 text-white'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+                className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${
+                  statusFilter === t.value ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
                 }`}>
                 {t.label}
-                <span className={`ml-1.5 text-[10px] ${statusFilter === t.value ? 'text-indigo-200' : 'text-zinc-600'}`}>
+                <span className={`ml-1.5 text-[10px] ${statusFilter === t.value ? 'text-indigo-200' : 'text-zinc-500'}`}>
                   {counts[t.value] ?? 0}
                 </span>
               </button>
