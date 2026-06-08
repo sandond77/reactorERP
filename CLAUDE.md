@@ -154,6 +154,8 @@ No test suite exists. Validate changes by running the dev server.
 **Filter pill styling (mandatory):** Filter tabs use this exact class set:
 `px-3 py-1 text-xs rounded-md font-medium transition-colors` then conditionally `bg-indigo-600 text-white` when active, `bg-zinc-800 text-zinc-400 hover:text-zinc-200` when inactive. Group buttons with `flex gap-1` (or `flex gap-1 border-l border-zinc-800 pl-3` when adjacent to another filter group). Counts inside a pill use `ml-1.5 text-[10px]` with `text-indigo-200` (active) or `text-zinc-500` (inactive). **Do not invent variations** (`py-1.5`, `bg-zinc-800/60` hover, rounded-lg, etc.) — they all need to look identical across pages.
 
+**No `window.confirm` / `window.alert` / `window.prompt` — ever.** Not just here — they're a general JS anti-pattern. They block the main thread, are un-styled (white OS chrome that clashes with the dark theme), can't be themed or tested, and behave inconsistently across browsers. Use the `Modal` component (`client/src/components/ui/Modal.tsx`) with a small body and two buttons (Cancel + a styled action), or an inline confirm row when the affordance lives next to a single button (see the Delete batch row in `Grading.tsx` for the inline pattern). For info/feedback, use the existing `react-hot-toast` (`toast.success` / `toast.error`). If you find yourself reaching for `window.confirm` while implementing a feature, stop and add a Modal — it's the same lines of code.
+
 **Environment:** Server runs on port 3001. Vite dev server on 5173 and proxies `/api` and `/uploads` to `localhost:3001`. Server `.env` needs `DATABASE_URL`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `CLIENT_URL`.
 
 ---

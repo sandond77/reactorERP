@@ -60,6 +60,7 @@ interface SlabResult {
   listing_id: string | null;
   listing_url: string | null;
   is_listed: boolean;
+  is_set_listing: boolean;
   is_personal_collection: boolean;
   location_name: string | null;
   card_show_price: number | null;
@@ -171,6 +172,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Step 1b — copy selection (graded)
   const [selectedCard, setSelectedCard] = useState<SlabResult | null>(null);
   const [listedOnly, setListedOnly] = useState(true);
+  // When the user clicks a SET cert, or hits Continue with one selected, we
+  // park the candidate here and render a Modal-based confirm (no window.confirm).
+  // confirmContext distinguishes the two paths so OK does the right thing.
+  const [setConfirm, setSetConfirm] = useState<{ copy: SlabResult; context: 'pick' | 'continue' } | null>(null);
 
   // Raw mode
   const [rawSearchMode, setRawSearchMode] = useState<'name' | 'id' | 'url'>('name');
@@ -488,22 +493,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const copies = (platform === 'ebay' && listedOnly) ? allCopies.filter(c => c.is_listed) : allCopies;
   const listedCount = allCopies.filter(c => c.is_listed).length;
 
-  // Set-listing detection: a copy is part of an eBay set listing when its
-  // ebay_listing_url is shared with at least one OTHER copy in the same
-  // result set. Selling one of these via the single-card flow would orphan
-  // the rest of the set — the user must use the Set Listing sale flow
-  // instead. We surface this in the picker with a SET badge + confirm.
-  const setMemberIds = (() => {
-    const urlCounts = new Map<string, number>();
-    for (const c of copies) {
-      if (c.listing_url) urlCounts.set(c.listing_url, (urlCounts.get(c.listing_url) ?? 0) + 1);
-    }
-    const ids = new Set<string>();
-    for (const c of copies) {
-      if (c.listing_url && (urlCounts.get(c.listing_url) ?? 0) > 1) ids.add(c.id);
-    }
-    return ids;
-  })();
+  // Set-listing detection comes from the server (is_set_listing): true when
+  // the slab's ebay_listing_url has at least one sibling active listing for
+  // a DIFFERENT card identity. Multiple copies of the same card on one URL
+  // (a qty-N single listing) is NOT a set and must not be flagged.
+  const setMemberIds = new Set(copies.filter(c => c.is_set_listing).map(c => c.id));
   const firstNonSetCopy = copies.find(c => !setMemberIds.has(c.id)) ?? null;
 
   // Auto-select FIFO — first NON-set-listing copy. Skipping set members
@@ -837,10 +831,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <button key={copy.id} type="button"
                 onClick={() => {
                   if (isSet && (!selectedCard || selectedCard.id !== copy.id)) {
-                    const ok = window.confirm(
-                      `Cert #${copy.cert_number ?? '?'} is part of an eBay set listing. Selling it individually will leave the rest of the set in the listing. Use the Set Listing sale flow to sell the whole set.\n\nContinue selling this single cert anyway?`
-                    );
-                    if (!ok) return;
+                    setSetConfirm({ copy, context: 'pick' });
+                    return;
                   }
                   setSelectedCard(copy);
                 }}
@@ -882,19 +874,53 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
         <Button type="button" disabled={!selectedCard} onClick={() => {
           // Final guard: if the user reached Continue with a set-listing cert
-          // selected (e.g. via the cert-search auto-jump), confirm before
-          // proceeding so individual sale of a set member is never silent.
+          // selected (e.g. via the cert-search auto-jump), prompt via the
+          // styled Modal below so individual sale of a set member is never
+          // silent. window.confirm is forbidden — see CLAUDE.md UI rules.
           if (selectedCard && setMemberIds.has(selectedCard.id)) {
-            const ok = window.confirm(
-              `Cert #${selectedCard.cert_number ?? '?'} is part of an eBay set listing. Selling it individually will leave the rest of the set in the listing.\n\nContinue?`
-            );
-            if (!ok) return;
+            setSetConfirm({ copy: selectedCard, context: 'continue' });
+            return;
           }
           setStep('details');
         }}>
           Continue →
         </Button>
       </div>
+
+      <Modal
+        open={!!setConfirm}
+        onClose={() => setSetConfirm(null)}
+        title="Set listing cert">
+        {setConfirm && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-300 leading-relaxed">
+              Cert <span className="font-mono text-zinc-100">#{setConfirm.copy.cert_number ?? '?'}</span> is part of
+              an eBay <span className="text-rose-400 font-medium">set listing</span> (multiple different cards under
+              one URL). Selling it on its own will leave the rest of the set inside the listing.
+            </p>
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              Use the <span className="text-zinc-300">Set Listing</span> sale flow (Record Sale → eBay → Set Listing)
+              to sell the whole set in one go. Or continue here to sell just this cert.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={() => setSetConfirm(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="bg-rose-600 hover:bg-rose-500 text-white border-0"
+                onClick={() => {
+                  setSelectedCard(setConfirm.copy);
+                  const next = setConfirm.context;
+                  setSetConfirm(null);
+                  if (next === 'continue') setStep('details');
+                }}>
+                Sell single cert anyway
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 
