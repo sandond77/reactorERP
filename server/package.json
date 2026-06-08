@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
+    "start": "exec node dist/index.js",
     "migrate": "node dist/db/migrate.js",
     "migrate:create": "node-pg-migrate -m src/db/migrations create",
     "seed:slabs": "tsx src/db/seeds/seed-slabs.ts",
