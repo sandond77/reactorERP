@@ -349,10 +349,18 @@ export async function deleteBatch(userId: string, id: string): Promise<DeleteBat
         .execute();
       recreditedToLegacy++;
     } else {
+      // Only flip back to inspected when the card is actually in flight
+      // (status='grading_submitted'). Without this guard, a back-linked
+      // sold slab (decision='already_graded', status='sold') that ever
+      // ended up referenced by a batch_item would have its terminal
+      // status clobbered to 'inspected' here without anyone touching its
+      // sale row — silently corrupting the slab and letting it reappear
+      // in raw inventory pickers.
       await db.updateTable('card_instances')
         .set({ status: 'inspected', decision: 'grade' })
         .where('id', '=', card.id)
         .where('user_id', '=', userId)
+        .where('status', '=', 'grading_submitted')
         .execute();
     }
   }
@@ -1121,11 +1129,16 @@ export async function removeItem(userId: string, itemId: string) {
     .executeTakeFirst();
 
   if (!remaining) {
+    // Guarded for the same reason as deleteBatch above — only flip a card
+    // back to inspected when its current status is grading_submitted.
+    // Otherwise a back-linked sold slab gets its terminal status silently
+    // clobbered on batch_item removal.
     await db
       .updateTable('card_instances')
       .set({ status: 'inspected', decision: 'grade' })
       .where('id', '=', item.card_instance_id)
       .where('user_id', '=', userId)
+      .where('status', '=', 'grading_submitted')
       .execute();
   }
 }
