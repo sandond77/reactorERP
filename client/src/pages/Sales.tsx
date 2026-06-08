@@ -488,16 +488,55 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const copies = (platform === 'ebay' && listedOnly) ? allCopies.filter(c => c.is_listed) : allCopies;
   const listedCount = allCopies.filter(c => c.is_listed).length;
 
-  // Auto-select first copy in filtered list (FIFO) — only on the copies step.
-  // Use functional setState so we don't clobber a user's manual click on every
-  // render (copies is a fresh array ref each render).
+  // Set-listing detection: a copy is part of an eBay set listing when its
+  // ebay_listing_url is shared with at least one OTHER copy in the same
+  // result set. Selling one of these via the single-card flow would orphan
+  // the rest of the set — the user must use the Set Listing sale flow
+  // instead. We surface this in the picker with a SET badge + confirm.
+  const setMemberIds = (() => {
+    const urlCounts = new Map<string, number>();
+    for (const c of copies) {
+      if (c.listing_url) urlCounts.set(c.listing_url, (urlCounts.get(c.listing_url) ?? 0) + 1);
+    }
+    const ids = new Set<string>();
+    for (const c of copies) {
+      if (c.listing_url && (urlCounts.get(c.listing_url) ?? 0) > 1) ids.add(c.id);
+    }
+    return ids;
+  })();
+  const firstNonSetCopy = copies.find(c => !setMemberIds.has(c.id)) ?? null;
+
+  // Auto-select FIFO — first NON-set-listing copy. Skipping set members
+  // means clicking Record Sale on a card that happens to lead with a set
+  // never accidentally puts that cert in the cart.
+  // Use functional setState so we don't clobber a user's manual click on
+  // every render (copies is a fresh array ref each render).
   useEffect(() => {
     if (step !== 'copies') return;
     setSelectedCard(prev => {
       if (prev && copies.some(c => c.id === prev.id)) return prev;
-      return copies.length > 0 ? copies[0] : null;
+      return firstNonSetCopy;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [copies, step]);
+
+  // Auto-jump on exact cert-# search: when the user types a numeric cert #
+  // (3+ digits) into the graded search and it matches exactly one row's
+  // cert_number, skip the names dropdown and navigate straight to the
+  // copies step with that cert pre-selected. The set-member confirm gate
+  // on Continue still applies, so a set cert won't slip through silently.
+  useEffect(() => {
+    if (step !== 'search') return;
+    const term = debouncedSearch.trim();
+    if (!/^\d{3,}$/.test(term)) return;
+    const match = searchResults?.data.find(s => String(s.cert_number ?? '') === term);
+    if (!match || !match.card_name) return;
+    setSelectedCardName(match.card_name);
+    setCardSearch(match.card_name);
+    setSelectedCard(match);
+    setStep('copies');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchResults, debouncedSearch, step]);
 
 
   async function handleSubmit(e: React.FormEvent) {
@@ -790,20 +829,34 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-          {copies.map((copy, idx) => {
-            const isFifo = idx === 0;
+          {copies.map((copy) => {
+            const isFifo     = !!firstNonSetCopy && copy.id === firstNonSetCopy.id;
+            const isSet      = setMemberIds.has(copy.id);
             const isSelected = selectedCard?.id === copy.id;
             return (
               <button key={copy.id} type="button"
-                onClick={() => setSelectedCard(copy)}
+                onClick={() => {
+                  if (isSet && (!selectedCard || selectedCard.id !== copy.id)) {
+                    const ok = window.confirm(
+                      `Cert #${copy.cert_number ?? '?'} is part of an eBay set listing. Selling it individually will leave the rest of the set in the listing. Use the Set Listing sale flow to sell the whole set.\n\nContinue selling this single cert anyway?`
+                    );
+                    if (!ok) return;
+                  }
+                  setSelectedCard(copy);
+                }}
                 className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
                   isSelected
                     ? 'border-amber-500/50 bg-amber-500/10'
-                    : 'border-zinc-700/50 bg-zinc-800/40 hover:bg-zinc-800'
+                    : isSet
+                      ? 'border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10'
+                      : 'border-zinc-700/50 bg-zinc-800/40 hover:bg-zinc-800'
                 }`}>
                 <div className="flex items-center gap-2">
                   {isFifo && (
                     <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-1 py-0.5">FIFO</span>
+                  )}
+                  {isSet && (
+                    <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded px-1 py-0.5">SET</span>
                   )}
                   <span className="text-sm font-mono text-zinc-200">
                     {copy.cert_number ? `#${String(copy.cert_number).padStart(8, '0')}` : 'No cert'}
@@ -827,7 +880,18 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="button" disabled={!selectedCard} onClick={() => setStep('details')}>
+        <Button type="button" disabled={!selectedCard} onClick={() => {
+          // Final guard: if the user reached Continue with a set-listing cert
+          // selected (e.g. via the cert-search auto-jump), confirm before
+          // proceeding so individual sale of a set member is never silent.
+          if (selectedCard && setMemberIds.has(selectedCard.id)) {
+            const ok = window.confirm(
+              `Cert #${selectedCard.cert_number ?? '?'} is part of an eBay set listing. Selling it individually will leave the rest of the set in the listing.\n\nContinue?`
+            );
+            if (!ok) return;
+          }
+          setStep('details');
+        }}>
           Continue →
         </Button>
       </div>
