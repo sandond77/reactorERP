@@ -6,3 +6,9 @@ dist/
 *.log
 coverage/
 uploads/
+
+# Claude Code per-project settings — contains auto-allow command patterns
+# that may inline secrets (e.g. one-off PROD_URL=... scripts). Keep local.
+.claude/settings.json
+.claude/settings.local.json
+
