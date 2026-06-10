@@ -174,6 +174,7 @@ export async function getReturnedSlabs(userId: string, batchId: string) {
     .innerJoin('card_instances as ci', 'ci.id', 'sd.card_instance_id')
     .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
     .leftJoin('card_instances as raw_ci', 'raw_ci.id', 'sd.source_raw_instance_id')
+    .leftJoin('raw_purchases as rp', 'rp.id', 'raw_ci.raw_purchase_id')
     .select([
       'sd.id',
       'sd.cert_number',
@@ -184,7 +185,9 @@ export async function getReturnedSlabs(userId: string, batchId: string) {
       sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
       sql<string | null>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
       sql<string | null>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
+      'raw_ci.condition as inspection_condition',
       'raw_ci.condition_notes as inspection_note',
+      'rp.purchase_id as raw_purchase_label',
       sql<number | null>`(
         SELECT gbi.expected_grade
         FROM grading_batch_items gbi
@@ -195,7 +198,6 @@ export async function getReturnedSlabs(userId: string, batchId: string) {
     ])
     .where('sd.grading_batch_id', '=', batchId)
     .where('sd.user_id', '=', userId)
-    .orderBy('sd.grade', 'desc')
     .orderBy('sd.cert_number', 'asc')
     .execute();
 

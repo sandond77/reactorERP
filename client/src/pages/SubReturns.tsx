@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen, Eye } from 'lucide-react';
+import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen } from 'lucide-react';
 import { api } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -1125,7 +1125,9 @@ interface ReturnedSlab {
   card_name: string;
   set_name: string | null;
   card_number: string | null;
+  inspection_condition: string | null;
   inspection_note: string | null;
+  raw_purchase_label: string | null;
   expected_grade: number | null;
 }
 
@@ -1195,14 +1197,16 @@ function ViewReturnModal({ batchId, onClose }: { batchId: string; onClose: () =>
                     <th className="px-4 py-2 text-left   font-medium">Cert #</th>
                     <th className="px-4 py-2 text-left   font-medium">Grade</th>
                     <th className="px-4 py-2 text-left   font-medium">Label</th>
-                    <th className="px-4 py-2 text-right  font-medium">Exp</th>
-                    <th className="px-4 py-2 text-left   font-medium">Inspection Note</th>
+                    <th className="px-4 py-2 text-left   font-medium">Raw ID</th>
+                    <th className="px-4 py-2 text-right  font-medium">Expected Grade</th>
+                    <th className="px-4 py-2 text-left   font-medium">Condition</th>
+                    <th className="px-4 py-2 text-left   font-medium">Notes</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50">
                   {slabs.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-zinc-600 text-xs">
+                      <td colSpan={8} className="px-4 py-8 text-center text-zinc-600 text-xs">
                         No slabs returned for this batch.
                       </td>
                     </tr>
@@ -1223,7 +1227,9 @@ function ViewReturnModal({ batchId, onClose }: { batchId: string; onClose: () =>
                             : <span className="text-zinc-600">—</span>}
                         </td>
                         <td className="px-4 py-2.5 text-zinc-400">{s.grade_label ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-zinc-500 font-mono text-[10px]">{s.raw_purchase_label ?? '—'}</td>
                         <td className={`px-4 py-2.5 text-right ${expColor}`}>{s.expected_grade ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-zinc-400 uppercase text-[11px]">{s.inspection_condition ?? '—'}</td>
                         <td className="px-4 py-2.5 text-zinc-500 text-[11px] max-w-[280px] whitespace-normal break-words">
                           {s.inspection_note ?? '—'}
                         </td>
@@ -1367,7 +1373,11 @@ export function SubReturns() {
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
               {returned.map((batch) => (
-                <tr key={batch.id} className="hover:bg-zinc-800/25 transition-colors">
+                <tr
+                  key={batch.id}
+                  onClick={() => confirmRevertId !== batch.id && setViewingId(batch.id)}
+                  className="hover:bg-zinc-800/25 transition-colors cursor-pointer"
+                >
                   <td className="px-4 py-2.5">
                     <p className="text-zinc-100 font-medium">{batch.name ?? batch.batch_id}</p>
                     <p className="text-[10px] text-zinc-600 font-mono">{batch.batch_id}</p>
@@ -1382,7 +1392,7 @@ export function SubReturns() {
                     </Badge>
                   </td>
                   <td className="px-4 py-2.5 text-zinc-500">{formatDate(batch.submitted_at)}</td>
-                  <td className="px-4 py-2.5 text-right">
+                  <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                     {confirmRevertId === batch.id ? (
                       <div className="flex items-center justify-end gap-2">
                         <span className="text-[10px] text-zinc-400">Undo return &amp; restore raw cards?</span>
@@ -1397,18 +1407,10 @@ export function SubReturns() {
                         >{revertingId === batch.id ? 'Reverting…' : 'Confirm Revert'}</button>
                       </div>
                     ) : (
-                      <div className="flex items-center justify-end gap-3">
-                        <button
-                          onClick={() => setViewingId(batch.id)}
-                          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors"
-                        >
-                          <Eye size={11} /> View
-                        </button>
-                        <button
-                          onClick={() => setConfirmRevertId(batch.id)}
-                          className="text-[10px] text-zinc-600 hover:text-amber-400 transition-colors"
-                        >Revert Return</button>
-                      </div>
+                      <button
+                        onClick={() => setConfirmRevertId(batch.id)}
+                        className="text-[10px] text-zinc-600 hover:text-amber-400 transition-colors"
+                      >Revert Return</button>
                     )}
                   </td>
                 </tr>
