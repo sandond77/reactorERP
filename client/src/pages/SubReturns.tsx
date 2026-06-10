@@ -30,6 +30,7 @@ interface Batch {
   notes: string | null;
   created_at: string;
   item_count: number;
+  total_qty: number;
 }
 
 interface BatchItem {
@@ -495,7 +496,7 @@ function SelectBatchModal({
                   </div>
                   <div className="text-right text-xs text-zinc-400 shrink-0">
                     <p>{b.company} · {b.tier}</p>
-                    <p className="text-zinc-600">{b.item_count} card{b.item_count !== 1 ? 's' : ''}</p>
+                    <p className="text-zinc-600">{b.total_qty} card{b.total_qty !== 1 ? 's' : ''} · {b.item_count} line{b.item_count !== 1 ? 's' : ''}</p>
                   </div>
                   <Badge className={BATCH_STATUS_COLORS['submitted']}>submitted</Badge>
                 </button>
@@ -1192,7 +1193,8 @@ export function SubReturns() {
                 <th className="px-4 py-2 text-left font-medium">Batch</th>
                 <th className="px-4 py-2 text-left font-medium">Company</th>
                 <th className="px-4 py-2 text-left font-medium">Tier</th>
-                <th className="px-4 py-2 text-right font-medium">Cards</th>
+                <th className="px-4 py-2 text-right font-medium">Line Items</th>
+                <th className="px-4 py-2 text-right font-medium">Total Cards</th>
                 <th className="px-4 py-2 text-left font-medium">Status</th>
                 <th className="px-4 py-2 text-left font-medium">Submitted</th>
                 <th className="w-48" />
@@ -1208,6 +1210,7 @@ export function SubReturns() {
                   <td className="px-4 py-2.5 text-zinc-300">{batch.company}</td>
                   <td className="px-4 py-2.5 text-zinc-400">{batch.tier}</td>
                   <td className="px-4 py-2.5 text-right text-zinc-300">{batch.item_count}</td>
+                  <td className="px-4 py-2.5 text-right text-zinc-300">{batch.total_qty}</td>
                   <td className="px-4 py-2.5">
                     <Badge className={BATCH_STATUS_COLORS[batch.status] ?? 'bg-zinc-700/50 text-zinc-400'}>
                       {batch.status}
