@@ -935,24 +935,46 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                       </div>
                     </td>
                     <td className="px-2 py-2">
-                      <select
-                        value={slot.batch_item_id}
-                        onChange={(e) => remapSlot(idx, e.target.value)}
-                        className="w-full px-1.5 py-1 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 focus:outline-none focus:border-indigo-500 truncate"
-                      >
-                        {batch.items.map((bi) => {
-                          const parts = [
-                            bi.card_name ?? '(unnamed)',
-                            bi.set_name,
-                            bi.card_number ? `#${bi.card_number}` : null,
-                          ].filter(Boolean);
-                          return (
-                            <option key={bi.id} value={bi.id}>
-                              #{bi.line_item_num} {parts.join(' — ')}
-                            </option>
-                          );
-                        })}
-                      </select>
+                      {(() => {
+                        const selected = batch.items.find((bi) => bi.id === slot.batch_item_id);
+                        const selectedParts = selected
+                          ? [
+                              selected.card_name ?? '(unnamed)',
+                              selected.set_name,
+                              selected.card_number ? `#${selected.card_number}` : null,
+                            ].filter(Boolean)
+                          : [];
+                        const selectedLabel = selected
+                          ? `#${selected.line_item_num} ${selectedParts.join(' — ')}`
+                          : '—';
+                        return (
+                          <div className="relative">
+                            <div className="px-1.5 py-1 pr-5 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 whitespace-normal break-words min-h-[26px]">
+                              {selectedLabel}
+                            </div>
+                            <span className="pointer-events-none absolute right-1.5 top-1.5 text-zinc-500 text-[9px]">▾</span>
+                            <select
+                              value={slot.batch_item_id}
+                              onChange={(e) => remapSlot(idx, e.target.value)}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer focus:outline-none"
+                              aria-label="Remap to batch item"
+                            >
+                              {batch.items.map((bi) => {
+                                const parts = [
+                                  bi.card_name ?? '(unnamed)',
+                                  bi.set_name,
+                                  bi.card_number ? `#${bi.card_number}` : null,
+                                ].filter(Boolean);
+                                return (
+                                  <option key={bi.id} value={bi.id}>
+                                    #{bi.line_item_num} {parts.join(' — ')}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-2 py-2">
                       <div className="flex items-center gap-1.5">
