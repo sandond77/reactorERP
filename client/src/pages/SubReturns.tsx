@@ -1125,6 +1125,8 @@ interface ReturnedSlab {
   card_name: string;
   set_name: string | null;
   card_number: string | null;
+  inspection_note: string | null;
+  expected_grade: number | null;
 }
 
 interface ReturnedSlabsResponse {
@@ -1189,34 +1191,45 @@ function ViewReturnModal({ batchId, onClose }: { batchId: string; onClose: () =>
               <table className="w-full text-xs border-collapse">
                 <thead className="sticky top-0 bg-zinc-900">
                   <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wide text-[10px]">
-                    <th className="px-4 py-2 text-left  font-medium">Card</th>
-                    <th className="px-4 py-2 text-left  font-medium">Cert #</th>
-                    <th className="px-4 py-2 text-left  font-medium">Grade</th>
-                    <th className="px-4 py-2 text-left  font-medium">Label</th>
+                    <th className="px-4 py-2 text-left   font-medium">Card</th>
+                    <th className="px-4 py-2 text-left   font-medium">Cert #</th>
+                    <th className="px-4 py-2 text-left   font-medium">Grade</th>
+                    <th className="px-4 py-2 text-left   font-medium">Label</th>
+                    <th className="px-4 py-2 text-right  font-medium">Exp</th>
+                    <th className="px-4 py-2 text-left   font-medium">Inspection Note</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/50">
                   {slabs.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-zinc-600 text-xs">
+                      <td colSpan={6} className="px-4 py-8 text-center text-zinc-600 text-xs">
                         No slabs returned for this batch.
                       </td>
                     </tr>
-                  ) : slabs.map((s) => (
-                    <tr key={s.id} className="hover:bg-zinc-800/20">
-                      <td className="px-4 py-2.5">
-                        <p className="text-zinc-200 font-medium">{s.card_name}</p>
-                        {s.set_name && <p className="text-[10px] text-zinc-600">{s.set_name}{s.card_number ? ` · #${s.card_number}` : ''}</p>}
-                      </td>
-                      <td className="px-4 py-2.5 text-zinc-400 font-mono">{s.cert_number ?? '—'}</td>
-                      <td className="px-4 py-2.5">
-                        {s.grade != null
-                          ? <span className="text-emerald-400 font-semibold">{s.grade}</span>
-                          : <span className="text-zinc-600">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-zinc-400">{s.grade_label ?? '—'}</td>
-                    </tr>
-                  ))}
+                  ) : slabs.map((s) => {
+                    const beatExpected = s.grade != null && s.expected_grade != null && s.grade > s.expected_grade;
+                    const missedExpected = s.grade != null && s.expected_grade != null && s.grade < s.expected_grade;
+                    const expColor = beatExpected ? 'text-emerald-400' : missedExpected ? 'text-red-400' : 'text-zinc-500';
+                    return (
+                      <tr key={s.id} className="hover:bg-zinc-800/20">
+                        <td className="px-4 py-2.5">
+                          <p className="text-zinc-200 font-medium">{s.card_name}</p>
+                          {s.set_name && <p className="text-[10px] text-zinc-600">{s.set_name}{s.card_number ? ` · #${s.card_number}` : ''}</p>}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-400 font-mono">{s.cert_number ?? '—'}</td>
+                        <td className="px-4 py-2.5">
+                          {s.grade != null
+                            ? <span className="text-emerald-400 font-semibold">{s.grade}</span>
+                            : <span className="text-zinc-600">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-400">{s.grade_label ?? '—'}</td>
+                        <td className={`px-4 py-2.5 text-right ${expColor}`}>{s.expected_grade ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-zinc-500 text-[11px] max-w-[280px] whitespace-normal break-words">
+                          {s.inspection_note ?? '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
