@@ -488,7 +488,10 @@ function SelectBatchModal({
                 >
                   <div className="flex-1">
                     <p className="text-sm font-medium text-zinc-100">{b.name ?? b.batch_id}</p>
-                    <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{b.batch_id}</p>
+                    <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                      {b.batch_id}
+                      {b.submitted_at && <span className="text-zinc-600"> · sub {formatDate(b.submitted_at)}</span>}
+                    </p>
                   </div>
                   <div className="text-right text-xs text-zinc-400 shrink-0">
                     <p>{b.company} · {b.tier}</p>
@@ -792,7 +795,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-400 uppercase tracking-wide text-[10px]">
                 <th className="px-2 py-2 text-left  font-medium w-10">Line</th>
-                <th className="px-3 py-2 text-left  font-medium min-w-[260px]">Card</th>
+                <th className="px-3 py-2 text-left  font-medium min-w-[325px]">Card</th>
                 <th className="px-2 py-2 text-left  font-medium">ID</th>
                 <th className="px-2 py-2 text-right font-medium">Cost</th>
                 <th className="px-2 py-2 text-right font-medium">Exp</th>
@@ -801,7 +804,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                 <th className="px-2 py-2 text-left  font-medium">Grade</th>
                 <th className="px-2 py-2 text-left  font-medium">Label</th>
                 <th className="px-2 py-2 text-left  font-medium">Match</th>
-                <th className="px-2 py-2 text-left  font-medium min-w-[220px]">Remap</th>
+                <th className="px-2 py-2 text-left  font-medium min-w-[155px]">Remap</th>
                 <th className="px-2 py-2 text-left  font-medium">Disposition</th>
                 <th className="px-2 py-2 text-center font-medium w-8" />
               </tr>
@@ -838,9 +841,10 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                         rows={2}
                         value={slot.card_name_override ?? item.card_name ?? ''}
                         onChange={(e) => updateSlot(idx, { card_name_override: e.target.value })}
-                        className="w-full px-2 py-1 text-xs bg-transparent border border-transparent hover:border-zinc-700 focus:border-indigo-500 focus:bg-zinc-900 rounded text-zinc-200 font-medium focus:outline-none transition-colors resize-none whitespace-normal break-words leading-snug"
+                        style={{ fieldSizing: 'content' } as React.CSSProperties}
+                        className="w-full px-2 py-1 text-xs bg-transparent border border-transparent hover:border-zinc-700 focus:border-indigo-500 focus:bg-zinc-900 rounded text-zinc-200 font-medium focus:outline-none transition-colors resize-none whitespace-normal break-words leading-snug overflow-hidden"
                       />
-                      <p className="text-[10px] text-zinc-600 px-2">
+                      <p className="text-[10px] text-zinc-600 px-2 break-words">
                         {item.set_name ?? '—'}{item.card_number ? ` · #${item.card_number}` : ''}
                       </p>
                     </td>
@@ -936,11 +940,18 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                         onChange={(e) => remapSlot(idx, e.target.value)}
                         className="w-full px-1.5 py-1 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 focus:outline-none focus:border-indigo-500 truncate"
                       >
-                        {batch.items.map((bi) => (
-                          <option key={bi.id} value={bi.id}>
-                            #{bi.line_item_num} {bi.card_name ?? '(unnamed)'}
-                          </option>
-                        ))}
+                        {batch.items.map((bi) => {
+                          const parts = [
+                            bi.card_name ?? '(unnamed)',
+                            bi.set_name,
+                            bi.card_number ? `#${bi.card_number}` : null,
+                          ].filter(Boolean);
+                          return (
+                            <option key={bi.id} value={bi.id}>
+                              #{bi.line_item_num} {parts.join(' — ')}
+                            </option>
+                          );
+                        })}
                       </select>
                     </td>
                     <td className="px-2 py-2">
@@ -1120,7 +1131,16 @@ export function SubReturns() {
     return <ReturnForm batch={batchDetail} onBack={() => setSelectedId(null)} />;
   }
 
-  const submitted = data?.filter((b) => b.status === 'submitted') ?? [];
+  // Earliest-submitted first — when returns come back from the grader they
+  // come back in submission order, so the oldest sub is almost always the
+  // one being returned next.
+  const submitted = (data?.filter((b) => b.status === 'submitted') ?? [])
+    .slice()
+    .sort((a, b) => {
+      const aT = a.submitted_at ? new Date(a.submitted_at).getTime() : Infinity;
+      const bT = b.submitted_at ? new Date(b.submitted_at).getTime() : Infinity;
+      return aT - bT;
+    });
   const returned  = data?.filter((b) => b.status === 'returned') ?? [];
 
   return (
