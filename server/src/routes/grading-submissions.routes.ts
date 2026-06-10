@@ -16,4 +16,5 @@ gradingSubsRouter.post('/:id/items/legacy',       ctrl.addLegacyItem);
 gradingSubsRouter.patch('/:id/items/:itemId',     ctrl.updateItem);
 gradingSubsRouter.delete('/:id/items/:itemId',    ctrl.removeItem);
 gradingSubsRouter.post('/:id/return',             ctrl.processReturn);
+gradingSubsRouter.get('/:id/returned-slabs',      ctrl.getReturnedSlabs);
 gradingSubsRouter.post('/:id/revert-return',      ctrl.revertReturn);

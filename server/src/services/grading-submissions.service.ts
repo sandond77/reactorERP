@@ -158,6 +158,41 @@ export async function getBatch(userId: string, id: string) {
   };
 }
 
+// Slabs produced by this batch, with card name + cert + grade.
+// Used by the Sub Returns "View Return" modal.
+export async function getReturnedSlabs(userId: string, batchId: string) {
+  const batch = await db
+    .selectFrom('grading_batches')
+    .select(['id', 'batch_id', 'name', 'company', 'tier', 'status', 'submitted_at'])
+    .where('id', '=', batchId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!batch) return null;
+
+  const slabs = await db
+    .selectFrom('slab_details as sd')
+    .innerJoin('card_instances as ci', 'ci.id', 'sd.card_instance_id')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .select([
+      'sd.id',
+      'sd.cert_number',
+      'sd.grade',
+      'sd.grade_label',
+      'sd.company',
+      'ci.id as card_instance_id',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      sql<string | null>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
+      sql<string | null>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
+    ])
+    .where('sd.grading_batch_id', '=', batchId)
+    .where('sd.user_id', '=', userId)
+    .orderBy('sd.grade', 'desc')
+    .orderBy('sd.cert_number', 'asc')
+    .execute();
+
+  return { batch, slabs };
+}
+
 export async function createBatch(userId: string, input: CreateBatchInput) {
   const year = input.submitted_at
     ? new Date(input.submitted_at).getFullYear()

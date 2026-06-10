@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen } from 'lucide-react';
+import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen, Eye } from 'lucide-react';
 import { api } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -1113,6 +1113,157 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
   );
 }
 
+// ── View Return Modal ─────────────────────────────────────────────────────────
+
+interface ReturnedSlab {
+  id: string;
+  cert_number: number | null;
+  grade: number | null;
+  grade_label: string | null;
+  company: string;
+  card_instance_id: string;
+  card_name: string;
+  set_name: string | null;
+  card_number: string | null;
+}
+
+interface ReturnedSlabsResponse {
+  batch: {
+    id: string;
+    batch_id: string;
+    name: string | null;
+    company: string;
+    tier: string;
+    status: string;
+    submitted_at: string | null;
+  };
+  slabs: ReturnedSlab[];
+}
+
+function ViewReturnModal({ batchId, onClose }: { batchId: string; onClose: () => void }) {
+  const { data, isLoading } = useQuery<ReturnedSlabsResponse>({
+    queryKey: ['returned-slabs', batchId],
+    queryFn:  () => api.get(`/grading-subs/${batchId}/returned-slabs`).then((r) => r.data),
+  });
+
+  // Build grade distribution — descending grade, with counts and percentages
+  // across only graded slabs (cert_number !== null && grade !== null).
+  const slabs = data?.slabs ?? [];
+  const graded = slabs.filter((s) => s.grade != null);
+  const total  = graded.length;
+  const buckets = new Map<number, number>();
+  for (const s of graded) {
+    if (s.grade == null) continue;
+    buckets.set(s.grade, (buckets.get(s.grade) ?? 0) + 1);
+  }
+  const summary = Array.from(buckets.entries())
+    .sort((a, b) => b[0] - a[0])
+    .map(([grade, count]) => ({
+      grade,
+      count,
+      pct: total > 0 ? (count / total) * 100 : 0,
+    }));
+
+  const batch = data?.batch;
+  const title = batch ? `${batch.company} · ${batch.batch_id}` : 'Return';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden mx-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-100">View Return — {title}</h2>
+            {batch?.name && <p className="text-[10px] text-zinc-500 mt-0.5">{batch.name}</p>}
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={15} />
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
+        ) : (
+          <div className="flex max-h-[70vh]">
+            {/* Slab list */}
+            <div className="flex-1 overflow-y-auto border-r border-zinc-800">
+              <table className="w-full text-xs border-collapse">
+                <thead className="sticky top-0 bg-zinc-900">
+                  <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wide text-[10px]">
+                    <th className="px-4 py-2 text-left  font-medium">Card</th>
+                    <th className="px-4 py-2 text-left  font-medium">Cert #</th>
+                    <th className="px-4 py-2 text-left  font-medium">Grade</th>
+                    <th className="px-4 py-2 text-left  font-medium">Label</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/50">
+                  {slabs.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-4 py-8 text-center text-zinc-600 text-xs">
+                        No slabs returned for this batch.
+                      </td>
+                    </tr>
+                  ) : slabs.map((s) => (
+                    <tr key={s.id} className="hover:bg-zinc-800/20">
+                      <td className="px-4 py-2.5">
+                        <p className="text-zinc-200 font-medium">{s.card_name}</p>
+                        {s.set_name && <p className="text-[10px] text-zinc-600">{s.set_name}{s.card_number ? ` · #${s.card_number}` : ''}</p>}
+                      </td>
+                      <td className="px-4 py-2.5 text-zinc-400 font-mono">{s.cert_number ?? '—'}</td>
+                      <td className="px-4 py-2.5">
+                        {s.grade != null
+                          ? <span className="text-emerald-400 font-semibold">{s.grade}</span>
+                          : <span className="text-zinc-600">—</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-zinc-400">{s.grade_label ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Grade summary panel */}
+            <div className="w-64 p-5 shrink-0">
+              <h3 className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-3">Grade Summary</h3>
+              {summary.length === 0 ? (
+                <p className="text-xs text-zinc-600">No graded slabs.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
+                      <th className="text-left  py-1.5 font-medium">Grade</th>
+                      <th className="text-right py-1.5 font-medium">Count</th>
+                      <th className="text-right py-1.5 font-medium">%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/50">
+                    {summary.map((row) => (
+                      <tr key={row.grade}>
+                        <td className="py-1.5 text-emerald-400 font-semibold">{row.grade}</td>
+                        <td className="py-1.5 text-right text-zinc-300">{row.count}</td>
+                        <td className="py-1.5 text-right text-zinc-500">{row.pct.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t border-zinc-700">
+                      <td className="py-1.5 text-zinc-400 font-medium">Total</td>
+                      <td className="py-1.5 text-right text-zinc-200 font-medium">{total}</td>
+                      <td className="py-1.5 text-right text-zinc-400">100.00%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-800">
+          <p className="text-[11px] text-zinc-500">{slabs.length} slab{slabs.length !== 1 ? 's' : ''} · {total} graded</p>
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function SubReturns() {
@@ -1120,6 +1271,7 @@ export function SubReturns() {
   const [selectOpen, setSelectOpen] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
   const [confirmRevertId, setConfirmRevertId] = useState<string | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery<Batch[]>({
@@ -1232,10 +1384,18 @@ export function SubReturns() {
                         >{revertingId === batch.id ? 'Reverting…' : 'Confirm Revert'}</button>
                       </div>
                     ) : (
-                      <button
-                        onClick={() => setConfirmRevertId(batch.id)}
-                        className="text-[10px] text-zinc-600 hover:text-amber-400 transition-colors"
-                      >Revert Return</button>
+                      <div className="flex items-center justify-end gap-3">
+                        <button
+                          onClick={() => setViewingId(batch.id)}
+                          className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-indigo-300 transition-colors"
+                        >
+                          <Eye size={11} /> View
+                        </button>
+                        <button
+                          onClick={() => setConfirmRevertId(batch.id)}
+                          className="text-[10px] text-zinc-600 hover:text-amber-400 transition-colors"
+                        >Revert Return</button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -1251,6 +1411,10 @@ export function SubReturns() {
           onSelect={(id) => { setSelectOpen(false); setSelectedId(id); }}
           onClose={() => setSelectOpen(false)}
         />
+      )}
+
+      {viewingId && (
+        <ViewReturnModal batchId={viewingId} onClose={() => setViewingId(null)} />
       )}
     </div>
   );
