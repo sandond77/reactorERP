@@ -705,13 +705,14 @@ function OverviewTab() {
                 <div>
                   <p className="text-xl font-bold text-zinc-100 leading-none">{sellThroughGraded != null ? `${sellThroughGraded}%` : '—'}</p>
                   <p className="text-[10px] text-zinc-500 mt-1">Graded</p>
+                  <p className="text-[10px] text-zinc-600">{cards.sold.graded} / {cards.sold.graded + cards.unsold.graded}</p>
                 </div>
                 <div>
                   <p className="text-xl font-bold text-zinc-100 leading-none">{sellThroughRaw != null ? `${sellThroughRaw}%` : '—'}</p>
                   <p className="text-[10px] text-zinc-500 mt-1">Raw</p>
+                  <p className="text-[10px] text-zinc-600">{cards.sold.raw} / {cards.sold.raw + cards.unsold.raw}</p>
                 </div>
               </div>
-              <p className="text-xs text-zinc-600 mt-0.5">sold / (sold + unsold)</p>
             </div>
             <div className="px-6">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Pending Orders</p>

@@ -727,6 +727,13 @@ export async function relinkItem(userId: string, itemId: string, input: RelinkIt
     .executeTakeFirst();
   if (!newCi) throw new AppError(404, 'New card not found');
 
+  // Reject terminal-state targets. Prevents a direct API call from clobbering
+  // a graded slab or sold card by silently flipping its status to
+  // grading_submitted further down.
+  if (['graded', 'sold', 'lost_damaged'].includes(newCi.status)) {
+    throw new AppError(409, `Cannot relink to a card in '${newCi.status}' state`);
+  }
+
   const qty = input.quantity ?? existing.gbi_qty;
 
   // Sum existing usage of the new ci across the same batch (excluding the row
@@ -799,20 +806,20 @@ export async function relinkItemLegacy(userId: string, itemId: string, input: Ad
     throw new AppError(409, 'Sub must be in Adding state to relink a line');
   }
 
-  // Reuse the addLegacyItem path: it creates a new ci + a new gbi. We then
-  // delete the OLD gbi, restore its old ci, and renumber so the new line
-  // takes the displaced position.
+  // Capture the displaced slot BEFORE we touch addLegacyItem so partial-
+  // failure paths don't lose ordering info.
   const oldCiId = existing.card_instance_id;
-  const created = await addLegacyItem(userId, existing.batch_id, input);
-
-  // Capture the line numbers so we can swap them — the new gbi was appended
-  // at max+1; we want it to occupy the slot the relinked line was in.
   const oldRow = await db
     .selectFrom('grading_batch_items')
     .select(['line_item_num'])
     .where('id', '=', itemId)
     .executeTakeFirst();
-  const oldLine = oldRow?.line_item_num;
+  const oldLine = oldRow?.line_item_num ?? null;
+
+  // Reuse the addLegacyItem path: it creates a new ci + a new gbi. If this
+  // throws (e.g. bucket empty / not legacy), we haven't touched the old gbi
+  // so the user can retry.
+  const created = await addLegacyItem(userId, existing.batch_id, input);
 
   // Drop the old gbi.
   await db.deleteFrom('grading_batch_items').where('id', '=', itemId).execute();
@@ -857,6 +864,9 @@ export interface UpdateItemInput {
   set_name_override?: string | null;
   card_number_override?: string | null;
   language?: string;
+  // Pass the human-facing purchase_id label (e.g. "2025R109") to re-link the
+  // source card to a different raw lot. Pass empty string or null to detach.
+  raw_purchase_label?: string | null;
 }
 
 export async function updateItem(userId: string, itemId: string, input: UpdateItemInput) {
@@ -913,13 +923,14 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
       .where('id', '=', existing.card_instance_id).execute();
   }
 
-  // Identity fixups on the linked card_instance — names/set/#/language. Done
-  // first so any failure here aborts before the gbi row is touched.
+  // Identity fixups on the linked card_instance — names/set/#/language/raw lot.
+  // Done first so any failure here aborts before the gbi row is touched.
   const ciFieldsTouched =
     input.card_name_override   !== undefined ||
     input.set_name_override    !== undefined ||
     input.card_number_override !== undefined ||
-    input.language             !== undefined;
+    input.language             !== undefined ||
+    input.raw_purchase_label   !== undefined;
 
   if (ciFieldsTouched) {
     const ciBefore = await db
@@ -935,6 +946,21 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
     if (input.set_name_override    !== undefined) ciUpdate.set_name_override    = input.set_name_override    || null;
     if (input.card_number_override !== undefined) ciUpdate.card_number_override = input.card_number_override || null;
     if (input.language             !== undefined) ciUpdate.language             = input.language;
+    if (input.raw_purchase_label   !== undefined) {
+      const label = (input.raw_purchase_label ?? '').trim();
+      if (!label) {
+        ciUpdate.raw_purchase_id = null;
+      } else {
+        const rp = await db
+          .selectFrom('raw_purchases')
+          .select('id')
+          .where('purchase_id', '=', label)
+          .where('user_id', '=', userId)
+          .executeTakeFirst();
+        if (!rp) throw new AppError(404, `Raw purchase ${label} not found`);
+        ciUpdate.raw_purchase_id = rp.id;
+      }
+    }
 
     // Re-resolve catalog link if identity fields changed — typo'd lines link
     // to the wrong (or no) catalog row; refresh so future joins/reports use

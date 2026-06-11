@@ -792,6 +792,7 @@ function FixIdentityTab({ item, batchId, onClose }: { item: BatchItem; batchId: 
   const [setName,        setSetName]        = useState(item.set_name ?? '');
   const [cardNumber,     setCardNumber]     = useState(item.card_number ?? '');
   const [language,       setLanguage]       = useState(item.language ?? 'EN');
+  const [rawPurchaseLabel, setRawPurchaseLabel] = useState(item.raw_purchase_label ?? '');
   const [autoFillText,   setAutoFillText]   = useState('');
   const [autoFilling,    setAutoFilling]    = useState(false);
   const [saving, setSaving] = useState(false);
@@ -851,6 +852,7 @@ function FixIdentityTab({ item, batchId, onClose }: { item: BatchItem; batchId: 
         set_name_override:    setName.trim() || null,
         card_number_override: cardNumber.trim() || null,
         language:             language,
+        raw_purchase_label:   rawPurchaseLabel.trim() || null,
       });
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
@@ -913,6 +915,12 @@ function FixIdentityTab({ item, batchId, onClose }: { item: BatchItem; batchId: 
             </select>
           </div>
         </div>
+        <Input
+          label={`Raw ID${item.raw_purchase_label ? ` (current: ${item.raw_purchase_label})` : ''}`}
+          value={rawPurchaseLabel}
+          onChange={(e) => setRawPurchaseLabel(e.target.value)}
+          placeholder="e.g. 2025R109 — leave blank to detach"
+        />
       </div>
 
       <div className="h-px bg-zinc-800" />
@@ -1014,11 +1022,11 @@ function ReplaceFromInventoryTab({ item, batchId, onClose }: { item: BatchItem; 
 
       <div className="flex gap-2 items-center">
         <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by card name, set, or part #"
+          placeholder="Search by Raw ID (e.g. 2025R109), card name, set, or part #"
           className="flex-1 rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500" />
-        <label className="flex items-center gap-1 text-[10px] text-zinc-500 shrink-0">
+        <label className="flex items-center gap-1 text-[10px] text-zinc-500 shrink-0" title="Whole-term equality across name/ID/cert — use to stop 2025R1 from matching 2025R10, 2025R109, etc.">
           <input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)} className="accent-indigo-500" />
-          Exact
+          Exact ID
         </label>
       </div>
 
