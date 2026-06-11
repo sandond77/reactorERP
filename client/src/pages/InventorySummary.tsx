@@ -26,6 +26,7 @@ interface SummaryRow {
   grade_label: string | null;
   qty_total: number;
   qty_unsold: number;
+  qty_in_grading: number;
   qty_sold: number;
   catalog_id: string | null;
 }
@@ -58,13 +59,52 @@ function groupRows(rows: SummaryRow[]) {
   return groups;
 }
 
+// Second-level bucket: collapses same-grade (or "Raw") rows together so
+// multiple card_name variants under one grade don't sprawl across the page.
+type Level2Bucket =
+  | { kind: 'graded'; company: string; grade_label: string; grade: number; rows: SummaryRow[] }
+  | { kind: 'raw';    rows: SummaryRow[] };
+
+function level2Buckets(rows: SummaryRow[]): Level2Bucket[] {
+  const map = new Map<string, Level2Bucket>();
+  for (const r of rows) {
+    if (r.grade != null && r.grade_label) {
+      const key = `g|${r.company}|${r.grade_label}`;
+      const existing = map.get(key);
+      if (existing && existing.kind === 'graded') existing.rows.push(r);
+      else map.set(key, { kind: 'graded', company: r.company, grade_label: r.grade_label, grade: r.grade, rows: [r] });
+    } else {
+      const existing = map.get('raw');
+      if (existing && existing.kind === 'raw') existing.rows.push(r);
+      else map.set('raw', { kind: 'raw', rows: [r] });
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === 'graded' ? -1 : 1;
+    if (a.kind === 'graded' && b.kind === 'graded') return b.grade - a.grade;
+    return 0;
+  });
+}
+
+function bucketTotals(b: Level2Bucket) {
+  return b.rows.reduce(
+    (acc, r) => ({
+      total:      acc.total      + r.qty_total,
+      unsold:     acc.unsold     + r.qty_unsold,
+      in_grading: acc.in_grading + (r.qty_in_grading ?? 0),
+      sold:       acc.sold       + r.qty_sold,
+    }),
+    { total: 0, unsold: 0, in_grading: 0, sold: 0 },
+  );
+}
+
 function totalQty(rows: SummaryRow[]) {
   return rows.reduce((s, r) => s + r.qty_total, 0);
 }
 
 type SortDir = 'asc' | 'desc';
 
-type SortKey = 'sku' | 'card_name' | 'set_name' | 'language' | 'rarity' | 'company' | 'grade' | 'qty_total' | 'qty_unsold' | 'qty_sold';
+type SortKey = 'sku' | 'card_name' | 'set_name' | 'language' | 'rarity' | 'company' | 'grade' | 'qty_total' | 'qty_unsold' | 'qty_in_grading' | 'qty_sold';
 
 function getSortValue(row: SummaryRow, col: SortKey): string | number | null {
   switch (col) {
@@ -77,6 +117,7 @@ function getSortValue(row: SummaryRow, col: SortKey): string | number | null {
     case 'grade': return row.grade ?? 0;
     case 'qty_total': return row.qty_total;
     case 'qty_unsold': return row.qty_unsold;
+    case 'qty_in_grading': return row.qty_in_grading ?? 0;
     case 'qty_sold': return row.qty_sold;
     default: return '';
   }
@@ -1661,6 +1702,15 @@ export function InventorySummary() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // Second-level expansion: grade/condition buckets within an expanded part #.
+  // Key format: `${partKey}|${bucketLabel}`.
+  const [expandedL2, setExpandedL2] = useState<Set<string>>(new Set());
+  const toggleL2 = (key: string) =>
+    setExpandedL2((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
   const [sortCol, setSortCol] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [fGame, setFGame] = useState<string | null>(null);
@@ -1674,18 +1724,19 @@ export function InventorySummary() {
   const [reassignRow, setReassignRow] = useState<ReassignTarget | null>(null);
   const [reassignPart, setReassignPart] = useState<SummaryRow | null>(null);
   const MINS = {
-    sku:       colMinWidth('Part #',  true,  false),
-    set:       colMinWidth('Set',     true,  false),
-    card:      colMinWidth('Card',    true,  false),
-    lang:      colMinWidth('Lang',    true,  true),
-    rarity:    colMinWidth('Rarity',  true,  true),
-    grader:    colMinWidth('Grader',  true,  true),
-    grade:     colMinWidth('Grade',   true,  false),
-    qty_total:  colMinWidth('Total',  true,  false),
-    qty_unsold: colMinWidth('Unsold', true,  false),
-    qty_sold:   colMinWidth('Sold',   true,  false),
+    sku:       colMinWidth('Part #',     true,  false),
+    set:       colMinWidth('Set',        true,  false),
+    card:      colMinWidth('Card',       true,  false),
+    lang:      colMinWidth('Lang',       true,  true),
+    rarity:    colMinWidth('Rarity',     true,  true),
+    grader:    colMinWidth('Grader',     true,  true),
+    grade:     colMinWidth('Grade',      true,  false),
+    qty_total:      colMinWidth('Total',      true,  false),
+    qty_unsold:     colMinWidth('Unsold',     true,  false),
+    qty_in_grading: colMinWidth('In Grading', true,  false),
+    qty_sold:       colMinWidth('Sold',       true,  false),
   };
-  const { rz, totalWidth } = useColWidths({ sku: Math.max(MINS.sku, 180), set: Math.max(MINS.set, 200), card: Math.max(MINS.card, 640), lang: Math.max(MINS.lang, 80), rarity: Math.max(MINS.rarity, 130), grader: Math.max(MINS.grader, 110), grade: Math.max(MINS.grade, 130), qty_total: Math.max(MINS.qty_total, 90), qty_unsold: Math.max(MINS.qty_unsold, 90), qty_sold: Math.max(MINS.qty_sold, 80) });
+  const { rz, totalWidth } = useColWidths({ sku: Math.max(MINS.sku, 180), set: Math.max(MINS.set, 200), card: Math.max(MINS.card, 640), lang: Math.max(MINS.lang, 80), rarity: Math.max(MINS.rarity, 130), grader: Math.max(MINS.grader, 110), grade: Math.max(MINS.grade, 130), qty_total: Math.max(MINS.qty_total, 90), qty_unsold: Math.max(MINS.qty_unsold, 90), qty_in_grading: Math.max(MINS.qty_in_grading, 100), qty_sold: Math.max(MINS.qty_sold, 80) });
 
   const { data: gamesData = [] } = useQuery<CardGame[]>({
     queryKey: ['card-games'],
@@ -1712,6 +1763,7 @@ export function InventorySummary() {
         grade_label: null,
         qty_total: 0,
         qty_unsold: 0,
+        qty_in_grading: 0,
         qty_sold: 0,
       })),
     })),
@@ -1901,8 +1953,9 @@ export function InventorySummary() {
                   filterOptions={companyOptions} filterSelected={fCompany} onFilterChange={(v) => { setFCompany(v); setPage(1); }} />
                 <ColHeader label="Grade"      col="grade"      {...sh} {...rz('grade')} minWidth={MINS.grade} />
                 <ColHeader label="Total"   col="qty_total"  {...sh} {...rz('qty_total')}  align="right" minWidth={MINS.qty_total} />
-                <ColHeader label="Unsold"  col="qty_unsold" {...sh} {...rz('qty_unsold')} align="right" minWidth={MINS.qty_unsold} />
-                <ColHeader label="Sold"    col="qty_sold"   {...sh} {...rz('qty_sold')}   align="right" minWidth={MINS.qty_sold} />
+                <ColHeader label="Unsold"     col="qty_unsold"     {...sh} {...rz('qty_unsold')}     align="right" minWidth={MINS.qty_unsold} />
+                <ColHeader label="In Grading" col="qty_in_grading" {...sh} {...rz('qty_in_grading')} align="right" minWidth={MINS.qty_in_grading} />
+                <ColHeader label="Sold"       col="qty_sold"       {...sh} {...rz('qty_sold')}       align="right" minWidth={MINS.qty_sold} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
@@ -1935,6 +1988,7 @@ export function InventorySummary() {
                       <td className="px-3 py-1.5 text-zinc-300 font-medium whitespace-nowrap">{r.grade_label ?? (r.grade != null ? String(r.grade) : '—')}</td>
                       <td className="px-3 py-1.5 text-right text-zinc-300 whitespace-nowrap">{r.qty_total}</td>
                       <td className="px-3 py-1.5 text-right text-zinc-300 whitespace-nowrap">{r.qty_unsold}</td>
+                      <td className="px-3 py-1.5 text-right text-zinc-400 whitespace-nowrap">{r.qty_in_grading ?? 0}</td>
                       <td className="px-3 py-1.5 text-right text-zinc-400 whitespace-nowrap">{r.qty_sold}</td>
                     </tr>
                   );
@@ -1975,35 +2029,86 @@ export function InventorySummary() {
                     })()}</td>
                     <td className="px-3 py-1.5 text-right text-zinc-200 font-semibold whitespace-nowrap">{qty}</td>
                     <td className="px-3 py-1.5 text-right text-zinc-200 font-semibold whitespace-nowrap">{groupRows.reduce((s, r) => s + r.qty_unsold, 0)}</td>
+                    <td className="px-3 py-1.5 text-right text-zinc-400 whitespace-nowrap">{groupRows.reduce((s, r) => s + (r.qty_in_grading ?? 0), 0)}</td>
                     <td className="px-3 py-1.5 text-right text-zinc-400 whitespace-nowrap">{groupRows.reduce((s, r) => s + r.qty_sold, 0)}</td>
                   </tr>,
-                  // Expanded grade rows
+                  // Expanded: render level-2 buckets (one per grade/company, plus
+                  // a single Raw bucket if any). Each level-2 bucket can itself
+                  // expand to show its name-variant rows as level-3.
                   ...(isExpanded
-                    ? groupRows.map((r, idx) => (
-                        <tr key={`${key}-grade-${idx}`} className="group/subrow hover:bg-zinc-800/15">
-                          <td className="px-3 py-1 pl-8 text-zinc-700 font-mono text-[10px] whitespace-nowrap">↳</td>
-                          <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{setName}</td>
-                          <td className="px-3 py-1 text-zinc-400 whitespace-normal break-words">
-                            <span>{r.card_name ?? '—'}</span>
-                            {r.catalog_id && (
-                              <button
-                                onClick={() => setReassignRow({ card_name: r.card_name, company: r.company, grade: r.grade, grade_label: r.grade_label, catalog_id: r.catalog_id! })}
-                                className="ml-1.5 opacity-0 group-hover/subrow:opacity-100 transition-opacity text-zinc-600 hover:text-zinc-300"
-                                title="Reassign to different part number"
-                              >
-                                <Pencil size={10} />
-                              </button>
-                            )}
-                          </td>
-                          <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{r.language}</td>
-                          <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{r.rarity ?? '—'}</td>
-                          <td className="px-3 py-1 text-zinc-400 whitespace-nowrap">{r.company}</td>
-                          <td className="px-3 py-1 text-zinc-300 whitespace-nowrap">{r.grade_label ?? (r.grade != null ? String(r.grade) : '—')}</td>
-                          <td className="px-3 py-1 text-right text-zinc-400 whitespace-nowrap">{r.qty_total}</td>
-                          <td className="px-3 py-1 text-right text-zinc-400 whitespace-nowrap">{r.qty_unsold}</td>
-                          <td className="px-3 py-1 text-right text-zinc-400 whitespace-nowrap">{r.qty_sold}</td>
-                        </tr>
-                      ))
+                    ? level2Buckets(groupRows).flatMap((b) => {
+                        const bucketLabel = b.kind === 'graded' ? b.grade_label : 'Raw';
+                        const bucketKey = `${key}|${b.kind === 'graded' ? `${b.company}/${b.grade_label}` : 'raw'}`;
+                        const l2Expanded = expandedL2.has(bucketKey);
+                        const totals = bucketTotals(b);
+                        const onlyOne = b.rows.length === 1;
+                        return [
+                          <tr key={`${bucketKey}-l2`}
+                            className={`group/l2 ${onlyOne ? '' : 'cursor-pointer'} bg-zinc-900/15 hover:bg-zinc-800/25`}
+                            onClick={onlyOne ? undefined : () => toggleL2(bucketKey)}>
+                            <td className="px-3 py-1 pl-8 text-zinc-700 font-mono text-[10px] whitespace-nowrap">
+                              {onlyOne ? '↳' : (l2Expanded ? <ChevronDown size={11} className="inline" /> : <ChevronRight size={11} className="inline" />)}
+                            </td>
+                            <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{setName}</td>
+                            <td className="px-3 py-1 text-zinc-300 whitespace-normal break-words">
+                              {onlyOne ? (
+                                <>
+                                  <span>{b.rows[0].card_name ?? '—'}</span>
+                                  {b.rows[0].catalog_id && (
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setReassignRow({ card_name: b.rows[0].card_name, company: b.rows[0].company, grade: b.rows[0].grade, grade_label: b.rows[0].grade_label, catalog_id: b.rows[0].catalog_id! }); }}
+                                      className="ml-1.5 opacity-0 group-hover/l2:opacity-100 transition-opacity text-zinc-600 hover:text-zinc-300"
+                                      title="Reassign to different part number"
+                                    >
+                                      <Pencil size={10} />
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <span className="text-zinc-500 italic text-[11px]">{b.rows.length} variants</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{lang}</td>
+                            <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{rarity}</td>
+                            <td className="px-3 py-1 text-zinc-400 whitespace-nowrap">{b.kind === 'graded' ? b.company : '—'}</td>
+                            <td className="px-3 py-1 text-zinc-300 font-medium whitespace-nowrap">{bucketLabel}</td>
+                            <td className="px-3 py-1 text-right text-zinc-300 whitespace-nowrap">{totals.total}</td>
+                            <td className="px-3 py-1 text-right text-zinc-300 whitespace-nowrap">{totals.unsold}</td>
+                            <td className="px-3 py-1 text-right text-zinc-400 whitespace-nowrap">{totals.in_grading}</td>
+                            <td className="px-3 py-1 text-right text-zinc-400 whitespace-nowrap">{totals.sold}</td>
+                          </tr>,
+                          // Level-3: name variants under this bucket, only when
+                          // there's more than one and the bucket is expanded.
+                          ...((!onlyOne && l2Expanded)
+                            ? b.rows.map((r, idx) => (
+                                <tr key={`${bucketKey}-l3-${idx}`} className="group/subrow hover:bg-zinc-800/10">
+                                  <td className="px-3 py-1 pl-14 text-zinc-700 font-mono text-[10px] whitespace-nowrap">↳</td>
+                                  <td className="px-3 py-1 text-zinc-700 whitespace-nowrap">{setName}</td>
+                                  <td className="px-3 py-1 text-zinc-400 whitespace-normal break-words">
+                                    <span>{r.card_name ?? '—'}</span>
+                                    {r.catalog_id && (
+                                      <button
+                                        onClick={() => setReassignRow({ card_name: r.card_name, company: r.company, grade: r.grade, grade_label: r.grade_label, catalog_id: r.catalog_id! })}
+                                        className="ml-1.5 opacity-0 group-hover/subrow:opacity-100 transition-opacity text-zinc-600 hover:text-zinc-300"
+                                        title="Reassign to different part number"
+                                      >
+                                        <Pencil size={10} />
+                                      </button>
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-1 text-zinc-700 whitespace-nowrap">{r.language}</td>
+                                  <td className="px-3 py-1 text-zinc-700 whitespace-nowrap">{r.rarity ?? '—'}</td>
+                                  <td className="px-3 py-1 text-zinc-500 whitespace-nowrap">{r.company}</td>
+                                  <td className="px-3 py-1 text-zinc-400 whitespace-nowrap">{r.grade_label ?? (r.grade != null ? String(r.grade) : '—')}</td>
+                                  <td className="px-3 py-1 text-right text-zinc-500 whitespace-nowrap">{r.qty_total}</td>
+                                  <td className="px-3 py-1 text-right text-zinc-500 whitespace-nowrap">{r.qty_unsold}</td>
+                                  <td className="px-3 py-1 text-right text-zinc-500 whitespace-nowrap">{r.qty_in_grading ?? 0}</td>
+                                  <td className="px-3 py-1 text-right text-zinc-500 whitespace-nowrap">{r.qty_sold}</td>
+                                </tr>
+                              ))
+                            : []),
+                        ];
+                      })
                     : []),
                 ];
               })}

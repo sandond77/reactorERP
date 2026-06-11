@@ -421,6 +421,7 @@ export async function getInventorySummary(userId: string) {
     grade_label: string | null;
     qty_total: number;
     qty_unsold: number;
+    qty_in_grading: number;
     qty_sold: number;
     qty_pending: number;
     total_cost: number;
@@ -442,7 +443,11 @@ export async function getInventorySummary(userId: string) {
       sd.grade,
       sd.grade_label,
       COALESCE(SUM(ci.quantity), 0)::int                                                    AS qty_total,
-      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status != 'sold'), 0)::int                  AS qty_unsold,
+      -- Unsold = available raw/graded inventory. Excludes 'sold' AND
+      -- 'grading_submitted' so cards in transit to the grader don't show up
+      -- as available stock. They get their own qty_in_grading bucket.
+      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status NOT IN ('sold', 'grading_submitted')), 0)::int AS qty_unsold,
+      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int      AS qty_in_grading,
       COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'sold'), 0)::int                   AS qty_sold,
       0::int                                                                                 AS qty_pending,
       SUM(ci.purchase_cost + COALESCE(sd.grading_cost, 0))::int                              AS total_cost,
