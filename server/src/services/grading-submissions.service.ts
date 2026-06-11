@@ -686,10 +686,177 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
   return { card_instance: ci, batch_item: item };
 }
 
+// ── Relink (swap underlying card_instance on a line item) ────────────────────
+
+export interface RelinkItemInput {
+  // Replace the gbi's linked ci with this one (must exist in inventory).
+  card_instance_id: string;
+  // Optional gbi field updates applied alongside the swap.
+  quantity?: number;
+  expected_grade?: number | null;
+  estimated_value?: number | null;
+}
+
+export async function relinkItem(userId: string, itemId: string, input: RelinkItemInput) {
+  const existing = await db
+    .selectFrom('grading_batch_items as gbi')
+    .innerJoin('grading_batches as gb', 'gb.id', 'gbi.batch_id')
+    .select(['gbi.id', 'gbi.card_instance_id', 'gbi.quantity as gbi_qty', 'gbi.batch_id', 'gb.status as batch_status'])
+    .where('gbi.id', '=', itemId)
+    .where('gb.user_id', '=', userId)
+    .executeTakeFirst();
+  if (!existing) throw new AppError(404, 'Line item not found');
+  if (existing.batch_status !== 'pending') {
+    throw new AppError(409, 'Sub must be in Adding state to relink a line');
+  }
+
+  // No swap — fall through to the regular update path.
+  if (input.card_instance_id === existing.card_instance_id) {
+    return updateItem(userId, itemId, {
+      quantity: input.quantity,
+      expected_grade: input.expected_grade,
+      estimated_value: input.estimated_value,
+    });
+  }
+
+  const newCi = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!newCi) throw new AppError(404, 'New card not found');
+
+  const qty = input.quantity ?? existing.gbi_qty;
+
+  // Sum existing usage of the new ci across the same batch (excluding the row
+  // we're about to mutate) so we don't over-allocate.
+  const others = await db
+    .selectFrom('grading_batch_items')
+    .select(db.fn.sum<number>('quantity').as('total'))
+    .where('batch_id', '=', existing.batch_id)
+    .where('card_instance_id', '=', input.card_instance_id)
+    .where('id', '!=', itemId)
+    .executeTakeFirst();
+  const alreadyInBatch = Number(others?.total ?? 0);
+  if (alreadyInBatch + qty > newCi.quantity) {
+    throw new AppError(400, `Only ${newCi.quantity - alreadyInBatch} of selected card available (${alreadyInBatch} already in batch).`);
+  }
+
+  // Update gbi to point at the new ci with the new field values.
+  const update: Record<string, unknown> = {
+    card_instance_id: input.card_instance_id,
+    quantity:         qty,
+  };
+  if (input.expected_grade  !== undefined) update.expected_grade  = input.expected_grade;
+  if (input.estimated_value !== undefined) update.estimated_value = input.estimated_value;
+
+  const updated = await db
+    .updateTable('grading_batch_items')
+    .set(update)
+    .where('id', '=', itemId)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  // Restore old ci to inspected/grade — only if no other batch_item still
+  // references it and it's currently in flight. Mirrors removeItem guard.
+  const stillReferenced = await db
+    .selectFrom('grading_batch_items')
+    .select('id')
+    .where('card_instance_id', '=', existing.card_instance_id)
+    .executeTakeFirst();
+  if (!stillReferenced) {
+    await db
+      .updateTable('card_instances')
+      .set({ status: 'inspected', decision: 'grade', updated_at: new Date() })
+      .where('id', '=', existing.card_instance_id)
+      .where('user_id', '=', userId)
+      .where('status', '=', 'grading_submitted')
+      .execute();
+  }
+
+  // Move the new ci into grading_submitted (matches addItem semantics).
+  await db
+    .updateTable('card_instances')
+    .set({ status: 'grading_submitted', location_id: null })
+    .where('id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .execute();
+
+  return updated;
+}
+
+export async function relinkItemLegacy(userId: string, itemId: string, input: AddLegacyItemInput) {
+  const existing = await db
+    .selectFrom('grading_batch_items as gbi')
+    .innerJoin('grading_batches as gb', 'gb.id', 'gbi.batch_id')
+    .select(['gbi.id', 'gbi.card_instance_id', 'gbi.batch_id', 'gb.status as batch_status'])
+    .where('gbi.id', '=', itemId)
+    .where('gb.user_id', '=', userId)
+    .executeTakeFirst();
+  if (!existing) throw new AppError(404, 'Line item not found');
+  if (existing.batch_status !== 'pending') {
+    throw new AppError(409, 'Sub must be in Adding state to relink a line');
+  }
+
+  // Reuse the addLegacyItem path: it creates a new ci + a new gbi. We then
+  // delete the OLD gbi, restore its old ci, and renumber so the new line
+  // takes the displaced position.
+  const oldCiId = existing.card_instance_id;
+  const created = await addLegacyItem(userId, existing.batch_id, input);
+
+  // Capture the line numbers so we can swap them — the new gbi was appended
+  // at max+1; we want it to occupy the slot the relinked line was in.
+  const oldRow = await db
+    .selectFrom('grading_batch_items')
+    .select(['line_item_num'])
+    .where('id', '=', itemId)
+    .executeTakeFirst();
+  const oldLine = oldRow?.line_item_num;
+
+  // Drop the old gbi.
+  await db.deleteFrom('grading_batch_items').where('id', '=', itemId).execute();
+
+  // Restore the old ci if nothing else references it.
+  const stillReferenced = await db
+    .selectFrom('grading_batch_items')
+    .select('id')
+    .where('card_instance_id', '=', oldCiId)
+    .executeTakeFirst();
+  if (!stillReferenced) {
+    await db
+      .updateTable('card_instances')
+      .set({ status: 'inspected', decision: 'grade', updated_at: new Date() })
+      .where('id', '=', oldCiId)
+      .where('user_id', '=', userId)
+      .where('status', '=', 'grading_submitted')
+      .execute();
+  }
+
+  // Slide the new gbi into the old slot so display order is preserved.
+  if (oldLine != null) {
+    await db
+      .updateTable('grading_batch_items')
+      .set({ line_item_num: oldLine })
+      .where('id', '=', created.batch_item.id)
+      .execute();
+  }
+
+  return created.batch_item;
+}
+
 export interface UpdateItemInput {
   quantity?: number;
   expected_grade?: number | null;
   estimated_value?: number | null;
+  // Identity fixups — propagated to the linked card_instance. When any of the
+  // four are present, the catalog link is re-resolved so a typo'd line points
+  // at the correct catalog row going forward (slabs created on return inherit
+  // the corrected overrides + catalog_id from the source ci).
+  card_name_override?: string | null;
+  set_name_override?: string | null;
+  card_number_override?: string | null;
+  language?: string;
 }
 
 export async function updateItem(userId: string, itemId: string, input: UpdateItemInput) {
@@ -746,10 +913,67 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
       .where('id', '=', existing.card_instance_id).execute();
   }
 
+  // Identity fixups on the linked card_instance — names/set/#/language. Done
+  // first so any failure here aborts before the gbi row is touched.
+  const ciFieldsTouched =
+    input.card_name_override   !== undefined ||
+    input.set_name_override    !== undefined ||
+    input.card_number_override !== undefined ||
+    input.language             !== undefined;
+
+  if (ciFieldsTouched) {
+    const ciBefore = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', existing.card_instance_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!ciBefore) throw new AppError(404, 'Linked card not found');
+
+    const ciUpdate: Record<string, unknown> = { updated_at: new Date() };
+    if (input.card_name_override   !== undefined) ciUpdate.card_name_override   = input.card_name_override   || null;
+    if (input.set_name_override    !== undefined) ciUpdate.set_name_override    = input.set_name_override    || null;
+    if (input.card_number_override !== undefined) ciUpdate.card_number_override = input.card_number_override || null;
+    if (input.language             !== undefined) ciUpdate.language             = input.language;
+
+    // Re-resolve catalog link if identity fields changed — typo'd lines link
+    // to the wrong (or no) catalog row; refresh so future joins/reports use
+    // the right one. Fall back to keeping the existing link on failure.
+    const newName = input.card_name_override   ?? ciBefore.card_name_override;
+    const newSet  = input.set_name_override    ?? ciBefore.set_name_override;
+    const newNum  = input.card_number_override ?? ciBefore.card_number_override;
+    const newLang = input.language             ?? ciBefore.language;
+    if (newName) {
+      try {
+        const resolve = await resolveLazyForUser(userId);
+        const resolved = await resolve(newName, newSet, newNum, newLang, 0);
+        if (resolved) ciUpdate.catalog_id = resolved;
+      } catch { /* keep existing catalog_id */ }
+    }
+
+    await db
+      .updateTable('card_instances')
+      .set(ciUpdate)
+      .where('id', '=', existing.card_instance_id)
+      .where('user_id', '=', userId)
+      .execute();
+    await logAudit(userId, 'card_instances', existing.card_instance_id, 'updated', ciBefore, { ...ciBefore, ...ciUpdate });
+  }
+
   const update: Record<string, unknown> = {};
   if (input.quantity        !== undefined) update.quantity        = input.quantity;
   if (input.expected_grade  !== undefined) update.expected_grade  = input.expected_grade;
   if (input.estimated_value !== undefined) update.estimated_value = input.estimated_value;
+
+  // No gbi fields to update — bail with a fresh fetch so the controller can
+  // still respond with the current row.
+  if (Object.keys(update).length === 0) {
+    return db
+      .selectFrom('grading_batch_items')
+      .selectAll()
+      .where('id', '=', itemId)
+      .executeTakeFirst();
+  }
 
   return db
     .updateTable('grading_batch_items as gbi')
@@ -765,6 +989,14 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
     )
     .returningAll()
     .executeTakeFirst();
+}
+
+// One-shot catalog resolver helper for updateItem — mirrors the lazy import
+// pattern processReturn uses, scoped to a single call.
+async function resolveLazyForUser(userId: string) {
+  const { createCatalogResolver } = await import('./import/import.service');
+  const { getOrCreateCatalogId } = await createCatalogResolver(userId);
+  return getOrCreateCatalogId;
 }
 
 export type ReturnDisposition = 'graded' | 'lost' | 'not_graded' | 'not_submitted';

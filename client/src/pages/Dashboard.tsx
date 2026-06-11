@@ -594,8 +594,11 @@ function OverviewTab() {
   const performance  = summary?.performance ?? { avg_hold_days: null, listings_value: 0, pending_orders: 0 };
   const lifetimeSales = summary?.lifetime   ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0 };
 
-  const sellThrough   = (cards.sold.all + cards.unsold.all) > 0
-    ? ((cards.sold.all / (cards.sold.all + cards.unsold.all)) * 100).toFixed(1)
+  const sellThroughGraded = (cards.sold.graded + cards.unsold.graded) > 0
+    ? ((cards.sold.graded / (cards.sold.graded + cards.unsold.graded)) * 100).toFixed(1)
+    : null;
+  const sellThroughRaw    = (cards.sold.raw + cards.unsold.raw) > 0
+    ? ((cards.sold.raw / (cards.sold.raw + cards.unsold.raw)) * 100).toFixed(1)
     : null;
   const EMPTY_ROW: SalesRow = { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0 };
   const windowData: SalesRow = salesWindow === 'today' ? (summary?.today ?? EMPTY_ROW)
@@ -698,7 +701,16 @@ function OverviewTab() {
           <div className="grid grid-cols-4 divide-x divide-zinc-800">
             <div className="pr-6">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
-              <p className="text-xl font-bold text-zinc-100">{sellThrough != null ? `${sellThrough}%` : '—'}</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-xl font-bold text-zinc-100 leading-none">{sellThroughGraded != null ? `${sellThroughGraded}%` : '—'}</p>
+                  <p className="text-[10px] text-zinc-500 mt-1">Graded</p>
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-zinc-100 leading-none">{sellThroughRaw != null ? `${sellThroughRaw}%` : '—'}</p>
+                  <p className="text-[10px] text-zinc-500 mt-1">Raw</p>
+                </div>
+              </div>
               <p className="text-xs text-zinc-600 mt-0.5">sold / (sold + unsold)</p>
             </div>
             <div className="px-6">

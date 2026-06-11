@@ -80,6 +80,20 @@ export async function processReturn(req: Request, res: Response, next: NextFunct
   } catch (err) { next(err); }
 }
 
+export async function relinkItem(req: Request, res: Response, next: NextFunction) {
+  try {
+    const updated = await svc.relinkItem(req.dataUserId, req.params['itemId'] as string, req.body);
+    res.json(updated);
+  } catch (err) { next(err); }
+}
+
+export async function relinkItemLegacy(req: Request, res: Response, next: NextFunction) {
+  try {
+    const updated = await svc.relinkItemLegacy(req.dataUserId, req.params['itemId'] as string, req.body);
+    res.json(updated);
+  } catch (err) { next(err); }
+}
+
 export async function getReturnedSlabs(req: Request, res: Response, next: NextFunction) {
   try {
     const result = await svc.getReturnedSlabs(req.dataUserId, req.params['id'] as string);

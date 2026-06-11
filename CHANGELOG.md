@@ -1,5 +1,46 @@
 # Reactor — Changelog
 
+## June 11, 2026
+
+### Features
+
+**Edit Line Item — three tabs: Fix Identity, Replace from Inventory, Replace from Legacy**
+- The pending-sub Edit Line Item modal used to only let you change Qty / Expected Grade / Est. Value. When a wrong `card_instance` got accidentally linked at sub-add time, the only recovery was deleting the line and re-adding it — losing position and needing to retype every other field. Worse, by the time the sub came back as returned the misidentification was baked into the slab.
+- New tabbed UI mirrors Add Card to Batch:
+  - **Fix Identity** — auto-fill from a pasted card name, then edits the *existing* linked `card_instance`'s overrides (name, set, #, language) and re-resolves the catalog link via `createCatalogResolver`. Use when the typo is in the identity but the right physical card is linked. Drives the slab's display + catalog attribution on the next return because `processReturn` reads from the source ci.
+  - **Replace from Inventory** — single-card picker that points `gbi.card_instance_id` at a different inspected raw card via the new `POST /grading-subs/:id/items/:itemId/relink` endpoint. Restores the old `card_instance` to `inspected` / `decision=grade` (guarded — only flips when current status is `grading_submitted`, mirroring removeItem's guard so a back-linked sold slab can't be clobbered). Moves the new one to `grading_submitted` and clears `location_id`. Validates qty against the new card's available stock minus any other batch items already using it.
+  - **Replace from Legacy** — full PartNumberField + legacy bucket picker, same UX as Add Card → Legacy. Uses `POST /grading-subs/:id/items/:itemId/relink-legacy`, which delegates to `addLegacyItem` then deletes the old gbi, restores the old ci, and slides the new line into the old `line_item_num` slot so display order is preserved.
+
+**Dashboard — Pipeline tile splits Sell-Through into Graded + Raw 50/50**
+- Single Sell-Through number replaced with a 2-column micro-stat inside the same tile cell. Computed client-side from `cards.sold.graded / (cards.sold.graded + cards.unsold.graded)` and the same formula for raw. No server change, no row-height change, no layout reshuffle — drill-down detail lives in the Grading / Ungraded views.
+
+### Fixes
+
+**Inspection — returned-graded raw lots falsely reappear in Needs Inspection**
+- `raw-purchases.service.listRawPurchases` and `reports.service` both computed a lot's processed count as `SUM(quantity) FROM card_instances WHERE raw_purchase_id = rp.id`. After `processReturn` zeroes the source raw row's quantity (graded_out=true) and creates the new slab `card_instance` with `raw_purchase_id = null`, that sum drops to zero — so a fully-graded raw lot fell back into the Needs Inspection filter on the Inspection page and into the dashboard's `awaiting_intake` gap.
+- Verified against prod: every raw lot whose source went through either of the two PSA returns (June 6, 11 lots; June 10, 42 lots) was stuck this way. The bug actually predates migration 057 — the prior hard-delete behavior produced the same zero-row sum — it just hadn't been noticed because the first really large return was the 195-card one.
+- Fix adds a slab-from-this-lot subcount to both the SELECT and the HAVING clauses: `+ COALESCE((SELECT COUNT(*) FROM slab_details sd JOIN card_instances src ON src.id = sd.source_raw_instance_id WHERE src.raw_purchase_id = rp.id), 0)`. Slab `raw_purchase_id` stays null so cost-basis reports and raw inventory totals are unchanged. Verified with the same prod query — all 53 affected lots now return processed = card_count.
+
+## June 9, 2026
+
+### Features
+
+**Sub Returns — View Return modal with grade distribution + origin context**
+- Returned-sub rows on the list page are now clickable; click anywhere on the row (except the Revert Return cell, which stops propagation so it stays a discrete action) to open a View Return modal styled to match the existing Review Return panel. Eye icon dropped — whole-row click felt more natural.
+- New endpoint `GET /api/v1/grading-subs/:id/returned-slabs` joins `slab_details` → `card_instances` → `card_catalog` → original raw `card_instances` (via `sd.source_raw_instance_id`) → `raw_purchases` → `grading_batch_items` for one batch.
+- Left pane lists every slab returned by that sub with Card / Cert # / Grade / Label / Raw ID / Expected Grade / Condition / Notes. Right pane shows a per-sub Grade / Count / % summary table (grade DESC, totals row). Expected-grade cell is colored green when the actual beat it and red when it missed. Slabs ordered by `cert_number` ascending so the list reads in natural cert order.
+
+### Fixes
+
+**Sub Returns — Cards column was counting line items, not cards**
+- Returned-sub list table column labeled "Cards" was showing `item_count` (count of `grading_batch_items` rows). For a 195-card sub split across ~80 line items it read "80". Mirrored the Grading page pattern: split into "Line Items" + "Total Cards" so both numbers are visible at a glance. `Batch` type gained `total_qty` (already returned by `listBatches`). Select Submission modal subtitle also updated to show both ("N cards · M lines").
+
+**Sub Returns — remap dropdown showed only the card name, slider scrollbar on Card column**
+- Remap column options were just card name + line # — same card across two lines was ambiguous. Options now read `#{line} {Name — Set — #card}`. Card column had a horizontal scrollbar because the textarea was fixed-width with overflow; switched to inline `fieldSizing: 'content'` with `overflow-hidden` so it word-wraps and auto-grows. Card column widened from 260px → 325px and Remap shrunk 220px → 155px to balance the gain. Native `<select>` can't render multi-line text in its closed state, so Remap is now an invisible native select overlaid on a wrapped text display — keeps native click/keyboard behavior with full word-wrap on the selected label.
+
+**Sub Returns — Select Submission modal listed newest sub first**
+- Returns come back from PSA in submission order so the oldest sub is almost always the next one to record. Submitted batches in the modal are now sorted `submitted_at` ascending (earliest first) and each row shows the submit date next to the batch ID.
+
 ## June 8, 2026
 
 ### Features
