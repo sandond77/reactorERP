@@ -581,9 +581,16 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
   }>`
     WITH rp_intake AS (
       SELECT rp.id, rp.status, rp.card_count,
-        GREATEST(rp.card_count - COALESCE((
-          SELECT SUM(ci.quantity) FROM card_instances ci WHERE ci.raw_purchase_id = rp.id
-        ), 0), 0) AS gap
+        GREATEST(rp.card_count - (
+          COALESCE((
+            SELECT SUM(ci.quantity) FROM card_instances ci WHERE ci.raw_purchase_id = rp.id
+          ), 0)
+          + COALESCE((
+            SELECT COUNT(*) FROM slab_details sd
+            JOIN card_instances src ON src.id = sd.source_raw_instance_id
+            WHERE src.raw_purchase_id = rp.id
+          ), 0)
+        ), 0) AS gap
       FROM raw_purchases rp
       WHERE rp.user_id = ${userId}
         ${type !== 'both' ? sql`AND rp.type = ${type}` : sql``}

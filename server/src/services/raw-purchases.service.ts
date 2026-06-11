@@ -249,9 +249,22 @@ export async function listRawPurchases(
       'rp.reserved',
       'rp.notes',
       'rp.receipt_url',
-      sql<number>`COALESCE(SUM(ci.quantity), 0)`.as('inspected_count'),
+      // Includes slabs whose source raw came from this lot. processReturn
+      // creates the new slab card_instance with raw_purchase_id=null and zeroes
+      // the source raw row's quantity (graded_out=true), so without the slab
+      // subcount a fully-graded lot would falsely drop back to 0/N and reappear
+      // in "Needs Inspection."
+      sql<number>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+        SELECT COUNT(*)::int FROM slab_details sd
+        JOIN card_instances src ON src.id = sd.source_raw_instance_id
+        WHERE src.raw_purchase_id = rp.id
+      ), 0)`.as('inspected_count'),
       sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'sell_raw' THEN ci.quantity END), 0)`.as('sell_raw_count'),
-      sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'grade' THEN ci.quantity END), 0)`.as('grade_count'),
+      sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'grade' THEN ci.quantity END), 0) + COALESCE((
+        SELECT COUNT(*)::int FROM slab_details sd
+        JOIN card_instances src ON src.id = sd.source_raw_instance_id
+        WHERE src.raw_purchase_id = rp.id
+      ), 0)`.as('grade_count'),
     ])
     .where('rp.user_id', '=', userId)
     .groupBy(['rp.id', 'cc.sku', 'cc.card_name', 'cc.set_name', 'cc.card_number'])
@@ -270,11 +283,19 @@ export async function listRawPurchases(
   if (needs_inspection || inspection_state === 'needs') {
     query = query
       .where('rp.status', '=', 'received')
-      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`);
+      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+        SELECT COUNT(*)::int FROM slab_details sd
+        JOIN card_instances src ON src.id = sd.source_raw_instance_id
+        WHERE src.raw_purchase_id = rp.id
+      ), 0) < rp.card_count`);
   } else if (inspection_state === 'done') {
     query = query
       .where('rp.status', '=', 'received')
-      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) >= rp.card_count`);
+      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+        SELECT COUNT(*)::int FROM slab_details sd
+        JOIN card_instances src ON src.id = sd.source_raw_instance_id
+        WHERE src.raw_purchase_id = rp.id
+      ), 0) >= rp.card_count`);
   }
   if (search) {
     const term = `%${search}%`;
@@ -305,8 +326,16 @@ export async function listRawPurchases(
           .$if(!!type, (q) => q.where('rp.type', '=', type!))
           .groupBy(['rp.id'])
           .having(inspectionDoneSide
-            ? sql<boolean>`COALESCE(SUM(ci.quantity), 0) >= rp.card_count`
-            : sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`)
+            ? sql<boolean>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+                SELECT COUNT(*)::int FROM slab_details sd
+                JOIN card_instances src ON src.id = sd.source_raw_instance_id
+                WHERE src.raw_purchase_id = rp.id
+              ), 0) >= rp.card_count`
+            : sql<boolean>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+                SELECT COUNT(*)::int FROM slab_details sd
+                JOIN card_instances src ON src.id = sd.source_raw_instance_id
+                WHERE src.raw_purchase_id = rp.id
+              ), 0) < rp.card_count`)
           .execute()
           .then((rows) => ({ total: rows.length }))
       : db
