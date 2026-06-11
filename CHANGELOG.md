@@ -9,12 +9,27 @@
 - New tabbed UI mirrors Add Card to Batch:
   - **Fix Identity** — auto-fill from a pasted card name, then edits the *existing* linked `card_instance`'s overrides (name, set, #, language) and re-resolves the catalog link via `createCatalogResolver`. Use when the typo is in the identity but the right physical card is linked. Drives the slab's display + catalog attribution on the next return because `processReturn` reads from the source ci.
   - **Replace from Inventory** — single-card picker that points `gbi.card_instance_id` at a different inspected raw card via the new `POST /grading-subs/:id/items/:itemId/relink` endpoint. Restores the old `card_instance` to `inspected` / `decision=grade` (guarded — only flips when current status is `grading_submitted`, mirroring removeItem's guard so a back-linked sold slab can't be clobbered). Moves the new one to `grading_submitted` and clears `location_id`. Validates qty against the new card's available stock minus any other batch items already using it.
-  - **Replace from Legacy** — full PartNumberField + legacy bucket picker, same UX as Add Card → Legacy. Uses `POST /grading-subs/:id/items/:itemId/relink-legacy`, which delegates to `addLegacyItem` then deletes the old gbi, restores the old ci, and slides the new line into the old `line_item_num` slot so display order is preserved.
+  - **Replace from Legacy** — full PartNumberField + legacy bucket picker, same UX as Add Card → Legacy. Uses `POST /grading-subs/:id/items/:itemId/relink-legacy`, which delegates to `addLegacyItem` then deletes the old gbi, restores the old ci, and slides the new line into the old `line_item_num` slot so display order is preserved. Reordered so `line_item_num` capture happens *before* `addLegacyItem` runs — if the bucket-validation throws, the old gbi is untouched.
+- Fix Identity gains a **Raw ID** input. Pass `raw_purchase_label` (e.g. `2025R109`) and the server looks up the matching `raw_purchases.id` and re-links the source `card_instances.raw_purchase_id`. Blank string detaches. 404s cleanly if the label doesn't match.
+- Replace from Inventory placeholder updated to call out Raw ID search; **Exact** toggle renamed **Exact ID** with a tooltip. The `/cards` endpoint already supported `purchase_id` in both fuzzy and exact modes — this just makes the affordance obvious.
+- `relinkItem` rejects terminal-state targets (`graded` / `sold` / `lost_damaged`) so a direct API call can't clobber a slab by silently flipping its status to `grading_submitted`.
+
+**Part Numbers (Inventory Summary) — 3-level hierarchy + In Grading column**
+- Same part number with multiple grades + name variants used to render as a flat list of (sku × name × grade) tuples — 5+ rows for a single Slowpoke. Defeats the point of the catalog roll-up.
+- New hierarchy on the Part Numbers page:
+  - **Level 1**: part number summary (unchanged structure).
+  - **Level 2**: one row per `(grade_label, company)` for graded slabs, plus a single **Raw** row if any raw cards exist. Grade rows sort DESC; Raw goes at the bottom. Single-variant buckets render flat inline with no extra chevron; multi-variant buckets show `N variants` with an expand chevron.
+  - **Level 3**: `card_name_override` variants under multi-variant buckets, surfaced when level 2 is expanded.
+- Added an **In Grading** column. Server's `getInventorySummary` now splits the old unsold bucket: rows at `status='grading_submitted'` (cards in transit to PSA) move to `qty_in_grading` so they no longer inflate the "available stock" count. Invariant `qty_total = qty_unsold + qty_in_grading + qty_sold` verified to hold across every prod row. No other consumer reads `qty_unsold`. Returned slabs continue to count under their `(grade, company)` graded line; the original raw line (now `graded_out=true`, `quantity=0`) contributes 0 — so no double counting.
 
 **Dashboard — Pipeline tile splits Sell-Through into Graded + Raw 50/50**
-- Single Sell-Through number replaced with a 2-column micro-stat inside the same tile cell. Computed client-side from `cards.sold.graded / (cards.sold.graded + cards.unsold.graded)` and the same formula for raw. No server change, no row-height change, no layout reshuffle — drill-down detail lives in the Grading / Ungraded views.
+- Single Sell-Through number replaced with a 2-column micro-stat inside the same tile cell. Computed client-side from `cards.sold.graded / (cards.sold.graded + cards.unsold.graded)` and the same formula for raw. Underneath each %, a small `sold / total` count makes the underlying numbers visible without drilling in. No server change, no row-height change, no layout reshuffle.
 
 ### Fixes
+
+**Grading — Edit Legacy form rows misaligned + auto-fill leaves stale catalog match**
+- The Replace from Legacy / Add Card → Legacy forms had a Quantity field that drifted out of vertical alignment with the Cost / Card cell next to it whenever the Cost label wrapped to two lines. Grid rows now use `items-end` so the input baselines stay aligned regardless of label height.
+- The Auto-fill button populated the form's identity fields but didn't reset `PartNumberField`'s cached match, so the stale lock-in stuck until the user manually clicked the X. Now clears `catalogMatch` + `catalogId` after a successful auto-fill so the field re-resolves against the freshly-filled identity.
 
 **Inspection — returned-graded raw lots falsely reappear in Needs Inspection**
 - `raw-purchases.service.listRawPurchases` and `reports.service` both computed a lot's processed count as `SUM(quantity) FROM card_instances WHERE raw_purchase_id = rp.id`. After `processReturn` zeroes the source raw row's quantity (graded_out=true) and creates the new slab `card_instance` with `raw_purchase_id = null`, that sum drops to zero — so a fully-graded raw lot fell back into the Needs Inspection filter on the Inspection page and into the dashboard's `awaiting_intake` gap.
