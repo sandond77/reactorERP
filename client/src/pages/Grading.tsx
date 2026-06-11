@@ -568,6 +568,10 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
           card_number: s.card_number ?? prev.card_number,
           language:    s.language    ?? prev.language,
         }));
+        // Clear the previous catalog match so PartNumberField re-resolves
+        // against the freshly-filled identity.
+        setCatalogMatch(null);
+        setCatalogId(null);
         toast.success('Auto-filled from card database');
       } else {
         toast('No match found — fill manually', { icon: '🔍' });
@@ -1141,6 +1145,11 @@ function ReplaceFromLegacyTab({ item, batchId, onClose }: { item: BatchItem; bat
           card_number: s.card_number ?? prev.card_number,
           language:    s.language    ?? prev.language,
         }));
+        // Clear the previous catalog match so PartNumberField re-resolves
+        // against the freshly-filled identity. Otherwise the locked-in stale
+        // match stays selected and the user has to X it manually.
+        setCatalogMatch(null);
+        setCatalogId(null);
         toast.success('Auto-filled from card database');
       } else {
         toast('No match found — fill manually', { icon: '🔍' });
@@ -1277,14 +1286,14 @@ function ReplaceFromLegacyTab({ item, batchId, onClose }: { item: BatchItem; bat
         onClear={() => { setCatalogMatch(null); setCatalogId(null); }}
       />
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-3 items-end">
         <Input
           label={`Quantity *${legacyBucket ? ` (max ${legacyBucket.stash_qty})` : ''}`}
           type="number" min="1" max={legacyBucket?.stash_qty}
           value={form.quantity} onChange={set('quantity')} className={noSpinner}
         />
         <Input
-          label={`Cost / Card (USD)${legacyBucket ? ' — from legacy bucket' : ''}`}
+          label="Cost / Card (USD)"
           type="text" inputMode="decimal"
           value={form.purchase_cost} onChange={set('purchase_cost')} placeholder="0.00"
           readOnly={!!legacyBucket}
@@ -1292,7 +1301,7 @@ function ReplaceFromLegacyTab({ item, batchId, onClose }: { item: BatchItem; bat
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800">
+      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800 items-end">
         <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
           value={form.expected_grade} onChange={set('expected_grade')} className={noSpinner} />
         <Input label="Est. Value / Card" type="text" inputMode="decimal" placeholder="0.00"
