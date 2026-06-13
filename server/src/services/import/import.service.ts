@@ -624,6 +624,20 @@ async function executeGradedImport(
       const language   = explicitLang || (/\bJAPANESE?\b|\bJP\b/i.test(cardName) ? 'JP' : 'EN');
       const catalogId  = await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex);
 
+      // Resolve the game from the catalog row (set via the alias/SKU prefix at
+      // catalog-creation time). Without this, ci.card_game would be hardcoded
+      // 'pokemon' and Weiss / Union Arena / etc imports would bin under
+      // Pokemon on the frontend.
+      let resolvedGame = 'pokemon';
+      if (catalogId) {
+        const cat = await db
+          .selectFrom('card_catalog')
+          .select('game')
+          .where('id', '=', catalogId)
+          .executeTakeFirst();
+        if (cat?.game) resolvedGame = cat.game;
+      }
+
       // When a catalog entry was matched/created via part number, don't override
       // the canonical name — otherwise each PSA label variation creates a separate group.
       // Store the raw PSA label in notes for reference if no notes already provided.
@@ -634,7 +648,7 @@ async function executeGradedImport(
         card_name_override:   cardName ?? null,
         set_name_override:    catalogId ? null : setName,
         card_number_override: catalogId ? null : cardNumber,
-        card_game:            'pokemon',
+        card_game:            resolvedGame,
         language,
         variant:              null,
         rarity:               null,
@@ -843,13 +857,20 @@ async function executeRawPurchaseImport(
       // Raw single-card purchases ARE inventory rows. Bulk purchases are lots
       // and get split into card_instances during inspection — don't auto-create.
       if (purchaseType === 'raw') {
+        let rawResolvedGame = 'pokemon';
+        if (catalogId) {
+          const cat = await db
+            .selectFrom('card_catalog').select('game')
+            .where('id', '=', catalogId).executeTakeFirst();
+          if (cat?.game) rawResolvedGame = cat.game;
+        }
         await db.insertInto('card_instances').values({
           user_id:              userId,
           catalog_id:           catalogId ?? null,
           card_name_override:   cardName || null,
           set_name_override:    catalogId ? null : (setName ?? null),
           card_number_override: catalogId ? null : (cardNumber ?? null),
-          card_game:            'pokemon',
+          card_game:            rawResolvedGame,
           language,
           variant: null, rarity: null, notes: null,
           purchase_type:        'raw' as const,
@@ -1045,13 +1066,24 @@ async function executeLegacyCardsImport(
       const language = explicitLang?.toUpperCase() || (/japanese/i.test(cardName) ? 'JP' : 'EN');
       const catalogId = await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex);
 
+      let legacyResolvedGame = mapped['card_game']?.toLowerCase();
+      if (!legacyResolvedGame && catalogId) {
+        const cat = await db
+          .selectFrom('card_catalog')
+          .select('game')
+          .where('id', '=', catalogId)
+          .executeTakeFirst();
+        if (cat?.game) legacyResolvedGame = cat.game;
+      }
+      if (!legacyResolvedGame) legacyResolvedGame = 'pokemon';
+
       await db.insertInto('card_instances').values({
         user_id:              userId,
         catalog_id:           catalogId,
         card_name_override:   cardName,
         set_name_override:    catalogId ? null : setName,
         card_number_override: catalogId ? null : cardNumber,
-        card_game:            mapped['card_game']?.toLowerCase() ?? 'pokemon',
+        card_game:            legacyResolvedGame,
         language,
         variant:              null, rarity: null, notes: null,
         purchase_type:        'raw' as const,
