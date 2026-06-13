@@ -10,7 +10,7 @@ import type { PaginationParams } from '../utils/pagination';
 export interface RecordSaleInput {
   card_instance_id: string;
   listing_id?: string;
-  card_show_id?: string;
+  card_show_id?: string | null;
   platform: ListingPlatform;
   sale_price: number;
   platform_fees?: number;
@@ -388,6 +388,7 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
     ...(input.unique_id !== undefined && { unique_id: input.unique_id }),
     ...(input.unique_id_2 !== undefined && { unique_id_2: input.unique_id_2 }),
     ...(input.order_details_link !== undefined && { order_details_link: input.order_details_link }),
+    ...(input.card_show_id !== undefined && { card_show_id: input.card_show_id }),
   }).where('id', '=', saleId).where('user_id', '=', userId).execute();
 
   // Quantity edit: rebalance against the source sibling in the same lot so

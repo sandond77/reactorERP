@@ -2229,7 +2229,14 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
   const [soldAt, setSoldAt] = useState(sale.sold_at ? sale.sold_at.slice(0, 10) : '');
   const [orderNumber, setOrderNumber] = useState(sale.unique_id ?? '');
   const [quantity, setQuantity] = useState(String(sale.quantity ?? 1));
+  const [cardShowId, setCardShowId] = useState<string>(sale.card_show_id ?? '');
   const [submitting, setSubmitting] = useState(false);
+
+  const { data: cardShowsData } = useQuery<{ data: Array<{ id: string; name: string; show_date: string; end_date: string | null; num_days: number; location: string | null }> }>({
+    queryKey: ['card-shows'],
+    queryFn: () => api.get('/card-shows').then((r) => r.data),
+    enabled: platform === 'card_show',
+  });
 
   // Max sale qty = what's on this sale today + what's still available in the
   // same lot to grow into. Keeps the lot's original total invariant.
@@ -2259,6 +2266,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
         unique_id_2: notes || undefined,
         order_details_link: platform === 'ebay' ? (ebayLink || undefined) : undefined,
         quantity: qtyParsed,
+        card_show_id: platform === 'card_show' ? (cardShowId || null) : null,
       });
       toast.success('Sale updated');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -2354,6 +2362,32 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
         <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
           className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
       </div>
+      {platform === 'card_show' && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Card Show</label>
+          <select
+            value={cardShowId}
+            onChange={(e) => {
+              const val = e.target.value;
+              setCardShowId(val);
+              const show = (cardShowsData?.data ?? []).find((s) => s.id === val);
+              if (show) setSoldAt(show.show_date.slice(0, 10));
+            }}
+            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors"
+          >
+            <option value="">— No show —</option>
+            {(cardShowsData?.data ?? []).map((s) => {
+              const fmt = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+              const dateLabel = s.num_days > 1 && s.end_date ? `${fmt(s.show_date)} – ${fmt(s.end_date)}` : fmt(s.show_date);
+              return (
+                <option key={s.id} value={s.id}>
+                  {s.name} · {dateLabel}{s.location ? ` · ${s.location}` : ''}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
       <Input label="Notes" placeholder="Card Show, Location, Person, Etc..." value={notes} onChange={(e) => setNotes(e.target.value)} />
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={() => setMode('prompt')}>Back</Button>

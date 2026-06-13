@@ -98,7 +98,9 @@ export async function recordBulkSale(req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 }
 
-const updateSaleSchema = recordSaleSchema.omit({ card_instance_id: true }).partial();
+const updateSaleSchema = recordSaleSchema.omit({ card_instance_id: true }).partial().extend({
+  card_show_id: z.string().uuid().nullable().optional(),
+});
 
 export async function updateSale(req: Request, res: Response, next: NextFunction) {
   try {
