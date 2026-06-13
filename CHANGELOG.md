@@ -1,5 +1,33 @@
 # Reactor — Changelog
 
+## June 13, 2026
+
+### Fixes
+
+**Imports — `card_instances.card_game` always written as 'pokemon' regardless of catalog game**
+- All three insert paths in `import.service.ts` (graded CSV, raw purchase, legacy cards) were hardcoded to write `card_game: 'pokemon'` when creating `card_instances` rows. Even though `pokemon_set_aliases` correctly tagged Weiss / Union Arena / Black Clover set codes (SAO, KGL, BCV, SPY, etc.) with the right game, and the resulting `card_catalog` row carried `game = 'weiss-schwarz'` / `union_arena` / etc., the inventory row attached to it was force-stamped Pokémon. Result: imports rendered correctly in the catalog but binned under Pokémon everywhere the frontend filtered on `ci.card_game` (Inventory Summary, Reports, listings).
+- Surfaced by a prod user (wanchi) whose entire Weiss Schwarz collection appeared under Pokémon. 80 instance rows + 4 catalog rows reconciled (4 of the catalog rows were also mislabeled as `pokemon` for clearly non-Pokémon cards: Noelle Silva / Miku Nakano / Catwoman / Coco — all updated to weiss-schwarz).
+- Fix reads `card_catalog.game` after `getOrCreateCatalogId` resolves and uses that for `card_game`. Falls back to 'pokemon' only when no catalog match exists (legacy import already supports an explicit `card_game` CSV column).
+
+### Features
+
+**Inventory — Add Card / Add Slab now have a dynamic game picker with inline "+ Add new game"**
+- Both quick-add forms had hardcoded `<select>` lists (Add Card: pokemon / one_piece / mtg / other; Add Slab: pokemon / one_piece / other) that didn't include Weiss Schwarz, Union Arena, or any user-registered game. The "Other" escape hatch produced rows tagged with the literal string `other`, which was useless — they couldn't be filtered, attributed to a set, or rolled up against any catalog.
+- New shared `CardGameSelect` component queries `/sets/games` (same query key as the Catalog page, so the dropdown stays in sync with the rest of the app) and renders one option per registered game. A "+ Add new game…" sentinel opens an inline name + SKU prefix panel that POSTs to `/sets/games` and refetches before assigning the new game to the form — same pattern as `AddPartModal`.
+- "Other" removed entirely. Every game must now be registered in `card_games`, which keeps `card_catalog.game` and `card_instances.card_game` aligned on a known vocabulary.
+
+**Slab Detail — cert-uniqueness guards on every write path**
+- `processReturn` rejects payloads that reuse a cert within the same return or against any existing slab for the company (catches the May 6 PSA dupe import and the cert 145655318 sub-return collision that produced two slabs from one return).
+- `createCard` (Add Slab API) and `updateCard` (Slab Detail edit) now check `(user_id, company, cert_number)` and 409 if the cert already exists on another slab.
+- Graded CSV import path checks the same constraint per row inside the existing try/catch so a single bad row doesn't kill the whole import.
+
+**Slab Detail — Personal Collection + Card Show mutual exclusion**
+- Personal Collection (intent: not for sale) and Card Show (intent: actively selling) are contradictory. The modal now shows an inline warning when both are toggled and the server still accepts either independently — the warning is purely a UX guardrail.
+
+**Card Number — normalize to numerator-only at every write site**
+- Users were typing card numbers as printed on the card (`215/172`, `110/100`) instead of just the numerator. New `normalizeCardNumber` util splits on `/` and trims; applied at every write site (`cards.service`, `catalog.service`, `raw-purchases.service`, `grading-submissions.service`, `import.service`).
+- UI placeholders updated: Add Slab "Card Number" placeholder changed from `e.g. 4/102` → `e.g. 4` with hint "numerator only — e.g. 4, not 4/102"; Add Part Number modal got the same hint inline.
+
 ## June 11, 2026
 
 ### Features
