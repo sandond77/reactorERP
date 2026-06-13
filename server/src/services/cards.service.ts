@@ -468,6 +468,26 @@ export async function createCard(
     if (loc) isCardShow = loc.is_card_show;
   }
 
+  // Cert-uniqueness guard for Add Slab. (company, cert_number) is globally
+  // unique inside a grading company; collisions are always typos. Reject
+  // before insert so we don't pollute slab_details with duplicates that
+  // later confuse reports + listings.
+  if (slab?.cert_number) {
+    const certNum = Number(slab.cert_number);
+    if (Number.isFinite(certNum)) {
+      const existing = await db
+        .selectFrom('slab_details')
+        .select('id')
+        .where('user_id', '=', userId)
+        .where('company', '=', slab.company as any)
+        .where('cert_number', '=', certNum)
+        .executeTakeFirst();
+      if (existing) {
+        throw new AppError(409, `${slab.company} cert # ${slab.cert_number} is already recorded on another slab.`);
+      }
+    }
+  }
+
   const card = await db
     .insertInto('card_instances')
     .values({ ...data, user_id: userId, status, purchase_type: purchaseType, raw_purchase_id: rawPurchaseId, is_card_show: isCardShow, card_show_added_at: isCardShow ? new Date() : null })
@@ -549,6 +569,27 @@ export async function updateCard(
   const hasSlabFields = slab_cert_number !== undefined || slab_grade !== undefined ||
     slab_grade_label !== undefined || slab_grading_cost !== undefined;
   if (hasSlabFields) {
+    // Cert-uniqueness guard on edit — same rule as createCard. Reject if the
+    // user is changing this slab's cert to one that another slab on the same
+    // company already owns.
+    if (slab_cert_number != null && Number.isFinite(slab_cert_number)) {
+      const ownCompany = await db
+        .selectFrom('slab_details').select('company')
+        .where('card_instance_id', '=', cardId).where('user_id', '=', userId)
+        .executeTakeFirst();
+      if (ownCompany) {
+        const collision = await db
+          .selectFrom('slab_details').select('id')
+          .where('user_id', '=', userId)
+          .where('company', '=', ownCompany.company)
+          .where('cert_number', '=', slab_cert_number)
+          .where('card_instance_id', '!=', cardId)
+          .executeTakeFirst();
+        if (collision) {
+          throw new AppError(409, `${ownCompany.company} cert # ${slab_cert_number} is already recorded on another slab.`);
+        }
+      }
+    }
     const slabUpdate: Record<string, unknown> = { updated_at: new Date() };
     if (slab_cert_number !== undefined) slabUpdate.cert_number = slab_cert_number;
     if (slab_grade !== undefined)       slabUpdate.grade = slab_grade;

@@ -1085,6 +1085,44 @@ export async function processReturn(userId: string, batchId: string, input: Proc
     }
   }
 
+  // Cert-uniqueness guards. Two checks:
+  //  (a) Within this payload — same cert across two slots = copy/paste typo.
+  //      Caught the 2026-06-10 incident where one Rayquaza slot was filled in
+  //      with the Ampharos cert + name override, producing a phantom slab.
+  //  (b) Cross-batch — cert already present in slab_details (any company).
+  //      Cert numbers are globally unique within their grading company; a
+  //      collision means either a typo or an attempt to re-record an
+  //      already-returned slab.
+  const gradedCerts: { idx: number; cert: string }[] = [];
+  for (let i = 0; i < input.items.length; i++) {
+    const it = input.items[i];
+    const disp = it.disposition ?? (it.lost ? 'lost' : 'graded');
+    if (disp === 'graded' && it.cert_number) {
+      gradedCerts.push({ idx: i, cert: String(it.cert_number).trim() });
+    }
+  }
+  const seen = new Map<string, number>();
+  for (const { idx, cert } of gradedCerts) {
+    if (seen.has(cert)) {
+      throw new AppError(400, `Cert # ${cert} is used twice in this return (items #${seen.get(cert)! + 1} and #${idx + 1}). Each cert can only appear once.`);
+    }
+    seen.set(cert, idx);
+  }
+  if (gradedCerts.length > 0) {
+    const certNums = gradedCerts.map((c) => Number(c.cert));
+    const existingDupes = await db
+      .selectFrom('slab_details')
+      .select(['cert_number', 'company'])
+      .where('user_id', '=', userId)
+      .where('cert_number', 'in', certNums)
+      .where('company', '=', batch.company as GradingCompany)
+      .execute();
+    if (existingDupes.length > 0) {
+      const list = existingDupes.map((d) => d.cert_number).join(', ');
+      throw new AppError(409, `Cert # ${list} already exist${existingDupes.length === 1 ? 's' : ''} on a returned slab. Each ${batch.company} cert can only be recorded once.`);
+    }
+  }
+
   // Lazy-load the catalog resolver — only constructed when needed, but reused
   // across all items in the batch.
   let cachedResolver: ((cardName: string, setName: string | null, cardNum: string | null, lang: string, idx: number) => Promise<string | null>) | null = null;
