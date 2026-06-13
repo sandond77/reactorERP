@@ -2,6 +2,7 @@ import axios from 'axios';
 import { sql } from 'kysely';
 import { db } from '../config/database';
 import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
+import { normalizeCardNumber } from '../utils/card-number';
 
 // ── Rarity code map ──────────────────────────────────────────────────────────
 // Maps TCGdex rarity strings AND PSA label rarity terms → SKU abbreviation
@@ -494,8 +495,10 @@ export async function createCatalogCard(userId: string, params: {
   variant?: string | null;
 }): Promise<string> {
   const lang = params.language.toUpperCase() === 'JP' || params.language.toUpperCase() === 'JPN' ? 'JP' : 'EN';
-  const autoSku = (!params.sku && params.set_code && params.card_number)
-    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: params.card_number })
+  // Canonicalize "215/172" → "215" before SKU autogen and storage.
+  const normalizedNumber = normalizeCardNumber(params.card_number);
+  const autoSku = (!params.sku && params.set_code && normalizedNumber)
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber })
     : null;
 
   const result = await db
@@ -507,7 +510,7 @@ export async function createCatalogCard(userId: string, params: {
       card_name: params.card_name,
       set_name: params.set_name,
       set_code: params.set_code ?? null,
-      card_number: params.card_number ?? null,
+      card_number: normalizedNumber ?? null,
       language: params.language,
       rarity: params.rarity ?? null,
       variant: params.variant ?? null,
@@ -726,8 +729,10 @@ export async function linkUnlinkedByCardName(userId: string, params: {
   variant?: string | null;
 }): Promise<{ catalog_id: string; linked_count: number }> {
   const lang = params.language.toUpperCase() === 'JP' ? 'JP' : params.language.toUpperCase();
-  const autoSku = (!params.sku && params.set_code && params.card_number)
-    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: params.card_number })
+  // Canonicalize "215/172" → "215" so SKU autogen and stored value match catalog form.
+  const normalizedNumber = normalizeCardNumber(params.card_number);
+  const autoSku = (!params.sku && params.set_code && normalizedNumber)
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber })
     : null;
 
   // Look up an existing entry: first by SKU (if we can compute one), then by card_name+set_code
@@ -759,7 +764,7 @@ export async function linkUnlinkedByCardName(userId: string, params: {
       card_name: params.card_name,
       set_name: params.set_name,
       set_code: params.set_code ?? null,
-      card_number: params.card_number ?? null,
+      card_number: normalizedNumber ?? null,
       language: params.language,
       rarity: params.rarity ?? null,
       variant: params.variant ?? null,
@@ -793,6 +798,12 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
   variant?: string | null;
   language?: string;
 }) {
+  // Canonicalize "215/172" → "215" when card_number is being updated.
+  if (fields.card_number !== undefined) {
+    const normalized = normalizeCardNumber(fields.card_number);
+    fields.card_number = normalized ?? undefined;
+  }
+
   // Auto-generate SKU when card_number is being set but no explicit sku is provided
   let effectiveSku = fields.sku;
   if (!effectiveSku && fields.card_number) {

@@ -302,12 +302,15 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
         <div>
           <Input
             label="Card Number"
-            placeholder={unnumbered ? '—' : 'e.g. 4/102'}
+            placeholder={unnumbered ? '—' : 'e.g. 4'}
             disabled={unnumbered}
             {...register('card_number_override')}
             error={errors.card_number_override?.message ?? unnumberedError ?? undefined}
             className={unnumbered ? 'opacity-50' : undefined}
           />
+          {!unnumbered && (
+            <p className="text-[10px] text-zinc-500 mt-1">numerator only — e.g. 4, not 4/102</p>
+          )}
           <label className="flex items-center gap-1 text-[10px] text-zinc-500 cursor-pointer select-none mt-1">
             <input
               type="checkbox"

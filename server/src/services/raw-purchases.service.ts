@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { normalizeCardNumber } from '../utils/card-number';
 import { AppError } from '../middleware/errorHandler';
 import type { RawPurchaseType, RawPurchaseStatus } from '../types/db';
 
@@ -442,7 +443,7 @@ export async function createRawPurchase(userId: string, input: CreateRawPurchase
       catalog_id: input.catalog_id ?? null,
       card_name: input.card_name ?? null,
       set_name: input.set_name ?? null,
-      card_number: input.card_number ?? null,
+      card_number: normalizeCardNumber(input.card_number) ?? null,
       total_cost_yen: input.total_cost_yen ?? null,
       fx_rate: input.fx_rate ?? null,
       total_cost_usd: input.total_cost_usd ?? null,
@@ -484,7 +485,7 @@ export async function updateRawPurchase(
   if (input.catalog_id !== undefined)    update.catalog_id = input.catalog_id;
   if (input.card_name !== undefined)     update.card_name = input.card_name;
   if (input.set_name !== undefined)      update.set_name = input.set_name;
-  if (input.card_number !== undefined)   update.card_number = input.card_number;
+  if (input.card_number !== undefined)   update.card_number = normalizeCardNumber(input.card_number);
   if (input.total_cost_yen !== undefined) update.total_cost_yen = input.total_cost_yen;
   if (input.fx_rate !== undefined)       update.fx_rate = input.fx_rate;
   if (input.total_cost_usd !== undefined) update.total_cost_usd = input.total_cost_usd;

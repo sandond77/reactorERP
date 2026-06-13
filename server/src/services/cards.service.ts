@@ -2,6 +2,7 @@ import { sql } from 'kysely';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
+import { normalizeCardNumber } from '../utils/card-number';
 import { createRawPurchase } from './raw-purchases.service';
 import { logAudit } from '../utils/audit';
 import type { CardStatus, NewCardInstance, CardInstanceUpdate } from '../types/db';
@@ -429,6 +430,12 @@ export async function createCard(
   data: Omit<NewCardInstance, 'user_id'>,
   slab?: { company: string; grade: number; grade_label?: string; cert_number?: string; additional_cost?: number }
 ) {
+  // Normalize "215/172" → "215" so the stored override lines up with how the
+  // catalog stores card_number. Suffix letters / leading zeros preserved.
+  if ((data as any).card_number_override !== undefined) {
+    (data as any).card_number_override = normalizeCardNumber((data as any).card_number_override);
+  }
+
   // 'bulk' is a raw_purchases.type, not a card_instances.purchase_type — map it to 'raw'
   const incomingType = slab ? 'pre_graded' : (data.purchase_type ?? 'raw');
   const rawPurchaseType = (incomingType as any) === 'bulk' ? 'bulk' : 'raw';
@@ -507,6 +514,12 @@ export async function updateCard(
   if (!existing) throw new AppError(404, 'Card not found');
 
   const { slab_cert_number, slab_grade, slab_grade_label, slab_grading_cost, ...instanceData } = data;
+
+  // Normalize "215/172" → "215" so the stored override lines up with the
+  // catalog. Apply only when the field is touched.
+  if ((instanceData as any).card_number_override !== undefined) {
+    (instanceData as any).card_number_override = normalizeCardNumber((instanceData as any).card_number_override);
+  }
 
   // Quantity is invariant outside intake/inspection/sales — it's set at
   // purchase and only adjusted through sale splits. Strip any client-supplied

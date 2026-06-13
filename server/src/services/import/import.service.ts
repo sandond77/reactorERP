@@ -8,6 +8,7 @@ import { createRawPurchase } from '../raw-purchases.service';
 import { createExpense } from '../expenses.service';
 import { recordSale } from '../sales.service';
 import { lookupSetCode, lookupSetName, generatePartNumber, EN_SETS, JP_SETS } from '../../utils/set-codes';
+import { normalizeCardNumber } from '../../utils/card-number';
 import { backfillCardShowLinks } from '../card-shows.service';
 import type { GradingCompany, ListingPlatform } from '../../types/db';
 
@@ -445,8 +446,9 @@ export async function createCatalogResolver(
       }
     }
 
-    // Derive card number — prefer explicit, fall back to parsing the card name
-    let resolvedNumber = cardNumber?.trim() || null;
+    // Derive card number — prefer explicit, fall back to parsing the card name.
+    // Strip "N/M" → "N" so the catalog gets the canonical form.
+    let resolvedNumber = normalizeCardNumber(cardNumber?.trim()) || null;
     if (!resolvedNumber) {
       // Strip the set code from the label so it doesn't get mistaken for a card number
       // e.g. "SV10-GLORY OF TEAM ROCKET 101" → strip "SV10" before matching
@@ -1020,7 +1022,7 @@ async function executeLegacyCardsImport(
       if (!cardName) throw new Error('card_name is required');
       const qty = parseInt(mapped['quantity'] ?? '1', 10);
       const setName = mapped['set_name']?.trim() ?? null;
-      const cardNumber = mapped['card_number']?.trim() ?? null;
+      const cardNumber = normalizeCardNumber(mapped['card_number']?.trim()) ?? null;
       const explicitLang = mapped['language']?.trim();
       const language = explicitLang?.toUpperCase() || (/japanese/i.test(cardName) ? 'JP' : 'EN');
       const catalogId = await getOrCreateCatalogId(cardName, setName, cardNumber, language, rowIndex);

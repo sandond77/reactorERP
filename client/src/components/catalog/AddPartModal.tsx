@@ -392,7 +392,9 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
               />
             </div>
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">Card #</label>
+              <label className="block text-xs text-zinc-400 mb-1">
+                Card # <span className="text-zinc-600 text-[10px] font-normal">(numerator only — e.g. 215, not 215/172)</span>
+              </label>
               <input
                 className={`${inputCls} ${unnumbered ? 'opacity-50' : ''}`}
                 value={unnumbered ? '' : form.card_number}

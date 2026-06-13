@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { normalizeCardNumber } from '../utils/card-number';
 import { AppError } from '../middleware/errorHandler';
 import type { GradingCompany } from '../types/db';
 
@@ -651,7 +652,7 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       catalog_id: catalogId,
       card_name_override: input.card_name,
       set_name_override: input.set_name ?? null,
-      card_number_override: input.card_number ?? null,
+      card_number_override: normalizeCardNumber(input.card_number) ?? null,
       card_game: 'pokemon',
       language: input.language,
       purchase_type: 'raw',
@@ -944,7 +945,7 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
     const ciUpdate: Record<string, unknown> = { updated_at: new Date() };
     if (input.card_name_override   !== undefined) ciUpdate.card_name_override   = input.card_name_override   || null;
     if (input.set_name_override    !== undefined) ciUpdate.set_name_override    = input.set_name_override    || null;
-    if (input.card_number_override !== undefined) ciUpdate.card_number_override = input.card_number_override || null;
+    if (input.card_number_override !== undefined) ciUpdate.card_number_override = normalizeCardNumber(input.card_number_override) || null;
     if (input.language             !== undefined) ciUpdate.language             = input.language;
     if (input.raw_purchase_label   !== undefined) {
       const label = (input.raw_purchase_label ?? '').trim();
