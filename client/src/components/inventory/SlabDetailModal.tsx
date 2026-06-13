@@ -126,7 +126,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
             slab_cert_number:    editCert ? Number(editCert) : null,
             slab_grade:          editGrade ? parseFloat(editGrade) : null,
             slab_grade_label:    editGradeLabel || null,
-            slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : null,
+            slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : 0,
             is_personal_collection: editPersonal,
           };
       await api.patch(`/cards/${slab.id}`, body);
@@ -259,6 +259,14 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
                     />
                     <span className="text-xs text-zinc-300">Personal collection (not for sale)</span>
                   </label>
+                  {editPersonal && !!editLocationId && allLocations.find((l) => l.id === editLocationId)?.is_card_show && (
+                    <div className="flex items-start gap-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2.5 py-1.5">
+                      <span>⚠</span>
+                      <span>
+                        This slab is in a <strong>Card Show</strong> location (intent to sell) but is also marked as <strong>Personal Collection</strong> (not for sale). Pick one.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

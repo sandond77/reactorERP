@@ -540,7 +540,9 @@ export async function updateCard(
     if (slab_cert_number !== undefined) slabUpdate.cert_number = slab_cert_number;
     if (slab_grade !== undefined)       slabUpdate.grade = slab_grade;
     if (slab_grade_label !== undefined) slabUpdate.grade_label = slab_grade_label;
-    if (slab_grading_cost !== undefined) slabUpdate.grading_cost = slab_grading_cost;
+    // grading_cost is NOT NULL DEFAULT 0; SlabDetailModal sends null when the
+    // input is empty. Coerce so the UPDATE doesn't violate the constraint.
+    if (slab_grading_cost !== undefined) slabUpdate.grading_cost = slab_grading_cost ?? 0;
     await db.updateTable('slab_details')
       .set(slabUpdate)
       .where('card_instance_id', '=', cardId)
