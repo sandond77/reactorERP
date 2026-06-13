@@ -581,6 +581,24 @@ async function executeGradedImport(
       const certNumber = parseInt(certRaw.replace(/\D/g, ''), 10);
       const gradeLabel = gradeRaw.trim(); // store exactly as-is
 
+      // Cert-uniqueness guard. (company, cert_number) is the global key for a
+      // physical slab; collisions inside the same user_id are typos / re-imports
+      // and produced the May 6 2026 cluster of dupes (142067347/8/9, 120313004,
+      // 82932250, 77067174, 77916099). Skip the row with a clear error message
+      // instead of inserting a phantom ci+slab_details that pollutes inventory.
+      if (Number.isFinite(certNumber)) {
+        const existing = await db
+          .selectFrom('slab_details')
+          .select('id')
+          .where('user_id', '=', userId)
+          .where('company', '=', companyRaw as any)
+          .where('cert_number', '=', certNumber)
+          .executeTakeFirst();
+        if (existing) {
+          throw new Error(`${companyRaw} cert # ${certNumber} is already recorded — skipped to avoid duplicate.`);
+        }
+      }
+
       const purchaseCost = toCents(row['purchase_cost'] ?? '0');
       const gradingCost  = toCents(row['grading_cost']  ?? '0');
       const currency = normalizeCurrency(row['currency']);
