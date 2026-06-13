@@ -10,6 +10,7 @@ import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { useLocations } from '../../hooks/useLocations';
 import { AddPartModal } from '../catalog/AddPartModal';
+import { CardGameSelect } from './CardGameSelect';
 
 const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'] as const;
 
@@ -364,11 +365,10 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <Select label="Game" {...register('card_game')}>
-          <option value="pokemon">Pokémon</option>
-          <option value="one_piece">One Piece</option>
-          <option value="other">Other</option>
-        </Select>
+        <CardGameSelect
+          value={watch('card_game') ?? 'pokemon'}
+          onChange={(g) => setValue('card_game', g, { shouldDirty: true })}
+        />
         <Select label="Language" {...register('language')}>
           <option value="EN">English</option>
           <option value="JP">Japanese</option>
