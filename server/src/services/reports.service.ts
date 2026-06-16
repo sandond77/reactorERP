@@ -303,9 +303,6 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
       sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw' AND ci.graded_out = false), 0)::int`.as('unsubmitted'),
       sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw' AND ci.graded_out = false), 0)::int`.as('unsubmitted_cost'),
       sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'graded'), 0)::int`.as('returned'),
-      sql<number>`COALESCE(AVG(
-        EXTRACT(DAY FROM NOW() - ci.updated_at)
-      ) FILTER (WHERE ci.status = 'grading_submitted' AND ci.graded_out = false), 0)::int`.as('avg_days_at_graders'),
     ])
     .where('ci.user_id', '=', userId)
     .executeTakeFirst();
@@ -454,7 +451,16 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
       unsubmitted: pipeline?.unsubmitted ?? 0,
       unsubmitted_cost: pipeline?.unsubmitted_cost ?? 0,
       returned: pipeline?.returned ?? 0,
-      avg_days_at_graders: pipeline?.avg_days_at_graders ?? 0,
+      // Card-weighted average over every actively-submitted batch. Computed
+      // from activeBatches (which uses gb.submitted_at) instead of
+      // ci.updated_at — the latter gets bumped by any unrelated row update
+      // (decision backfills, edits) and produced 4d on a screen where every
+      // visible batch was 12–57d.
+      avg_days_at_graders: (() => {
+        const totalCardDays = activeBatches.reduce((s, b) => s + Number(b.card_count) * Number(b.days_elapsed), 0);
+        const totalCards = activeBatches.reduce((s, b) => s + Number(b.card_count), 0);
+        return totalCards > 0 ? Math.round(totalCardDays / totalCards) : 0;
+      })(),
       active_batches: activeBatches.map((b) => {
         const cardCount = Number(b.card_count);
         const rawCost = Number(b.raw_cost);
