@@ -1978,7 +1978,7 @@ export function InventorySummary() {
                           {renderPartLabel(r)}
                         </button>
                       </td>
-                      <td className="px-3 py-1.5 text-zinc-400 truncate whitespace-nowrap">{setName}</td>
+                      <td className="px-3 py-1.5 text-zinc-400 whitespace-normal break-words">{setName}</td>
                       <td className="px-3 py-1.5 text-zinc-200 whitespace-normal break-words">
                         {displayName}
                       </td>
@@ -2013,7 +2013,7 @@ export function InventorySummary() {
                         </button>
                       </span>
                     </td>
-                    <td className="px-3 py-1.5 text-zinc-400 truncate whitespace-nowrap">{setName}</td>
+                    <td className="px-3 py-1.5 text-zinc-400 whitespace-normal break-words">{setName}</td>
                     <td className="px-3 py-1.5 text-zinc-200 font-medium whitespace-normal break-words">
                       {displayName}
                     </td>
@@ -2049,7 +2049,7 @@ export function InventorySummary() {
                             <td className="px-3 py-1 pl-8 text-zinc-700 font-mono text-[10px] whitespace-nowrap">
                               {onlyOne ? '↳' : (l2Expanded ? <ChevronDown size={11} className="inline" /> : <ChevronRight size={11} className="inline" />)}
                             </td>
-                            <td className="px-3 py-1 text-zinc-600 whitespace-nowrap">{setName}</td>
+                            <td className="px-3 py-1 text-zinc-600 whitespace-normal break-words">{setName}</td>
                             <td className="px-3 py-1 text-zinc-300 whitespace-normal break-words">
                               {onlyOne ? (
                                 <>
@@ -2083,7 +2083,7 @@ export function InventorySummary() {
                             ? b.rows.map((r, idx) => (
                                 <tr key={`${bucketKey}-l3-${idx}`} className="group/subrow hover:bg-zinc-800/10">
                                   <td className="px-3 py-1 pl-14 text-zinc-700 font-mono text-[10px] whitespace-nowrap">↳</td>
-                                  <td className="px-3 py-1 text-zinc-700 whitespace-nowrap">{setName}</td>
+                                  <td className="px-3 py-1 text-zinc-700 whitespace-normal break-words">{setName}</td>
                                   <td className="px-3 py-1 text-zinc-400 whitespace-normal break-words">
                                     <span>{r.card_name ?? '—'}</span>
                                     {r.catalog_id && (

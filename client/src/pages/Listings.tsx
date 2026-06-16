@@ -81,6 +81,11 @@ interface SlabResult {
   is_listed: boolean;
   is_card_show: boolean;
   is_personal_collection: boolean;
+  sku: string | null;
+}
+
+function slabDedupeKey(s: { sku?: string | null; card_name: string | null }): string {
+  return s.sku ?? (s.card_name ?? 'Unknown').toLowerCase();
 }
 
 interface RawCardResult {
@@ -100,7 +105,7 @@ type SortDir = 'asc' | 'desc';
 
 // ── Set Slot ──────────────────────────────────────────────────────────────────
 
-type SetSlot = { cardName: string | null; slab: SlabResult | null };
+type SetSlot = { cardName: string | null; cardKey: string | null; slab: SlabResult | null };
 
 function SetSlotRow({
   index,
@@ -140,18 +145,20 @@ function SetSlotRow({
 
   const uniqueNames = searchData
     ? Array.from(searchData.data.reduce((m, s) => {
-        const key = s.card_name ?? '';
-        const cur = m.get(key) ?? { count: 0, onShow: 0 };
+        const key = slabDedupeKey(s);
+        const name = s.card_name ?? '';
+        const cur = m.get(key) ?? { name, count: 0, onShow: 0 };
         cur.count += 1;
         if (s.is_card_show) cur.onShow += 1;
+        if (name.length > cur.name.length) cur.name = name;
         m.set(key, cur);
         return m;
-      }, new Map<string, { count: number; onShow: number }>())).filter(([n, v]) => n && v.count > 0)
+      }, new Map<string, { name: string; count: number; onShow: number }>())).filter(([k, v]) => k && v.count > 0)
     : [];
 
   // Sort non-card-show certs first so on-show ones drop to the bottom of the picker.
   const copies = (copiesData?.data ?? [])
-    .filter(c => c.card_name === slot.cardName && !c.is_listed && !c.is_personal_collection)
+    .filter(c => slot.cardKey != null && slabDedupeKey(c) === slot.cardKey && !c.is_listed && !c.is_personal_collection)
     .sort((a, b) => Number(a.is_card_show) - Number(b.is_card_show));
 
   // Collapsed state — cert has been picked
@@ -169,7 +176,7 @@ function SetSlotRow({
           className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors shrink-0">
           Change
         </button>
-        <button type="button" onClick={() => onUpdate({ cardName: null, slab: null })}
+        <button type="button" onClick={() => onUpdate({ cardName: null, cardKey: null, slab: null })}
           className="text-zinc-600 hover:text-red-400 transition-colors shrink-0">
           <X size={13} />
         </button>
@@ -182,7 +189,7 @@ function SetSlotRow({
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800/60">
         <span className="text-[10px] text-zinc-500 uppercase tracking-wide font-medium">Card {index + 1}</span>
         {slot.cardName && (
-          <button type="button" onClick={() => { onUpdate({ cardName: null, slab: null }); setSearch(''); }}
+          <button type="button" onClick={() => { onUpdate({ cardName: null, cardKey: null, slab: null }); setSearch(''); }}
             className="text-[10px] text-zinc-600 hover:text-zinc-300 transition-colors">
             ← Change card
           </button>
@@ -204,11 +211,11 @@ function SetSlotRow({
             {debounced.length >= 2 && (
               uniqueNames.length > 0 ? (
                 <div className="rounded border border-zinc-700/50 overflow-hidden max-h-36 overflow-y-auto">
-                  {uniqueNames.map(([name, v]) => (
-                    <button key={name} type="button"
+                  {uniqueNames.map(([key, v]) => (
+                    <button key={key} type="button"
                       className="w-full text-left px-3 py-2 hover:bg-zinc-700/40 border-b border-zinc-700/30 last:border-0 flex items-center justify-between gap-2 transition-colors"
-                      onClick={() => { onUpdate({ cardName: name, slab: null }); setSearch(''); }}>
-                      <span className="text-xs text-zinc-200 truncate">{name}</span>
+                      onClick={() => { onUpdate({ cardName: v.name, cardKey: key, slab: null }); setSearch(''); }}>
+                      <span className="text-xs text-zinc-200 truncate">{v.name}</span>
                       <span className="shrink-0 flex items-center gap-1.5">
                         {v.onShow > 0 && (
                           <span className="text-[9px] font-bold uppercase tracking-wide bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 rounded px-1 py-0.5 tabular-nums">{v.onShow} on show</span>
@@ -240,7 +247,7 @@ function SetSlotRow({
                   const takenElsewhere = !isPickedHere && takenIds.has(copy.id);
                   return (
                     <button key={copy.id} type="button" disabled={takenElsewhere}
-                      onClick={() => { onUpdate({ cardName: slot.cardName, slab: copy }); setOpen(false); }}
+                      onClick={() => { onUpdate({ cardName: slot.cardName, cardKey: slot.cardKey, slab: copy }); setOpen(false); }}
                       className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-left transition-colors ${
                         takenElsewhere ? 'opacity-25 cursor-not-allowed' :
                         isPickedHere ? 'bg-indigo-500/10' : 'hover:bg-zinc-700/30'
@@ -276,6 +283,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const [cardSearch, setCardSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [selectedCardName, setSelectedCardName] = useState<string | null>(null);
+  const [selectedCardKey, setSelectedCardKey] = useState<string | null>(null);
 
   // Step: quantity (single)
   const [qty, setQty] = useState(1);
@@ -344,7 +352,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select'),
   });
 
-  const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName) ?? [];
+  const allCopies = copiesResult?.data.filter(c => selectedCardKey != null && slabDedupeKey(c) === selectedCardKey) ?? [];
   const availableCopies = allCopies.filter(c => !c.is_listed && !c.is_personal_collection);
 
   const gradeBreakdown = availableCopies.reduce((map, c) => {
@@ -366,17 +374,23 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const setSlabs = setSlotList.map(s => s.slab).filter((s): s is SlabResult => s != null);
   const takenSetIds = new Set(setSlabs.map(s => s.id));
 
-  // Deduplicate search results by card name, with on-show count
+  // Dedupe by sku (falls back to lowercased card_name when unlinked).
+  // Without this, casing-only variations of card_name_override — like
+  // "...Charmander" vs "...CHARMANDER" — split a single part number into
+  // two suggestions and miscount the unsold totals. We track every variant
+  // and surface the longest one as the canonical display name.
   const uniqueCardNames = searchResults
     ? Array.from(
         searchResults.data.reduce((map, s) => {
+          const key = slabDedupeKey(s);
           const name = s.card_name ?? 'Unknown';
-          const cur = map.get(name) ?? { count: 0, onShow: 0 };
+          const cur = map.get(key) ?? { name, count: 0, onShow: 0 };
           cur.count += 1;
           if (s.is_card_show) cur.onShow += 1;
-          map.set(name, cur);
+          if (name.length > cur.name.length) cur.name = name;
+          map.set(key, cur);
           return map;
-        }, new Map<string, { count: number; onShow: number }>())
+        }, new Map<string, { name: string; count: number; onShow: number }>())
       ).filter(([, v]) => v.count > 0)
     : [];
 
@@ -509,11 +523,11 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       {debouncedSearch.length >= 2 && (
         uniqueCardNames.length > 0 ? (
           <div className="rounded-lg border border-zinc-700 overflow-hidden">
-            {uniqueCardNames.map(([name, v]) => (
-              <button key={name} type="button"
+            {uniqueCardNames.map(([key, v]) => (
+              <button key={key} type="button"
                 className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-start justify-between gap-3 transition-colors"
-                onClick={() => { setSelectedCardName(name); setQty(1); setStep('quantity'); }}>
-                <span className="text-sm text-zinc-200 break-words leading-snug">{name}</span>
+                onClick={() => { setSelectedCardName(v.name); setSelectedCardKey(key); setQty(1); setStep('quantity'); }}>
+                <span className="text-sm text-zinc-200 break-words leading-snug">{v.name}</span>
                 <span className="shrink-0 flex items-center gap-1.5 mt-0.5">
                   {v.onShow > 0 && (
                     <span className="text-[9px] font-bold uppercase tracking-wide bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/30 rounded px-1 py-0.5 tabular-nums">{v.onShow} on show</span>
@@ -539,7 +553,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   if (step === 'quantity') return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 min-w-0">
-        <button type="button" onClick={() => { setStep('search'); setSelectedCardName(null); }}
+        <button type="button" onClick={() => { setStep('search'); setSelectedCardName(null); setSelectedCardKey(null); }}
           className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0">← Back</button>
         <p className="text-xs font-medium text-zinc-300 truncate">{selectedCardName}</p>
       </div>
@@ -766,7 +780,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
           disabled={!setTargetCount || parseInt(setTargetCount) < 2}
           onClick={() => {
             const n = parseInt(setTargetCount);
-            setSetSlotList(Array.from({ length: n }, () => ({ cardName: null, slab: null })));
+            setSetSlotList(Array.from({ length: n }, () => ({ cardName: null, cardKey: null, slab: null })));
             setStep('set-search');
           }}>
           Continue →
