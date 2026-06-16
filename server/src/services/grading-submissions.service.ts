@@ -657,6 +657,13 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       language: input.language,
       purchase_type: 'raw',
       status: 'grading_submitted',
+      // The reassigned row never goes through inspection, so it would otherwise
+      // land with decision=NULL and render as "—" in the lot view. Stamping
+      // 'grade' makes it visually consistent with where it was pulled from
+      // (the parent legacy bucket's decision='grade' stash) and with how
+      // processReturn restores source rows on revert (status='inspected',
+      // decision='grade').
+      decision: 'grade',
       quantity: qty,
       purchase_cost: perCardCost,
       currency: 'USD',
