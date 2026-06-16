@@ -1,5 +1,29 @@
 # Reactor — Changelog
 
+## June 15, 2026
+
+### Fixes
+
+**Record Listing — case-only card name variants split a part number into two suggestions**
+- The "Search Card" picker in Record Listing grouped suggestions by raw `card_name`, so the same `PKMN-JP-Svg-051` part rendered as two distinct entries: one for "...Charmander" (2 on show / 4 unsold) and another for "...CHARMANDER" (11 unsold). Picking one missed the other casing's copies in the cert step. Same bug existed in the set-listing slot picker.
+- `SlabResult.sku` added to the response shape on the client. Both dedupe paths now key on `sku ?? lowercased(card_name)`; the canonical display name is the longest variant in the bucket. Phase 2 (cert picker) filters with the same key extractor, so a "Pokemon" selection collects "POKEMON" certs too.
+
+**Part Numbers — SET column truncated while CARD wrapped, making adjacent rows look like they overlapped**
+- All four row levels (single-grade, summary, level 2 bucket, level 3 variant) had `truncate whitespace-nowrap` on the SET cell but `whitespace-normal break-words` on CARD. Long set names like "Venusaur & Charizard & Blastoise Special Deck" got chopped to ellipsis while the matching card name wrapped to 2–3 lines, mismatching row heights and producing overlapping text from the next row.
+- Switched all four SET cells to `whitespace-normal break-words` so heights match the CARD column.
+
+**Sales — Edit Sale modal had no way to set/change the linked Card Show**
+- When a card_show sale was recorded without picking a show (or against the wrong one), there was no in-app fix: the show couldn't be added later, so any show-grouped report under-counted those sales. Discovered after 4 May 31 sales on the user's account ended up dated Jun 1 with no `card_show_id`, missing the CardCon roll-up entirely.
+- Added a Card Show `<select>` to the Edit Sale modal that mounts when `platform === 'card_show'`, reusing the `['card-shows']` query and the auto-fill-date behavior from Record Sale. Wired `card_show_id` through `PUT /sales/:id` — schema accepts UUID or `null` (set-or-clear), service spreads it through the update set, `RecordSaleInput.card_show_id` widened to `string | null`. Backfilled the 4 prod rows: `card_show_id = CardCon`, `sold_at = 2026-05-31`.
+
+**Money inputs — `$` and `,` in price fields broke parsing inconsistently across modals**
+- Bare `parseFloat("$38.58")` returns `NaN`, which then propagated through `Math.round(parseFloat(x) * 100)` and either submitted `NaN` to the server or zeroed display sums depending on the codepath. Some modals had their own local `toCents` with the same bug (e.g. `AddToCardShowModal`), others used inline `parseFloat`. Behavior diverged across Sales / Grading / Intake / Inspection / Add to Card Show.
+- New `lib/utils.ts` exports `parseDollars` + `toCents` that strip every non-digit / non-decimal char before parsing — mirrors `server/src/utils/cents.ts` so client display matches what the server stores. Every money-field `parseFloat` callsite replaced: Sales (single + bulk + listed/CS price commits + Edit Sale), Grading (purchase_cost, estimated_value, grading_cost), Intake (per-line cost, fx_rate, total_cost_yen/usd), InspectionPanel (purchase_cost), AddToCardShowModal (allValid check). Validation lines that previously used `isNaN(parseFloat(...))` now check `/\d/` so a lone `"$"` still gets rejected — `parseDollars("$") === 0` would otherwise let it through.
+
+**Grading — legacy-reassigned source rows showed `—` decision in the lot view**
+- `addLegacyItem` (and the relink-from-legacy path that delegates to it) creates the reassigned source `card_instances` row at `status='grading_submitted'` but never set `decision`, so it landed `NULL`. In the lot view those rows rendered with an em-dash decision next to `qty=0` (or `qty=1` if still out at PSA), reading like a state-machine gap. The parent legacy bucket carried the real `decision='grade'`, but the child row didn't.
+- Stamp `decision='grade'` on insert so the row reflects the same intent as the bucket it was pulled from, and matches what `processReturn` already writes when restoring source rows on revert (`status='inspected', decision='grade'`). Backfilled 221 existing rows on prod for the affected user.
+
 ## June 13, 2026
 
 ### Fixes
