@@ -2,7 +2,7 @@ import { useState, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Check, ArrowRight } from 'lucide-react';
 import { api, type PaginatedResult } from '../../lib/api';
-import { formatCurrency, cn } from '../../lib/utils';
+import { formatCurrency, cn, toCents, parseDollars } from '../../lib/utils';
 import { Button } from '../ui/Button';
 
 interface SlabOption {
@@ -42,9 +42,6 @@ interface SelectedCard {
 
 const MAX_SELECT = 5;
 
-function toCents(val: string): number {
-  return Math.round(parseFloat(val) * 100);
-}
 
 export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
   const qc = useQueryClient();
@@ -159,8 +156,8 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
 
   const selectedList = Array.from(selected.values());
   const allValid = selectedList.length > 0 && selectedList.every((c) => {
-    const n = parseFloat(c.card_show_price_input);
-    return !isNaN(n) && n >= 0;
+    const raw = c.card_show_price_input;
+    return raw.trim() !== '' && /\d/.test(raw) && parseDollars(raw) >= 0;
   });
 
   if (step === 'price') {

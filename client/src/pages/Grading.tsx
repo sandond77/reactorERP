@@ -8,7 +8,7 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
-import { formatCurrency, formatDate } from '../lib/utils';
+import { formatCurrency, formatDate, toCents } from '../lib/utils';
 import toast from 'react-hot-toast';
 
 const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'] as const;
@@ -122,7 +122,7 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
         company,
         tier,
         submitted_at:  submittedAt || undefined,
-        grading_cost:  costPerCard ? Math.round(parseFloat(costPerCard) * 100) : undefined,
+        grading_cost:  costPerCard ? toCents(costPerCard) : undefined,
         notes:         notes || undefined,
       });
       toast.success('Batch created');
@@ -354,7 +354,7 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
           card_instance_id: r.card.id,
           quantity:         parseInt(r.qty),
           expected_grade:   r.expectedGrade ? parseFloat(r.expectedGrade) : undefined,
-          estimated_value:  r.estimatedValue ? Math.round(parseFloat(r.estimatedValue) * 100) : undefined,
+          estimated_value:  r.estimatedValue ? toCents(r.estimatedValue) : undefined,
         })),
       });
       toast.success(rows.length === 1 ? 'Card added to batch' : `${rows.length} cards added to batch`);
@@ -604,9 +604,9 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
         quantity:          qtyNum,
         // When pulling from a legacy bucket, server derives cost from the
         // stash row; purchase_cost is only used in the phantom-lot fallback.
-        purchase_cost:     form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
+        purchase_cost:     form.purchase_cost ? toCents(form.purchase_cost) : 0,
         expected_grade:    form.expected_grade ? parseFloat(form.expected_grade) : undefined,
-        estimated_value:   form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
+        estimated_value:   form.estimated_value ? toCents(form.estimated_value) : undefined,
         catalog_id:        catalogId ?? undefined,        // REAL card identity — slab lands here
         legacy_catalog_id: legacyBucketId || undefined,   // legacy bucket — stash drawn from here
       });
@@ -851,7 +851,7 @@ function FixIdentityTab({ item, batchId, onClose }: { item: BatchItem; batchId: 
       await api.patch(`/grading-subs/${batchId}/items/${item.id}`, {
         quantity:             qtyNum,
         expected_grade:       expectedGrade ? parseFloat(expectedGrade) : null,
-        estimated_value:      estimatedValue ? Math.round(parseFloat(estimatedValue) * 100) : null,
+        estimated_value:      estimatedValue ? toCents(estimatedValue) : null,
         card_name_override:   cardName.trim(),
         set_name_override:    setName.trim() || null,
         card_number_override: cardNumber.trim() || null,
@@ -1002,7 +1002,7 @@ function ReplaceFromInventoryTab({ item, batchId, onClose }: { item: BatchItem; 
         card_instance_id: picked.id,
         quantity:         qtyNum,
         expected_grade:   expectedGrade ? parseFloat(expectedGrade) : null,
-        estimated_value:  estimatedValue ? Math.round(parseFloat(estimatedValue) * 100) : null,
+        estimated_value:  estimatedValue ? toCents(estimatedValue) : null,
       });
       toast.success('Line replaced');
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
@@ -1180,9 +1180,9 @@ function ReplaceFromLegacyTab({ item, batchId, onClose }: { item: BatchItem; bat
         language:          form.language,
         condition:         form.condition || null,
         quantity:          qtyNum,
-        purchase_cost:     form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
+        purchase_cost:     form.purchase_cost ? toCents(form.purchase_cost) : 0,
         expected_grade:    form.expected_grade ? parseFloat(form.expected_grade) : undefined,
-        estimated_value:   form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
+        estimated_value:   form.estimated_value ? toCents(form.estimated_value) : undefined,
         catalog_id:        catalogId ?? undefined,
         legacy_catalog_id: legacyBucketId || undefined,
       });

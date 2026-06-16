@@ -6,7 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
-import { formatCurrency, formatDate, cn } from '../lib/utils';
+import { formatCurrency, formatDate, cn, parseDollars, toCents } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import toast from 'react-hot-toast';
@@ -339,7 +339,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     if (!activeCard) return;
     const current = activeCard.card_show_price ?? null;
     const trimmed = csPriceInput.trim();
-    const cents = trimmed === '' ? null : Math.round(parseFloat(trimmed) * 100);
+    const cents = trimmed === '' ? null : toCents(trimmed);
     if (cents !== null && (!Number.isFinite(cents) || cents < 0)) {
       toast.error('Enter a valid CS price');
       return;
@@ -371,8 +371,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const row = bulkCart.find(c => c.cart_entry_id === cartEntryId);
     if (!row || row.cs_price_draft === undefined) return;
     const trimmed = row.cs_price_draft.trim();
-    const cents = trimmed === '' ? null : Math.round(parseFloat(trimmed) * 100);
-    if (cents !== null && (!Number.isFinite(cents) || cents < 0)) {
+    const cents = trimmed === '' ? null : toCents(trimmed);
+    if (cents !== null && cents < 0) {
       toast.error('Enter a valid CS price');
       return;
     }
@@ -391,8 +391,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       setBulkCart(prev => prev.map(c => c.cart_entry_id === cartEntryId ? { ...c, listed_price_draft: undefined } : c));
       return;
     }
-    const cents = Math.round(parseFloat(trimmed) * 100);
-    if (!Number.isFinite(cents) || cents < 0) {
+    const cents = toCents(trimmed);
+    if (cents < 0) {
       toast.error('Enter a valid listed price');
       return;
     }
@@ -413,8 +413,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       setListedPriceInput(current != null ? (current / 100).toFixed(2) : '');
       return;
     }
-    const cents = Math.round(parseFloat(trimmed) * 100);
-    if (!Number.isFinite(cents) || cents < 0) {
+    const cents = toCents(trimmed);
+    if (cents < 0) {
       toast.error('Enter a valid listed price');
       return;
     }
@@ -569,8 +569,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     e.preventDefault();
     const cardId = saleMode === 'raw' ? selectedRawCard?.id : selectedCard?.id;
     if (!cardId) { toast.error('Select a card'); return; }
-    // Empty is invalid; 0 is allowed (giveaway / total loss).
-    if (!strikePrice.trim() || isNaN(parseFloat(strikePrice)) || parseFloat(strikePrice) < 0) {
+    // Empty is invalid; 0 is allowed (giveaway / total loss). Reject inputs
+    // that strip to nothing (e.g. "$") so we don't silently submit 0.
+    if (!strikePrice.trim() || !/\d/.test(strikePrice) || parseDollars(strikePrice) < 0) {
       toast.error('Enter a strike price (0 is OK for giveaways)'); return;
     }
     // Raw lots can carry quantity > 1; validate the user-entered qty.
@@ -582,8 +583,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       if (qty > max) { toast.error(`Only ${max} of these in inventory; can't sell ${qty}`); return; }
       qtyToSell = qty;
     }
-    const strikeCents = Math.round(parseFloat(strikePrice) * 100);
-    const earningsCents = platform === 'ebay' && orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : strikeCents;
+    const strikeCents = toCents(strikePrice);
+    const earningsCents = platform === 'ebay' && orderEarnings ? toCents(orderEarnings) : strikeCents;
     const feesCents = Math.max(0, strikeCents - earningsCents);
     setSubmitting(true);
     try {
@@ -1400,7 +1401,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         const sellQty = saleMode === 'raw' ? Math.max(1, parseInt(rawSaleQty || '1', 10) || 1) : 1;
         const isMulti = sellQty > 1;
         const strikeLabel = isMulti ? 'Strike Price (total)' : 'Strike Price';
-        const priceNum = parseFloat(strikePrice);
+        const priceNum = parseDollars(strikePrice);
         const perCard = isMulti && Number.isFinite(priceNum) && priceNum > 0
           ? (priceNum / sellQty).toFixed(2)
           : null;
@@ -1565,9 +1566,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     if (added) return;
                     const buildEntry = (row: SlabResult) => {
                       const stickerStr = row.card_show_price ? (row.card_show_price / 100).toFixed(2) : '';
-                      const discPct = parseFloat(bulkDiscount || '0');
+                      const discPct = parseDollars(bulkDiscount);
                       const finalStr = stickerStr && discPct > 0
-                        ? (parseFloat(stickerStr) * (1 - discPct / 100)).toFixed(2)
+                        ? (parseDollars(stickerStr) * (1 - discPct / 100)).toFixed(2)
                         : stickerStr;
                       return {
                         cart_entry_id: crypto.randomUUID(),
@@ -1635,9 +1636,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     if (added) return;
                     const doAdd = () => {
                       const rawStickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
-                      const rawDiscPct = parseFloat(bulkDiscount || '0');
+                      const rawDiscPct = parseDollars(bulkDiscount);
                       const rawFinalStr = rawStickerStr && rawDiscPct > 0
-                        ? (parseFloat(rawStickerStr) * (1 - rawDiscPct / 100)).toFixed(2)
+                        ? (parseDollars(rawStickerStr) * (1 - rawDiscPct / 100)).toFixed(2)
                         : rawStickerStr;
                       setBulkCart(prev => [...prev, {
                         cart_entry_id: crypto.randomUUID(),
@@ -1832,17 +1833,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const n = bulkCart.length;
 
     // For eBay set listings: total inputs that divide evenly per card
-    const totalStrikeCents = Math.round(parseFloat(strikePrice || '0') * 100);
-    const totalEarningsCents = orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : totalStrikeCents;
+    const totalStrikeCents = toCents(strikePrice);
+    const totalEarningsCents = orderEarnings ? toCents(orderEarnings) : totalStrikeCents;
     const perCardStrike = n > 0 ? (totalStrikeCents / n / 100).toFixed(2) : '0.00';
     const perCardEarnings = n > 0 ? (totalEarningsCents / n / 100).toFixed(2) : '0.00';
     const perCardFees = n > 0 ? ((totalStrikeCents - totalEarningsCents) / n / 100).toFixed(2) : '0.00';
 
     // Card show total (manual per-card pricing)
-    const total = bulkCart.reduce((s, item) => {
-      const final = Math.round(parseFloat(item.final_price_input || '0') * 100);
-      return s + final;
-    }, 0);
+    const total = bulkCart.reduce((s, item) => s + toCents(item.final_price_input), 0);
 
     function updateReviewField(entryId: string, field: 'sticker_price_input' | 'final_price_input', val: string) {
       setBulkCart(prev => prev.map(c => {
@@ -1851,10 +1849,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         // entering only sticker, then bouncing off a disabled Review &
         // Confirm because every row needs final to be > 0.
         if (field === 'sticker_price_input') {
-          const currentFinal = parseFloat(c.final_price_input || '0');
-          // Cascade only when final is empty / non-numeric / negative, NOT
+          // Cascade only when final is empty / has no digits / negative, NOT
           // when final has been intentionally set to 0 (giveaway).
-          const finalEmpty = !c.final_price_input.trim() || isNaN(currentFinal) || currentFinal < 0;
+          const finalEmpty = !c.final_price_input.trim() || !/\d/.test(c.final_price_input) || parseDollars(c.final_price_input) < 0;
           return { ...c, sticker_price_input: val, ...(finalEmpty ? { final_price_input: val } : {}) };
         }
         return { ...c, [field]: val };
@@ -1882,7 +1879,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               {strikePrice && (
                 <p className="text-xs text-zinc-500 mt-2">
                   Per card: <span className="text-zinc-300">${perCardStrike} strike</span>
-                  {orderEarnings && parseFloat(perCardFees) > 0 && <> · <span className="text-zinc-300">${perCardEarnings} after fees</span> · <span className="text-amber-400">${perCardFees} fees</span></>}
+                  {orderEarnings && parseDollars(perCardFees) > 0 && <> · <span className="text-zinc-300">${perCardEarnings} after fees</span> · <span className="text-amber-400">${perCardFees} fees</span></>}
                 </p>
               )}
             </div>
@@ -1905,19 +1902,19 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             <div className="w-36">
               <Input label="Discount % (all)" type="number" min="0" max="100" step="1"
                 placeholder="0" value={bulkDiscount} onChange={(e) => {
-                  const pct = parseFloat(e.target.value || '0');
+                  const pct = parseDollars(e.target.value);
                   setBulkDiscount(e.target.value);
                   const multiplier = 1 - pct / 100;
                   setBulkCart(prev => prev.map(c => ({
                     ...c,
                     final_price_input: c.sticker_price_input
-                      ? (parseFloat(c.sticker_price_input) * multiplier).toFixed(2)
+                      ? (parseDollars(c.sticker_price_input) * multiplier).toFixed(2)
                       : c.final_price_input,
                   })));
                 }} />
             </div>
-            {parseFloat(bulkDiscount || '0') > 0 && (
-              <p className="text-xs text-zinc-500 pb-2">{parseFloat(bulkDiscount)}% off each card</p>
+            {parseDollars(bulkDiscount) > 0 && (
+              <p className="text-xs text-zinc-500 pb-2">{parseDollars(bulkDiscount)}% off each card</p>
             )}
           </div>
         )}
@@ -1937,8 +1934,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           </div>
           <div className="max-h-[280px] overflow-y-auto">
           {bulkCart.map((item) => {
-            const sticker = parseFloat(item.sticker_price_input || '0');
-            const final = parseFloat(item.final_price_input || '0');
+            const sticker = parseDollars(item.sticker_price_input);
+            const final = parseDollars(item.final_price_input);
             const discountPct = sticker > 0 ? Math.round((1 - final / sticker) * 100) : 0;
             return (
               <div key={item.cart_entry_id} className={cn('gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start',
@@ -2055,13 +2052,13 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 // doesn't flicker disabled mid-typing (which made users think
                 // it was permanently broken).
                 if (isEbaySet) {
-                  if (!strikePrice.trim() || isNaN(parseFloat(strikePrice)) || parseFloat(strikePrice) < 0) {
+                  if (!strikePrice.trim() || !/\d/.test(strikePrice) || parseDollars(strikePrice) < 0) {
                     toast.error('Enter a total strike price (0 is OK for giveaways)');
                     return;
                   }
                 } else {
-                  // 0 is valid (giveaway). Flag only empty / non-numeric / negative.
-                  const blocked = bulkCart.filter(i => { const raw = i.final_price_input; const n = parseFloat(raw); return !raw.trim() || isNaN(n) || n < 0; });
+                  // 0 is valid (giveaway). Flag only empty / no digits / negative.
+                  const blocked = bulkCart.filter(i => { const raw = i.final_price_input; return !raw.trim() || !/\d/.test(raw) || parseDollars(raw) < 0; });
                   if (blocked.length > 0) {
                     const names = blocked.slice(0, 3).map(b => b.card_name ?? '(unnamed)').join(', ');
                     toast.error(`Missing final price: ${names}${blocked.length > 3 ? ` +${blocked.length - 3} more` : ''}`);
@@ -2085,8 +2082,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const n = bulkCart.length;
 
     // eBay set: split total evenly per card
-    const totalStrikeCents = Math.round(parseFloat(strikePrice || '0') * 100);
-    const totalEarningsCents = orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : totalStrikeCents;
+    const totalStrikeCents = toCents(strikePrice);
+    const totalEarningsCents = orderEarnings ? toCents(orderEarnings) : totalStrikeCents;
     const totalFeesCents = Math.max(0, totalStrikeCents - totalEarningsCents);
     // Distribute remainder to first card to avoid rounding loss
     const basePerCard = Math.floor(totalStrikeCents / n);
@@ -2100,7 +2097,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         const platform_fees = baseFeesPerCard + (idx === 0 ? feesRemainder : 0);
         return { ...item, final_price: sale_price, platform_fees };
       }
-      return { ...item, final_price: Math.round(parseFloat(item.final_price_input || '0') * 100), platform_fees: 0 };
+      return { ...item, final_price: toCents(item.final_price_input), platform_fees: 0 };
     });
     const total = itemsWithFinal.reduce((s, i) => s + i.final_price, 0);
     const selectedShow = (cardShowsData?.data ?? []).find(s => s.id === cardShowId);
@@ -2251,8 +2248,8 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       return;
     }
     setSubmitting(true);
-    const strikeCents = Math.round(parseFloat(strikePrice) * 100);
-    const earningsCents = platform === 'ebay' && orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : strikeCents;
+    const strikeCents = toCents(strikePrice);
+    const earningsCents = platform === 'ebay' && orderEarnings ? toCents(orderEarnings) : strikeCents;
     const feesCents = Math.max(0, strikeCents - earningsCents);
     try {
       await api.put(`/sales/${sale.id}`, {

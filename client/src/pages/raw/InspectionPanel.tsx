@@ -4,7 +4,7 @@ import { Plus, ChevronLeft, Trash2, Pencil, ImagePlus, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, toCents } from '../../lib/utils';
 import toast from 'react-hot-toast';
 import type { PurchaseRow, PurchaseDetail, InspectionLine, Decision } from './types';
 import { CONDITIONS, DECISION_LABELS } from './types';
@@ -162,7 +162,7 @@ function InspectionLineForm({
       condition:     form.condition,
       decision:      form.decision,
       quantity:      qty,
-      purchase_cost: Math.round(parseFloat(form.purchase_cost) * 100),
+      purchase_cost: toCents(form.purchase_cost),
       currency:      form.currency,
       notes:         form.notes || undefined,
       location_id:   form.location_id || null,
