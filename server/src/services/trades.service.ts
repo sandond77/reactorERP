@@ -100,19 +100,19 @@ async function createTradeInner(
 ) {
   const soldAt = input.trade_date ? new Date(input.trade_date) : undefined;
 
-  // Distribute cash_from_customer proportionally across outgoing card sales
-  const totalTradeCreditCents = input.outgoing.reduce((sum, item) => sum + item.sale_price, 0);
-  const cashFromCustomer = input.cash_from_customer_cents;
-
+  // sale_price coming from the client is already the user's full assigned
+  // trade value for the outgoing card — it equals what was received back
+  // (incoming card value + any cash from customer share). We do NOT add
+  // cash_from_customer again here. Doing so inflated Strike Price on the
+  // outgoing slab and caused the trades list to flag the row Unbalanced
+  // because the cash is also displayed as its own column.
+  // The cash is preserved separately on trades.cash_from_customer_cents.
   await Promise.all(input.outgoing.map(async (item) => {
-    const cashShare = totalTradeCreditCents > 0
-      ? Math.round((item.sale_price / totalTradeCreditCents) * cashFromCustomer)
-      : 0;
     const sale = await recordSale(userId, {
       card_instance_id: item.card_instance_id,
       listing_id: item.listing_id,
       platform: 'other',
-      sale_price: item.sale_price + cashShare,
+      sale_price: item.sale_price,
       currency: item.currency,
       sold_at: soldAt,
     });
