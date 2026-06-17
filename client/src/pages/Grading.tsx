@@ -86,6 +86,7 @@ interface CardToGrade {
   condition: string | null;
   quantity: number;
   raw_purchase_label: string | null;
+  purchase_cost: number;
 }
 
 // ── Create Batch Modal ───────────────────────────────────────────────────────
@@ -279,7 +280,11 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
         search: debounced,
         ...(strict ? { exact: 'true' } : {}),
         limit: 50,
-        status: 'purchased_raw,inspected,grading_submitted',
+        // grading_submitted is intentionally NOT in this list — those cards
+        // are physically at PSA and have already been split into a sibling
+        // ci row. Including them re-exposed already-submitted cards in the
+        // next batch's picker.
+        status: 'purchased_raw,inspected',
         decision: 'grade',
         // Legacy stash rows live in the Legacy (no lot) tab; suppress them
         // here so they don't pollute the From Inventory search results.
@@ -419,7 +424,7 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
                       </span>
                     </div>
                     <div className="text-xs text-zinc-500 mt-0.5">
-                      {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{remaining} available</span>
+                      {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{remaining} available</span> · <span className="text-zinc-400">{formatCurrency(card.purchase_cost, 'USD')}/card</span>
                     </div>
                   </button>
                 );
@@ -455,6 +460,7 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
                     {r.card.condition ? ` · ${r.card.condition}` : ''}
                     {' · '}<span className="font-mono text-zinc-400">{r.card.raw_purchase_label ?? '—'}</span>
                     {' · '}max {r.card.quantity}
+                    {' · '}<span className="text-zinc-400">{formatCurrency(r.card.purchase_cost, 'USD')}/card</span>
                   </p>
                 </div>
                 <input type="number" min={1} max={r.card.quantity} value={r.qty}
@@ -981,7 +987,9 @@ function ReplaceFromInventoryTab({ item, batchId, onClose }: { item: BatchItem; 
         search: debounced,
         ...(strict ? { exact: 'true' } : {}),
         limit: 50,
-        status: 'purchased_raw,inspected,grading_submitted',
+        // grading_submitted excluded — those cards are at PSA, not eligible
+        // to be swapped in as a replacement.
+        status: 'purchased_raw,inspected',
         decision: 'grade',
         exclude_legacy_bucket: 'true',
       },
