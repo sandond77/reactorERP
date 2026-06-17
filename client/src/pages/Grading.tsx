@@ -198,7 +198,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
       <div className="inline-flex rounded-md bg-zinc-900 border border-zinc-800 p-0.5">
         {([
           { key: 'inventory', label: 'From Inventory' },
-          { key: 'legacy',    label: 'Legacy (no lot)' },
+          { key: 'legacy',    label: 'Legacy' },
         ] as const).map(t => (
           <button key={t.key} type="button" onClick={() => trySwitch(t.key)}
             className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${mode === t.key ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
