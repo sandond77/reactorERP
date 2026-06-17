@@ -101,12 +101,12 @@ async function createTradeInner(
   const soldAt = input.trade_date ? new Date(input.trade_date) : undefined;
 
   // sale_price coming from the client is already the user's full assigned
-  // trade value for the outgoing card — it equals what was received back
-  // (incoming card value + any cash from customer share). We do NOT add
-  // cash_from_customer again here. Doing so inflated Strike Price on the
-  // outgoing slab and caused the trades list to flag the row Unbalanced
-  // because the cash is also displayed as its own column.
-  // The cash is preserved separately on trades.cash_from_customer_cents.
+  // trade value for the outgoing card — it represents the total proceeds
+  // received (incoming card value + cash from customer combined). The cash
+  // is conceptually already inside the value the user typed, so we do NOT
+  // distribute or add cash_from_customer here. Adding it again inflates the
+  // stored strike price and breaks the trades-list balance check.
+  // The cash is preserved on trades.cash_from_customer_cents for the ledger.
   await Promise.all(input.outgoing.map(async (item) => {
     const sale = await recordSale(userId, {
       card_instance_id: item.card_instance_id,
@@ -119,7 +119,13 @@ async function createTradeInner(
     await db.updateTable('sales').set({ trade_id: trade.id }).where('id', '=', sale.id).execute();
   }));
 
+  // purchase_cost_cents from the client is the user's assigned trade-in value
+  // — the value at which we're taking the card onto our books. Cash we paid
+  // (cash_to_customer) is similarly already baked into how the user balanced
+  // the trade (it's the bridge that made the totals match). We don't add it
+  // to the card's cost basis here; the cash stays on trades.cash_to_customer_cents.
   await Promise.all(input.incoming.map(async (item) => {
+    const adjustedCost = item.purchase_cost_cents;
     const slab = item.slab_company
       ? {
           company: item.slab_company,
@@ -142,10 +148,8 @@ async function createTradeInner(
         set_name: item.set_name_override,
         card_number: item.card_number_override,
         // raw_purchases.total_cost_usd is stored as integer cents
-        // (matches every other call site). Previously this divided by 100
-        // which sent a non-integer to an integer column and the whole trade
-        // failed with the outgoing cards already marked sold.
-        total_cost_usd: item.purchase_cost_cents,
+        // (matches every other call site).
+        total_cost_usd: adjustedCost,
         card_count: 1,
         status: 'received',
         purchased_at: soldAt?.toISOString(),
@@ -164,7 +168,7 @@ async function createTradeInner(
         language: item.language,
         condition: item.condition,
         decision: slab ? undefined : item.decision,
-        purchase_cost: item.purchase_cost_cents,
+        purchase_cost: adjustedCost,
         currency: item.currency,
         catalog_id: item.catalog_id,
         location_id: item.location_id ?? null,
