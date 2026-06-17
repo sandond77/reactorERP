@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { Sparkles, Loader2, CheckCircle, AlertCircle, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../lib/api';
+import { normalizeCardNumber } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
@@ -82,7 +83,10 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
         const params: Record<string, string> = { language: watchedLang || 'EN' };
         if (name) params.card_name   = name;
         if (set)  params.set_name    = set;
-        if (num)  params.card_number = num;
+        // Normalize "074/071" → "074" so the lookup matches the catalog row's
+        // stored card_number — otherwise the form drifts into "new part"
+        // mode and a duplicate catalog row gets proposed.
+        if (num)  params.card_number = normalizeCardNumber(num);
         const res = await api.get('/catalog/search', { params });
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const matches = (res.data?.data ?? []) as Array<any>;
@@ -152,7 +156,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
           setValue('card_name_override', s.card_name);
         }
         if (s.set_name) setValue('set_name_override', s.set_name);
-        if (s.card_number) setValue('card_number_override', s.card_number);
+        if (s.card_number) setValue('card_number_override', normalizeCardNumber(s.card_number));
         if (s.rarity) setValue('rarity', s.rarity);
         if (s.language) setValue('language', s.language === 'JP' ? 'JP' : 'EN');
         setPartNumber({ sku: s.sku ?? null, exists: !!s.catalog_exists, catalogData: s });
