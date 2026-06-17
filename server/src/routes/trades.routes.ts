@@ -52,7 +52,7 @@ const listQuerySchema = z.object({
 tradesRouter.post('/', async (req, res, next) => {
   try {
     const body = createTradeSchema.parse(req.body);
-    const trade = await tradesService.createTrade(req.user!.id, {
+    const trade = await tradesService.createTrade(req.dataUserId, {
       outgoing: body.outgoing.map((o) => ({
         card_instance_id: o.card_instance_id,
         listing_id: o.listing_id,
@@ -93,7 +93,7 @@ tradesRouter.post('/', async (req, res, next) => {
 tradesRouter.get('/', async (req, res, next) => {
   try {
     const { page, limit } = listQuerySchema.parse(req.query);
-    const result = await tradesService.listTrades(req.user!.id, { page, limit });
+    const result = await tradesService.listTrades(req.dataUserId, { page, limit });
     res.json(result);
   } catch (err) {
     next(err);
@@ -110,7 +110,7 @@ const updateTradeSchema = z.object({
 tradesRouter.patch('/:id', async (req, res, next) => {
   try {
     const body = updateTradeSchema.parse(req.body);
-    const trade = await tradesService.updateTrade(req.user!.id, req.params.id, body);
+    const trade = await tradesService.updateTrade(req.dataUserId, req.params.id, body);
     res.json({ data: trade });
   } catch (err) {
     next(err);
@@ -119,7 +119,7 @@ tradesRouter.patch('/:id', async (req, res, next) => {
 
 tradesRouter.delete('/:id', async (req, res, next) => {
   try {
-    await tradesService.deleteTrade(req.user!.id, req.params.id);
+    await tradesService.deleteTrade(req.dataUserId, req.params.id);
     res.status(204).send();
   } catch (err) {
     next(err);
