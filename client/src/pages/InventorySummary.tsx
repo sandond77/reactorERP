@@ -29,6 +29,7 @@ interface SummaryRow {
   qty_in_grading: number;
   qty_sold: number;
   catalog_id: string | null;
+  catalog_card_name: string | null;
 }
 
 // Render the part number cell. Three states:
@@ -65,6 +66,27 @@ type Level2Bucket =
   | { kind: 'graded'; company: string; grade_label: string; grade: number; rows: SummaryRow[] }
   | { kind: 'raw';    rows: SummaryRow[] };
 
+// Collapse case-only duplicates inside a bucket. The server groups by raw
+// card_name_override so an ALL-CAPS PSA label and a Title-Case import of the
+// same card produce two rows — they should read as one variant in the UI.
+// Sums the qty fields and keeps the longest name as the display.
+function collapseCaseVariants(rows: SummaryRow[]): SummaryRow[] {
+  const map = new Map<string, SummaryRow>();
+  for (const r of rows) {
+    const key = (r.card_name ?? '').toLowerCase();
+    const existing = map.get(key);
+    if (!existing) { map.set(key, { ...r }); continue; }
+    existing.qty_total      += r.qty_total;
+    existing.qty_unsold     += r.qty_unsold;
+    existing.qty_in_grading += r.qty_in_grading ?? 0;
+    existing.qty_sold       += r.qty_sold;
+    if ((r.card_name?.length ?? 0) > (existing.card_name?.length ?? 0)) {
+      existing.card_name = r.card_name;
+    }
+  }
+  return Array.from(map.values());
+}
+
 function level2Buckets(rows: SummaryRow[]): Level2Bucket[] {
   const map = new Map<string, Level2Bucket>();
   for (const r of rows) {
@@ -79,6 +101,8 @@ function level2Buckets(rows: SummaryRow[]): Level2Bucket[] {
       else map.set('raw', { kind: 'raw', rows: [r] });
     }
   }
+  // Collapse case-only duplicates inside each bucket before we render variants.
+  for (const b of map.values()) b.rows = collapseCaseVariants(b.rows);
   return Array.from(map.values()).sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === 'graded' ? -1 : 1;
     if (a.kind === 'graded' && b.kind === 'graded') return b.grade - a.grade;
@@ -1961,7 +1985,13 @@ export function InventorySummary() {
             <tbody className="divide-y divide-zinc-800/50">
               {pagedKeys.map((key) => {
                 const groupRows = groups.get(key)!;
-                const displayName = groupRows[0].card_name ?? '—';
+                // Show the catalog's canonical card_name on the parent row.
+                // Falling back to the first variant produced confusing parents
+                // (e.g. renaming a single source to "Gengar" left the parent
+                // showing whichever PSA-label casing sorted first
+                // alphabetically). The catalog name is the source of truth
+                // for the SKU.
+                const displayName = groupRows[0].catalog_card_name ?? groupRows[0].card_name ?? '—';
                 const setName = toTitleCase(groupRows[0].set_name ?? groupRows[0].set_code ?? '—');
                 const lang = groupRows[0].language;
                 const rarity = groupRows[0].rarity ?? '—';

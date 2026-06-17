@@ -429,11 +429,13 @@ export async function getInventorySummary(userId: string) {
     avg_cost: number;
     qty_listed: number;
     catalog_id: string | null;
+    catalog_card_name: string | null;
   }>`
     SELECT
       COALESCE(cc.game, 'pokemon')                     AS game,
       cc.sku,
       COALESCE(ci.card_name_override, cc.card_name)   AS card_name,
+      cc.card_name                                     AS catalog_card_name,
       COALESCE(cc.set_name,  ci.set_name_override)    AS set_name,
       cc.set_code,
       COALESCE(cc.card_number, ci.card_number_override) AS card_number,
