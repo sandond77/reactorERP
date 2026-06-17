@@ -531,6 +531,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // (a qty-N single listing) is NOT a set and must not be flagged.
   const setMemberIds = new Set(copies.filter(c => c.is_set_listing).map(c => c.id));
   const firstNonSetCopy = copies.find(c => !setMemberIds.has(c.id)) ?? null;
+  // FIFO is per (company, grade_label) bucket: the FIFO badge should mark the
+  // earliest-cert non-set copy within each grade so the picker doesn't suggest
+  // a PSA 6 when the user is recording a PSA 8 sale.
+  const fifoIdByGrade = new Map<string, string>();
+  for (const c of copies) {
+    if (setMemberIds.has(c.id)) continue;
+    const key = `${c.company ?? '—'}|${c.grade_label ?? '—'}`;
+    if (!fifoIdByGrade.has(key)) fifoIdByGrade.set(key, c.id);
+  }
+  const fifoIds = new Set(fifoIdByGrade.values());
 
   // Auto-select FIFO — first NON-set-listing copy. Skipping set members
   // means clicking Record Sale on a card that happens to lead with a set
@@ -857,7 +867,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       ) : (
         <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
           {copies.map((copy) => {
-            const isFifo     = !!firstNonSetCopy && copy.id === firstNonSetCopy.id;
+            const isFifo     = fifoIds.has(copy.id);
             const isSet      = setMemberIds.has(copy.id);
             const isSelected = selectedCard?.id === copy.id;
             return (
