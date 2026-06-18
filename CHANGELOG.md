@@ -1,5 +1,56 @@
 # Reactor — Changelog
 
+## June 17, 2026
+
+### Fixes
+
+**Trades — outgoing sale_price double-counted `cash_from_customer`**
+- `createTradeInner` distributed `cash_from_customer_cents` across each outgoing card's `sale_price`, but the client already sends `sale_price` as the user's full assigned trade value (i.e. the $125 Gengar includes the $80 Wiglett value + $45 cash that came back together). The server then added the $45 again, storing the Gengar's strike at $170. The Trades list flagged the row Unbalanced because `|$170 − $80 − $45| = $45`, and the slab's net profit reflected the inflated proceeds. The same pattern applied to `cash_to_customer` and incoming `purchase_cost`.
+- Store `sale_price` and `purchase_cost` exactly as the client sent them. Cash from / to customer stays on `trades.cash_*_customer_cents` as a ledger memo only — it never lands on a per-card value. Balance check `|out_card_total + cash_to − in_card_total − cash_from| < 1` now reduces to comparing card-only sums on each side (cash terms cancel because they're already inside both stored prices). The Gengar example now stores `$125` and renders as Balanced.
+
+**Sales — FIFO badge ignored grade and condition**
+- The Record Sale cert picker rendered a single FIFO badge on the lowest-cert non-set copy across the entire card, so a PSA 8 sale that listed both a PSA 6 (#152584779) and a PSA 8 (#152584780) cert flagged the PSA 6 as FIFO. Same bug on the raw card picker — it flagged `idx === 0` regardless of condition, so an NM sale got pointed at the oldest LP lot.
+- Track FIFO per `(company, grade_label)` bucket for graded and per `condition` bucket for raw. Each bucket gets its own badge on the earliest-cert / oldest-purchase non-set copy. Matches the per-grade picker already used in the listing-creation flow.
+
+**Add Slab — `074/071` card-number drift created duplicate catalog rows**
+- Auto-fill from a PSA label / pasted card name passed `s.card_number` to `setValue` verbatim and to `/catalog/search` verbatim. When the agent returned `"074/071"` (printed form with denominator), the catalog lookup couldn't match the stored `"074"` row, the badge flipped to "New part", and the user could end up proposing a duplicate catalog entry.
+- New `lib/utils.ts` `normalizeCardNumber` helper mirrors `server/src/utils/card-number.ts`. AddSlabForm runs it on the auto-fill `setValue` AND on the catalog/search params so both stay in lockstep with what the server stores.
+
+### Features
+
+**Add Slab — manual part-number search + reuse of the shared catalog picker**
+- AddSlabForm rolled its own debounced `/catalog/search` + Create-part badge that only resolved a SKU when card name + set + card number all aligned. There was no way to TYPE a known SKU and pin the slab to it (AddCardForm has that capability via the shared `PartNumberField`). The forked implementation also produced display drift — the inline badge showed `"PKMN-JP-S10A-074"` (agent's uppercase output) while the actual catalog row was `"PKMN-JP-S10a-074"` because the badge re-rendered the agent's returned SKU before the catalog lookup confirmed it.
+- Dropped the local `partNumber` / `createdCatalogId` / `showCreatePartModal` state and the embedded useEffect + AddPartModal block. Mounted the shared `PartNumberField` the same way AddCardForm does. The agent's auto-fill now sets `catalogMatch` when `catalog_exists + catalog_id` are present so the existing catalog row is pre-selected. Manual search, "+ Create new", single-match auto-pick, and onSelect form-fill all come for free.
+
+**Slabs — canonical grade-label library + auto-fill on Add / Edit**
+- Slab inventory had drift like `"10"` and `"GEM MINT 10"` coexisting under PSA grade 10, splitting the Grade column into separate buckets. CGC and ARS each had multiple in-use formats.
+- New `client/src/lib/grade-labels.ts` mirrors `server/src/utils/grade-labels.ts` — same canonical maps for PSA / BGS / CGC / SGC / HGA / ACE / ARS. Add Slab and Edit Slab auto-populate `slab_grade_label` when `grading_company` + numeric grade change (via `getCanonicalLabel`), and expose a `<datalist>` on the input with every option for the picked company (CGC `10 Pristine` vs `Gem Mint 10`, `ARS10+` vs `ARS10`). SubReturns already had its own canonical map + auto-derive fallback so the weak-CSV-match path stayed working without changes.
+
+## June 16, 2026
+
+### Fixes
+
+**Inventory Summary — Part Numbers parent row picked a random instance name; case-only variants over-split**
+- The Part Numbers parent picked `displayName = groupRows[0].card_name` which is `COALESCE(ci.card_name_override, cc.card_name)`. For PKMN-JP-S10a-074 (Gengar Dark Phantasma) the first sorted variant was a title-case PSA label, so renaming 4 raw instances to `"Gengar"` had no visible effect at the parent level — the parent stayed locked to the long uppercase PSA label. Level-2 buckets exposed case-only duplicates as separate variants ("2022 Pokemon..." title case vs "2022 POKEMON..." all caps for the same card).
+- Server returns `cc.card_name AS catalog_card_name` so the client can prefer the catalog's canonical name on the parent display. New `collapseCaseVariants` runs at the level-2 bucket boundary — groups bucket rows by lowercased `card_name`, sums all qty fields, keeps the longest casing as the display. PSA 10 GENGAR's 74 uppercase + 61 title-case now reads as a single 135-card variant instead of "2 variants".
+
+**Grading — Add Card picker re-exposed already-submitted cards in the next batch**
+- The picker's status filter included `grading_submitted`. When a card is added to a batch and submitted, the server creates a sibling ci row at `status='grading_submitted'` for the qty being graded (the source ci's qty drops by that amount). Including `grading_submitted` meant those sibling rows — physically at PSA already — re-appeared in the next batch's search.
+- Dropped `grading_submitted` from both pickers (Add Card + Edit Item Replace from Inventory). `purchased_raw + inspected` covers the eligible pool. Also added a `purchase_cost` `$N.NN/card` cell on each search-result row + selected row so the per-card raw cost is visible while picking.
+
+**Dashboard — Avg days at graders read `ci.updated_at` instead of batch submitted_at**
+- The Grading Pipeline tile's "Avg days at graders" stat was `AVG(NOW() − ci.updated_at)` over cards at `status='grading_submitted'`. `updated_at` gets bumped by any unrelated row update — the night-before's `decision='grade'` backfill on 221 cards rewound the average to **4d** on a screen where every visible active batch was 12–57d.
+- Compute it card-weighted from the `activeBatches` result instead, which already uses `gb.submitted_at` for its per-batch `days_elapsed`. New value matches the visible batches (27d for the sample data vs. 4d before). Dropped the bad expression from the pipeline query.
+
+**Org scoping — listings / locations / trades route handlers read `req.user!.id` instead of `req.dataUserId`**
+- Three routers were querying with the session user's id directly instead of the org-owner resolution that `requireAuth` writes to `req.dataUserId`. Org-member sessions could see / mutate the wrong tenant's data via these endpoints.
+- Switched every handler in `listings.routes.ts` / `locations.routes.ts` / `trades.routes.ts` to `req.dataUserId`. Matches the rule already enforced by `requireAuth` and stated in CLAUDE.md.
+
+### UI
+
+**Grading — Legacy tab label**
+- Dropped the parenthetical "(no lot)" from the Legacy tab — the tab body explains what it covers, and the suffix was duplicating the heading.
+
 ## June 15, 2026
 
 ### Fixes
