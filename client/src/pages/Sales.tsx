@@ -1091,8 +1091,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-        {rawCopiesForName.map((copy, idx) => {
-          const isFifo = idx === 0;
+        {rawCopiesForName.map((copy) => {
+          // FIFO per condition bucket: NM/LP/MP each get their own badge so a
+          // NM sale doesn't get pointed at the oldest LP lot.
+          const isFifo = rawCopiesForName.find(c => (c.condition ?? '—') === (copy.condition ?? '—'))?.id === copy.id;
           const isSelected = selectedRawCard?.id === copy.id;
           return (
             <button key={copy.id} type="button"
