@@ -4,7 +4,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
   Tooltip, Legend, ResponsiveContainer, LabelList,
 } from 'recharts';
-import { AlertTriangle, BellOff, EyeOff, ArrowRight } from 'lucide-react';
+import { AlertTriangle, BellOff, EyeOff, ArrowRight, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
@@ -237,6 +237,10 @@ function OrderMoreSection() {
     mutationFn: (id: string) => api.post(`/reorder/thresholds/${id}/ignore`),
     onSuccess: invalidate,
   });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/reorder/thresholds/${id}`),
+    onSuccess: invalidate,
+  });
 
   const alerts = alertsData?.data ?? [];
 
@@ -256,16 +260,17 @@ function OrderMoreSection() {
         <p className="text-xs text-zinc-600">No reorder alerts. Manage thresholds under <span className="text-zinc-500">Manage → Alerts</span>.</p>
       ) : (
         <div>
-          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
+          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem_3rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Inbound</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">To Grade</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Min</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Remove</span>
           </div>
           {alerts.map((alert) => (
-            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem_3rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
               <div className="min-w-0">
                 <p className="text-xs text-zinc-200 truncate">{alert.card_name}</p>
                 <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
@@ -280,8 +285,11 @@ function OrderMoreSection() {
               <button onClick={() => muteMutation.mutate(alert.threshold_id)} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
                 <BellOff size={13} />
               </button>
-              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-red-400 transition-colors flex justify-center">
+              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400 transition-colors flex justify-center">
                 <EyeOff size={13} />
+              </button>
+              <button onClick={() => removeMutation.mutate(alert.threshold_id)} title="Remove from watchlist" className="text-zinc-600 hover:text-red-400 transition-colors flex justify-center">
+                <Trash2 size={13} />
               </button>
             </div>
           ))}
@@ -311,6 +319,10 @@ function GradeMoreSection() {
     mutationFn: (id: string) => api.post(`/grade-more/${id}/ignore`),
     onSuccess: invalidate,
   });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/grade-more/${id}`),
+    onSuccess: invalidate,
+  });
 
   const alerts = alertsData?.data ?? [];
 
@@ -322,16 +334,17 @@ function GradeMoreSection() {
         <p className="text-xs text-zinc-600">No grade more alerts. Manage thresholds under <span className="text-zinc-500">Manage → Alerts</span>.</p>
       ) : (
         <div>
-          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
+          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem_3rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Unsold</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Grading</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Min</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Remove</span>
           </div>
           {alerts.map((alert) => (
-            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem_3rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
               <div className="min-w-0">
                 <p className="text-xs text-zinc-200 truncate">{alert.card_name}</p>
                 <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
@@ -346,8 +359,11 @@ function GradeMoreSection() {
               <button onClick={() => muteMutation.mutate(alert.threshold_id)} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
                 <BellOff size={13} />
               </button>
-              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-red-400 transition-colors flex justify-center">
+              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400 transition-colors flex justify-center">
                 <EyeOff size={13} />
+              </button>
+              <button onClick={() => removeMutation.mutate(alert.threshold_id)} title="Remove from watchlist" className="text-zinc-600 hover:text-red-400 transition-colors flex justify-center">
+                <Trash2 size={13} />
               </button>
             </div>
           ))}
