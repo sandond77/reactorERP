@@ -207,8 +207,13 @@ export async function listBulkCatalogCards(userId: string) {
  * Cards without a threshold have min_quantity = null, threshold_id = null.
  */
 export async function listBulkCardsWithThresholds(userId: string) {
-  // Use a raw query so we can FULL OUTER JOIN inventory rows with threshold rows.
-  // This ensures manually-added thresholds appear even when there's no current stock.
+  // Only return cards the user has explicitly set a threshold on. Previously
+  // this FULL OUTER JOINed inventory rows so every bulk card in stock was
+  // auto-added to the list as a roster candidate — the table bloated with
+  // hundreds of "Not tracked" rows the user never asked to monitor. Users
+  // now add cards explicitly via "Add Card", which writes a row to
+  // reorder_thresholds; only those rows surface here. inv stays LEFT JOINed
+  // so to_grade / inbound stock counts still render when applicable.
   const rows = await sql<{
     catalog_id: string;
     card_name: string;
@@ -223,7 +228,7 @@ export async function listBulkCardsWithThresholds(userId: string) {
     inbound_quantity: number;
   }>`
     SELECT
-      COALESCE(inv.catalog_id, rt.catalog_id) AS catalog_id,
+      rt.catalog_id        AS catalog_id,
       cc.card_name,
       cc.set_name,
       cc.card_number,
@@ -234,7 +239,10 @@ export async function listBulkCardsWithThresholds(userId: string) {
       rt.muted_until,
       COALESCE(inv.to_grade_quantity, 0)::int  AS to_grade_quantity,
       COALESCE(inv.inbound_quantity,  0)::int  AS inbound_quantity
-    FROM (
+    FROM reorder_thresholds rt
+    INNER JOIN card_catalog cc
+      ON cc.id = rt.catalog_id
+    LEFT JOIN (
       SELECT
         ci.catalog_id,
         COALESCE(SUM(ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status NOT IN ('sold', 'lost_damaged')), 0) AS to_grade_quantity,
@@ -250,11 +258,8 @@ export async function listBulkCardsWithThresholds(userId: string) {
       INNER JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id AND rp.type = 'bulk'
       WHERE ci.user_id = ${userId}
       GROUP BY ci.catalog_id
-    ) inv
-    FULL OUTER JOIN reorder_thresholds rt
-      ON rt.catalog_id = inv.catalog_id AND rt.user_id = ${userId}
-    INNER JOIN card_catalog cc
-      ON cc.id = COALESCE(inv.catalog_id, rt.catalog_id)
+    ) inv ON inv.catalog_id = rt.catalog_id
+    WHERE rt.user_id = ${userId}
     ORDER BY cc.sku ASC NULLS LAST
   `.execute(db);
   return rows.rows;
