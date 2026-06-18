@@ -13,7 +13,12 @@ function isMuted(muted_until: string | null) {
   return !!muted_until && new Date(muted_until) > new Date();
 }
 
-function AlertStatusBadge({ is_ignored, muted_until }: { is_ignored: boolean | null; muted_until: string | null }) {
+function AlertStatusBadge({ is_ignored, muted_until, threshold_id }: { is_ignored: boolean | null; muted_until: string | null; threshold_id?: string | null }) {
+  // No threshold set → just a roster row, not a tracked alert. Show muted
+  // "Not tracked" so the green "Active" badge stops misrepresenting these.
+  if (threshold_id === null || threshold_id === undefined) {
+    return <span className="text-[10px] text-zinc-600 italic">Not tracked</span>;
+  }
   if (is_ignored) return <span className="text-[10px] text-zinc-500 bg-zinc-800 px-2 py-0.5 rounded-full">Ignored</span>;
   if (isMuted(muted_until)) {
     const d = new Date(muted_until!).toLocaleDateString();
@@ -249,7 +254,7 @@ function ReorderTab() {
                 <td className="px-4 py-2.5 text-sm text-zinc-400 text-right tabular-nums">{row.inbound_quantity}</td>
                 <td className="px-4 py-2.5 text-sm text-zinc-400 text-right tabular-nums">{row.to_grade_quantity}</td>
                 <td className="px-4 py-2.5"><MinQtyCell row={row} /></td>
-                <td className="px-4 py-2.5 whitespace-nowrap"><AlertStatusBadge is_ignored={row.is_ignored} muted_until={row.muted_until} /></td>
+                <td className="px-4 py-2.5 whitespace-nowrap"><AlertStatusBadge is_ignored={row.is_ignored} muted_until={row.muted_until} threshold_id={row.threshold_id} /></td>
                 <td className="px-4 py-2.5"><ReorderActionButtons row={row} /></td>
               </tr>
             ))}
@@ -783,7 +788,7 @@ function GradeMoreTab() {
                 <td className={cn('px-4 py-2.5 text-sm text-right tabular-nums font-medium', row.unsold_graded === 0 ? 'text-red-400' : 'text-amber-400')}>{row.unsold_graded}</td>
                 <td className="px-4 py-2.5 text-sm text-blue-400 text-right tabular-nums">{row.in_grading}</td>
                 <td className="px-4 py-2.5"><WatchlistMinQtyCell row={row} /></td>
-                <td className="px-4 py-2.5"><AlertStatusBadge is_ignored={row.is_ignored} muted_until={row.muted_until} /></td>
+                <td className="px-4 py-2.5"><AlertStatusBadge is_ignored={row.is_ignored} muted_until={row.muted_until} threshold_id={row.threshold_id} /></td>
                 <td className="px-4 py-2.5"><WatchlistActionButtons row={row} /></td>
               </tr>
             ))}
