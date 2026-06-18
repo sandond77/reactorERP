@@ -6,6 +6,7 @@ import { Sparkles, Loader2, CheckCircle, AlertCircle, Upload, X } from 'lucide-r
 import toast from 'react-hot-toast';
 import { api } from '../../lib/api';
 import { normalizeCardNumber } from '../../lib/utils';
+import { labelsForCompany, getCanonicalLabel } from '../../lib/grade-labels';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
@@ -63,6 +64,20 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
 
   const watchedCompany = watch('slab_company');
   const watchedCert = watch('slab_cert_number');
+  const watchedGrade = watch('slab_grade');
+
+  // Auto-fill the canonical grade label whenever company + numeric grade
+  // change. Overwrites whatever's there so the label tracks the latest
+  // (company, grade) pair. User can still manually edit after — but the
+  // next change to either field resets it back to canonical.
+  useEffect(() => {
+    if (!watchedCompany || watchedGrade == null) return;
+    const canon = getCanonicalLabel(watchedCompany, Number(watchedGrade));
+    if (canon) setValue('slab_grade_label', canon, { shouldDirty: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watchedCompany, watchedGrade]);
+
+  const gradeLabelOptions = labelsForCompany(watchedCompany);
 
   // Auto-detect part number from manual entry — debounced /catalog/search
   // when the user types name/set/#. Mirrors the logic in AddCardForm so
@@ -398,7 +413,18 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
           />
         </div>
         <div className="grid grid-cols-2 gap-3 mt-3">
-          <Input label="Grade Label" placeholder="e.g. MINT 9" {...register('slab_grade_label')} error={errors.slab_grade_label?.message} />
+          <div>
+            <Input
+              label="Grade Label"
+              placeholder="e.g. MINT 9"
+              list="grade-label-options"
+              {...register('slab_grade_label')}
+              error={errors.slab_grade_label?.message}
+            />
+            <datalist id="grade-label-options">
+              {gradeLabelOptions.map((opt) => <option key={opt} value={opt} />)}
+            </datalist>
+          </div>
           <Input label="Cert #" placeholder="e.g. 12345678" {...register('slab_cert_number')} error={errors.slab_cert_number?.message} />
         </div>
       </div>
