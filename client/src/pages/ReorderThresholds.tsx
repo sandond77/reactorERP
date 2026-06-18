@@ -100,6 +100,7 @@ function ReorderActionButtons({ row }: { row: BulkCardRow }) {
   const mute   = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/mute`),   onSuccess: () => { invalidate(); toast.success('Muted 30 days'); } });
   const ignore = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/ignore`), onSuccess: () => { invalidate(); toast.success('Ignored'); } });
   const reset  = useMutation({ mutationFn: () => api.post(`/reorder/thresholds/${row.threshold_id}/reset`),  onSuccess: () => { invalidate(); toast.success('Reset'); } });
+  const remove = useMutation({ mutationFn: () => api.delete(`/reorder/thresholds/${row.threshold_id}`),      onSuccess: () => { invalidate(); toast.success('Removed'); } });
   if (!row.threshold_id) return null;
   const silenced = row.is_ignored || isMuted(row.muted_until);
   return (
@@ -112,6 +113,7 @@ function ReorderActionButtons({ row }: { row: BulkCardRow }) {
           <button onClick={() => ignore.mutate()} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400"><EyeOff size={13} /></button>
         </>
       )}
+      <button onClick={() => remove.mutate()} title="Remove from watchlist" className="text-zinc-600 hover:text-red-400"><Trash2 size={13} /></button>
     </div>
   );
 }
