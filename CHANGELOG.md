@@ -1,5 +1,23 @@
 # Reactor — Changelog
 
+## June 17, 2026 — late
+
+### Fixes
+
+**Reorder — table auto-listed every bulk card in inventory, not just tracked alerts**
+- `listBulkCardsWithThresholds` FULL OUTER JOINed `card_instances` (filtered to bulk) with `reorder_thresholds`, so any bulk card in stock auto-appeared as a roster candidate. The user got a 100+-row table dominated by cards they never asked to monitor, every row labeled green "Active" (because `AlertStatusBadge` fell through when `is_ignored` and `muted_until` were both null), and the Mute / Ignore / Trash actions correctly hid themselves on no-threshold rows — reading as a bug because the page surface implied every row was a tracked alert.
+- Switched to INNER JOIN from `reorder_thresholds` → `card_catalog` so only rows the user explicitly added via "Add Card" surface. Inventory stays LEFT JOINed so `to_grade` / `inbound` counts still render when the catalog row has stock. Every row now has a `threshold_id`, so the actions and status badge are correct without extra fallbacks.
+
+**Sales — eBay "Ship this cert" row hid the bin location**
+- The Location field rendered on its own row below "Ship this cert", only when `selectedCard.location_name` was set. A slab without a location quietly dropped the field, easy to miss when prepping a shipment.
+- Pulled Location inline next to the cert (graded path) and lot id (raw path), separated by a `·` mid-dot. When no location is assigned, render `No location` as muted italic so the eBay shipping flow always shows the field. Non-eBay platforms keep the original cert-only row.
+
+### Features
+
+**Reorder Alerts — Remove action on every surface**
+- `ReorderActionButtons` on the manage page exposed Mute / Ignore / Reset but no Trash, so the only way to drop a threshold was to clear the Min Qty cell. The Dashboard `OrderMoreSection` and `GradeMoreSection` widgets were missing Remove buttons too.
+- Added a `Trash2` button to all four surfaces — manage-page Reorder tab + Grade More tab, and the Dashboard Reorder Alerts widget + Grade More widget. Each hits the existing `DELETE /reorder/thresholds/<id>` (or `/grade-more/<id>`) endpoint that the manage page's MinQtyCell already used for its inline clear action.
+
 ## June 17, 2026
 
 ### Fixes
