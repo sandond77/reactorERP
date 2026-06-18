@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Sparkles, Loader2, CheckCircle, AlertCircle, Upload, X } from 'lucide-react';
+import { Sparkles, Loader2, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../../lib/api';
 import { normalizeCardNumber } from '../../lib/utils';
@@ -11,7 +11,7 @@ import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { Select } from '../ui/Select';
 import { useLocations } from '../../hooks/useLocations';
-import { AddPartModal } from '../catalog/AddPartModal';
+import { PartNumberField, type CatalogMatch } from '../catalog/PartNumberField';
 import { CardGameSelect } from './CardGameSelect';
 
 const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'] as const;
@@ -50,14 +50,13 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   const [gradingLabel, setGradingLabel] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [partNumber, setPartNumber] = useState<{ sku: string | null; exists: boolean; catalogData?: Record<string, string> } | null>(null);
-  const [showCreatePartModal, setShowCreatePartModal] = useState(false);
-  const [createdCatalogId, setCreatedCatalogId] = useState<string | null>(null);
+  const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(null);
+  const [catalogId, setCatalogId] = useState<string | null>(null);
   const [unnumbered, setUnnumbered] = useState(false);
   const [unnumberedError, setUnnumberedError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { register, handleSubmit, setValue, getValues, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
+  const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
     defaultValues: { card_game: 'pokemon', language: 'EN', currency: 'USD', slab_company: 'PSA', is_personal_collection: false },
   });
@@ -79,53 +78,15 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
 
   const gradeLabelOptions = labelsForCompany(watchedCompany);
 
-  // Auto-detect part number from manual entry — debounced /catalog/search
-  // when the user types name/set/#. Mirrors the logic in AddCardForm so
-  // manual entry surfaces the same Create-part badge as autoFill().
-  const watchedName   = watch('card_name_override');
-  const watchedSet    = watch('set_name_override');
-  const watchedNumber = watch('card_number_override');
-  const watchedLang   = watch('language');
-  useEffect(() => {
-    if (autoFilling) return;
-    const name = (watchedName ?? '').trim();
-    const set  = (watchedSet  ?? '').trim();
-    const num  = (watchedNumber ?? '').trim();
-    if (!name && !set && !num) { setPartNumber(null); return; }
-    let cancelled = false;
-    const t = setTimeout(async () => {
-      try {
-        const params: Record<string, string> = { language: watchedLang || 'EN' };
-        if (name) params.card_name   = name;
-        if (set)  params.set_name    = set;
-        // Normalize "074/071" → "074" so the lookup matches the catalog row's
-        // stored card_number — otherwise the form drifts into "new part"
-        // mode and a duplicate catalog row gets proposed.
-        if (num)  params.card_number = normalizeCardNumber(num);
-        const res = await api.get('/catalog/search', { params });
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const matches = (res.data?.data ?? []) as Array<any>;
-        if (cancelled) return;
-        if (matches.length === 1) {
-          const m = matches[0];
-          setCreatedCatalogId(m.id);
-          setPartNumber({ sku: m.sku ?? null, exists: true, catalogData: m });
-        } else if (matches.length === 0 && (num || unnumbered)) {
-          setCreatedCatalogId(null);
-          setPartNumber({
-            sku: null,
-            exists: false,
-            catalogData: { card_name: name, set_name: set, card_number: num, language: watchedLang || 'EN' } as Record<string, string>,
-          });
-        } else {
-          setPartNumber(null);
-        }
-      } catch {
-        if (!cancelled) setPartNumber(null);
-      }
-    }, 350);
-    return () => { cancelled = true; clearTimeout(t); };
-  }, [watchedName, watchedSet, watchedNumber, watchedLang, unnumbered, autoFilling]);
+  // PartNumberField (below) runs its own debounced /catalog/search and
+  // manages catalogMatch / catalogId. Its auto-pick behavior surfaces the
+  // existing catalog row when card_name + set + card_number resolve, and
+  // exposes a manual search dropdown so the user can pick another SKU
+  // directly.
+  const watchedName   = watch('card_name_override') ?? '';
+  const watchedSet    = watch('set_name_override') ?? '';
+  const watchedNumber = watch('card_number_override') ?? '';
+  const watchedLang   = watch('language') ?? 'EN';
 
   const handleImageSelect = (file: File) => {
     setImageFile(file);
@@ -174,7 +135,21 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
         if (s.card_number) setValue('card_number_override', normalizeCardNumber(s.card_number));
         if (s.rarity) setValue('rarity', s.rarity);
         if (s.language) setValue('language', s.language === 'JP' ? 'JP' : 'EN');
-        setPartNumber({ sku: s.sku ?? null, exists: !!s.catalog_exists, catalogData: s });
+        // If the agent matched an existing catalog row, pre-select it so the
+        // PartNumberField shows the existing SKU and the slab gets linked on
+        // submit without the user re-confirming.
+        if (s.catalog_exists && s.catalog_id) {
+          const m: CatalogMatch = {
+            id: s.catalog_id,
+            sku: s.sku ?? null,
+            card_name: s.catalog_card_name ?? s.card_name ?? '',
+            set_name: s.set_name ?? '',
+            card_number: s.card_number ? normalizeCardNumber(s.card_number) : null,
+            language: s.language === 'JP' ? 'JP' : 'EN',
+          };
+          setCatalogMatch(m);
+          setCatalogId(m.id);
+        }
       }
       if (pg) {
         const validCompanies = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'];
@@ -196,18 +171,9 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
     }
   }, [setValue, imageFile]);
 
-  // Routes through AddPartModal so the user can review/edit Game / Lang /
-  // Set Code / SKU before commit. Single source of truth for "create
-  // catalog entry" — same modal Trades and Edit Purchase use.
-  const openCreatePart = () => setShowCreatePartModal(true);
-
   const onSubmit = async (data: FormData) => {
     if (!unnumbered && !data.card_number_override?.trim()) {
       setUnnumberedError('Card number required');
-      return;
-    }
-    if (partNumber && !partNumber.exists) {
-      toast.error('Create the part number before adding the slab');
       return;
     }
     const { grading_cost, purchase_cost, ...rest } = data;
@@ -217,11 +183,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       purchase_cost: purchase_cost.toFixed(2),
       slab_additional_cost: grading_cost.toFixed(2),
       is_personal_collection: rest.is_personal_collection ?? false,
-      ...(createdCatalogId
-        ? { catalog_id: createdCatalogId }
-        : partNumber?.catalogData?.catalog_id
-          ? { catalog_id: partNumber.catalogData.catalog_id }
-          : {}),
+      ...(catalogId ? { catalog_id: catalogId } : {}),
     });
     toast.success('Slab added!');
     onSuccess();
@@ -298,23 +260,20 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
           {...register('card_name_override')}
           error={errors.card_name_override?.message}
         />
-        {partNumber && !partNumber.exists && (
-          <p className="text-xs text-yellow-500/80 leading-snug">
-            New part — enter the card name from the cert page
-            {watchedCert && (() => {
-              const cert = watchedCert.trim();
-              const url =
-                watchedCompany === 'PSA' ? `https://www.psacard.com/cert/${cert}` :
-                watchedCompany === 'BGS' ? `https://www.beckett.com/grading/show/${cert}` :
-                watchedCompany === 'CGC' ? `https://www.cgccards.com/certlookup/${cert}` :
-                watchedCompany === 'SGC' ? `https://www.gosgc.com/certlookup?cert=${cert}` :
-                null;
-              return url ? (
-                <> — <a href={url} target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-300">{watchedCompany} cert ↗</a></>
-              ) : null;
-            })()}
-          </p>
-        )}
+        {!catalogMatch && watchedName && watchedCert && (() => {
+          const cert = watchedCert.trim();
+          const url =
+            watchedCompany === 'PSA' ? `https://www.psacard.com/cert/${cert}` :
+            watchedCompany === 'BGS' ? `https://www.beckett.com/grading/show/${cert}` :
+            watchedCompany === 'CGC' ? `https://www.cgccards.com/certlookup/${cert}` :
+            watchedCompany === 'SGC' ? `https://www.gosgc.com/certlookup?cert=${cert}` :
+            null;
+          return url ? (
+            <p className="text-xs text-yellow-500/80 leading-snug">
+              No catalog match yet — pull the card name from the <a href={url} target="_blank" rel="noopener noreferrer" className="underline hover:text-yellow-300">{watchedCompany} cert ↗</a>
+            </p>
+          ) : null;
+        })()}
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -347,41 +306,22 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
         <Input label="Rarity" placeholder="e.g. Holo, Art Rare" {...register('rarity')} />
       </div>
 
-      {partNumber && (
-        <div className={`flex items-center justify-between rounded-lg px-3 py-2 text-sm border ${partNumber.exists ? 'bg-green-950/40 border-green-800/50' : 'bg-yellow-950/40 border-yellow-700/50'}`}>
-          <div className="flex items-center gap-2 min-w-0">
-            {partNumber.exists
-              ? <CheckCircle size={14} className="text-green-400 shrink-0" />
-              : <AlertCircle size={14} className="text-yellow-400 shrink-0" />}
-            {partNumber.sku
-              ? <span className="font-mono text-xs text-zinc-200 truncate">{partNumber.sku}</span>
-              : <span className="text-xs text-zinc-400 italic">Part number unknown</span>}
-            <span className={`text-xs ${partNumber.exists ? 'text-green-500' : 'text-yellow-500'} shrink-0`}>
-              {partNumber.exists ? 'Part exists' : partNumber.sku ? 'New part — not in catalog' : 'No part found'}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            {!partNumber.exists && (
-              <button
-                type="button"
-                onClick={openCreatePart}
-                disabled={!partNumber.catalogData?.card_name}
-                className="text-xs text-yellow-400 hover:text-yellow-300 font-medium disabled:opacity-50"
-              >
-                Create part
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => { setPartNumber(null); setCreatedCatalogId(null); }}
-              title="Clear part number match"
-              className="text-zinc-600 hover:text-zinc-300 transition-colors"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        </div>
-      )}
+      <PartNumberField
+        form={{ card_name: watchedName, set_name: watchedSet, card_number: normalizeCardNumber(watchedNumber), language: watchedLang }}
+        catalogMatch={catalogMatch}
+        catalogId={catalogId}
+        onSelect={(m) => {
+          setCatalogMatch(m);
+          setCatalogId(m.id);
+          // Fill any missing form fields from the picked catalog row so the
+          // slab is consistent with what the catalog says.
+          if (!watchedName && m.card_name) setValue('card_name_override', m.card_name);
+          if (!watchedSet && m.set_name) setValue('set_name_override', m.set_name);
+          if (!watchedNumber && m.card_number) setValue('card_number_override', m.card_number);
+          if (m.language) setValue('language', m.language === 'JP' ? 'JP' : 'EN');
+        }}
+        onClear={() => { setCatalogMatch(null); setCatalogId(null); }}
+      />
 
       <div className="grid grid-cols-2 gap-3">
         <CardGameSelect
@@ -501,43 +441,11 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       </label>
 
       <div className="flex justify-end gap-2 pt-2">
-        <Button type="submit" disabled={isSubmitting || (!!partNumber && !partNumber.exists)}>
+        <Button type="submit" disabled={isSubmitting}>
           {isSubmitting && <Loader2 size={14} className="animate-spin" />}
           Add Slab
         </Button>
       </div>
-
-      {showCreatePartModal && (
-        <AddPartModal
-          prefill={{
-            card_name:   getValues('card_name_override') || partNumber?.catalogData?.card_name,
-            set_name:    getValues('set_name_override')  || partNumber?.catalogData?.set_name,
-            card_number: getValues('card_number_override') || partNumber?.catalogData?.card_number,
-            language:    getValues('language') || partNumber?.catalogData?.language || 'EN',
-            unnumbered,
-          }}
-          onClose={() => setShowCreatePartModal(false)}
-          onCreated={(part) => {
-            setShowCreatePartModal(false);
-            setCreatedCatalogId(part.id);
-            setPartNumber({
-              sku: part.sku,
-              exists: true,
-              catalogData: {
-                ...partNumber?.catalogData,
-                card_name: part.card_name,
-                set_name: part.set_name,
-                card_number: part.card_number ?? '',
-                language: part.language,
-              } as Record<string, string>,
-            });
-            if (part.card_name)   setValue('card_name_override', part.card_name);
-            if (part.set_name)    setValue('set_name_override',  part.set_name);
-            if (part.card_number) setValue('card_number_override', part.card_number);
-            toast.success('Part number created');
-          }}
-        />
-      )}
     </form>
   );
 }
