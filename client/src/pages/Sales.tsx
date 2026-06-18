@@ -1231,16 +1231,19 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             </div>
             <button type="button" onClick={() => setStep('raw-select')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
           </div>
-          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2">
+          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2 flex-wrap">
             <span className="text-[10px] font-bold uppercase tracking-wide text-amber-400">Ship this card</span>
             <span className="font-mono text-sm text-zinc-200">{selectedRawCard.raw_purchase_label ?? '—'}</span>
+            {platform === 'ebay' && (
+              <>
+                <span className="text-zinc-700">·</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
+                <span className={`text-sm ${selectedRawCard.location_name ? 'text-zinc-300' : 'text-zinc-600 italic'}`}>
+                  {selectedRawCard.location_name ?? 'No location'}
+                </span>
+              </>
+            )}
           </div>
-          {platform === 'ebay' && selectedRawCard.location_name && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
-              <span className="text-sm text-zinc-300">{selectedRawCard.location_name}</span>
-            </div>
-          )}
           {/* Always render Sell qty for raw so the user can see/confirm
               what's about to flip sold — even for qty=1 lots where the
               field is effectively read-only. */}
@@ -1273,18 +1276,21 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             </div>
             <button type="button" onClick={() => setStep('copies')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
           </div>
-          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2">
+          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2 flex-wrap">
             <span className="text-[10px] font-bold uppercase tracking-wide text-amber-400">Ship this cert</span>
             <span className="font-mono text-sm text-zinc-200">
               {selectedCard.cert_number ? `#${String(selectedCard.cert_number).padStart(8, '0')}` : '—'}
             </span>
+            {platform === 'ebay' && (
+              <>
+                <span className="text-zinc-700">·</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
+                <span className={`text-sm ${selectedCard.location_name ? 'text-zinc-300' : 'text-zinc-600 italic'}`}>
+                  {selectedCard.location_name ?? 'No location'}
+                </span>
+              </>
+            )}
           </div>
-          {platform === 'ebay' && selectedCard.location_name && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
-              <span className="text-sm text-zinc-300">{selectedCard.location_name}</span>
-            </div>
-          )}
         </div>
       ) : null}
 
