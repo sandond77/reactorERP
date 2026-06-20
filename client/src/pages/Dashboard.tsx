@@ -24,7 +24,7 @@ const C = {
 // ── Types ────────────────────────────────────────────────────────────────────
 interface InventoryRow { status: string; count: number; total_cost: number }
 interface SalesRow { count: number; total_gross: number; total_net: number; total_cost: number; total_profit: number; total_expenses: number }
-interface ChannelRow { count: number; total_profit: number }
+interface ChannelRow { count: number; total_gross: number; total_cost: number; total_profit: number }
 interface ChannelBreakdown { ebay: ChannelRow; card_show: ChannelRow; other: ChannelRow }
 interface SalesSummary {
   today: SalesRow;
@@ -692,19 +692,32 @@ function OverviewTab() {
             { key: 'card_show', label: 'Card Shows' },
             { key: 'other',     label: 'Other' },
           ] as { key: keyof ChannelBreakdown; label: string }[]).map(({ key, label }) => {
-            const ch = summary?.by_channel?.[wk]?.[key] ?? { count: 0, total_profit: 0 };
+            const ch = summary?.by_channel?.[wk]?.[key] ?? { count: 0, total_gross: 0, total_cost: 0, total_profit: 0 };
             return (
               <Card key={key}>
                 <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
                 <p className="text-xl font-bold text-zinc-100">{ch.count} <span className="text-sm font-normal text-zinc-500">sales</span></p>
-                <p className={cn('text-sm font-semibold', ch.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                  {(ch.total_profit >= 0 ? '+' : '') + formatCurrency(ch.total_profit)}
-                </p>
+                <div className="mt-1 grid grid-cols-3 gap-x-3 text-xs">
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Gross</p>
+                    <p className="text-zinc-300 tabular-nums">{formatCurrency(ch.total_gross)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Cost</p>
+                    <p className="text-zinc-300 tabular-nums">{formatCurrency(ch.total_cost)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Net</p>
+                    <p className={cn('tabular-nums font-semibold', ch.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                      {(ch.total_profit >= 0 ? '+' : '') + formatCurrency(ch.total_profit)}
+                    </p>
+                  </div>
+                </div>
                 {key === 'ebay' && (
-                  <p className="text-xs text-zinc-500 mt-0.5">{cards.listed.all} listed &nbsp;·&nbsp; {cards.listed.graded} Graded / {cards.listed.raw} Raw</p>
+                  <p className="text-xs text-zinc-500 mt-1.5">{cards.listed.all} listed &nbsp;·&nbsp; {cards.listed.graded} Graded / {cards.listed.raw} Raw</p>
                 )}
                 {key === 'card_show' && (
-                  <p className="text-xs text-zinc-500 mt-0.5">{cards.card_show.unsold} unsold &nbsp;·&nbsp; {cards.card_show.graded} Graded / {cards.card_show.raw} Raw</p>
+                  <p className="text-xs text-zinc-500 mt-1.5">{cards.card_show.unsold} unsold &nbsp;·&nbsp; {cards.card_show.graded} Graded / {cards.card_show.raw} Raw</p>
                 )}
               </Card>
             );

@@ -126,6 +126,8 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         .select([
           sql<string>`platform`.as('platform'),
           sql<number>`COUNT(*)::int`.as('count'),
+          sql<number>`SUM(sale_price)::int`.as('total_gross'),
+          sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
           sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
         ])
         .where('user_id', '=', req.dataUserId);
@@ -157,6 +159,8 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       .select([
         sql<string>`platform`.as('platform'),
         sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(sale_price)::int`.as('total_gross'),
+        sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
         sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
       ])
       .where('user_id', '=', req.dataUserId)
@@ -181,6 +185,8 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       .select([
         sql<string>`platform`.as('platform'),
         sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(sale_price)::int`.as('total_gross'),
+        sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
         sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
       ])
       .where('user_id', '=', req.dataUserId)
@@ -233,10 +239,15 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
     ]);
     const perf = perfResult.rows[0] ?? { avg_hold_days: null, avg_listed_days: null, listings_value: 0 };
 
-    type CRow = { platform: string; count: number; total_profit: number };
+    type CRow = { platform: string; count: number; total_gross: number; total_cost: number; total_profit: number };
     const channelGroup = (rows: CRow[]) => {
       const sum = (filter: (r: CRow) => boolean) =>
-        rows.filter(filter).reduce((s, r) => ({ count: s.count + r.count, total_profit: s.total_profit + r.total_profit }), { count: 0, total_profit: 0 });
+        rows.filter(filter).reduce((s, r) => ({
+          count:        s.count + r.count,
+          total_gross:  s.total_gross + Number(r.total_gross ?? 0),
+          total_cost:   s.total_cost + Number(r.total_cost ?? 0),
+          total_profit: s.total_profit + Number(r.total_profit ?? 0),
+        }), { count: 0, total_gross: 0, total_cost: 0, total_profit: 0 });
       return {
         ebay:      sum(r => r.platform === 'ebay'),
         card_show: sum(r => r.platform === 'card_show'),
