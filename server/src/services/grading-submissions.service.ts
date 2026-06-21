@@ -1308,6 +1308,8 @@ export async function processReturn(userId: string, batchId: string, input: Proc
         .where('id', '=', original.id)
         .where('user_id', '=', userId)
         .execute();
+      await logAudit(userId, 'card_instances', original.id, 'updated',
+        original, { ...original, quantity: newQty });
     }
   }
 
@@ -1428,15 +1430,23 @@ export async function revertReturn(
       .where('user_id', '=', userId)
       .executeTakeFirst();
     if (!original) continue;
+    const restored = {
+      ...original,
+      quantity:   original.quantity + addBack,
+      graded_out: false,
+      status:     'inspected' as const,
+      decision:   'grade' as const,
+    };
     await db.updateTable('card_instances')
       .set({
-        quantity:   original.quantity + addBack,
+        quantity:   restored.quantity,
         graded_out: false,
         status:     'inspected',
         decision:   'grade',
         updated_at: new Date(),
       })
       .where('id', '=', original.id).execute();
+    await logAudit(userId, 'card_instances', original.id, 'updated', original, restored);
   }
 
   await db
