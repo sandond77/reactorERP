@@ -267,6 +267,12 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
     existing &&
     existing.grading_cost !== update.grading_cost
   ) {
+    const slabsBefore = await db
+      .selectFrom('slab_details')
+      .selectAll()
+      .where('grading_batch_id', '=', id)
+      .where('user_id', '=', userId)
+      .execute();
     const affected = await db
       .updateTable('slab_details')
       .set({ grading_cost: update.grading_cost as number, updated_at: new Date() })
@@ -274,12 +280,15 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
       .where('user_id', '=', userId)
       .returning('card_instance_id')
       .execute();
+    for (const before of slabsBefore) {
+      await logAudit(userId, 'slab_details', before.card_instance_id, 'updated', before, { ...before, grading_cost: update.grading_cost as number });
+    }
 
     if (affected.length > 0) {
       const cardIds = affected.map((r) => r.card_instance_id);
       const sales = await db
         .selectFrom('sales')
-        .select(['id', 'card_instance_id'])
+        .selectAll()
         .where('user_id', '=', userId)
         .where('card_instance_id', 'in', cardIds)
         .execute();
@@ -292,6 +301,7 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
           .where('id', '=', sale.id)
           .where('user_id', '=', userId)
           .execute();
+        await logAudit(userId, 'sales', sale.id, 'updated', sale, { ...sale, total_cost_basis: newBasis });
       }
     }
   }
@@ -796,13 +806,22 @@ export async function relinkItem(userId: string, itemId: string, input: RelinkIt
     .where('card_instance_id', '=', existing.card_instance_id)
     .executeTakeFirst();
   if (!stillReferenced) {
-    await db
-      .updateTable('card_instances')
-      .set({ status: 'inspected', decision: 'grade', updated_at: new Date() })
+    const oldCiBefore = await db
+      .selectFrom('card_instances')
+      .selectAll()
       .where('id', '=', existing.card_instance_id)
       .where('user_id', '=', userId)
-      .where('status', '=', 'grading_submitted')
-      .execute();
+      .executeTakeFirst();
+    if (oldCiBefore && oldCiBefore.status === 'grading_submitted') {
+      await db
+        .updateTable('card_instances')
+        .set({ status: 'inspected', decision: 'grade', updated_at: new Date() })
+        .where('id', '=', existing.card_instance_id)
+        .where('user_id', '=', userId)
+        .where('status', '=', 'grading_submitted')
+        .execute();
+      await logAudit(userId, 'card_instances', existing.card_instance_id, 'updated', oldCiBefore, { ...oldCiBefore, status: 'inspected' as const, decision: 'grade' as const });
+    }
   }
 
   // Move the new ci into grading_submitted (matches addItem semantics).
@@ -812,6 +831,7 @@ export async function relinkItem(userId: string, itemId: string, input: RelinkIt
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
     .execute();
+  await logAudit(userId, 'card_instances', input.card_instance_id, 'updated', newCi, { ...newCi, status: 'grading_submitted' as const, location_id: null });
 
   return updated;
 }
@@ -941,9 +961,13 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
       .set({ quantity: stash.quantity - delta, updated_at: new Date() })
       .where('id', '=', stash.id).execute();
     await logAudit(userId, 'card_instances', stash.id, 'updated', stashBefore, { ...stashBefore, quantity: stash.quantity - delta });
+    const ciBefore = await db.selectFrom('card_instances').selectAll().where('id', '=', existing.card_instance_id).executeTakeFirst();
     await db.updateTable('card_instances')
       .set({ quantity: existing.ci_qty + delta, updated_at: new Date() })
       .where('id', '=', existing.card_instance_id).execute();
+    if (ciBefore) {
+      await logAudit(userId, 'card_instances', existing.card_instance_id, 'updated', ciBefore, { ...ciBefore, quantity: existing.ci_qty + delta });
+    }
   }
 
   // Identity fixups on the linked card_instance — names/set/#/language/raw lot.

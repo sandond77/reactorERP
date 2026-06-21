@@ -517,6 +517,13 @@ export async function updateRawPurchase(
     if (updated.set_name != null)    fill.set_name_override = updated.set_name;
     if (updated.card_number != null) fill.card_number_override = updated.card_number;
     for (const [col, val] of Object.entries(fill)) {
+      const beforeRows = await db
+        .selectFrom('card_instances')
+        .selectAll()
+        .where('raw_purchase_id', '=', id)
+        .where('user_id', '=', userId)
+        .where(col as any, 'is', null)
+        .execute();
       await db
         .updateTable('card_instances')
         .set({ [col]: val })
@@ -524,6 +531,9 @@ export async function updateRawPurchase(
         .where('user_id', '=', userId)
         .where(col as any, 'is', null)
         .execute();
+      for (const row of beforeRows) {
+        await logAudit(userId, 'card_instances', row.id, 'updated', row, { ...row, [col]: val });
+      }
     }
   }
 
@@ -545,13 +555,22 @@ export async function saveReceiptUrl(userId: string, id: string, receiptUrl: str
 export async function deleteRawPurchase(userId: string, id: string) {
   const existing = await db.selectFrom('raw_purchases').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
 
-  // Unlink cards first
+  // Unlink cards first (audit each unlink so the lot lineage is recoverable)
+  const cardsToUnlink = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('raw_purchase_id', '=', id)
+    .where('user_id', '=', userId)
+    .execute();
   await db
     .updateTable('card_instances')
     .set({ raw_purchase_id: null })
     .where('raw_purchase_id', '=', id)
     .where('user_id', '=', userId)
     .execute();
+  for (const card of cardsToUnlink) {
+    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, raw_purchase_id: null });
+  }
 
   const result = await db
     .deleteFrom('raw_purchases')

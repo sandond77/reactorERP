@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import type { LocationCardType } from '../types/db';
+import { logAudit } from '../utils/audit';
 
 export interface CreateLocationInput {
   name: string;
@@ -149,13 +150,24 @@ export async function deleteLocation(userId: string, locationId: string) {
     throw new Error('The Card Show root location cannot be deleted');
   }
 
-  // Unassign all cards from this location before deleting
+  // Unassign all cards from this location before deleting (audit each so the
+  // pre-delete location is recoverable from the log)
+  const cardsToUnassign = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('location_id', '=', locationId)
+    .where('user_id', '=', userId)
+    .execute();
   await db.updateTable('card_instances')
     .set({ location_id: null })
     .where('location_id', '=', locationId)
     .execute();
+  for (const card of cardsToUnassign) {
+    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, location_id: null });
+  }
 
   await db.deleteFrom('locations').where('id', '=', locationId).execute();
+  await logAudit(userId, 'locations', locationId, 'deleted', loc, null);
 }
 
 export async function getLocationCards(userId: string, locationId: string) {
@@ -218,6 +230,7 @@ export async function assignLocation(userId: string, cardInstanceId: string, loc
   const card = await db.selectFrom('card_instances').select(['id', 'purchase_type']).where('id', '=', cardInstanceId).where('user_id', '=', userId).executeTakeFirst();
   if (!card) throw new Error('Card not found');
 
+  const fullBefore = await db.selectFrom('card_instances').selectAll().where('id', '=', cardInstanceId).where('user_id', '=', userId).executeTakeFirst();
   if (locationId) {
     // Verify location belongs to user and is compatible with card type
     const loc = await db.selectFrom('locations').select(['id', 'card_type', 'is_card_show', 'is_container']).where('id', '=', locationId).where('user_id', '=', userId).executeTakeFirst();
@@ -229,18 +242,23 @@ export async function assignLocation(userId: string, cardInstanceId: string, loc
     if (loc.card_type === 'raw' && isGraded) throw new Error('This location is for raw cards only');
 
     // Sync is_card_show flag; stamp card_show_added_at when transitioning to card show
-    const existing = await db.selectFrom('card_instances').select(['is_card_show', 'card_show_added_at']).where('id', '=', cardInstanceId).executeTakeFirst();
-    const wasCardShow = existing?.is_card_show ?? false;
-    const addedAt = loc.is_card_show && !wasCardShow ? new Date() : (loc.is_card_show ? (existing?.card_show_added_at ?? new Date()) : null);
+    const wasCardShow = fullBefore?.is_card_show ?? false;
+    const addedAt = loc.is_card_show && !wasCardShow ? new Date() : (loc.is_card_show ? (fullBefore?.card_show_added_at ?? new Date()) : null);
     await db.updateTable('card_instances')
       .set({ location_id: locationId, is_card_show: loc.is_card_show, card_show_added_at: addedAt })
       .where('id', '=', cardInstanceId)
       .execute();
+    if (fullBefore) {
+      await logAudit(userId, 'card_instances', cardInstanceId, 'updated', fullBefore, { ...fullBefore, location_id: locationId, is_card_show: loc.is_card_show, card_show_added_at: addedAt });
+    }
   } else {
     await db.updateTable('card_instances')
       .set({ location_id: null, is_card_show: false, card_show_added_at: null })
       .where('id', '=', cardInstanceId)
       .execute();
+    if (fullBefore) {
+      await logAudit(userId, 'card_instances', cardInstanceId, 'updated', fullBefore, { ...fullBefore, location_id: null, is_card_show: false, card_show_added_at: null });
+    }
   }
 }
 

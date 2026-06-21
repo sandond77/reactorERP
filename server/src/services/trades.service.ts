@@ -117,6 +117,7 @@ async function createTradeInner(
       sold_at: soldAt,
     });
     await db.updateTable('sales').set({ trade_id: trade.id }).where('id', '=', sale.id).execute();
+    await logAudit(userId, 'sales', sale.id, 'updated', sale, { ...sale, trade_id: trade.id });
   }));
 
   // purchase_cost_cents from the client is the user's assigned trade-in value
@@ -179,6 +180,7 @@ async function createTradeInner(
       slab
     );
     await db.updateTable('card_instances').set({ trade_id: trade.id }).where('id', '=', card.id).execute();
+    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, trade_id: trade.id });
   }));
 
   await logAudit(userId, 'trades', trade.id, 'created', null, trade);
@@ -260,9 +262,9 @@ export async function deleteTrade(userId: string, tradeId: string) {
   const trade = await db.selectFrom('trades').select('id').where('id', '=', tradeId).where('user_id', '=', userId).executeTakeFirst();
   if (!trade) throw new Error('Trade not found');
 
-  // Get all sales linked to this trade
+  // Get all sales linked to this trade (full rows so we can audit the deletion)
   const sales = await db.selectFrom('sales')
-    .select(['id', 'card_instance_id', 'listing_id'])
+    .selectAll()
     .where('trade_id', '=', tradeId)
     .execute();
 
@@ -273,7 +275,7 @@ export async function deleteTrade(userId: string, tradeId: string) {
   const cardShowLocId = await ensureCardShowLocation(userId);
   await Promise.all(sales.map(async (sale) => {
     const card = await db.selectFrom('card_instances')
-      .select(['id', 'decision', 'is_card_show', 'location_id'])
+      .selectAll()
       .where('id', '=', sale.card_instance_id)
       .executeTakeFirst();
     const hasSlab = await db.selectFrom('slab_details').select('id').where('card_instance_id', '=', sale.card_instance_id).executeTakeFirst();
@@ -291,12 +293,20 @@ export async function deleteTrade(userId: string, tradeId: string) {
     const restoreLocationId = card?.is_card_show && !card.location_id ? cardShowLocId : card?.location_id ?? null;
 
     await db.deleteFrom('sales').where('id', '=', sale.id).execute();
-    await db.updateTable('card_instances')
-      .set({ status: restoreStatus, trade_id: null, location_id: restoreLocationId })
-      .where('id', '=', sale.card_instance_id)
-      .execute();
+    await logAudit(userId, 'sales', sale.id, 'deleted', sale, null);
+    if (card) {
+      await db.updateTable('card_instances')
+        .set({ status: restoreStatus, trade_id: null, location_id: restoreLocationId })
+        .where('id', '=', sale.card_instance_id)
+        .execute();
+      await logAudit(userId, 'card_instances', sale.card_instance_id, 'updated', card, { ...card, status: restoreStatus, trade_id: null, location_id: restoreLocationId });
+    }
     if (sale.listing_id) {
+      const listingBefore = await db.selectFrom('listings').selectAll().where('id', '=', sale.listing_id).executeTakeFirst();
       await db.updateTable('listings').set({ listing_status: 'active', sold_at: null }).where('id', '=', sale.listing_id).execute();
+      if (listingBefore) {
+        await logAudit(userId, 'listings', sale.listing_id, 'updated', listingBefore, { ...listingBefore, listing_status: 'active' as const, sold_at: null });
+      }
     }
   }));
 
