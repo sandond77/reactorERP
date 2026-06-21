@@ -70,11 +70,13 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
   if (sellQty < card.quantity) {
     isSplit = true;
     // Shave the sold qty off the source row
+    const newSourceQty = card.quantity - sellQty;
     await db
       .updateTable('card_instances')
-      .set({ quantity: card.quantity - sellQty })
+      .set({ quantity: newSourceQty })
       .where('id', '=', input.card_instance_id)
       .execute();
+    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, quantity: newSourceQty });
     // Insert a sibling sold row with the same identity + the per-card cost basis.
     // Copy every field we care about so reports/cost calcs see the same data.
     const sibling = await db
@@ -102,6 +104,7 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
       } as any)
       .returningAll()
       .executeTakeFirstOrThrow();
+    await logAudit(userId, 'card_instances', sibling.id, 'created', null, sibling);
     saleCardInstanceId = sibling.id;
   }
 
@@ -171,14 +174,23 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
       .set({ status: 'sold', location_id: null })
       .where('id', '=', input.card_instance_id)
       .execute();
+    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, status: 'sold' as const, location_id: null });
   }
 
   if (resolvedListingId) {
+    const listingBefore = await db
+      .selectFrom('listings')
+      .selectAll()
+      .where('id', '=', resolvedListingId)
+      .executeTakeFirst();
     await db
       .updateTable('listings')
       .set({ listing_status: 'sold', sold_at: sale.sold_at })
       .where('id', '=', resolvedListingId)
       .execute();
+    if (listingBefore) {
+      await logAudit(userId, 'listings', resolvedListingId, 'updated', listingBefore, { ...listingBefore, listing_status: 'sold' as const, sold_at: sale.sold_at });
+    }
   }
 
   await logAudit(userId, 'sales', sale.id, 'created', null, sale);
@@ -424,16 +436,21 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
       if (delta > 0) {
         if (!source) throw new AppError(409, `No remaining inventory in this lot to draw ${delta} more from`);
         if (source.quantity < delta) throw new AppError(409, `Only ${source.quantity} remaining in this lot; can't increase sale by ${delta}`);
-        await db.updateTable('card_instances').set({ quantity: source.quantity - delta }).where('id', '=', source.id).execute();
+        const newSourceQty = source.quantity - delta;
+        await db.updateTable('card_instances').set({ quantity: newSourceQty }).where('id', '=', source.id).execute();
+        await logAudit(userId, 'card_instances', source.id, 'updated', source, { ...source, quantity: newSourceQty });
         await db.updateTable('card_instances').set({ quantity: input.quantity }).where('id', '=', sold.id).execute();
+        await logAudit(userId, 'card_instances', sold.id, 'updated', sold, { ...sold, quantity: input.quantity });
       } else {
         // delta < 0 — return the difference to the source, or recreate one
         // if the whole lot had been sold off.
         const returnQty = -delta;
         if (source) {
-          await db.updateTable('card_instances').set({ quantity: source.quantity + returnQty }).where('id', '=', source.id).execute();
+          const newSourceQty = source.quantity + returnQty;
+          await db.updateTable('card_instances').set({ quantity: newSourceQty }).where('id', '=', source.id).execute();
+          await logAudit(userId, 'card_instances', source.id, 'updated', source, { ...source, quantity: newSourceQty });
         } else {
-          await db.insertInto('card_instances').values({
+          const recreated = await db.insertInto('card_instances').values({
             user_id: userId,
             catalog_id: sold.catalog_id,
             raw_purchase_id: sold.raw_purchase_id,
@@ -453,9 +470,11 @@ export async function updateSale(userId: string, saleId: string, input: Partial<
             notes: sold.notes,
             purchased_at: sold.purchased_at,
             is_personal_collection: sold.is_personal_collection,
-          } as any).execute();
+          } as any).returningAll().executeTakeFirstOrThrow();
+          await logAudit(userId, 'card_instances', recreated.id, 'created', null, recreated);
         }
         await db.updateTable('card_instances').set({ quantity: input.quantity }).where('id', '=', sold.id).execute();
+        await logAudit(userId, 'card_instances', sold.id, 'updated', sold, { ...sold, quantity: input.quantity });
       }
     }
     // computeCostBasis multiplies purchase_cost × quantity (+grading_cost),
@@ -483,11 +502,19 @@ export async function deleteSale(userId: string, saleId: string) {
     .where('card_instance_id', '=', sale.card_instance_id).executeTakeFirst();
   const revertStatus = hasSlab ? 'graded' : 'raw_for_sale';
 
+  const ciBefore = await db.selectFrom('card_instances').selectAll().where('id', '=', sale.card_instance_id).executeTakeFirst();
   await db.updateTable('card_instances').set({ status: revertStatus }).where('id', '=', sale.card_instance_id).execute();
+  if (ciBefore) {
+    await logAudit(userId, 'card_instances', sale.card_instance_id, 'updated', ciBefore, { ...ciBefore, status: revertStatus });
+  }
 
   // Revert listing status if linked
   if (sale.listing_id) {
+    const listingBefore = await db.selectFrom('listings').selectAll().where('id', '=', sale.listing_id).executeTakeFirst();
     await db.updateTable('listings').set({ listing_status: 'active', sold_at: null }).where('id', '=', sale.listing_id).execute();
+    if (listingBefore) {
+      await logAudit(userId, 'listings', sale.listing_id, 'updated', listingBefore, { ...listingBefore, listing_status: 'active' as const, sold_at: null });
+    }
   }
 }
 

@@ -370,12 +370,14 @@ export async function deleteBatch(userId: string, id: string): Promise<DeleteBat
         .executeTakeFirst();
 
       if (stash) {
+        const newStashQty = stash.quantity + qty;
         await db.updateTable('card_instances')
-          .set({ quantity: stash.quantity + qty, updated_at: new Date() })
+          .set({ quantity: newStashQty, updated_at: new Date() })
           .where('id', '=', stash.id)
           .execute();
+        await logAudit(userId, 'card_instances', stash.id, 'updated', stash, { ...stash, quantity: newStashQty });
       } else {
-        await db.insertInto('card_instances').values({
+        const created = await db.insertInto('card_instances').values({
           user_id:        userId,
           catalog_id:     bucketId,
           card_game:      card.card_game,
@@ -386,7 +388,8 @@ export async function deleteBatch(userId: string, id: string): Promise<DeleteBat
           quantity:       qty,
           purchase_cost:  card.purchase_cost,
           currency:       card.currency,
-        } as any).execute();
+        } as any).returningAll().executeTakeFirstOrThrow();
+        await logAudit(userId, 'card_instances', created.id, 'created', null, created);
       }
 
       await logAudit(userId, 'card_instances', card.id, 'deleted', card, null);
@@ -403,12 +406,15 @@ export async function deleteBatch(userId: string, id: string): Promise<DeleteBat
       // status clobbered to 'inspected' here without anyone touching its
       // sale row — silently corrupting the slab and letting it reappear
       // in raw inventory pickers.
-      await db.updateTable('card_instances')
-        .set({ status: 'inspected', decision: 'grade' })
-        .where('id', '=', card.id)
-        .where('user_id', '=', userId)
-        .where('status', '=', 'grading_submitted')
-        .execute();
+      if (card.status === 'grading_submitted') {
+        await db.updateTable('card_instances')
+          .set({ status: 'inspected', decision: 'grade' })
+          .where('id', '=', card.id)
+          .where('user_id', '=', userId)
+          .where('status', '=', 'grading_submitted')
+          .execute();
+        await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, status: 'inspected' as const, decision: 'grade' as const });
+      }
     }
   }
 
@@ -504,12 +510,21 @@ export async function addItem(userId: string, batchId: string, input: AddItemInp
 
   // Move card instance to grading_submitted and clear physical location —
   // the card is at the grader, not in any of our locations.
+  const ciBefore = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
   await db
     .updateTable('card_instances')
     .set({ status: 'grading_submitted', location_id: null })
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
     .execute();
+  if (ciBefore) {
+    await logAudit(userId, 'card_instances', input.card_instance_id, 'updated', ciBefore, { ...ciBefore, status: 'grading_submitted' as const, location_id: null });
+  }
 
   return item;
 }
@@ -1493,12 +1508,21 @@ export async function removeItem(userId: string, itemId: string) {
     // back to inspected when its current status is grading_submitted.
     // Otherwise a back-linked sold slab gets its terminal status silently
     // clobbered on batch_item removal.
-    await db
-      .updateTable('card_instances')
-      .set({ status: 'inspected', decision: 'grade' })
+    const ciBefore = await db
+      .selectFrom('card_instances')
+      .selectAll()
       .where('id', '=', item.card_instance_id)
       .where('user_id', '=', userId)
-      .where('status', '=', 'grading_submitted')
-      .execute();
+      .executeTakeFirst();
+    if (ciBefore && ciBefore.status === 'grading_submitted') {
+      await db
+        .updateTable('card_instances')
+        .set({ status: 'inspected', decision: 'grade' })
+        .where('id', '=', item.card_instance_id)
+        .where('user_id', '=', userId)
+        .where('status', '=', 'grading_submitted')
+        .execute();
+      await logAudit(userId, 'card_instances', item.card_instance_id, 'updated', ciBefore, { ...ciBefore, status: 'inspected' as const, decision: 'grade' as const });
+    }
   }
 }
