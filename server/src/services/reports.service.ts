@@ -946,6 +946,7 @@ export async function getPendingGradingSub(userId: string) {
     .where('ci.user_id', '=', userId)
     .where('ci.status', '=', 'inspected')
     .where('ci.decision', '=', 'grade')
+    .where('ci.quantity', '>', 0)
     .where('rp.type', '=', 'raw')
     .orderBy('ci.created_at', 'asc')
     .execute();
