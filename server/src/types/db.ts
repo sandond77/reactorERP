@@ -285,6 +285,8 @@ export interface AuditLogTable {
   action: string;
   actor: string; // 'user' | 'agent'
   actor_name: string | null;
+  request_id: string | null;
+  reason: string | null;
   old_data: unknown | null;
   new_data: unknown | null;
   ip_address: string | null;

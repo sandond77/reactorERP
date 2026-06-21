@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import { randomUUID } from 'crypto';
 import { db } from '../config/database';
 import { auditContext } from '../utils/audit-context';
 
@@ -49,5 +50,6 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 
   req.dataUserId = dataUserId;
   const actor_name = req.user.display_name ?? req.user.email;
-  return auditContext.run({ actor: 'user', actor_name }, next);
+  const request_id = randomUUID();
+  return auditContext.run({ actor: 'user', actor_name, request_id }, next);
 }

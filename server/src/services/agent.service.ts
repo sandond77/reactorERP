@@ -2104,10 +2104,17 @@ ${JSON.stringify(summary, null, 2)}${earlierContextSummary ? `\n\n=== EARLIER IN
 
       // Execute each tool call and collect results
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      // Carry the originating user message into the audit reason so we can
+      // trace any agent-driven mutation back to "what did the user say".
+      // Cap at 200 chars to keep audit rows small; full transcript is in
+      // chat history anyway.
+      const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+      const userExcerpt = lastUserMsg.length > 200 ? lastUserMsg.slice(0, 197) + '...' : lastUserMsg;
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         try {
-          const result = await auditContext.run({ actor: 'agent', actor_name: actorName ?? 'AI Agent' }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
+          const reason = `agent:${block.name} | user: ${userExcerpt}`;
+          const result = await auditContext.run({ actor: 'agent', actor_name: actorName ?? 'AI Agent', reason }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
           // Track any card instance IDs created
           if ((block.name === 'add_card_to_purchase' || block.name === 'add_graded_card') && typeof result === 'object' && result !== null && 'id' in result) {
             createdCardIds.push(result.id as string);
