@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
   LayoutDashboard, Star, TrendingUp, ListOrdered,
-  BarChart3, Upload, Zap, LayoutGrid, ShoppingBag, ClipboardList,
+  BarChart3, Upload, Download, Zap, LayoutGrid, ShoppingBag, ClipboardList,
   ChevronDown, PackageSearch, ScanSearch, Layers, GalleryVerticalEnd, PackageCheck, ArrowRightLeft, MapPin, TableProperties, Receipt,
   ScrollText, ShieldCheck, FolderClock, Tag, Settings2, LogOut, CalendarDays, Bell, Users, X,
 } from 'lucide-react';
@@ -176,6 +176,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             </NavFolder>
 
             <NavItem to="/import" icon={Upload} label="Import" />
+            <NavItem to="/export" icon={Download} label="Export" />
             <NavItem to="/team"   icon={Users}  label="Team" />
           </div>
 

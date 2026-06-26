@@ -13,6 +13,7 @@ import { Sales } from './pages/Sales';
 import { Trades } from './pages/Trades';
 import { Reports } from './pages/Reports';
 import { Import } from './pages/Import';
+import { Export } from './pages/Export';
 import { Overall } from './pages/Overall';
 import { CardShow } from './pages/CardShow';
 import { InventorySummary } from './pages/InventorySummary';
@@ -77,6 +78,7 @@ export default function App() {
               <Route path="/trades" element={<Trades />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/import" element={<Import />} />
+              <Route path="/export" element={<Export />} />
               <Route path="/parts" element={<InventorySummary />} />
               <Route path="/locations" element={<LocationManager />} />
               <Route path="/expenses" element={<Expenses />} />
