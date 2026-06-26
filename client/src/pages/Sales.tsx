@@ -8,7 +8,8 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency, formatDate, cn, parseDollars, toCents } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
-import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { ColHeader, ColumnFilter, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { FilterDrawer, FilterDrawerLauncher } from '../components/ui/FilterDrawer';
 import toast from 'react-hot-toast';
 
 interface Sale {
@@ -2457,6 +2458,7 @@ export function Sales() {
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
   const [fPlatform, setFPlatform] = useState<string[] | null>(saved.fPlatform);
   const [fSoldDates, setFSoldDates] = useState<string[]>(saved.fSoldDates ?? []);
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [cardType, setCardType] = useState<CardTypeFilter>(saved.cardType ?? 'all');
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
@@ -2554,6 +2556,10 @@ export function Sales() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-64"
+          />
+          <FilterDrawerLauncher
+            onClick={() => setFilterDrawerOpen(true)}
+            activeCount={(fPlatform ? 1 : 0) + (fSoldDates.length > 0 ? 1 : 0)}
           />
           <Button size="sm" onClick={() => setShowAddModal(true)}>
             <Plus size={14} /> Record Sale
@@ -2695,6 +2701,33 @@ export function Sales() {
       <Modal open={!!selectedSale} onClose={() => setSelectedSale(null)} title="Sale">
         {selectedSale && <SaleActionModal sale={selectedSale} onClose={() => setSelectedSale(null)} />}
       </Modal>
+
+      {/* Tablet (<lg) filter drawer — surfaces the column-header filters
+          (Platform, Sold Date) that aren't accessible when the desktop table
+          is hidden:lg:table. ColumnFilter is reused from TableHeader so the
+          UX matches the desktop popovers exactly. */}
+      <FilterDrawer open={filterDrawerOpen} onClose={() => setFilterDrawerOpen(false)} title="Sales filters">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-zinc-400">Platform</span>
+          <ColumnFilter
+            options={filterOptions?.platforms ?? []}
+            selected={fPlatform}
+            onChange={(v) => { setFPlatform(v); setPage(1); }}
+            align="right"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-zinc-400">Sold date</span>
+          <ColumnFilter
+            options={[]}
+            selected={null}
+            onChange={() => {}}
+            align="right"
+            dateValues={fSoldDates}
+            onDatesChange={(d) => { setFSoldDates(d); setPage(1); }}
+          />
+        </div>
+      </FilterDrawer>
     </div>
   );
 }

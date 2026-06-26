@@ -27,7 +27,7 @@ export function AppLayout() {
           <span>Menu</span>
         </button>
       )}
-      <AgentPanel />
+      <AgentPanel hideLauncher={sidebarOpen} />
     </div>
   );
 }

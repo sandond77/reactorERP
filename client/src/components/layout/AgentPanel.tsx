@@ -61,7 +61,7 @@ function saveMessages(msgs: Message[]) {
   } catch { /* storage full — ignore */ }
 }
 
-export function AgentPanel() {
+export function AgentPanel({ hideLauncher = false }: { hideLauncher?: boolean }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>(loadMessages);
@@ -339,19 +339,22 @@ export function AgentPanel() {
         </div>
       )}
 
-      {/* Floating toggle button */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className={cn(
-          'fixed bottom-5 right-5 z-40 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-colors',
-          open
-            ? 'bg-indigo-600 text-white'
-            : 'bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700'
-        )}
-      >
-        <Bot size={15} />
-        <span>AI Agent</span>
-      </button>
+      {/* Floating toggle button. Hidden while the sidebar overlay is open at
+          tablet so it doesn't float on top of the darkened backdrop. */}
+      {!hideLauncher && (
+        <button
+          onClick={() => setOpen(o => !o)}
+          className={cn(
+            'fixed bottom-5 right-5 z-40 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-colors',
+            open
+              ? 'bg-indigo-600 text-white'
+              : 'bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700'
+          )}
+        >
+          <Bot size={15} />
+          <span>AI Agent</span>
+        </button>
+      )}
     </>
   );
 }
