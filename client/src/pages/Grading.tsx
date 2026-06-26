@@ -1510,7 +1510,7 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="text-zinc-500 hover:text-zinc-300 transition-colors">
             <ArrowLeft size={16} />
@@ -1524,7 +1524,7 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
             {data.status}
           </Badge>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center flex-wrap gap-2 w-full lg:w-auto justify-end">
           {confirmDelete ? (
             <div className="flex items-center gap-2">
               <span className="text-xs text-zinc-400">Delete this batch and revert all cards?</span>
@@ -1735,9 +1735,9 @@ export function Grading() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Grading Submissions</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3 w-full lg:w-auto justify-end">
           <div className="flex gap-1">
             {STATUS_TABS.map((t) => (
               <button

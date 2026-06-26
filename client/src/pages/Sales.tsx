@@ -2531,9 +2531,9 @@ export function Sales() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Sales</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3 w-full lg:w-auto justify-end">
           {hasActiveFilters && (
             <button onClick={() => { setFPlatform(null); setCardType('all'); setSearch(''); setFSoldDates([]); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">

@@ -857,14 +857,16 @@ export function Trades() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800 shrink-0">
         <div>
           <h1 className="text-lg font-semibold text-zinc-100">Trades</h1>
           <p className="text-xs text-zinc-500 mt-0.5">Card-for-card trades with customers</p>
         </div>
-        <Button size="sm" onClick={() => setShowModal(true)}>
-          <ArrowRightLeft size={14} /> Record Trade
-        </Button>
+        <div className="flex w-full lg:w-auto justify-end">
+          <Button size="sm" onClick={() => setShowModal(true)}>
+            <ArrowRightLeft size={14} /> Record Trade
+          </Button>
+        </div>
       </div>
 
       {/* Table */}

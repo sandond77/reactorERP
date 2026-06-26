@@ -757,7 +757,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <div className="flex items-center gap-3">
           <button onClick={onBack} className="text-zinc-500 hover:text-zinc-300 transition-colors">
             <ArrowLeft size={16} />
@@ -1355,12 +1355,14 @@ export function SubReturns() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Sub Returns</h1>
-        <Button size="sm" onClick={() => setSelectOpen(true)}>
-          <Plus size={14} />
-          Record Return
-        </Button>
+        <div className="flex w-full lg:w-auto justify-end">
+          <Button size="sm" onClick={() => setSelectOpen(true)}>
+            <Plus size={14} />
+            Record Return
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto">
