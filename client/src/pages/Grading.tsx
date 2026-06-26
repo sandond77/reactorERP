@@ -1767,7 +1767,7 @@ export function Grading() {
             {data?.length ? `No ${statusFilter === 'all' ? '' : STATUS_TABS.find(t => t.value === statusFilter)?.label.toLowerCase() + ' '}batches.` : 'No grading batches yet.'}
           </div>
         ) : (
-          <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', minWidth: '100%', width: 'max-content' }}>
+          <table className="text-xs border-collapse hidden lg:table" style={{ tableLayout: 'fixed', minWidth: '100%', width: 'max-content' }}>
             <colgroup>
               <col style={{ minWidth: 200 }} />
               <col style={{ minWidth: 70 }} />
@@ -1851,6 +1851,50 @@ export function Grading() {
             </tbody>
           </table>
         )}
+
+        {/* Tablet (<lg): minimal-row table. Row click opens batch detail
+            (setSelectedId already wired). Skips per-cost breakdown — those
+            are in the batch detail view anyway. */}
+        <table className="lg:hidden w-full text-xs">
+          <thead className="sticky top-0 bg-zinc-950 z-10">
+            <tr className="border-b border-zinc-700 text-[10px] text-zinc-400 uppercase tracking-wide">
+              <th className="px-3 py-2 text-left font-medium">Batch</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Company</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Status</th>
+              <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Total Cost</th>
+              <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Est. Gain</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800/50">
+            {filtered.map((batch) => {
+              const totalGrading = (batch.grading_cost ?? 0) * (batch.total_qty ?? batch.item_count);
+              const totalCost    = batch.raw_cost + totalGrading;
+              const estGain      = batch.estimated_total - totalCost;
+              const statusLabel  = batch.status === 'pending' ? 'Adding' : batch.status;
+              return (
+                <tr key={`m-${batch.id}`} onClick={() => setSelectedId(batch.id)}
+                    className="hover:bg-zinc-800/30 cursor-pointer transition-colors">
+                  <td className="px-3 py-2">
+                    <p className="text-zinc-100 font-medium break-words">{batch.name ?? batch.batch_id}</p>
+                    <p className="text-[10px] text-zinc-600 font-mono">{batch.batch_id}</p>
+                  </td>
+                  <td className="px-3 py-2 text-zinc-300 whitespace-nowrap">{batch.company}</td>
+                  <td className="px-3 py-2">
+                    <Badge className={BATCH_STATUS_COLORS[batch.status] ?? 'bg-zinc-700/50 text-zinc-400'}>
+                      {statusLabel}
+                    </Badge>
+                  </td>
+                  <td className="px-3 py-2 text-right text-zinc-200 font-medium whitespace-nowrap">
+                    {totalCost ? formatCurrency(totalCost, 'USD') : '—'}
+                  </td>
+                  <td className={`px-3 py-2 text-right font-medium whitespace-nowrap ${estGain > 0 ? 'text-emerald-400' : estGain < 0 ? 'text-red-400' : 'text-zinc-500'}`}>
+                    {totalCost ? formatCurrency(estGain, 'USD') : '—'}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="Start Submission">
