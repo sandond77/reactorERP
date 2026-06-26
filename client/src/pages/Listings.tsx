@@ -7,7 +7,8 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency, formatCertNumber } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
-import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { ColHeader, ColumnFilter, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { FilterDrawer, FilterDrawerLauncher } from '../components/ui/FilterDrawer';
 import toast from 'react-hot-toast';
 import { AlertTriangle } from 'lucide-react';
 
@@ -1172,6 +1173,7 @@ export function Listings() {
   const [fNumSold, setFNumSold] = useState<string[] | null>(saved.fNumSold);
   const [fCardName, setFCardName] = useState<string[] | null>(saved.fCardName);
   const [fPrice, setFPrice] = useState<string[] | null>(saved.fPrice);
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [listingTab, setListingTab] = useState<'graded' | 'raw' | 'graded_set' | 'raw_set'>('graded');
@@ -1320,6 +1322,19 @@ export function Listings() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-52"
+          />
+          <FilterDrawerLauncher
+            onClick={() => setFilterDrawerOpen(true)}
+            activeCount={
+              (fPartNumber ? 1 : 0) +
+              (fCardName ? 1 : 0) +
+              (fCompany ? 1 : 0) +
+              (fGrade ? 1 : 0) +
+              (fPlatform ? 1 : 0) +
+              (fPrice ? 1 : 0) +
+              (fNumListed ? 1 : 0) +
+              (fNumSold ? 1 : 0)
+            }
           />
           <Button size="sm" onClick={() => setShowAddModal(true)}>
             <Plus size={14} /> Add Listing
@@ -1643,6 +1658,54 @@ export function Listings() {
       <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title="Edit Listing">
         {editTarget && <EditListingModal row={editTarget.row} cert={editTarget.cert} onClose={() => setEditTarget(null)} />}
       </Modal>
+
+      {/* Tablet (<lg) filter drawer — surfaces all the column-header filters
+          that go away when the desktop table is hidden:lg:table. Filters are
+          context-aware: Company/Grade only show in graded modes; Condition
+          handling stays on the inline header (no multi-select). */}
+      {(() => {
+        const isGraded = listingTab === 'graded' || listingTab === 'graded_set';
+        return (
+          <FilterDrawer open={filterDrawerOpen} onClose={() => setFilterDrawerOpen(false)} title="Listings filters">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Part #</span>
+              <ColumnFilter options={filterOptions?.part_numbers ?? []} selected={fPartNumber} onChange={(v) => { setFPartNumber(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Card name</span>
+              <ColumnFilter options={filterOptions?.card_names ?? []} selected={fCardName} onChange={(v) => { setFCardName(v); setPage(1); }} align="right" />
+            </div>
+            {isGraded && (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-zinc-400">Company</span>
+                  <ColumnFilter options={filterOptions?.companies ?? []} selected={fCompany} onChange={(v) => { setFCompany(v); setPage(1); }} align="right" />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-zinc-400">Grade</span>
+                  <ColumnFilter options={filterOptions?.grades ?? []} selected={fGrade} onChange={(v) => { setFGrade(v); setPage(1); }} align="right" />
+                </div>
+              </>
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Platform</span>
+              <ColumnFilter options={filterOptions?.platforms ?? []} selected={fPlatform} onChange={(v) => { setFPlatform(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Price</span>
+              <ColumnFilter options={filterOptions?.prices ?? []} selected={fPrice} onChange={(v) => { setFPrice(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400"># Listed</span>
+              <ColumnFilter options={filterOptions?.num_listed ?? []} selected={fNumListed} onChange={(v) => { setFNumListed(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400"># Sold</span>
+              <ColumnFilter options={filterOptions?.num_sold ?? []} selected={fNumSold} onChange={(v) => { setFNumSold(v); setPage(1); }} align="right" />
+            </div>
+          </FilterDrawer>
+        );
+      })()}
     </div>
   );
 }
