@@ -486,7 +486,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
                         : <span className="text-zinc-400">{row.cert_number ?? ''}</span>}
                     </td>
                     <td className="px-3 py-2 text-zinc-200 break-words">{row.card_name ?? ''}</td>
-                    <td className="px-3 py-2 text-zinc-300">{row.grade_label ?? row.grade ?? ''}</td>
+                    <td className="px-3 py-2 text-zinc-300">{row.grade_label ?? row.numeric_grade ?? ''}</td>
                     <td className="px-3 py-2 text-zinc-400 text-[11px]">{row.company}</td>
                     <td className={`px-3 py-2 text-right font-medium ${cardShowMode ? 'text-emerald-400' : 'text-zinc-300'}`}>{fmt(price)}</td>
                   </tr>
