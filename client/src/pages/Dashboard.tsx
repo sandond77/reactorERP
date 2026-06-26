@@ -648,7 +648,7 @@ function OverviewTab() {
           {(() => {
             const netProfit = (windowData.total_profit ?? 0) - (windowData.total_expenses ?? 0);
             return (
-              <div className="grid grid-cols-1 lg:grid-cols-6 lg:divide-x lg:divide-zinc-800 divide-y divide-zinc-800/40 lg:divide-y-0">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3 lg:gap-0 lg:divide-x lg:divide-zinc-800">
                 {([
                   { label: 'Gross',                  value: formatCurrency(windowData.total_gross ?? 0),                              cls: 'text-zinc-100' },
                   { label: 'Cost',                   value: formatCurrency(windowData.total_cost ?? 0),                               cls: 'text-zinc-100' },
@@ -658,7 +658,7 @@ function OverviewTab() {
                   { label: '# of Sales',             value: String(windowData.count),                                                 cls: 'text-zinc-100' },
                 ]).map(({ label, value, cls }, i) => (
                   <div key={label} className={cn(
-                    'py-3 lg:py-0',
+                    'lg:py-0',
                     i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
                     i === 5 ? 'lg:pr-0' : '',
                   )}>
@@ -674,14 +674,14 @@ function OverviewTab() {
         {/* Row 2: Inventory */}
         <Card>
           <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Inventory</p>
-          <div className="grid grid-cols-1 lg:grid-cols-3 lg:divide-x lg:divide-zinc-800 divide-y divide-zinc-800/40 lg:divide-y-0">
+          <div className="grid grid-cols-3 gap-x-4 lg:gap-0 lg:divide-x lg:divide-zinc-800">
             {([
               { label: 'Total Cards',  value: cards.total.all,  sub: `Graded ${cards.total.graded}  ·  Raw ${cards.total.raw}` },
               { label: 'Unsold Cards', value: cards.unsold.all, sub: `Graded ${cards.unsold.graded}  ·  Raw ${cards.unsold.raw}` },
               { label: 'Sold Cards',   value: cards.sold.all,   sub: `Graded ${cards.sold.graded}  ·  Raw ${cards.sold.raw}` },
             ]).map(({ label, value, sub }, i) => (
               <div key={label} className={cn(
-                'py-3 lg:py-0',
+                'lg:py-0',
                 i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
                 i === 2 ? 'lg:pr-0' : '',
               )}>
@@ -694,7 +694,7 @@ function OverviewTab() {
         </Card>
 
         {/* Row 3: Sales by channel */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {([
             { key: 'ebay',      label: 'eBay' },
             { key: 'card_show', label: 'Card Shows' },

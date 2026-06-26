@@ -268,9 +268,9 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">{cardShowMode ? 'Card Show Inventory' : 'Graded Overall'}</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3 w-full lg:w-auto justify-end">
           {hasActiveFilters && (
             <button onClick={clearAllFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
               <X size={12} /> Clear filters
@@ -362,7 +362,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
         ) : isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
         ) : (
-          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
+          <table className="text-xs whitespace-nowrap border-collapse hidden lg:table" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Part #"                                    {...sh} {...rz('part_number')} minWidth={MINS.part_number} />
@@ -456,6 +456,45 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
             </tbody>
           </table>
         )}
+
+        {/* Tablet (<lg): minimal-row table. Same rows, fewer columns — full data
+            opens in SlabDetailModal on row click. Desktop table above (hidden
+            lg:table) keeps the full 20-col layout with sort/filter/resize. */}
+        {!cardShowMode || cardType !== 'raw' ? (
+          <table className="lg:hidden w-full text-xs">
+            <thead className="sticky top-0 bg-zinc-950 z-10">
+              <tr className="border-b border-zinc-700 text-[10px] text-zinc-400 uppercase tracking-wide">
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Cert</th>
+                <th className="px-3 py-2 text-left font-medium">Card</th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Grade</th>
+                <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Co.</th>
+                <th className="px-3 py-2 text-right font-medium whitespace-nowrap">{cardShowMode ? 'CS' : 'Listed'}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {!data?.data.length ? (
+                <tr><td colSpan={5} className="px-3 py-10 text-center text-zinc-500">No records found.</td></tr>
+              ) : data.data.map((row) => {
+                const link = row.cert_number ? certLink(row.company, row.cert_number) : null;
+                const price = cardShowMode ? row.card_show_price : row.listed_price;
+                return (
+                  <tr key={`m-${row.id}`} onClick={() => setSelectedSlab(row)}
+                      className="border-b border-zinc-800/40 hover:bg-zinc-800/20 transition-colors cursor-pointer">
+                    <td className="px-3 py-2 font-mono text-[11px]" onClick={(e) => link && e.stopPropagation()}>
+                      {link
+                        ? <a href={link} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{row.cert_number}</a>
+                        : <span className="text-zinc-400">{row.cert_number ?? ''}</span>}
+                    </td>
+                    <td className="px-3 py-2 text-zinc-200 break-words">{row.card_name ?? ''}</td>
+                    <td className="px-3 py-2 text-zinc-300">{row.grade_label ?? row.grade ?? ''}</td>
+                    <td className="px-3 py-2 text-zinc-400 text-[11px]">{row.company}</td>
+                    <td className={`px-3 py-2 text-right font-medium ${cardShowMode ? 'text-emerald-400' : 'text-zinc-300'}`}>{fmt(price)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : null}
       </div>
 
       {selectedSlab && (
@@ -485,7 +524,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
         const pageData = cardShowMode && cardType === 'raw' ? rawData : data;
         if (!pageData) return null;
         return (
-          <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
+          <div className="flex items-center justify-center lg:justify-between gap-6 lg:gap-0 px-28 lg:px-6 lg:pr-44 py-3 border-t border-zinc-800 text-xs text-zinc-500">
             <span>{(pageData.total ?? 0).toLocaleString()} total records</span>
             {pageData.total_pages > 1 && (
               <div className="flex items-center gap-2">
