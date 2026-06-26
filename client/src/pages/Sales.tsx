@@ -2565,7 +2565,7 @@ export function Sales() {
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
         ) : (
-          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
+          <table className="text-xs whitespace-nowrap border-collapse hidden lg:table" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Date Sold"      col="sold_at"      {...sh} {...rz('date')} minWidth={MINS.date}
@@ -2640,10 +2640,42 @@ export function Sales() {
             </tbody>
           </table>
         )}
+
+        {/* Tablet (<lg): minimal-row table. Whole row click opens SaleActionModal
+            (already wired). Desktop table above keeps the full 13-col layout. */}
+        <table className="lg:hidden w-full text-xs">
+          <thead className="sticky top-0 bg-zinc-950 z-10">
+            <tr className="border-b border-zinc-700 text-[10px] text-zinc-400 uppercase tracking-wide">
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Date</th>
+              <th className="px-3 py-2 text-left font-medium">Card</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Grade / Cond.</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Platform</th>
+              <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Sale $</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800/60">
+            {!data?.data.length ? (
+              <tr><td colSpan={5} className="px-3 py-10 text-center text-zinc-500">No sales found.</td></tr>
+            ) : data.data.map((sale) => (
+              <tr key={`m-${sale.id}`} onClick={() => setSelectedSale(sale)}
+                  className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
+                <td className="px-3 py-2 text-zinc-500 whitespace-nowrap">{formatDate(sale.sold_at)}</td>
+                <td className="px-3 py-2 text-zinc-200 break-words">{sale.card_name ?? 'Unknown'}</td>
+                <td className="px-3 py-2 text-zinc-300">
+                  {sale.grade_label || sale.grade != null
+                    ? <span><span className="text-zinc-500 text-[10px] mr-1">{sale.grading_company}</span>{sale.grade_label ?? sale.grade}</span>
+                    : sale.condition ?? <span className="text-zinc-700">—</span>}
+                </td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{platformLabel(sale.platform)}</td>
+                <td className="px-3 py-2 text-right text-zinc-200 font-medium whitespace-nowrap">{formatCurrency(sale.sale_price, sale.currency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-center lg:justify-between gap-6 lg:gap-0 px-28 lg:px-6 lg:pr-44 py-3 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{data.total} sales</span>
           {data.total_pages > 1 && (
             <div className="flex gap-2">

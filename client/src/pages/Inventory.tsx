@@ -238,7 +238,7 @@ export function Inventory() {
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
         ) : (
-          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
+          <table className="text-xs whitespace-nowrap border-collapse hidden lg:table" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Cert"              col="cert_number"       {...sh} {...rz('cert')} minWidth={MINS.cert} />
@@ -353,11 +353,52 @@ export function Inventory() {
             </tbody>
           </table>
         )}
+
+        {/* Tablet (<lg): minimal-row table. Row click opens CardDetailModal
+            (already wired via setSelectedId). */}
+        <table className="lg:hidden w-full text-xs">
+          <thead className="sticky top-0 bg-zinc-950 z-10">
+            <tr className="border-b border-zinc-700 text-[10px] text-zinc-400 uppercase tracking-wide">
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Cert</th>
+              <th className="px-3 py-2 text-left font-medium">Card</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Grade</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Co.</th>
+              <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Listed</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800/50">
+            {!data?.data.length ? (
+              <tr><td colSpan={5} className="px-3 py-10 text-center text-zinc-500">No cards found.</td></tr>
+            ) : data.data.map((row) => {
+              const link = row.cert_number ? certLink(row.company, row.cert_number) : null;
+              const display = row.cert_number ? row.cert_number.padStart(8, '0') : '';
+              const gradeText = row.grade_label
+                ? (row.numeric_grade && !row.grade_label.includes(String(row.numeric_grade))
+                    ? `${row.grade_label} ${row.numeric_grade}`
+                    : row.grade_label)
+                : (row.numeric_grade ?? '—');
+              return (
+                <tr key={`m-${row.id}`} onClick={() => setSelectedId(row.id)}
+                    className="hover:bg-zinc-800/25 cursor-pointer transition-colors">
+                  <td className="px-3 py-2 font-mono text-[11px]" onClick={(e) => link && e.stopPropagation()}>
+                    {link
+                      ? <a href={link} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{display}</a>
+                      : <span className="text-zinc-400">{display}</span>}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-200 break-words">{row.card_name ?? '—'}</td>
+                  <td className="px-3 py-2 text-zinc-300">{gradeText}</td>
+                  <td className="px-3 py-2 text-zinc-400 text-[11px]">{row.company}</td>
+                  <td className="px-3 py-2 text-right text-zinc-300 font-medium">{fmt(row.listed_price)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {/* Pagination */}
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-center lg:justify-between gap-6 lg:gap-0 px-28 lg:px-6 lg:pr-44 py-3 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{(data.total ?? 0).toLocaleString()} cards</span>
           {data.total_pages > 1 && (
             <div className="flex items-center gap-2">

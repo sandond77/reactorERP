@@ -1346,7 +1346,7 @@ export function Listings() {
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
         ) : (
-          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
+          <table className="text-xs whitespace-nowrap border-collapse hidden lg:table" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Part #"                          {...sh} {...rz('part')}    minWidth={MINS.part}
@@ -1572,10 +1572,59 @@ export function Listings() {
             </tbody>
           </table>
         )}
+
+        {/* Tablet (<lg): minimal-row table. Skips the expand-toggle behaviour
+            — tapping a row always opens edit modal so users get full detail
+            without the awkward inline sub-row UX at narrow widths. */}
+        <table className="lg:hidden w-full text-xs">
+          <thead className="sticky top-0 bg-zinc-950 z-10">
+            <tr className="border-b border-zinc-700 text-[10px] text-zinc-400 uppercase tracking-wide">
+              <th className="px-3 py-2 text-left font-medium">Card</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                {listingTab === 'graded' || listingTab === 'graded_set' ? 'Grade' : 'Cond.'}
+              </th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Platform</th>
+              <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Price</th>
+              <th className="px-3 py-2 text-center font-medium whitespace-nowrap">Listed</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800/60">
+            {!data?.data.length ? (
+              <tr><td colSpan={5} className="px-3 py-10 text-center text-zinc-500">No listings found.</td></tr>
+            ) : data.data.map((row, i) => {
+              const isGraded = listingTab === 'graded' || listingTab === 'graded_set';
+              return (
+                <tr key={`m-${i}`} onClick={() => setEditRow(row)}
+                    className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
+                  <td className="px-3 py-2">
+                    <p className="text-zinc-200 break-words">
+                      {listingTab === 'graded_set'
+                        ? (row.listing_group_name ?? 'Unnamed Set')
+                        : (row.card_name ?? 'Unknown')}
+                    </p>
+                    {row.set_name && listingTab !== 'graded_set' && (
+                      <p className="text-[10px] text-zinc-500 truncate">{row.set_name}</p>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-300 text-[11px]">
+                    {isGraded
+                      ? (row.grade_label ?? '—')
+                      : (row.condition ?? '—')}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-300 capitalize whitespace-nowrap">{row.platform}</td>
+                  <td className="px-3 py-2 text-right text-zinc-200 font-medium whitespace-nowrap">
+                    {row.list_price != null ? formatCurrency(row.list_price, row.currency) : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-center text-zinc-400">{row.num_listed ?? 1}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-center lg:justify-between gap-6 lg:gap-0 px-28 lg:px-6 lg:pr-44 py-3 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{data.total} {data.total === 1 ? 'group' : 'groups'}</span>
           {data.total_pages > 1 && (
             <div className="flex gap-2">
