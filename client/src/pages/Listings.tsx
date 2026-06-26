@@ -7,7 +7,8 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency, formatCertNumber } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
-import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { ColHeader, ColumnFilter, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { FilterDrawer, FilterDrawerLauncher } from '../components/ui/FilterDrawer';
 import toast from 'react-hot-toast';
 import { AlertTriangle } from 'lucide-react';
 
@@ -1172,6 +1173,7 @@ export function Listings() {
   const [fNumSold, setFNumSold] = useState<string[] | null>(saved.fNumSold);
   const [fCardName, setFCardName] = useState<string[] | null>(saved.fCardName);
   const [fPrice, setFPrice] = useState<string[] | null>(saved.fPrice);
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
   const [listingTab, setListingTab] = useState<'graded' | 'raw' | 'graded_set' | 'raw_set'>('graded');
@@ -1297,9 +1299,9 @@ export function Listings() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Listings</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3 w-full lg:w-auto justify-end">
           {hasActiveFilters && (
             <button onClick={() => { setFPlatform(null); setFGrade(null); setFCompany(null); setFPartNumber(null); setFNumListed(null); setFNumSold(null); setFCardName(null); setFPrice(null); setSearch(''); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
@@ -1320,6 +1322,19 @@ export function Listings() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-52"
+          />
+          <FilterDrawerLauncher
+            onClick={() => setFilterDrawerOpen(true)}
+            activeCount={
+              (fPartNumber ? 1 : 0) +
+              (fCardName ? 1 : 0) +
+              (fCompany ? 1 : 0) +
+              (fGrade ? 1 : 0) +
+              (fPlatform ? 1 : 0) +
+              (fPrice ? 1 : 0) +
+              (fNumListed ? 1 : 0) +
+              (fNumSold ? 1 : 0)
+            }
           />
           <Button size="sm" onClick={() => setShowAddModal(true)}>
             <Plus size={14} /> Add Listing
@@ -1346,7 +1361,7 @@ export function Listings() {
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
         ) : (
-          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
+          <table className="text-xs whitespace-nowrap border-collapse hidden lg:table" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Part #"                          {...sh} {...rz('part')}    minWidth={MINS.part}
@@ -1572,10 +1587,59 @@ export function Listings() {
             </tbody>
           </table>
         )}
+
+        {/* Tablet (<lg): minimal-row table. Skips the expand-toggle behaviour
+            — tapping a row always opens edit modal so users get full detail
+            without the awkward inline sub-row UX at narrow widths. */}
+        <table className="lg:hidden w-full text-xs">
+          <thead className="sticky top-0 bg-zinc-950 z-10">
+            <tr className="border-b border-zinc-700 text-[10px] text-zinc-400 uppercase tracking-wide">
+              <th className="px-3 py-2 text-left font-medium">Card</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">
+                {listingTab === 'graded' || listingTab === 'graded_set' ? 'Grade' : 'Cond.'}
+              </th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Platform</th>
+              <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Price</th>
+              <th className="px-3 py-2 text-center font-medium whitespace-nowrap">Listed</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800/60">
+            {!data?.data.length ? (
+              <tr><td colSpan={5} className="px-3 py-10 text-center text-zinc-500">No listings found.</td></tr>
+            ) : data.data.map((row, i) => {
+              const isGraded = listingTab === 'graded' || listingTab === 'graded_set';
+              return (
+                <tr key={`m-${i}`} onClick={() => setEditRow(row)}
+                    className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
+                  <td className="px-3 py-2">
+                    <p className="text-zinc-200 break-words">
+                      {listingTab === 'graded_set'
+                        ? (row.listing_group_name ?? 'Unnamed Set')
+                        : (row.card_name ?? 'Unknown')}
+                    </p>
+                    {row.set_name && listingTab !== 'graded_set' && (
+                      <p className="text-[10px] text-zinc-500 truncate">{row.set_name}</p>
+                    )}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-300 text-[11px]">
+                    {isGraded
+                      ? (row.grade_label ?? '—')
+                      : (row.condition ?? '—')}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-300 capitalize whitespace-nowrap">{row.platform}</td>
+                  <td className="px-3 py-2 text-right text-zinc-200 font-medium whitespace-nowrap">
+                    {row.list_price != null ? formatCurrency(row.list_price, row.currency) : '—'}
+                  </td>
+                  <td className="px-3 py-2 text-center text-zinc-400">{row.num_listed ?? 1}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-center lg:justify-between gap-6 lg:gap-0 px-28 lg:px-6 lg:pr-44 py-3 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{data.total} {data.total === 1 ? 'group' : 'groups'}</span>
           {data.total_pages > 1 && (
             <div className="flex gap-2">
@@ -1594,6 +1658,54 @@ export function Listings() {
       <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title="Edit Listing">
         {editTarget && <EditListingModal row={editTarget.row} cert={editTarget.cert} onClose={() => setEditTarget(null)} />}
       </Modal>
+
+      {/* Tablet (<lg) filter drawer — surfaces all the column-header filters
+          that go away when the desktop table is hidden:lg:table. Filters are
+          context-aware: Company/Grade only show in graded modes; Condition
+          handling stays on the inline header (no multi-select). */}
+      {(() => {
+        const isGraded = listingTab === 'graded' || listingTab === 'graded_set';
+        return (
+          <FilterDrawer open={filterDrawerOpen} onClose={() => setFilterDrawerOpen(false)} title="Listings filters">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Part #</span>
+              <ColumnFilter options={filterOptions?.part_numbers ?? []} selected={fPartNumber} onChange={(v) => { setFPartNumber(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Card name</span>
+              <ColumnFilter options={filterOptions?.card_names ?? []} selected={fCardName} onChange={(v) => { setFCardName(v); setPage(1); }} align="right" />
+            </div>
+            {isGraded && (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-zinc-400">Company</span>
+                  <ColumnFilter options={filterOptions?.companies ?? []} selected={fCompany} onChange={(v) => { setFCompany(v); setPage(1); }} align="right" />
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-zinc-400">Grade</span>
+                  <ColumnFilter options={filterOptions?.grades ?? []} selected={fGrade} onChange={(v) => { setFGrade(v); setPage(1); }} align="right" />
+                </div>
+              </>
+            )}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Platform</span>
+              <ColumnFilter options={filterOptions?.platforms ?? []} selected={fPlatform} onChange={(v) => { setFPlatform(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Price</span>
+              <ColumnFilter options={filterOptions?.prices ?? []} selected={fPrice} onChange={(v) => { setFPrice(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400"># Listed</span>
+              <ColumnFilter options={filterOptions?.num_listed ?? []} selected={fNumListed} onChange={(v) => { setFNumListed(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400"># Sold</span>
+              <ColumnFilter options={filterOptions?.num_sold ?? []} selected={fNumSold} onChange={(v) => { setFNumSold(v); setPage(1); }} align="right" />
+            </div>
+          </FilterDrawer>
+        );
+      })()}
     </div>
   );
 }

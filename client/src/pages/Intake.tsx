@@ -565,7 +565,8 @@ function PurchaseForm({
             </div>
           )}
           <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
-            <div className="grid grid-cols-[repeat(14,minmax(0,1fr))] gap-2 px-2 py-1.5 text-[10px] uppercase tracking-wide text-zinc-500 bg-zinc-900/50">
+            {/* Header row — hidden at tablet since each card has inline field labels below */}
+            <div className="hidden lg:grid grid-cols-[repeat(14,minmax(0,1fr))] gap-2 px-2 py-1.5 text-[10px] uppercase tracking-wide text-zinc-500 bg-zinc-900/50">
               <div className="col-span-3">Card Name</div>
               <div className="col-span-3">Set</div>
               <div className="col-span-1">#</div>
@@ -577,22 +578,30 @@ function PurchaseForm({
             {lineItems.map((li, i) => {
               const sku = buildPartNumber(form.language, li.set_code, li.card_number);
               return (
-                <div key={i} className="grid grid-cols-[repeat(14,minmax(0,1fr))] gap-2 px-2 py-1.5 items-center">
-                  <input value={li.card_name}
-                    onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, card_name: e.target.value } : x))}
-                    className={`col-span-3 ${inp} ${errors[`line_${i}_name`] ? 'border-red-500/60' : ''}`} />
-                  <SetCombobox
-                    value={li.set_name}
-                    selectedCode={li.set_code || undefined}
-                    options={setOptions}
-                    inputCls={`${inp} ${errors[`line_${i}_set`] ? 'border-red-500/60' : ''}`}
-                    placeholder="Set"
-                    wrapperClassName="col-span-3"
-                    onTyped={(v) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, set_name: v, set_code: '' } : x))}
-                    onSelect={(entry) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, set_name: entry.name, set_code: entry.code } : x))}
-                    onAddNew={() => addNewSetForLine(i, li.set_name)}
-                  />
+                // Tablet: 2-col grid (Card/Set full-width, then # | Part#, then Qty | Cost, then Type full-width).
+                // Desktop (lg+): original 14-col single-row layout. Same inputs/handlers, just different col-spans.
+                <div key={i} className="grid grid-cols-2 lg:grid-cols-[repeat(14,minmax(0,1fr))] gap-2 px-3 py-3 lg:px-2 lg:py-1.5 items-start lg:items-center">
+                  <div className="col-span-2 lg:col-span-3">
+                    <label className="block text-[9px] uppercase tracking-wide text-zinc-500 mb-0.5 lg:hidden">Card Name</label>
+                    <input value={li.card_name}
+                      onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, card_name: e.target.value } : x))}
+                      className={`${inp} ${errors[`line_${i}_name`] ? 'border-red-500/60' : ''}`} />
+                  </div>
+                  <div className="col-span-2 lg:col-span-3">
+                    <label className="block text-[9px] uppercase tracking-wide text-zinc-500 mb-0.5 lg:hidden">Set</label>
+                    <SetCombobox
+                      value={li.set_name}
+                      selectedCode={li.set_code || undefined}
+                      options={setOptions}
+                      inputCls={`${inp} ${errors[`line_${i}_set`] ? 'border-red-500/60' : ''}`}
+                      placeholder="Set"
+                      onTyped={(v) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, set_name: v, set_code: '' } : x))}
+                      onSelect={(entry) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, set_name: entry.name, set_code: entry.code } : x))}
+                      onAddNew={() => addNewSetForLine(i, li.set_name)}
+                    />
+                  </div>
                   <div className="col-span-1 flex flex-col gap-0.5">
+                    <label className="block text-[9px] uppercase tracking-wide text-zinc-500 mb-0.5 lg:hidden">#</label>
                     <input
                       value={li.unnumbered ? '' : li.card_number}
                       disabled={li.unnumbered}
@@ -608,57 +617,69 @@ function PurchaseForm({
                       no #
                     </label>
                   </div>
-                  <div className="col-span-2 px-2 text-[10px] font-mono truncate flex items-center gap-1" title={sku ?? ''}>
-                    {sku && li.catalog_id ? (
-                      <>
-                        <span className="text-green-400">{sku}</span>
-                        {!li.card_number && <span className="font-sans text-[9px] text-zinc-500">(no #)</span>}
-                        <span title="Matches existing catalog entry" className="text-green-400 font-sans text-[9px]">✓</span>
+                  <div className="col-span-1 lg:col-span-2">
+                    <label className="block text-[9px] uppercase tracking-wide text-zinc-500 mb-0.5 lg:hidden">Part #</label>
+                    <div className="px-2 text-[10px] font-mono truncate flex items-center gap-1 min-h-[28px]" title={sku ?? ''}>
+                      {sku && li.catalog_id ? (
+                        <>
+                          <span className="text-green-400">{sku}</span>
+                          {!li.card_number && <span className="font-sans text-[9px] text-zinc-500">(no #)</span>}
+                          <span title="Matches existing catalog entry" className="text-green-400 font-sans text-[9px]">✓</span>
+                          <button
+                            type="button"
+                            onClick={() => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, catalog_id: null } : x))}
+                            title="Clear catalog match"
+                            className="ml-auto text-zinc-600 hover:text-zinc-300 transition-colors"
+                          >
+                            <X size={10} />
+                          </button>
+                        </>
+                      ) : sku && (li.card_number || li.unnumbered) ? (
                         <button
                           type="button"
-                          onClick={() => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, catalog_id: null } : x))}
-                          title="Clear catalog match"
-                          className="ml-auto text-zinc-600 hover:text-zinc-300 transition-colors"
-                        >
-                          <X size={10} />
+                          onClick={() => openCreatePartForLine(i)}
+                          className="text-[10px] font-sans text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5"
+                          title={li.card_number ? `Create new catalog entry: ${sku}` : `Create unnumbered catalog entry: ${sku} (${li.card_name})`}>
+                          <Plus size={10} /> Create part {!li.card_number && <span className="text-zinc-500">(no #)</span>}
                         </button>
-                      </>
-                    ) : sku && (li.card_number || li.unnumbered) ? (
-                      <button
-                        type="button"
-                        onClick={() => openCreatePartForLine(i)}
-                        className="text-[10px] font-sans text-indigo-400 hover:text-indigo-300 inline-flex items-center gap-0.5"
-                        title={li.card_number ? `Create new catalog entry: ${sku}` : `Create unnumbered catalog entry: ${sku} (${li.card_name})`}>
-                        <Plus size={10} /> Create part {!li.card_number && <span className="text-zinc-500">(no #)</span>}
-                      </button>
-                    ) : li.set_name && !li.set_code ? (
-                      <button
-                        type="button"
-                        onClick={() => addNewSetForLine(i, li.set_name)}
-                        className="text-[10px] font-sans text-yellow-400 hover:text-yellow-300 inline-flex items-center gap-0.5"
-                        title={`Register "${li.set_name}" as a new set`}>
-                        <Plus size={10} /> Add set
-                      </button>
-                    ) : (
-                      <span className="text-zinc-600">—</span>
-                    )}
+                      ) : li.set_name && !li.set_code ? (
+                        <button
+                          type="button"
+                          onClick={() => addNewSetForLine(i, li.set_name)}
+                          className="text-[10px] font-sans text-yellow-400 hover:text-yellow-300 inline-flex items-center gap-0.5"
+                          title={`Register "${li.set_name}" as a new set`}>
+                          <Plus size={10} /> Add set
+                        </button>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
+                    </div>
                   </div>
-                  <input type="number" min="1" value={li.quantity}
-                    onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))}
-                    title={li.type === 'raw' && parseInt(li.quantity || '1') > 1 ? 'Bulk (B) is recommended for purchases with more than 1 card' : undefined}
-                    className={`col-span-1 ${inp} ${errors[`line_${i}_qty`] ? 'border-red-500/60' : ''} ${li.type === 'raw' && parseInt(li.quantity || '1') > 1 ? 'border-amber-500/40' : ''}`} />
-                  <input type="text" inputMode="decimal" value={li.cost}
-                    onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, cost: e.target.value } : x))}
-                    className={`col-span-2 ${inp} ${errors[`line_${i}_cost`] ? 'border-red-500/60' : ''}`} />
-                  <select value={li.type}
-                    onChange={(e) => {
-                      const nextType = e.target.value as PurchaseType;
-                      setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, type: nextType } : x));
-                    }}
-                    className={`col-span-2 ${inp}`}>
-                    <option value="raw">Raw</option>
-                    <option value="bulk">Bulk</option>
-                  </select>
+                  <div className="col-span-1">
+                    <label className="block text-[9px] uppercase tracking-wide text-zinc-500 mb-0.5 lg:hidden">Qty</label>
+                    <input type="number" min="1" value={li.quantity}
+                      onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))}
+                      title={li.type === 'raw' && parseInt(li.quantity || '1') > 1 ? 'Bulk (B) is recommended for purchases with more than 1 card' : undefined}
+                      className={`${inp} ${errors[`line_${i}_qty`] ? 'border-red-500/60' : ''} ${li.type === 'raw' && parseInt(li.quantity || '1') > 1 ? 'border-amber-500/40' : ''}`} />
+                  </div>
+                  <div className="col-span-1 lg:col-span-2">
+                    <label className="block text-[9px] uppercase tracking-wide text-zinc-500 mb-0.5 lg:hidden">Cost ({lineCurrency === 'JPY' ? '¥' : '$'})</label>
+                    <input type="text" inputMode="decimal" value={li.cost}
+                      onChange={(e) => setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, cost: e.target.value } : x))}
+                      className={`${inp} ${errors[`line_${i}_cost`] ? 'border-red-500/60' : ''}`} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-[9px] uppercase tracking-wide text-zinc-500 mb-0.5 lg:hidden">Type</label>
+                    <select value={li.type}
+                      onChange={(e) => {
+                        const nextType = e.target.value as PurchaseType;
+                        setLineItems((arr) => arr!.map((x, j) => j === i ? { ...x, type: nextType } : x));
+                      }}
+                      className={inp}>
+                      <option value="raw">Raw</option>
+                      <option value="bulk">Bulk</option>
+                    </select>
+                  </div>
                 </div>
               );
             })}
@@ -1057,9 +1078,9 @@ export function Intake() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Purchases</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3 w-full lg:w-auto justify-end">
           {hasActiveFilters && (
             <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
               <X size={12} /> Clear filters

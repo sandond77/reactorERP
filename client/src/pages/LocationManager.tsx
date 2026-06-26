@@ -502,16 +502,18 @@ export default function LocationManager() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 shrink-0">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800 shrink-0">
         <div>
           <h1 className="text-lg font-semibold text-zinc-100">Location Manager</h1>
           <p className="text-xs text-zinc-500 mt-0.5">
             {rootCount} location{rootCount !== 1 ? 's' : ''} · {totalCards} card{totalCards !== 1 ? 's' : ''} assigned
           </p>
         </div>
-        <Button size="sm" onClick={() => setCreateModal({ parent: null })}>
-          <Plus size={14} /> Add Location
-        </Button>
+        <div className="flex w-full lg:w-auto justify-end">
+          <Button size="sm" onClick={() => setCreateModal({ parent: null })}>
+            <Plus size={14} /> Add Location
+          </Button>
+        </div>
       </div>
 
       {/* Table */}

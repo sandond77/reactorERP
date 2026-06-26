@@ -443,7 +443,7 @@ export function InspectionPanel({
   return (
     <div className="h-full flex flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <div className="flex items-center gap-3">
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
             <ChevronLeft size={16} />
@@ -457,7 +457,7 @@ export function InspectionPanel({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3 w-full lg:w-auto justify-end">
           <span className="text-xs text-zinc-500">
             {allocated}/{purchase.card_count} allocated
             {remaining > 0 ? ` · ${remaining} remaining` : ''}

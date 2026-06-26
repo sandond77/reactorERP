@@ -473,7 +473,7 @@ function AttentionCard() {
       </div>
 
       {/* Row 1: 3 equal boxes */}
-      <div className="grid grid-cols-3 gap-3 flex-1 min-h-[180px]">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 flex-1 min-h-[180px]">
         <AttentionBox title="Order More" count={reorderAlerts.length} hasAlert={reorderAlerts.length > 0} linkTo="/alerts?tab=reorder">
           <OrderMoreSection />
         </AttentionBox>
@@ -514,7 +514,7 @@ function AttentionCard() {
       </div>
 
       {/* Row 2: 2 equal boxes */}
-      <div className="grid grid-cols-2 gap-3 flex-[1.5] min-h-[220px] mt-3">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-[1.5] min-h-[220px] mt-3">
         <AttentionBox title={`eBay Listings Unsold 30+ Days`} count={staleEbay.length} hasAlert={staleEbay.length > 0} linkTo="/alerts?tab=ebay">
           {staleEbay.length === 0 ? (
             <p className="text-xs text-zinc-600">No stale listings.</p>
@@ -648,7 +648,7 @@ function OverviewTab() {
           {(() => {
             const netProfit = (windowData.total_profit ?? 0) - (windowData.total_expenses ?? 0);
             return (
-              <div className="grid grid-cols-6 divide-x divide-zinc-800">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3 lg:gap-0 lg:divide-x lg:divide-zinc-800">
                 {([
                   { label: 'Gross',                  value: formatCurrency(windowData.total_gross ?? 0),                              cls: 'text-zinc-100' },
                   { label: 'Cost',                   value: formatCurrency(windowData.total_cost ?? 0),                               cls: 'text-zinc-100' },
@@ -657,7 +657,11 @@ function OverviewTab() {
                   { label: 'Net Profit (After Exp)', value: (netProfit >= 0 ? '+' : '') + formatCurrency(netProfit),                  cls: netProfit >= 0 ? 'text-emerald-400' : 'text-red-400' },
                   { label: '# of Sales',             value: String(windowData.count),                                                 cls: 'text-zinc-100' },
                 ]).map(({ label, value, cls }, i) => (
-                  <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
+                  <div key={label} className={cn(
+                    'lg:py-0',
+                    i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
+                    i === 5 ? 'lg:pr-0' : '',
+                  )}>
                     <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
                     <p className={cn('text-xl font-bold', cls)}>{value}</p>
                   </div>
@@ -670,13 +674,17 @@ function OverviewTab() {
         {/* Row 2: Inventory */}
         <Card>
           <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Inventory</p>
-          <div className="grid grid-cols-3 divide-x divide-zinc-800">
+          <div className="grid grid-cols-3 gap-x-4 lg:gap-0 lg:divide-x lg:divide-zinc-800">
             {([
               { label: 'Total Cards',  value: cards.total.all,  sub: `Graded ${cards.total.graded}  ·  Raw ${cards.total.raw}` },
               { label: 'Unsold Cards', value: cards.unsold.all, sub: `Graded ${cards.unsold.graded}  ·  Raw ${cards.unsold.raw}` },
               { label: 'Sold Cards',   value: cards.sold.all,   sub: `Graded ${cards.sold.graded}  ·  Raw ${cards.sold.raw}` },
             ]).map(({ label, value, sub }, i) => (
-              <div key={label} className={i === 0 ? 'pr-6' : 'px-6'}>
+              <div key={label} className={cn(
+                'lg:py-0',
+                i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
+                i === 2 ? 'lg:pr-0' : '',
+              )}>
                 <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
                 <p className="text-xl font-bold text-zinc-100">{value}</p>
                 <p className="text-xs text-zinc-600 mt-0.5">{sub}</p>
@@ -686,7 +694,7 @@ function OverviewTab() {
         </Card>
 
         {/* Row 3: Sales by channel */}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {([
             { key: 'ebay',      label: 'eBay' },
             { key: 'card_show', label: 'Card Shows' },
@@ -727,8 +735,8 @@ function OverviewTab() {
         {/* Row 4: Pipeline */}
         <Card>
           <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Pipeline</p>
-          <div className="grid grid-cols-4 divide-x divide-zinc-800">
-            <div className="pr-6">
+          <div className="grid grid-cols-1 lg:grid-cols-4 lg:divide-x lg:divide-zinc-800 divide-y divide-zinc-800/40 lg:divide-y-0">
+            <div className="py-3 lg:py-0 lg:pr-6 lg:pt-0">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -743,17 +751,17 @@ function OverviewTab() {
                 </div>
               </div>
             </div>
-            <div className="px-6">
+            <div className="py-3 lg:py-0 lg:px-6">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Pending Orders</p>
               <p className={cn('text-xl font-bold', performance.pending_orders > 0 ? 'text-amber-400' : 'text-zinc-100')}>{performance.pending_orders}</p>
               <p className="text-xs text-zinc-600 mt-0.5">purchases ordered, not received</p>
             </div>
-            <div className="px-6">
+            <div className="py-3 lg:py-0 lg:px-6">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Needs Inspection</p>
               <p className={cn('text-xl font-bold', pipeline.needs_inspection > 0 ? 'text-amber-400' : 'text-zinc-100')}>{pipeline.needs_inspection}</p>
               <p className="text-xs text-zinc-600 mt-0.5">purchased, not yet inspected</p>
             </div>
-            <div className="pl-6">
+            <div className="py-3 lg:py-0 lg:pl-6 lg:pb-0">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">At Graders</p>
               <p className="text-xl font-bold text-zinc-100">{grading.card_count}</p>
               <p className="text-xs text-zinc-600 mt-0.5">{grading.sub_count} {grading.sub_count === 1 ? 'submission' : 'submissions'}</p>
@@ -992,7 +1000,7 @@ function RawCardsTab() {
       <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-800 pb-1">Statistics</p>
 
       {rawView === 'Unsold' && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {[
             { label: 'Total Unsold', value: String(INV.total) },
             { label: 'Total Cost',   value: formatCurrency(INV.total_cost_cents) },
@@ -1008,7 +1016,7 @@ function RawCardsTab() {
 
       {rawView === 'Sold' && (
         <>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {[
               { label: 'Total Sold',    value: String(S.total_sold) },
               { label: 'Total Revenue', value: formatCurrency(S.total_revenue_cents), color: 'text-emerald-400' },
@@ -1020,7 +1028,7 @@ function RawCardsTab() {
               </Card>
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {[
               { label: 'Avg Sale Price', value: formatCurrency(S.avg_sale_price_cents) },
               { label: 'Avg Profit',     value: formatCurrency(S.avg_profit_cents), color: S.avg_profit_cents >= 0 ? 'text-emerald-400' : 'text-red-400' },
@@ -1048,7 +1056,7 @@ function RawCardsTab() {
 
       {rawView === 'All' && (
         <>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {[
               { label: 'Total Cards',  value: String(INV.total) },
               { label: 'Sold Cards',   value: String(S.total_sold), color: 'text-emerald-400' },
@@ -1060,7 +1068,7 @@ function RawCardsTab() {
               </Card>
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {[
               { label: 'Total Cost',    value: formatCurrency(INV.total_cost_cents) },
               { label: 'Total Revenue', value: formatCurrency(S.total_revenue_cents), color: 'text-emerald-400' },
@@ -1384,7 +1392,7 @@ function GradedTab() {
       <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest border-b border-zinc-800 pb-1">Statistics</p>
 
       {invView === 'Unsold' && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {[
             { label: 'Total Unsold',     value: String(INV.total) },
             { label: 'Total Raw Cost',   value: formatCurrency(rawCostCents) },
@@ -1400,7 +1408,7 @@ function GradedTab() {
 
       {invView === 'Sold' && (
         <>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {[
               { label: 'Total Sold',    value: String(INV.total) },
               { label: 'Total Revenue', value: formatCurrency(S.total_revenue_cents),  color: 'text-emerald-400' },
@@ -1412,7 +1420,7 @@ function GradedTab() {
               </Card>
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {[
               { label: 'Total Raw Cost',   value: formatCurrency(rawCostCents) },
               { label: 'Total Cost Basis', value: formatCurrency(INV.total_cost_cents) },
@@ -1429,7 +1437,7 @@ function GradedTab() {
 
       {invView === 'All' && (
         <>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {[
               { label: 'Total Cards',  value: String(INV.total) },
               { label: 'Sold Cards',   value: String(S.total_sold), color: 'text-emerald-400' },
@@ -1441,7 +1449,7 @@ function GradedTab() {
               </Card>
             ))}
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {[
               { label: 'Total Raw Cost',   value: formatCurrency(rawCostCents) },
               { label: 'Total Cost Basis', value: formatCurrency(INV.total_cost_cents) },

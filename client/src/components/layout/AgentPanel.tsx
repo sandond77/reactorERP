@@ -61,7 +61,7 @@ function saveMessages(msgs: Message[]) {
   } catch { /* storage full — ignore */ }
 }
 
-export function AgentPanel() {
+export function AgentPanel({ hideLauncher = false }: { hideLauncher?: boolean }) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>(loadMessages);
@@ -180,8 +180,8 @@ export function AgentPanel() {
   return (
     <>
       {open && (
-        <div className="fixed bottom-16 right-5 z-50 w-96 flex flex-col bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
-          style={{ height: '520px' }}>
+        <div className="fixed bottom-16 right-5 z-50 w-96 max-w-[calc(100vw-2.5rem)] flex flex-col bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl overflow-hidden"
+          style={{ height: 'min(520px, calc(100vh - 6rem))' }}>
           {/* Header */}
           <div className="flex items-center justify-between px-5 py-4 bg-zinc-800 border-b border-zinc-700">
             <div className="flex items-center gap-3">
@@ -339,19 +339,22 @@ export function AgentPanel() {
         </div>
       )}
 
-      {/* Floating toggle button */}
-      <button
-        onClick={() => setOpen(o => !o)}
-        className={cn(
-          'fixed bottom-5 right-5 z-40 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-colors',
-          open
-            ? 'bg-indigo-600 text-white'
-            : 'bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700'
-        )}
-      >
-        <Bot size={15} />
-        <span>AI Agent</span>
-      </button>
+      {/* Floating toggle button. Hidden while the sidebar overlay is open at
+          tablet so it doesn't float on top of the darkened backdrop. */}
+      {!hideLauncher && (
+        <button
+          onClick={() => setOpen(o => !o)}
+          className={cn(
+            'fixed bottom-5 right-5 z-40 flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium shadow-lg transition-colors',
+            open
+              ? 'bg-indigo-600 text-white'
+              : 'bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-700'
+          )}
+        >
+          <Bot size={15} />
+          <span>AI Agent</span>
+        </button>
+      )}
     </>
   );
 }

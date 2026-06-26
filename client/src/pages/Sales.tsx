@@ -8,7 +8,8 @@ import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency, formatDate, cn, parseDollars, toCents } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
-import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { ColHeader, ColumnFilter, useColWidths, colMinWidth } from '../components/ui/TableHeader';
+import { FilterDrawer, FilterDrawerLauncher } from '../components/ui/FilterDrawer';
 import toast from 'react-hot-toast';
 
 interface Sale {
@@ -2457,6 +2458,7 @@ export function Sales() {
   const [sortDir, setSortDir] = useState<SortDir>(saved.sortDir);
   const [fPlatform, setFPlatform] = useState<string[] | null>(saved.fPlatform);
   const [fSoldDates, setFSoldDates] = useState<string[]>(saved.fSoldDates ?? []);
+  const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [cardType, setCardType] = useState<CardTypeFilter>(saved.cardType ?? 'all');
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
@@ -2531,9 +2533,9 @@ export function Sales() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Sales</h1>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center flex-wrap gap-3 w-full lg:w-auto justify-end">
           {hasActiveFilters && (
             <button onClick={() => { setFPlatform(null); setCardType('all'); setSearch(''); setFSoldDates([]); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
@@ -2555,6 +2557,10 @@ export function Sales() {
             onChange={(e) => setSearch(e.target.value)}
             className="px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 w-64"
           />
+          <FilterDrawerLauncher
+            onClick={() => setFilterDrawerOpen(true)}
+            activeCount={(fPlatform ? 1 : 0) + (fSoldDates.length > 0 ? 1 : 0)}
+          />
           <Button size="sm" onClick={() => setShowAddModal(true)}>
             <Plus size={14} /> Record Sale
           </Button>
@@ -2565,7 +2571,7 @@ export function Sales() {
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
         ) : (
-          <table className="text-xs whitespace-nowrap border-collapse" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
+          <table className="text-xs whitespace-nowrap border-collapse hidden lg:table" style={{ tableLayout: 'fixed', width: totalWidth + 'px' }}>
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-300 uppercase tracking-wide">
                 <ColHeader label="Date Sold"      col="sold_at"      {...sh} {...rz('date')} minWidth={MINS.date}
@@ -2640,10 +2646,42 @@ export function Sales() {
             </tbody>
           </table>
         )}
+
+        {/* Tablet (<lg): minimal-row table. Whole row click opens SaleActionModal
+            (already wired). Desktop table above keeps the full 13-col layout. */}
+        <table className="lg:hidden w-full text-xs">
+          <thead className="sticky top-0 bg-zinc-950 z-10">
+            <tr className="border-b border-zinc-700 text-[10px] text-zinc-400 uppercase tracking-wide">
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Date</th>
+              <th className="px-3 py-2 text-left font-medium">Card</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Grade / Cond.</th>
+              <th className="px-3 py-2 text-left font-medium whitespace-nowrap">Platform</th>
+              <th className="px-3 py-2 text-right font-medium whitespace-nowrap">Sale $</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-800/60">
+            {!data?.data.length ? (
+              <tr><td colSpan={5} className="px-3 py-10 text-center text-zinc-500">No sales found.</td></tr>
+            ) : data.data.map((sale) => (
+              <tr key={`m-${sale.id}`} onClick={() => setSelectedSale(sale)}
+                  className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
+                <td className="px-3 py-2 text-zinc-500 whitespace-nowrap">{formatDate(sale.sold_at)}</td>
+                <td className="px-3 py-2 text-zinc-200 break-words">{sale.card_name ?? 'Unknown'}</td>
+                <td className="px-3 py-2 text-zinc-300">
+                  {sale.grade_label || sale.grade != null
+                    ? <span><span className="text-zinc-500 text-[10px] mr-1">{sale.grading_company}</span>{sale.grade_label ?? sale.grade}</span>
+                    : sale.condition ?? <span className="text-zinc-700">—</span>}
+                </td>
+                <td className="px-3 py-2 text-zinc-400 whitespace-nowrap">{platformLabel(sale.platform)}</td>
+                <td className="px-3 py-2 text-right text-zinc-200 font-medium whitespace-nowrap">{formatCurrency(sale.sale_price, sale.currency)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
       {data && (
-        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="flex items-center justify-center lg:justify-between gap-6 lg:gap-0 px-28 lg:px-6 lg:pr-44 py-3 border-t border-zinc-800 text-xs text-zinc-500">
           <span>{data.total} sales</span>
           {data.total_pages > 1 && (
             <div className="flex gap-2">
@@ -2663,6 +2701,33 @@ export function Sales() {
       <Modal open={!!selectedSale} onClose={() => setSelectedSale(null)} title="Sale">
         {selectedSale && <SaleActionModal sale={selectedSale} onClose={() => setSelectedSale(null)} />}
       </Modal>
+
+      {/* Tablet (<lg) filter drawer — surfaces the column-header filters
+          (Platform, Sold Date) that aren't accessible when the desktop table
+          is hidden:lg:table. ColumnFilter is reused from TableHeader so the
+          UX matches the desktop popovers exactly. */}
+      <FilterDrawer open={filterDrawerOpen} onClose={() => setFilterDrawerOpen(false)} title="Sales filters">
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-zinc-400">Platform</span>
+          <ColumnFilter
+            options={filterOptions?.platforms ?? []}
+            selected={fPlatform}
+            onChange={(v) => { setFPlatform(v); setPage(1); }}
+            align="right"
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-zinc-400">Sold date</span>
+          <ColumnFilter
+            options={[]}
+            selected={null}
+            onChange={() => {}}
+            align="right"
+            dateValues={fSoldDates}
+            onDatesChange={(d) => { setFSoldDates(d); setPage(1); }}
+          />
+        </div>
+      </FilterDrawer>
     </div>
   );
 }
