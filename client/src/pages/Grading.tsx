@@ -8,7 +8,7 @@ import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
 import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
-import { formatCurrency, formatDate } from '../lib/utils';
+import { formatCurrency, formatDate, toCents } from '../lib/utils';
 import toast from 'react-hot-toast';
 
 const GRADING_COMPANIES = ['PSA', 'BGS', 'CGC', 'SGC', 'HGA', 'ACE', 'ARS', 'OTHER'] as const;
@@ -47,6 +47,7 @@ interface BatchItem {
   card_name: string | null;
   set_name: string | null;
   card_number: string | null;
+  language: string | null;
   condition: string | null;
   quantity: number;                       // qty submitted to this batch
   available_quantity: number;             // total qty on the card instance
@@ -59,6 +60,8 @@ interface BatchItem {
   item_total: number;
   rolling_total: number;
   raw_purchase_label: string | null;
+  slab_cert_number: string | null;
+  slab_grade_label: string | null;
 }
 
 interface BatchDetail extends Batch {
@@ -83,6 +86,7 @@ interface CardToGrade {
   condition: string | null;
   quantity: number;
   raw_purchase_label: string | null;
+  purchase_cost: number;
 }
 
 // ── Create Batch Modal ───────────────────────────────────────────────────────
@@ -119,7 +123,7 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
         company,
         tier,
         submitted_at:  submittedAt || undefined,
-        grading_cost:  costPerCard ? Math.round(parseFloat(costPerCard) * 100) : undefined,
+        grading_cost:  costPerCard ? toCents(costPerCard) : undefined,
         notes:         notes || undefined,
       });
       toast.success('Batch created');
@@ -176,14 +180,15 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
   // before switching to Legacy, since that swap unmounts the child and
   // wipes its selection state.
   const [pendingInventoryRows, setPendingInventoryRows] = useState(0);
+  // Modal-driven confirm — replaces window.confirm (forbidden by CLAUDE.md
+  // UI rules). Holds the target mode while we wait for user decision.
+  const [confirmSwitchTo, setConfirmSwitchTo] = useState<'inventory' | 'legacy' | null>(null);
 
   function trySwitch(next: 'inventory' | 'legacy') {
     if (next === mode) return;
     if (next === 'legacy' && pendingInventoryRows > 0) {
-      const ok = window.confirm(
-        `Switching to Legacy will discard the ${pendingInventoryRows} card${pendingInventoryRows === 1 ? '' : 's'} staged on the From Inventory tab. Continue?`
-      );
-      if (!ok) return;
+      setConfirmSwitchTo(next);
+      return;
     }
     setMode(next);
   }
@@ -193,7 +198,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
       <div className="inline-flex rounded-md bg-zinc-900 border border-zinc-800 p-0.5">
         {([
           { key: 'inventory', label: 'From Inventory' },
-          { key: 'legacy',    label: 'Legacy (no lot)' },
+          { key: 'legacy',    label: 'Legacy' },
         ] as const).map(t => (
           <button key={t.key} type="button" onClick={() => trySwitch(t.key)}
             className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${mode === t.key ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
@@ -204,6 +209,34 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
       {mode === 'inventory'
         ? <AddCardFromInventory batchId={batchId} onClose={onClose} onPendingCountChange={setPendingInventoryRows} />
         : <AddCardLegacy        batchId={batchId} onClose={onClose} />}
+
+      <Modal
+        open={!!confirmSwitchTo}
+        onClose={() => setConfirmSwitchTo(null)}
+        title="Discard staged cards?">
+        <div className="space-y-4">
+          <p className="text-sm text-zinc-300 leading-relaxed">
+            Switching to <span className="text-zinc-100 font-medium">Legacy</span> will discard
+            the <span className="text-zinc-100 font-medium">{pendingInventoryRows}</span> card
+            {pendingInventoryRows === 1 ? '' : 's'} staged on the From Inventory tab.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={() => setConfirmSwitchTo(null)}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="bg-red-600 hover:bg-red-500 text-white border-0"
+              onClick={() => {
+                const next = confirmSwitchTo;
+                setConfirmSwitchTo(null);
+                if (next) setMode(next);
+              }}>
+              Discard &amp; switch
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -247,7 +280,11 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
         search: debounced,
         ...(strict ? { exact: 'true' } : {}),
         limit: 50,
-        status: 'purchased_raw,inspected,grading_submitted',
+        // grading_submitted is intentionally NOT in this list — those cards
+        // are physically at PSA and have already been split into a sibling
+        // ci row. Including them re-exposed already-submitted cards in the
+        // next batch's picker.
+        status: 'purchased_raw,inspected',
         decision: 'grade',
         // Legacy stash rows live in the Legacy (no lot) tab; suppress them
         // here so they don't pollute the From Inventory search results.
@@ -322,7 +359,7 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
           card_instance_id: r.card.id,
           quantity:         parseInt(r.qty),
           expected_grade:   r.expectedGrade ? parseFloat(r.expectedGrade) : undefined,
-          estimated_value:  r.estimatedValue ? Math.round(parseFloat(r.estimatedValue) * 100) : undefined,
+          estimated_value:  r.estimatedValue ? toCents(r.estimatedValue) : undefined,
         })),
       });
       toast.success(rows.length === 1 ? 'Card added to batch' : `${rows.length} cards added to batch`);
@@ -387,7 +424,7 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
                       </span>
                     </div>
                     <div className="text-xs text-zinc-500 mt-0.5">
-                      {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{remaining} available</span>
+                      {card.set_name ?? '—'}{card.card_number ? ` · #${card.card_number}` : ''}{card.rarity ? ` · ${card.rarity}` : ''}{card.condition ? ` · ${card.condition}` : ''} · <span className="text-zinc-400">{remaining} available</span> · <span className="text-zinc-400">{formatCurrency(card.purchase_cost, 'USD')}/card</span>
                     </div>
                   </button>
                 );
@@ -423,6 +460,7 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
                     {r.card.condition ? ` · ${r.card.condition}` : ''}
                     {' · '}<span className="font-mono text-zinc-400">{r.card.raw_purchase_label ?? '—'}</span>
                     {' · '}max {r.card.quantity}
+                    {' · '}<span className="text-zinc-400">{formatCurrency(r.card.purchase_cost, 'USD')}/card</span>
                   </p>
                 </div>
                 <input type="number" min={1} max={r.card.quantity} value={r.qty}
@@ -536,6 +574,10 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
           card_number: s.card_number ?? prev.card_number,
           language:    s.language    ?? prev.language,
         }));
+        // Clear the previous catalog match so PartNumberField re-resolves
+        // against the freshly-filled identity.
+        setCatalogMatch(null);
+        setCatalogId(null);
         toast.success('Auto-filled from card database');
       } else {
         toast('No match found — fill manually', { icon: '🔍' });
@@ -568,9 +610,9 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
         quantity:          qtyNum,
         // When pulling from a legacy bucket, server derives cost from the
         // stash row; purchase_cost is only used in the phantom-lot fallback.
-        purchase_cost:     form.purchase_cost ? Math.round(parseFloat(form.purchase_cost) * 100) : 0,
+        purchase_cost:     form.purchase_cost ? toCents(form.purchase_cost) : 0,
         expected_grade:    form.expected_grade ? parseFloat(form.expected_grade) : undefined,
-        estimated_value:   form.estimated_value ? Math.round(parseFloat(form.estimated_value) * 100) : undefined,
+        estimated_value:   form.estimated_value ? toCents(form.estimated_value) : undefined,
         catalog_id:        catalogId ?? undefined,        // REAL card identity — slab lands here
         legacy_catalog_id: legacyBucketId || undefined,   // legacy bucket — stash drawn from here
       });
@@ -729,11 +771,71 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
 // ── Edit Item Modal ───────────────────────────────────────────────────────────
 
 function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: string; onClose: () => void }) {
+  const [mode, setMode] = useState<'fix' | 'inventory' | 'legacy'>('fix');
+  return (
+    <div className="space-y-3">
+      <div className="inline-flex rounded-md bg-zinc-900 border border-zinc-800 p-0.5">
+        {([
+          { key: 'fix',       label: 'Fix Identity' },
+          { key: 'inventory', label: 'Replace from Inventory' },
+          { key: 'legacy',    label: 'Replace from Legacy' },
+        ] as const).map(t => (
+          <button key={t.key} type="button" onClick={() => setMode(t.key)}
+            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${mode === t.key ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {mode === 'fix'       && <FixIdentityTab item={item} batchId={batchId} onClose={onClose} />}
+      {mode === 'inventory' && <ReplaceFromInventoryTab item={item} batchId={batchId} onClose={onClose} />}
+      {mode === 'legacy'    && <ReplaceFromLegacyTab item={item} batchId={batchId} onClose={onClose} />}
+    </div>
+  );
+}
+
+function FixIdentityTab({ item, batchId, onClose }: { item: BatchItem; batchId: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [qty,            setQty]            = useState(String(item.quantity));
   const [expectedGrade,  setExpectedGrade]  = useState(item.expected_grade != null ? String(parseFloat(String(item.expected_grade))) : '');
   const [estimatedValue, setEstimatedValue] = useState(item.estimated_value != null ? String(item.estimated_value / 100) : '');
+  const [cardName,       setCardName]       = useState(item.card_name ?? '');
+  const [setName,        setSetName]        = useState(item.set_name ?? '');
+  const [cardNumber,     setCardNumber]     = useState(item.card_number ?? '');
+  const [language,       setLanguage]       = useState(item.language ?? 'EN');
+  const [rawPurchaseLabel, setRawPurchaseLabel] = useState(item.raw_purchase_label ?? '');
+  const [autoFillText,   setAutoFillText]   = useState('');
+  const [autoFilling,    setAutoFilling]    = useState(false);
   const [saving, setSaving] = useState(false);
+
+  async function autoFill(name: string) {
+    if (!name.trim()) return;
+    setAutoFilling(true);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await api.post('/agent/auto-fill', { partial_name: name, game: 'pokemon' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = (res.data as any)?.data?.suggestions?.[0];
+      if (s) {
+        const next = {
+          card_name:   (s.catalog_exists && s.catalog_card_name) ? s.catalog_card_name : (s.card_name ?? cardName),
+          set_name:    s.set_name    ?? setName,
+          card_number: s.card_number ?? cardNumber,
+          language:    s.language    ?? language,
+        };
+        setCardName(next.card_name ?? '');
+        setSetName(next.set_name ?? '');
+        setCardNumber(next.card_number ?? '');
+        setLanguage(next.language);
+        toast.success('Auto-filled from card database');
+      } else {
+        toast('No match found — fill manually', { icon: '🔍' });
+      }
+    } catch {
+      toast.error('Unable to auto-fill — fill manually');
+    } finally {
+      setAutoFilling(false);
+    }
+  }
 
   // For legacy-sourced lines, qty can climb beyond the current available_quantity
   // by pulling additional cards from the bucket's stash row. The server adjusts
@@ -747,12 +849,20 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
     if (!qty || isNaN(qtyNum) || qtyNum < 1 || qtyNum > maxQty) {
       toast.error(`Qty must be 1–${maxQty}`); return;
     }
+    if (!cardName.trim()) {
+      toast.error('Card name is required'); return;
+    }
     setSaving(true);
     try {
       await api.patch(`/grading-subs/${batchId}/items/${item.id}`, {
-        quantity:        qtyNum,
-        expected_grade:  expectedGrade ? parseFloat(expectedGrade) : null,
-        estimated_value: estimatedValue ? Math.round(parseFloat(estimatedValue) * 100) : null,
+        quantity:             qtyNum,
+        expected_grade:       expectedGrade ? parseFloat(expectedGrade) : null,
+        estimated_value:      estimatedValue ? toCents(estimatedValue) : null,
+        card_name_override:   cardName.trim(),
+        set_name_override:    setName.trim() || null,
+        card_number_override: cardNumber.trim() || null,
+        language:             language,
+        raw_purchase_label:   rawPurchaseLabel.trim() || null,
       });
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
@@ -766,11 +876,65 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <p className="text-sm text-zinc-400">
-        <span className="text-zinc-200 font-medium">{item.card_name ?? '—'}</span>
-        {item.set_name ? <span className="text-zinc-500"> · {item.set_name}</span> : null}
-        {item.card_number ? <span className="text-zinc-500"> #{item.card_number}</span> : null}
+      <p className="text-[10px] text-zinc-500 leading-relaxed">
+        Edits the linked card's identity in place (overrides + catalog link). Use when a typo or wrong-card was entered.
       </p>
+
+      {/* Auto-fill */}
+      <div className="flex flex-col gap-2">
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+          Auto-fill <span className="normal-case text-zinc-600">(optional)</span>
+        </label>
+        <div className="flex gap-2 items-center">
+          <input type="text" value={autoFillText} onChange={(e) => setAutoFillText(e.target.value)}
+            placeholder="e.g. 2024 Pokemon Indonesian SV-P Promo 154 Pikachu"
+            className="flex-1 rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500" />
+          <Button type="button" variant="secondary" size="sm" className="shrink-0"
+            onClick={() => autoFill(autoFillText)}
+            disabled={autoFilling || !autoFillText.trim()}>
+            {autoFilling ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            Auto-fill
+          </Button>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        <Input label="Card Name *" value={cardName} onChange={(e) => setCardName(e.target.value)} placeholder="e.g. Charizard" autoFocus />
+        <div className="grid grid-cols-3 gap-3">
+          <Input label="Set" value={setName} onChange={(e) => setSetName(e.target.value)} placeholder="Set name" />
+          <Input label="Card #" value={cardNumber} onChange={(e) => setCardNumber(e.target.value)} placeholder="#" />
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">Language</label>
+            <select value={language} onChange={(e) => setLanguage(e.target.value)}
+              className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500">
+              <option value="EN">EN — English</option>
+              <option value="JP">JP — Japanese</option>
+              <option value="KR">KR — Korean</option>
+              <option value="ZH-TW">ZH-TW — Chinese (Traditional)</option>
+              <option value="ZH-CN">ZH-CN — Chinese (Simplified)</option>
+              <option value="FR">FR — French</option>
+              <option value="DE">DE — German</option>
+              <option value="IT">IT — Italian</option>
+              <option value="ES">ES — Spanish</option>
+              <option value="PT">PT — Portuguese</option>
+              <option value="PL">PL — Polish</option>
+              <option value="NL">NL — Dutch</option>
+              <option value="RU">RU — Russian</option>
+              <option value="TH">TH — Thai</option>
+              <option value="ID">ID — Indonesian</option>
+            </select>
+          </div>
+        </div>
+        <Input
+          label={`Raw ID${item.raw_purchase_label ? ` (current: ${item.raw_purchase_label})` : ''}`}
+          value={rawPurchaseLabel}
+          onChange={(e) => setRawPurchaseLabel(e.target.value)}
+          placeholder="e.g. 2025R109 — leave blank to detach"
+        />
+      </div>
+
+      <div className="h-px bg-zinc-800" />
+
       <div className="grid grid-cols-3 gap-3 items-start">
         <div>
           <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1 whitespace-nowrap">
@@ -792,6 +956,370 @@ function EditItemModal({ item, batchId, onClose }: { item: BatchItem; batchId: s
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
         <Button type="submit" disabled={saving}>
           {saving && <Loader2 size={14} className="animate-spin" />} Save
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// ── Replace from Inventory tab (relink gbi to a different card_instance) ─────
+
+function ReplaceFromInventoryTab({ item, batchId, onClose }: { item: BatchItem; batchId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [search, setSearch]       = useState('');
+  const [debounced, setDebounced] = useState('');
+  const [strict, setStrict]       = useState(false);
+  const [picked, setPicked]       = useState<CardToGrade | null>(null);
+  const [qty, setQty]             = useState(String(item.quantity));
+  const [expectedGrade, setExpectedGrade]     = useState(item.expected_grade != null ? String(parseFloat(String(item.expected_grade))) : '');
+  const [estimatedValue, setEstimatedValue]   = useState(item.estimated_value != null ? String(item.estimated_value / 100) : '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: cardResults, isLoading } = useQuery<PaginatedResult<CardToGrade>>({
+    queryKey: ['card-picker-grading-edit', debounced, strict],
+    queryFn:  () => api.get('/cards', {
+      params: {
+        search: debounced,
+        ...(strict ? { exact: 'true' } : {}),
+        limit: 50,
+        // grading_submitted excluded — those cards are at PSA, not eligible
+        // to be swapped in as a replacement.
+        status: 'purchased_raw,inspected',
+        decision: 'grade',
+        exclude_legacy_bucket: 'true',
+      },
+    }).then((r) => r.data),
+    enabled: debounced.length >= 2,
+  });
+
+  const cards = cardResults?.data ?? [];
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!picked) { toast.error('Pick a replacement card'); return; }
+    const qtyNum = parseInt(qty);
+    if (!qty || isNaN(qtyNum) || qtyNum < 1) { toast.error('Qty must be >= 1'); return; }
+    setSaving(true);
+    try {
+      await api.post(`/grading-subs/${batchId}/items/${item.id}/relink`, {
+        card_instance_id: picked.id,
+        quantity:         qtyNum,
+        expected_grade:   expectedGrade ? parseFloat(expectedGrade) : null,
+        estimated_value:  estimatedValue ? toCents(estimatedValue) : null,
+      });
+      toast.success('Line replaced');
+      qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
+      qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
+      onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to relink');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const noSpinner = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <p className="text-[10px] text-zinc-500 leading-relaxed">
+        Pick a different inspected raw card to take this line's place. The old card returns to inspected/grade.
+      </p>
+
+      <div className="flex gap-2 items-center">
+        <input type="text" value={search} onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by Raw ID (e.g. 2025R109), card name, set, or part #"
+          className="flex-1 rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500" />
+        <label className="flex items-center gap-1 text-[10px] text-zinc-500 shrink-0" title="Whole-term equality across name/ID/cert — use to stop 2025R1 from matching 2025R10, 2025R109, etc.">
+          <input type="checkbox" checked={strict} onChange={(e) => setStrict(e.target.checked)} className="accent-indigo-500" />
+          Exact ID
+        </label>
+      </div>
+
+      <div className="max-h-48 overflow-y-auto border border-zinc-800 rounded-lg">
+        {debounced.length < 2 ? (
+          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">Type at least 2 characters to search.</p>
+        ) : isLoading ? (
+          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">Searching…</p>
+        ) : cards.length === 0 ? (
+          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">No matches.</p>
+        ) : (
+          <ul className="divide-y divide-zinc-800/50">
+            {cards.map((c) => (
+              <li key={c.id}>
+                <button type="button" onClick={() => setPicked(c)}
+                  className={`w-full text-left px-3 py-2 transition-colors ${picked?.id === c.id ? 'bg-indigo-600/20' : 'hover:bg-zinc-800/40'}`}>
+                  <p className="text-xs text-zinc-200">{c.card_name ?? '—'}</p>
+                  <p className="text-[10px] text-zinc-500">
+                    {c.set_name ?? '—'}{c.card_number ? ` · #${c.card_number}` : ''} · qty {c.quantity}
+                    {c.raw_purchase_label ? <span className="text-zinc-600 font-mono"> · {c.raw_purchase_label}</span> : null}
+                  </p>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {picked && (
+        <div className="text-[11px] text-zinc-300 bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2">
+          Replacement: <span className="font-medium">{picked.card_name}</span>
+          {picked.set_name ? <span className="text-zinc-500"> · {picked.set_name}</span> : null}
+          {picked.card_number ? <span className="text-zinc-500"> #{picked.card_number}</span> : null}
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-3 items-start">
+        <div>
+          <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">Qty</label>
+          <input type="number" min={1} value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            className={`w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500 ${noSpinner}`} />
+        </div>
+        <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
+          value={expectedGrade} onChange={(e) => setExpectedGrade(e.target.value)} className={noSpinner} />
+        <Input label="Est. Value / Card" type="text" inputMode="decimal" placeholder="0.00"
+          value={estimatedValue} onChange={(e) => setEstimatedValue(e.target.value)} className={noSpinner} />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="submit" disabled={saving || !picked}>
+          {saving && <Loader2 size={14} className="animate-spin" />} Replace
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+// ── Replace from Legacy tab (relink-legacy) ──────────────────────────────────
+
+function ReplaceFromLegacyTab({ item, batchId, onClose }: { item: BatchItem; batchId: string; onClose: () => void }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    card_name:       item.card_name ?? '',
+    set_name:        item.set_name ?? '',
+    card_number:     item.card_number ?? '',
+    language:        item.language ?? 'EN',
+    condition:       'NM',
+    quantity:        String(item.quantity),
+    purchase_cost:   '0',
+    expected_grade:  item.expected_grade != null ? String(parseFloat(String(item.expected_grade))) : '',
+    estimated_value: item.estimated_value != null ? String(item.estimated_value / 100) : '',
+  });
+  const [catalogMatch, setCatalogMatch] = useState<CatalogMatch | null>(null);
+  const [catalogId, setCatalogId] = useState<string | null>(null);
+  const [legacyBucketId, setLegacyBucketId] = useState<string>('');
+  const [autoFillText, setAutoFillText] = useState('');
+  const [autoFilling, setAutoFilling] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    setForm(prev => ({ ...prev, [k]: e.target.value }));
+
+  const { data: legacyBuckets = [] } = useQuery<LegacyBucket[]>({
+    queryKey: ['legacy-buckets'],
+    queryFn: () => api.get('/catalog/legacy-buckets').then(r => r.data.data),
+  });
+  const legacyBucket = legacyBuckets.find(b => b.id === legacyBucketId) ?? null;
+
+  useEffect(() => {
+    if (!legacyBucket) return;
+    setForm(prev => ({
+      ...prev,
+      language: legacyBucket.language,
+      purchase_cost: (legacyBucket.per_card_cost / 100).toFixed(2),
+    }));
+  }, [legacyBucket]);
+
+  async function autoFill(name: string) {
+    if (!name.trim()) return;
+    setAutoFilling(true);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await api.post('/agent/auto-fill', { partial_name: name, game: 'pokemon' });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const s = (res.data as any)?.data?.suggestions?.[0];
+      if (s) {
+        setForm(prev => ({
+          ...prev,
+          card_name:   (s.catalog_exists && s.catalog_card_name) ? s.catalog_card_name : (s.card_name ?? prev.card_name),
+          set_name:    s.set_name    ?? prev.set_name,
+          card_number: s.card_number ?? prev.card_number,
+          language:    s.language    ?? prev.language,
+        }));
+        // Clear the previous catalog match so PartNumberField re-resolves
+        // against the freshly-filled identity. Otherwise the locked-in stale
+        // match stays selected and the user has to X it manually.
+        setCatalogMatch(null);
+        setCatalogId(null);
+        toast.success('Auto-filled from card database');
+      } else {
+        toast('No match found — fill manually', { icon: '🔍' });
+      }
+    } catch {
+      toast.error('Unable to auto-fill — fill manually');
+    } finally {
+      setAutoFilling(false);
+    }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!legacyBucketId) { toast.error('Pick a Legacy Part # to draw from'); return; }
+    if (!form.card_name.trim()) { toast.error('Card name is required'); return; }
+    const qtyNum = parseInt(form.quantity);
+    if (!qtyNum || qtyNum < 1) { toast.error('Quantity must be at least 1'); return; }
+    if (legacyBucket && qtyNum > legacyBucket.stash_qty) {
+      toast.error(`Only ${legacyBucket.stash_qty} card${legacyBucket.stash_qty === 1 ? '' : 's'} in this legacy bucket`);
+      return;
+    }
+    setSaving(true);
+    try {
+      await api.post(`/grading-subs/${batchId}/items/${item.id}/relink-legacy`, {
+        card_name:         form.card_name.trim(),
+        set_name:          form.set_name.trim() || null,
+        card_number:       form.card_number.trim() || null,
+        language:          form.language,
+        condition:         form.condition || null,
+        quantity:          qtyNum,
+        purchase_cost:     form.purchase_cost ? toCents(form.purchase_cost) : 0,
+        expected_grade:    form.expected_grade ? parseFloat(form.expected_grade) : undefined,
+        estimated_value:   form.estimated_value ? toCents(form.estimated_value) : undefined,
+        catalog_id:        catalogId ?? undefined,
+        legacy_catalog_id: legacyBucketId || undefined,
+      });
+      toast.success('Line replaced with legacy pull');
+      qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
+      qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
+      onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to relink');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const noSpinner = '[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <p className="text-[10px] text-zinc-500 leading-relaxed">
+        Replaces this line with a card pulled from a legacy bucket. The old card returns to inspected/grade.
+      </p>
+
+      <div>
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide block mb-1">
+          Legacy Part # <span className="text-red-500">*</span>
+        </label>
+        <select value={legacyBucketId} onChange={(e) => setLegacyBucketId(e.target.value)}
+          className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500">
+          <option value="">— Pick a legacy bucket to pull from —</option>
+          {legacyBuckets.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.sku ?? b.card_name} · {b.stash_qty} left · ${(b.per_card_cost / 100).toFixed(2)}/card
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+          Auto-fill <span className="normal-case text-zinc-600">(optional)</span>
+        </label>
+        <div className="flex gap-2 items-center">
+          <input type="text" value={autoFillText} onChange={(e) => setAutoFillText(e.target.value)}
+            placeholder="e.g. 2024 Pokemon Indonesian SV-P Promo 154 Pikachu"
+            className="flex-1 rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500" />
+          <Button type="button" variant="secondary" size="sm" className="shrink-0"
+            onClick={() => autoFill(autoFillText)}
+            disabled={autoFilling || !autoFillText.trim()}>
+            {autoFilling ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+            Auto-fill
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Input label="Card Name *" value={form.card_name} onChange={set('card_name')} placeholder="e.g. Charizard" />
+        <Input label="Set Name" value={form.set_name} onChange={set('set_name')} placeholder="e.g. Base Set" />
+      </div>
+      <div className="grid grid-cols-3 gap-3">
+        <Input label="Card #" value={form.card_number} onChange={set('card_number')} placeholder="4" />
+        <div>
+          <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1">Language</label>
+          <select value={form.language} onChange={set('language')}
+            className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 focus:outline-none focus:border-indigo-500">
+            <option value="EN">EN — English</option>
+            <option value="JP">JP — Japanese</option>
+            <option value="KR">KR — Korean</option>
+            <option value="ZH-TW">ZH-TW — Chinese (Traditional)</option>
+            <option value="ZH-CN">ZH-CN — Chinese (Simplified)</option>
+            <option value="FR">FR — French</option>
+            <option value="DE">DE — German</option>
+            <option value="IT">IT — Italian</option>
+            <option value="ES">ES — Spanish</option>
+            <option value="PT">PT — Portuguese</option>
+            <option value="PL">PL — Polish</option>
+            <option value="NL">NL — Dutch</option>
+            <option value="RU">RU — Russian</option>
+            <option value="TH">TH — Thai</option>
+            <option value="ID">ID — Indonesian</option>
+          </select>
+        </div>
+        <Input label="Condition" value={form.condition} onChange={set('condition')} placeholder="NM" />
+      </div>
+
+      <PartNumberField
+        form={{ card_name: form.card_name, set_name: form.set_name, card_number: form.card_number, language: form.language }}
+        catalogMatch={catalogMatch}
+        catalogId={catalogId}
+        onSelect={(m) => {
+          setCatalogMatch(m);
+          setCatalogId(m.id);
+          setForm(prev => ({
+            ...prev,
+            card_name:   prev.card_name   || m.card_name,
+            set_name:    prev.set_name    || m.set_name,
+            card_number: prev.card_number || (m.card_number ?? ''),
+            language:    m.language       || prev.language,
+          }));
+        }}
+        onClear={() => { setCatalogMatch(null); setCatalogId(null); }}
+      />
+
+      <div className="grid grid-cols-2 gap-3 items-end">
+        <Input
+          label={`Quantity *${legacyBucket ? ` (max ${legacyBucket.stash_qty})` : ''}`}
+          type="number" min="1" max={legacyBucket?.stash_qty}
+          value={form.quantity} onChange={set('quantity')} className={noSpinner}
+        />
+        <Input
+          label="Cost / Card (USD)"
+          type="text" inputMode="decimal"
+          value={form.purchase_cost} onChange={set('purchase_cost')} placeholder="0.00"
+          readOnly={!!legacyBucket}
+          className={`${noSpinner} ${legacyBucket ? 'opacity-60 cursor-not-allowed' : ''}`}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 pt-2 border-t border-zinc-800 items-end">
+        <Input label="Expected Grade" type="number" step="0.5" min="1" max="10" placeholder="e.g. 9"
+          value={form.expected_grade} onChange={set('expected_grade')} className={noSpinner} />
+        <Input label="Est. Value / Card" type="text" inputMode="decimal" placeholder="0.00"
+          value={form.estimated_value} onChange={set('estimated_value')} className={noSpinner} />
+      </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button type="submit" disabled={saving}>
+          {saving && <Loader2 size={14} className="animate-spin" />} Replace
         </Button>
       </div>
     </form>
@@ -1016,13 +1544,20 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
               <Trash2 size={13} /> Delete
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => setShowEdit(true)}>
-            Edit Details
-          </Button>
+          {data.status === 'pending' && (
+            <Button size="sm" variant="ghost" onClick={() => setShowEdit(true)}>
+              Edit Details
+            </Button>
+          )}
           {data.status === 'submitted' && (
             <Button size="sm" variant="ghost" onClick={() => setStatus.mutate('pending')} disabled={setStatus.isPending}>
               Unlock Sub
             </Button>
+          )}
+          {data.status === 'returned' && (
+            <span className="text-[10px] text-zinc-500 italic">
+              Locked — revert the return to unlock
+            </span>
           )}
           {data.status === 'pending' && (
             <>
@@ -1076,6 +1611,9 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
                 <th className="px-4 py-2 text-left font-medium">Card #</th>
                 <th className="px-4 py-2 text-left font-medium">ID</th>
                 <th className="px-4 py-2 text-left font-medium">Cond</th>
+                {data.status === 'returned' && (
+                  <th className="px-4 py-2 text-left font-medium">Returned Cert</th>
+                )}
                 <th className="px-4 py-2 text-right font-medium">Qty</th>
                 <th className="px-4 py-2 text-right font-medium">Raw Cost</th>
                 <th className="px-4 py-2 text-right font-medium">Total Raw</th>
@@ -1096,6 +1634,16 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
                   <td className="px-4 py-2 text-zinc-500">{item.card_number ? `#${item.card_number}` : '—'}</td>
                   <td className="px-4 py-2 text-zinc-500 font-mono text-[10px]">{item.raw_purchase_label ?? '—'}</td>
                   <td className="px-4 py-2 text-zinc-400">{item.condition ?? '—'}</td>
+                  {data.status === 'returned' && (
+                    <td className="px-4 py-2">
+                      {item.slab_cert_number ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-[11px] text-indigo-300/80">#{item.slab_cert_number}</span>
+                          {item.slab_grade_label && <span className="text-[10px] text-zinc-500">· {item.slab_grade_label}</span>}
+                        </div>
+                      ) : <span className="text-zinc-600">—</span>}
+                    </td>
+                  )}
                   <td className="px-4 py-2 text-right text-zinc-300">{item.quantity}</td>
                   <td className="px-4 py-2 text-right text-zinc-400">
                     {formatCurrency(item.purchase_cost, item.currency)}
@@ -1111,7 +1659,7 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
                   </td>
                   <td className="px-4 py-2 text-right text-zinc-400">{item.rolling_total}</td>
                   <td className="px-4 py-2">
-                    {data.status !== 'submitted' && (confirmingId === item.id ? (
+                    {data.status === 'pending' && (confirmingId === item.id ? (
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <button onClick={() => setConfirmingId(null)}
                           className="text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors">
@@ -1157,9 +1705,18 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+type StatusFilter = 'all' | 'pending' | 'submitted' | 'returned';
+const STATUS_TABS: { value: StatusFilter; label: string }[] = [
+  { value: 'all',       label: 'All' },
+  { value: 'pending',   label: 'Adding' },
+  { value: 'submitted', label: 'Submitted' },
+  { value: 'returned',  label: 'Returned' },
+];
+
 export function Grading() {
   const [selectedId, setSelectedId]     = useState<string | null>(null);
   const [showCreate, setShowCreate]     = useState(false);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   const { data, isLoading } = useQuery<Batch[]>({
     queryKey: ['grading-batches'],
@@ -1170,21 +1727,44 @@ export function Grading() {
     return <BatchDetailPanel batchId={selectedId} onBack={() => setSelectedId(null)} />;
   }
 
+  const counts = (data ?? []).reduce<Record<StatusFilter, number>>(
+    (acc, b) => { acc.all++; acc[b.status as StatusFilter] = (acc[b.status as StatusFilter] ?? 0) + 1; return acc; },
+    { all: 0, pending: 0, submitted: 0, returned: 0 },
+  );
+  const filtered = statusFilter === 'all' ? (data ?? []) : (data ?? []).filter((b) => b.status === statusFilter);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
         <h1 className="text-xl font-bold text-zinc-100">Grading Submissions</h1>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          <Plus size={14} /> Start Sub
-        </Button>
+        <div className="flex items-center gap-3">
+          <div className="flex gap-1">
+            {STATUS_TABS.map((t) => (
+              <button
+                key={t.value}
+                onClick={() => setStatusFilter(t.value)}
+                className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${
+                  statusFilter === t.value ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                }`}>
+                {t.label}
+                <span className={`ml-1.5 text-[10px] ${statusFilter === t.value ? 'text-indigo-200' : 'text-zinc-500'}`}>
+                  {counts[t.value] ?? 0}
+                </span>
+              </button>
+            ))}
+          </div>
+          <Button size="sm" onClick={() => setShowCreate(true)}>
+            <Plus size={14} /> Start Sub
+          </Button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-auto">
         {isLoading ? (
           <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
-        ) : !data?.length ? (
+        ) : !filtered.length ? (
           <div className="flex items-center justify-center h-40 text-zinc-500 text-sm">
-            No grading batches yet.
+            {data?.length ? `No ${statusFilter === 'all' ? '' : STATUS_TABS.find(t => t.value === statusFilter)?.label.toLowerCase() + ' '}batches.` : 'No grading batches yet.'}
           </div>
         ) : (
           <table className="text-xs border-collapse" style={{ tableLayout: 'fixed', minWidth: '100%', width: 'max-content' }}>
@@ -1221,7 +1801,7 @@ export function Grading() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
-              {data.map((batch) => {
+              {filtered.map((batch) => {
                 const totalGrading = (batch.grading_cost ?? 0) * (batch.total_qty ?? batch.item_count);
                 const totalCost    = batch.raw_cost + totalGrading;
                 const estGain      = batch.estimated_total - totalCost;

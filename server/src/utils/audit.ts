@@ -9,10 +9,13 @@ export async function logAudit(
   oldData: unknown,
   newData: unknown,
   actor?: 'user' | 'agent',
+  reason?: string,
 ) {
   const ctx = auditContext.getStore();
   const resolvedActor = actor ?? ctx?.actor ?? 'user';
   const resolvedActorName = ctx?.actor_name ?? null;
+  const resolvedRequestId = ctx?.request_id ?? null;
+  const resolvedReason = reason ?? ctx?.reason ?? null;
   await db
     .insertInto('audit_log')
     .values({
@@ -22,9 +25,11 @@ export async function logAudit(
       action,
       actor: resolvedActor,
       actor_name: resolvedActorName,
+      request_id: resolvedRequestId,
+      reason: resolvedReason,
       old_data: oldData as any,
       new_data: newData as any,
-    })
+    } as any)
     .execute()
     .catch((err) => console.error('[audit] Failed to write audit log:', err));
 }

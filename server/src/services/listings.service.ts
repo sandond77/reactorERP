@@ -174,8 +174,17 @@ export async function listListings(
         : sql`AND l.platform IN (${sql.join(filters.platforms.map((p) => sql.val(p)))})`
       : sql``;
 
+  // Search hits multiple identifiers: card name (substring), slab cert
+  // number (exact-substring on the text rep), part number (SKU), and the
+  // parent raw_purchase id (e.g. "2026R49"). Lets the user paste a cert,
+  // SKU, or purchase id into the same box that takes card names.
   const searchCond = filters.search
-    ? sql`AND COALESCE(ci.card_name_override, cc.card_name) ILIKE ${`%${filters.search}%`}`
+    ? sql`AND (
+        COALESCE(ci.card_name_override, cc.card_name) ILIKE ${`%${filters.search}%`}
+        OR sd.cert_number::text ILIKE ${`%${filters.search}%`}
+        OR cc.sku ILIKE ${`%${filters.search}%`}
+        OR rp.purchase_id ILIKE ${`%${filters.search}%`}
+      )`
     : sql``;
 
   const gradeCond =
@@ -256,6 +265,7 @@ export async function listListings(
             'c', sd.company
           ) ORDER BY LOWER(COALESCE(ci.card_name_override, cc.card_name, '')), sd.grade_label, sd.company) AS composition,
           STRING_AGG(LOWER(COALESCE(ci.card_name_override, cc.card_name, '')), ' | ')   AS names_concat,
+          STRING_AGG(COALESCE(sd.cert_number::text, ''), ' | ')                         AS certs_concat,
           (ARRAY_AGG(l.listing_group_name ORDER BY l.listed_at DESC NULLS LAST))[1]    AS listing_group_name,
           SUM(l.list_price) FILTER (WHERE l.listing_status = 'active')::int             AS list_price,
           MIN(l.listed_at)  FILTER (WHERE l.listing_status = 'active')                  AS listed_at,
@@ -320,7 +330,7 @@ export async function listListings(
             ? filters.platforms.length === 0 ? sql`AND 1=0`
               : sql`AND pg.platform IN (${sql.join(filters.platforms.map((p) => sql.val(p)))})`
             : sql``}
-          ${setSearchPattern ? sql`AND pg.names_concat ILIKE ${setSearchPattern}` : sql``}
+          ${setSearchPattern ? sql`AND (pg.names_concat ILIKE ${setSearchPattern} OR pg.certs_concat ILIKE ${setSearchPattern})` : sql``}
       )
       SELECT
         listing_group_id, listing_group_name, card_name, set_name, part_number,
@@ -506,45 +516,60 @@ export async function updateSetGroup(userId: string, groupId: string, data: { li
   // list_price from client is total set price — split evenly per listing
   if (data.list_price !== undefined) updateData.list_price = Math.round(data.list_price / existing.length);
 
+  const ids = existing.map(r => r.id);
+  const before = await db.selectFrom('listings').selectAll().where('id', 'in', ids).execute();
   await db
     .updateTable('listings')
     .set(updateData as any)
-    .where('id', 'in', existing.map(r => r.id))
+    .where('id', 'in', ids)
     .execute();
+  for (const row of before) {
+    await logAudit(userId, 'listings', row.id, 'updated', row, { ...row, ...updateData });
+  }
   return { updated: existing.length };
 }
 
 export async function cancelSingleListing(userId: string, listingId: string) {
-  const listing = await db
+  const listingFull = await db
     .selectFrom('listings')
-    .select(['id', 'card_instance_id'])
+    .selectAll()
     .where('id', '=', listingId)
     .where('user_id', '=', userId)
     .where('listing_status', '=', 'active')
     .executeTakeFirst();
-  if (!listing) throw new AppError(404, 'Active listing not found');
+  if (!listingFull) throw new AppError(404, 'Active listing not found');
 
   await db
     .updateTable('listings')
     .set({ listing_status: 'cancelled' })
     .where('id', '=', listingId)
     .execute();
+  await logAudit(userId, 'listings', listingId, 'updated', listingFull, { ...listingFull, listing_status: 'cancelled' as const });
 
   // Revert raw_for_sale back to purchased_raw if no remaining active listings
   const remaining = await db
     .selectFrom('listings')
     .select('id')
-    .where('card_instance_id', '=', listing.card_instance_id)
+    .where('card_instance_id', '=', listingFull.card_instance_id)
     .where('listing_status', '=', 'active')
     .executeTakeFirst();
   if (!remaining) {
-    await db
-      .updateTable('card_instances')
-      .set({ status: 'purchased_raw' })
-      .where('id', '=', listing.card_instance_id)
-      .where('status', '=', 'raw_for_sale')
+    const ciBefore = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', listingFull.card_instance_id)
       .where('user_id', '=', userId)
-      .execute();
+      .executeTakeFirst();
+    if (ciBefore && ciBefore.status === 'raw_for_sale') {
+      await db
+        .updateTable('card_instances')
+        .set({ status: 'purchased_raw' })
+        .where('id', '=', listingFull.card_instance_id)
+        .where('status', '=', 'raw_for_sale')
+        .where('user_id', '=', userId)
+        .execute();
+      await logAudit(userId, 'card_instances', listingFull.card_instance_id, 'updated', ciBefore, { ...ciBefore, status: 'purchased_raw' as const });
+    }
   }
   return { cancelled: 1 };
 }
@@ -552,7 +577,7 @@ export async function cancelSingleListing(userId: string, listingId: string) {
 export async function cancelSetGroup(userId: string, groupId: string) {
   const listingRows = await db
     .selectFrom('listings')
-    .select(['id', 'card_instance_id'])
+    .selectAll()
     .where('user_id', '=', userId)
     .where('listing_group_id', '=', groupId)
     .where('listing_status', '=', 'active')
@@ -563,6 +588,9 @@ export async function cancelSetGroup(userId: string, groupId: string) {
     .set({ listing_status: 'cancelled' })
     .where('id', 'in', listingRows.map(r => r.id))
     .execute();
+  for (const row of listingRows) {
+    await logAudit(userId, 'listings', row.id, 'updated', row, { ...row, listing_status: 'cancelled' as const });
+  }
   return { cancelled: listingRows.length };
 }
 
@@ -610,11 +638,16 @@ export async function updateListingsByGroup(
 ) {
   const ids = await groupIdSubquery(userId, key).execute(db);
   if (ids.rows.length === 0) throw new AppError(404, 'No active listings found for this group');
+  const listingIds = ids.rows.map(r => r.id);
+  const before = await db.selectFrom('listings').selectAll().where('id', 'in', listingIds).execute();
   await db
     .updateTable('listings')
     .set(updates as any)
-    .where('id', 'in', ids.rows.map(r => r.id))
+    .where('id', 'in', listingIds)
     .execute();
+  for (const row of before) {
+    await logAudit(userId, 'listings', row.id, 'updated', row, { ...row, ...updates });
+  }
   return { updated: ids.rows.length };
 }
 
@@ -623,10 +656,10 @@ export async function cancelListingsByGroup(userId: string, key: ListingGroupKey
   const ids = await groupIdSubquery(userId, key).execute(db);
   if (ids.rows.length === 0) throw new AppError(404, 'No active listings found for this group');
 
-  // Get card_instance_ids from these listings
+  // Get full listing rows so we can audit + know the affected card_instance_ids
   const listingRows = await db
     .selectFrom('listings')
-    .select(['id', 'card_instance_id'])
+    .selectAll()
     .where('id', 'in', ids.rows.map(r => r.id))
     .execute();
 
@@ -635,6 +668,9 @@ export async function cancelListingsByGroup(userId: string, key: ListingGroupKey
     .set({ listing_status: 'cancelled' })
     .where('id', 'in', ids.rows.map(r => r.id))
     .execute();
+  for (const row of listingRows) {
+    await logAudit(userId, 'listings', row.id, 'updated', row, { ...row, listing_status: 'cancelled' as const });
+  }
 
   // Revert raw_for_sale cards back to purchased_raw if they have no remaining active listings
   const cardIds = [...new Set(listingRows.map(r => r.card_instance_id))];
@@ -646,13 +682,22 @@ export async function cancelListingsByGroup(userId: string, key: ListingGroupKey
       .where('listing_status', '=', 'active')
       .executeTakeFirst();
     if (!remaining) {
-      await db
-        .updateTable('card_instances')
-        .set({ status: 'purchased_raw' })
+      const ciBefore = await db
+        .selectFrom('card_instances')
+        .selectAll()
         .where('id', '=', cardId)
-        .where('status', '=', 'raw_for_sale')
         .where('user_id', '=', userId)
-        .execute();
+        .executeTakeFirst();
+      if (ciBefore && ciBefore.status === 'raw_for_sale') {
+        await db
+          .updateTable('card_instances')
+          .set({ status: 'purchased_raw' })
+          .where('id', '=', cardId)
+          .where('status', '=', 'raw_for_sale')
+          .where('user_id', '=', userId)
+          .execute();
+        await logAudit(userId, 'card_instances', cardId, 'updated', ciBefore, { ...ciBefore, status: 'purchased_raw' as const });
+      }
     }
   }
 

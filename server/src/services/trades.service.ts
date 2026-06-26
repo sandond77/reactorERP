@@ -100,26 +100,33 @@ async function createTradeInner(
 ) {
   const soldAt = input.trade_date ? new Date(input.trade_date) : undefined;
 
-  // Distribute cash_from_customer proportionally across outgoing card sales
-  const totalTradeCreditCents = input.outgoing.reduce((sum, item) => sum + item.sale_price, 0);
-  const cashFromCustomer = input.cash_from_customer_cents;
-
+  // sale_price coming from the client is already the user's full assigned
+  // trade value for the outgoing card — it represents the total proceeds
+  // received (incoming card value + cash from customer combined). The cash
+  // is conceptually already inside the value the user typed, so we do NOT
+  // distribute or add cash_from_customer here. Adding it again inflates the
+  // stored strike price and breaks the trades-list balance check.
+  // The cash is preserved on trades.cash_from_customer_cents for the ledger.
   await Promise.all(input.outgoing.map(async (item) => {
-    const cashShare = totalTradeCreditCents > 0
-      ? Math.round((item.sale_price / totalTradeCreditCents) * cashFromCustomer)
-      : 0;
     const sale = await recordSale(userId, {
       card_instance_id: item.card_instance_id,
       listing_id: item.listing_id,
       platform: 'other',
-      sale_price: item.sale_price + cashShare,
+      sale_price: item.sale_price,
       currency: item.currency,
       sold_at: soldAt,
     });
     await db.updateTable('sales').set({ trade_id: trade.id }).where('id', '=', sale.id).execute();
+    await logAudit(userId, 'sales', sale.id, 'updated', sale, { ...sale, trade_id: trade.id });
   }));
 
+  // purchase_cost_cents from the client is the user's assigned trade-in value
+  // — the value at which we're taking the card onto our books. Cash we paid
+  // (cash_to_customer) is similarly already baked into how the user balanced
+  // the trade (it's the bridge that made the totals match). We don't add it
+  // to the card's cost basis here; the cash stays on trades.cash_to_customer_cents.
   await Promise.all(input.incoming.map(async (item) => {
+    const adjustedCost = item.purchase_cost_cents;
     const slab = item.slab_company
       ? {
           company: item.slab_company,
@@ -142,10 +149,8 @@ async function createTradeInner(
         set_name: item.set_name_override,
         card_number: item.card_number_override,
         // raw_purchases.total_cost_usd is stored as integer cents
-        // (matches every other call site). Previously this divided by 100
-        // which sent a non-integer to an integer column and the whole trade
-        // failed with the outgoing cards already marked sold.
-        total_cost_usd: item.purchase_cost_cents,
+        // (matches every other call site).
+        total_cost_usd: adjustedCost,
         card_count: 1,
         status: 'received',
         purchased_at: soldAt?.toISOString(),
@@ -164,7 +169,7 @@ async function createTradeInner(
         language: item.language,
         condition: item.condition,
         decision: slab ? undefined : item.decision,
-        purchase_cost: item.purchase_cost_cents,
+        purchase_cost: adjustedCost,
         currency: item.currency,
         catalog_id: item.catalog_id,
         location_id: item.location_id ?? null,
@@ -175,6 +180,7 @@ async function createTradeInner(
       slab
     );
     await db.updateTable('card_instances').set({ trade_id: trade.id }).where('id', '=', card.id).execute();
+    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, trade_id: trade.id });
   }));
 
   await logAudit(userId, 'trades', trade.id, 'created', null, trade);
@@ -256,9 +262,9 @@ export async function deleteTrade(userId: string, tradeId: string) {
   const trade = await db.selectFrom('trades').select('id').where('id', '=', tradeId).where('user_id', '=', userId).executeTakeFirst();
   if (!trade) throw new Error('Trade not found');
 
-  // Get all sales linked to this trade
+  // Get all sales linked to this trade (full rows so we can audit the deletion)
   const sales = await db.selectFrom('sales')
-    .select(['id', 'card_instance_id', 'listing_id'])
+    .selectAll()
     .where('trade_id', '=', tradeId)
     .execute();
 
@@ -269,7 +275,7 @@ export async function deleteTrade(userId: string, tradeId: string) {
   const cardShowLocId = await ensureCardShowLocation(userId);
   await Promise.all(sales.map(async (sale) => {
     const card = await db.selectFrom('card_instances')
-      .select(['id', 'decision', 'is_card_show', 'location_id'])
+      .selectAll()
       .where('id', '=', sale.card_instance_id)
       .executeTakeFirst();
     const hasSlab = await db.selectFrom('slab_details').select('id').where('card_instance_id', '=', sale.card_instance_id).executeTakeFirst();
@@ -287,12 +293,20 @@ export async function deleteTrade(userId: string, tradeId: string) {
     const restoreLocationId = card?.is_card_show && !card.location_id ? cardShowLocId : card?.location_id ?? null;
 
     await db.deleteFrom('sales').where('id', '=', sale.id).execute();
-    await db.updateTable('card_instances')
-      .set({ status: restoreStatus, trade_id: null, location_id: restoreLocationId })
-      .where('id', '=', sale.card_instance_id)
-      .execute();
+    await logAudit(userId, 'sales', sale.id, 'deleted', sale, null);
+    if (card) {
+      await db.updateTable('card_instances')
+        .set({ status: restoreStatus, trade_id: null, location_id: restoreLocationId })
+        .where('id', '=', sale.card_instance_id)
+        .execute();
+      await logAudit(userId, 'card_instances', sale.card_instance_id, 'updated', card, { ...card, status: restoreStatus, trade_id: null, location_id: restoreLocationId });
+    }
     if (sale.listing_id) {
+      const listingBefore = await db.selectFrom('listings').selectAll().where('id', '=', sale.listing_id).executeTakeFirst();
       await db.updateTable('listings').set({ listing_status: 'active', sold_at: null }).where('id', '=', sale.listing_id).execute();
+      if (listingBefore) {
+        await logAudit(userId, 'listings', sale.listing_id, 'updated', listingBefore, { ...listingBefore, listing_status: 'active' as const, sold_at: null });
+      }
     }
   }));
 

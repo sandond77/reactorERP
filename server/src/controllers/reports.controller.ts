@@ -91,6 +91,8 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         sql<number>`SUM(quantity) FILTER (WHERE NOT ${sql.raw(slabCheck)} AND status = 'sold')::int`.as('raw_sold'),
         sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true)::int`.as('card_show_total'),
         sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true AND status != 'sold' AND status != 'lost_damaged')::int`.as('card_show_unsold'),
+        sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true AND ${sql.raw(slabCheck)})::int`.as('card_show_graded'),
+        sql<number>`SUM(quantity) FILTER (WHERE is_card_show = true AND NOT ${sql.raw(slabCheck)})::int`.as('card_show_raw'),
       ])
       .where('user_id', '=', req.dataUserId)
       .executeTakeFirst();
@@ -124,6 +126,8 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         .select([
           sql<string>`platform`.as('platform'),
           sql<number>`COUNT(*)::int`.as('count'),
+          sql<number>`SUM(sale_price)::int`.as('total_gross'),
+          sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
           sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
         ])
         .where('user_id', '=', req.dataUserId);
@@ -132,6 +136,36 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
     };
 
     const yearStart = new Date(new Date().getFullYear(), 0, 1);
+    // Calendar-day "today" boundary (server local time). Matches how a card
+    // show / point-of-sale day is read by the user — sales reset at midnight,
+    // not 24 hours after the last visit.
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+
+    const queryToday = () => db
+      .selectFrom('sales')
+      .select([
+        sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(sale_price)::int`.as('total_gross'),
+        sql<number>`SUM(net_proceeds)::int`.as('total_net'),
+        sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
+        sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
+      ])
+      .where('user_id', '=', req.dataUserId)
+      .where('sold_at', '>=', todayStart)
+      .executeTakeFirst();
+
+    const channelQueryToday = () => (db
+      .selectFrom('sales')
+      .select([
+        sql<string>`platform`.as('platform'),
+        sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(sale_price)::int`.as('total_gross'),
+        sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
+        sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
+      ])
+      .where('user_id', '=', req.dataUserId)
+      .where('sold_at', '>=', todayStart) as any)
+      .groupBy('platform').execute();
 
     const queryYear = () => db
       .selectFrom('sales')
@@ -151,6 +185,8 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       .select([
         sql<string>`platform`.as('platform'),
         sql<number>`COUNT(*)::int`.as('count'),
+        sql<number>`SUM(sale_price)::int`.as('total_gross'),
+        sql<number>`SUM(COALESCE(total_cost_basis, 0))::int`.as('total_cost'),
         sql<number>`SUM(net_proceeds - COALESCE(total_cost_basis, 0))::int`.as('total_profit'),
       ])
       .where('user_id', '=', req.dataUserId)
@@ -195,18 +231,23 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
          WHERE user_id = ${req.dataUserId} AND status = 'ordered') AS pending_orders
     `.execute(db);
 
-    const [d30, d60, d90, dYear, lifetime, ch30, ch60, ch90, chYear, chLifetime, exp30, exp60, exp90, expYear, expLifetime, pipeline, perfResult] = await Promise.all([
-      query(30), query(60), query(90), queryYear(), query(null),
-      channelQuery(30), channelQuery(60), channelQuery(90), channelQueryYear(), channelQuery(null),
-      expensesQuery(30), expensesQuery(60), expensesQuery(90), expensesQuery(null, yearStart), expensesQuery(null),
+    const [dToday, d30, d60, d90, dYear, lifetime, chToday, ch30, ch60, ch90, chYear, chLifetime, expToday, exp30, exp60, exp90, expYear, expLifetime, pipeline, perfResult] = await Promise.all([
+      queryToday(), query(30), query(60), query(90), queryYear(), query(null),
+      channelQueryToday(), channelQuery(30), channelQuery(60), channelQuery(90), channelQueryYear(), channelQuery(null),
+      expensesQuery(null, todayStart), expensesQuery(30), expensesQuery(60), expensesQuery(90), expensesQuery(null, yearStart), expensesQuery(null),
       pipelineQuery, performanceQuery,
     ]);
     const perf = perfResult.rows[0] ?? { avg_hold_days: null, avg_listed_days: null, listings_value: 0 };
 
-    type CRow = { platform: string; count: number; total_profit: number };
+    type CRow = { platform: string; count: number; total_gross: number; total_cost: number; total_profit: number };
     const channelGroup = (rows: CRow[]) => {
       const sum = (filter: (r: CRow) => boolean) =>
-        rows.filter(filter).reduce((s, r) => ({ count: s.count + r.count, total_profit: s.total_profit + r.total_profit }), { count: 0, total_profit: 0 });
+        rows.filter(filter).reduce((s, r) => ({
+          count:        s.count + r.count,
+          total_gross:  s.total_gross + Number(r.total_gross ?? 0),
+          total_cost:   s.total_cost + Number(r.total_cost ?? 0),
+          total_profit: s.total_profit + Number(r.total_profit ?? 0),
+        }), { count: 0, total_gross: 0, total_cost: 0, total_profit: 0 });
       return {
         ebay:      sum(r => r.platform === 'ebay'),
         card_show: sum(r => r.platform === 'card_show'),
@@ -219,12 +260,14 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       total_expenses: Number(exp?.total ?? 0),
     });
     res.json({
+      today:        snap(dToday, expToday),
       last_30_days: snap(d30, exp30),
       last_60_days: snap(d60, exp60),
       last_90_days: snap(d90, exp90),
       this_year:    snap(dYear, expYear),
       lifetime:     snap(lifetime, expLifetime),
       by_channel: {
+        today:        channelGroup(chToday as CRow[]),
         last_30_days: channelGroup(ch30 as CRow[]),
         last_60_days: channelGroup(ch60 as CRow[]),
         last_90_days: channelGroup(ch90 as CRow[]),
@@ -237,7 +280,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
         unsold:        { all: Number(cardCounts?.unsold       ?? 0), graded: Number(cardCounts?.graded_unsold ?? 0), raw: Number(cardCounts?.raw_unsold ?? 0) },
         sold:          { all: Number(cardCounts?.sold         ?? 0), graded: Number(cardCounts?.graded_sold   ?? 0), raw: Number(cardCounts?.raw_sold   ?? 0) },
         listed:        { all: Number(listedCount?.total       ?? 0), graded: Number(listedCount?.graded       ?? 0), raw: Number(listedCount?.raw        ?? 0) },
-        card_show:     { all: Number(cardCounts?.card_show_total ?? 0), unsold: Number(cardCounts?.card_show_unsold ?? 0) },
+        card_show:     { all: Number(cardCounts?.card_show_total ?? 0), unsold: Number(cardCounts?.card_show_unsold ?? 0), graded: Number(cardCounts?.card_show_graded ?? 0), raw: Number(cardCounts?.card_show_raw ?? 0) },
       },
       pipeline: {
         needs_inspection:    Number(pipeline?.needs_inspection    ?? 0),

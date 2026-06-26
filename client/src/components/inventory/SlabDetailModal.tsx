@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { formatCurrency, formatDate } from '../../lib/utils';
+import { labelsForCompany, getCanonicalLabel } from '../../lib/grade-labels';
 import { api } from '../../lib/api';
 import { useLocations } from '../../hooks/useLocations';
 import toast from 'react-hot-toast';
@@ -103,6 +104,20 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
 
   const { locations: gradedLocations, allLocations } = useLocations('graded');
 
+  // Auto-fill canonical grade label when the user types a numeric grade
+  // while editing. Company isn't editable here so it stays slab.company.
+  useEffect(() => {
+    if (!editing) return;
+    if (editGrade === '' || editGrade == null) return;
+    const num = Number(editGrade);
+    if (!Number.isFinite(num)) return;
+    const canon = getCanonicalLabel(slab.company, num);
+    if (canon) setEditGradeLabel(canon);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editGrade, editing]);
+
+  const gradeLabelOptions = labelsForCompany(slab.company);
+
   function startEdit() {
     setEditName(slab.card_name ?? '');
     setEditCert(slab.cert_number ?? '');
@@ -126,7 +141,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
             slab_cert_number:    editCert ? Number(editCert) : null,
             slab_grade:          editGrade ? parseFloat(editGrade) : null,
             slab_grade_label:    editGradeLabel || null,
-            slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : null,
+            slab_grading_cost:   editGradingCost ? Math.round(parseFloat(editGradingCost) * 100) : 0,
             is_personal_collection: editPersonal,
           };
       await api.patch(`/cards/${slab.id}`, body);
@@ -221,7 +236,11 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Grade Label</label>
                     <input type="text" value={editGradeLabel} onChange={(e) => setEditGradeLabel(e.target.value)}
+                      list="slab-edit-grade-label-options"
                       placeholder="e.g. NEAR MINT-MINT 8" className={inputCls} />
+                    <datalist id="slab-edit-grade-label-options">
+                      {gradeLabelOptions.map((opt) => <option key={opt} value={opt} />)}
+                    </datalist>
                   </div>
                   <div>
                     <label className="block text-xs text-zinc-500 mb-1">Grading Cost (USD)</label>
@@ -259,6 +278,14 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
                     />
                     <span className="text-xs text-zinc-300">Personal collection (not for sale)</span>
                   </label>
+                  {editPersonal && !!editLocationId && allLocations.find((l) => l.id === editLocationId)?.is_card_show && (
+                    <div className="flex items-start gap-2 text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2.5 py-1.5">
+                      <span>⚠</span>
+                      <span>
+                        This slab is in a <strong>Card Show</strong> location (intent to sell) but is also marked as <strong>Personal Collection</strong> (not for sale). Pick one.
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

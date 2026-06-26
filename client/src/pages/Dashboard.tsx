@@ -4,7 +4,7 @@ import {
   PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis,
   Tooltip, Legend, ResponsiveContainer, LabelList,
 } from 'recharts';
-import { AlertTriangle, BellOff, EyeOff, ArrowRight } from 'lucide-react';
+import { AlertTriangle, BellOff, EyeOff, ArrowRight, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
@@ -24,22 +24,23 @@ const C = {
 // ── Types ────────────────────────────────────────────────────────────────────
 interface InventoryRow { status: string; count: number; total_cost: number }
 interface SalesRow { count: number; total_gross: number; total_net: number; total_cost: number; total_profit: number; total_expenses: number }
-interface ChannelRow { count: number; total_profit: number }
+interface ChannelRow { count: number; total_gross: number; total_cost: number; total_profit: number }
 interface ChannelBreakdown { ebay: ChannelRow; card_show: ChannelRow; other: ChannelRow }
 interface SalesSummary {
+  today: SalesRow;
   last_30_days: SalesRow;
   last_60_days: SalesRow;
   last_90_days: SalesRow;
   this_year: SalesRow;
   lifetime: SalesRow;
-  by_channel: { last_30_days: ChannelBreakdown; last_60_days: ChannelBreakdown; last_90_days: ChannelBreakdown; this_year: ChannelBreakdown; lifetime: ChannelBreakdown };
+  by_channel: { today: ChannelBreakdown; last_30_days: ChannelBreakdown; last_60_days: ChannelBreakdown; last_90_days: ChannelBreakdown; this_year: ChannelBreakdown; lifetime: ChannelBreakdown };
   grading: { sub_count: number; card_count: number };
   cards: {
     total:     { all: number; graded: number; raw: number };
     unsold:    { all: number; graded: number; raw: number };
     sold:      { all: number; graded: number; raw: number };
     listed:    { all: number; graded: number; raw: number };
-    card_show: { all: number; unsold: number };
+    card_show: { all: number; unsold: number; graded: number; raw: number };
   };
   pipeline: {
     needs_inspection:    number;
@@ -140,8 +141,9 @@ function MiniDonutChart({ pieData, formatter }: { pieData: PieEntry[]; formatter
 }
 
 // ── Tab: Overview ─────────────────────────────────────────────────────────────
-type SalesWindow = '30d' | '60d' | '90d' | 'this_year' | 'lifetime';
+type SalesWindow = 'today' | '30d' | '60d' | '90d' | 'this_year' | 'lifetime';
 const SALES_WINDOWS: { key: SalesWindow; label: string }[] = [
+  { key: 'today',     label: 'Today' },
   { key: '30d',       label: '30D' },
   { key: '60d',       label: '60D' },
   { key: '90d',       label: '90D' },
@@ -235,6 +237,10 @@ function OrderMoreSection() {
     mutationFn: (id: string) => api.post(`/reorder/thresholds/${id}/ignore`),
     onSuccess: invalidate,
   });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/reorder/thresholds/${id}`),
+    onSuccess: invalidate,
+  });
 
   const alerts = alertsData?.data ?? [];
 
@@ -254,16 +260,17 @@ function OrderMoreSection() {
         <p className="text-xs text-zinc-600">No reorder alerts. Manage thresholds under <span className="text-zinc-500">Manage → Alerts</span>.</p>
       ) : (
         <div>
-          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
+          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem_3rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Inbound</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">To Grade</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Min</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Remove</span>
           </div>
           {alerts.map((alert) => (
-            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem_3rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
               <div className="min-w-0">
                 <p className="text-xs text-zinc-200 truncate">{alert.card_name}</p>
                 <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
@@ -278,8 +285,11 @@ function OrderMoreSection() {
               <button onClick={() => muteMutation.mutate(alert.threshold_id)} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
                 <BellOff size={13} />
               </button>
-              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-red-400 transition-colors flex justify-center">
+              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400 transition-colors flex justify-center">
                 <EyeOff size={13} />
+              </button>
+              <button onClick={() => removeMutation.mutate(alert.threshold_id)} title="Remove from watchlist" className="text-zinc-600 hover:text-red-400 transition-colors flex justify-center">
+                <Trash2 size={13} />
               </button>
             </div>
           ))}
@@ -309,6 +319,10 @@ function GradeMoreSection() {
     mutationFn: (id: string) => api.post(`/grade-more/${id}/ignore`),
     onSuccess: invalidate,
   });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/grade-more/${id}`),
+    onSuccess: invalidate,
+  });
 
   const alerts = alertsData?.data ?? [];
 
@@ -320,16 +334,17 @@ function GradeMoreSection() {
         <p className="text-xs text-zinc-600">No grade more alerts. Manage thresholds under <span className="text-zinc-500">Manage → Alerts</span>.</p>
       ) : (
         <div>
-          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
+          <div className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem_3rem] gap-x-3 pb-1.5 mb-1 border-b border-orange-500/20">
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest">Card</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Unsold</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Grading</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-right">Min</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Mute</span>
             <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Ignore</span>
+            <span className="text-[10px] text-orange-400/60 uppercase tracking-widest text-center">Remove</span>
           </div>
           {alerts.map((alert) => (
-            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
+            <div key={alert.threshold_id} className="grid grid-cols-[1fr_4rem_4rem_3.5rem_3rem_3.5rem_3rem] gap-x-3 py-1.5 border-b border-orange-500/10 last:border-0 items-center">
               <div className="min-w-0">
                 <p className="text-xs text-zinc-200 truncate">{alert.card_name}</p>
                 <p className="text-xs text-zinc-500 truncate">{alert.set_name ?? alert.sku ?? ''}</p>
@@ -344,8 +359,11 @@ function GradeMoreSection() {
               <button onClick={() => muteMutation.mutate(alert.threshold_id)} title="Mute for 30 days" className="text-zinc-500 hover:text-zinc-300 transition-colors flex justify-center">
                 <BellOff size={13} />
               </button>
-              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-red-400 transition-colors flex justify-center">
+              <button onClick={() => ignoreMutation.mutate(alert.threshold_id)} title="Ignore permanently" className="text-zinc-500 hover:text-amber-400 transition-colors flex justify-center">
                 <EyeOff size={13} />
+              </button>
+              <button onClick={() => removeMutation.mutate(alert.threshold_id)} title="Remove from watchlist" className="text-zinc-600 hover:text-red-400 transition-colors flex justify-center">
+                <Trash2 size={13} />
               </button>
             </div>
           ))}
@@ -584,25 +602,29 @@ function OverviewTab() {
     queryFn: () => api.get('/reports/summary').then((r) => r.data),
   });
 
-  const [salesWindow, setSalesWindow] = useState<SalesWindow>('30d');
+  const [salesWindow, setSalesWindow] = useState<SalesWindow>('today');
 
   const grading      = summary?.grading     ?? { sub_count: 0, card_count: 0 };
-  const cards        = summary?.cards       ?? { total: { all: 0, graded: 0, raw: 0 }, unsold: { all: 0, graded: 0, raw: 0 }, sold: { all: 0, graded: 0, raw: 0 }, listed: { all: 0, graded: 0, raw: 0 }, card_show: { all: 0, unsold: 0 } };
+  const cards        = summary?.cards       ?? { total: { all: 0, graded: 0, raw: 0 }, unsold: { all: 0, graded: 0, raw: 0 }, sold: { all: 0, graded: 0, raw: 0 }, listed: { all: 0, graded: 0, raw: 0 }, card_show: { all: 0, unsold: 0, graded: 0, raw: 0 } };
   const pipeline     = summary?.pipeline    ?? { needs_inspection: 0, inspected: 0, pending_grading_sub: 0, grading_submitted: 0 };
   const performance  = summary?.performance ?? { avg_hold_days: null, listings_value: 0, pending_orders: 0 };
   const lifetimeSales = summary?.lifetime   ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0 };
 
-  const sellThrough   = (cards.sold.all + cards.unsold.all) > 0
-    ? ((cards.sold.all / (cards.sold.all + cards.unsold.all)) * 100).toFixed(1)
+  const sellThroughGraded = (cards.sold.graded + cards.unsold.graded) > 0
+    ? ((cards.sold.graded / (cards.sold.graded + cards.unsold.graded)) * 100).toFixed(1)
+    : null;
+  const sellThroughRaw    = (cards.sold.raw + cards.unsold.raw) > 0
+    ? ((cards.sold.raw / (cards.sold.raw + cards.unsold.raw)) * 100).toFixed(1)
     : null;
   const EMPTY_ROW: SalesRow = { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0 };
-  const windowData: SalesRow = salesWindow === '30d' ? (summary?.last_30_days ?? EMPTY_ROW)
+  const windowData: SalesRow = salesWindow === 'today' ? (summary?.today ?? EMPTY_ROW)
+    : salesWindow === '30d'      ? (summary?.last_30_days ?? EMPTY_ROW)
     : salesWindow === '60d'      ? (summary?.last_60_days ?? EMPTY_ROW)
     : salesWindow === '90d'      ? (summary?.last_90_days ?? EMPTY_ROW)
     : salesWindow === 'this_year'? (summary?.this_year    ?? EMPTY_ROW)
     : lifetimeSales;
 
-  const wk = salesWindow === '30d' ? 'last_30_days' : salesWindow === '60d' ? 'last_60_days' : salesWindow === '90d' ? 'last_90_days' : salesWindow === 'this_year' ? 'this_year' : 'lifetime';
+  const wk = salesWindow === 'today' ? 'today' : salesWindow === '30d' ? 'last_30_days' : salesWindow === '60d' ? 'last_60_days' : salesWindow === '90d' ? 'last_90_days' : salesWindow === 'this_year' ? 'this_year' : 'lifetime';
 
   return (
     <div className="flex flex-col gap-4 h-full min-h-0">
@@ -678,19 +700,32 @@ function OverviewTab() {
             { key: 'card_show', label: 'Card Shows' },
             { key: 'other',     label: 'Other' },
           ] as { key: keyof ChannelBreakdown; label: string }[]).map(({ key, label }) => {
-            const ch = summary?.by_channel?.[wk]?.[key] ?? { count: 0, total_profit: 0 };
+            const ch = summary?.by_channel?.[wk]?.[key] ?? { count: 0, total_gross: 0, total_cost: 0, total_profit: 0 };
             return (
               <Card key={key}>
                 <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
                 <p className="text-xl font-bold text-zinc-100">{ch.count} <span className="text-sm font-normal text-zinc-500">sales</span></p>
-                <p className={cn('text-sm font-semibold', ch.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
-                  {(ch.total_profit >= 0 ? '+' : '') + formatCurrency(ch.total_profit)}
-                </p>
+                <div className="mt-1 grid grid-cols-3 gap-x-3 text-xs">
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Gross</p>
+                    <p className="text-zinc-300 tabular-nums">{formatCurrency(ch.total_gross)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Cost</p>
+                    <p className="text-zinc-300 tabular-nums">{formatCurrency(ch.total_cost)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[9px] text-zinc-600 uppercase tracking-wide">Net</p>
+                    <p className={cn('tabular-nums font-semibold', ch.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400')}>
+                      {(ch.total_profit >= 0 ? '+' : '') + formatCurrency(ch.total_profit)}
+                    </p>
+                  </div>
+                </div>
                 {key === 'ebay' && (
-                  <p className="text-xs text-zinc-500 mt-0.5">{cards.listed.all} listed &nbsp;·&nbsp; {cards.listed.graded} Graded / {cards.listed.raw} Raw</p>
+                  <p className="text-xs text-zinc-500 mt-1.5">{cards.listed.all} listed &nbsp;·&nbsp; {cards.listed.graded} Graded / {cards.listed.raw} Raw</p>
                 )}
                 {key === 'card_show' && (
-                  <p className="text-xs text-zinc-500 mt-0.5">{cards.card_show.unsold} unsold &nbsp;·&nbsp; {cards.card_show.all} total inventory</p>
+                  <p className="text-xs text-zinc-500 mt-1.5">{cards.card_show.unsold} unsold &nbsp;·&nbsp; {cards.card_show.graded} Graded / {cards.card_show.raw} Raw</p>
                 )}
               </Card>
             );
@@ -703,8 +738,18 @@ function OverviewTab() {
           <div className="grid grid-cols-1 lg:grid-cols-4 lg:divide-x lg:divide-zinc-800 divide-y divide-zinc-800/40 lg:divide-y-0">
             <div className="py-3 lg:py-0 lg:pr-6 lg:pt-0">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
-              <p className="text-xl font-bold text-zinc-100">{sellThrough != null ? `${sellThrough}%` : '—'}</p>
-              <p className="text-xs text-zinc-600 mt-0.5">sold / (sold + unsold)</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <p className="text-xl font-bold text-zinc-100 leading-none">{sellThroughGraded != null ? `${sellThroughGraded}%` : '—'}</p>
+                  <p className="text-[10px] text-zinc-500 mt-1">Graded</p>
+                  <p className="text-[10px] text-zinc-600">{cards.sold.graded} / {cards.sold.graded + cards.unsold.graded}</p>
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-zinc-100 leading-none">{sellThroughRaw != null ? `${sellThroughRaw}%` : '—'}</p>
+                  <p className="text-[10px] text-zinc-500 mt-1">Raw</p>
+                  <p className="text-[10px] text-zinc-600">{cards.sold.raw} / {cards.sold.raw + cards.unsold.raw}</p>
+                </div>
+              </div>
             </div>
             <div className="py-3 lg:py-0 lg:px-6">
               <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Pending Orders</p>

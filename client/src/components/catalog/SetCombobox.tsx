@@ -58,10 +58,29 @@ export function SetCombobox({
   const [focused, setFocused] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const q = value.toLowerCase().trim();
-  const filtered = q
-    ? options.filter(s => s.code.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
+  // Token-based scoring so "2025 Taruka Hoppip" still surfaces a set whose
+  // alias only contains "taruka". Score = whole-string substring (4 pts,
+  // strongest signal) + token hits (1 pt each) + code prefix hit (2 pts).
+  // Pure year-tokens (4 digits) are ignored — they match too many sets.
+  const tokens = q.split(/\s+/).filter(t => t.length >= 2 && !/^\d{4}$/.test(t));
+  const scored = q
+    ? options
+        .map(s => {
+          const nameLc = s.name.toLowerCase();
+          const codeLc = s.code.toLowerCase();
+          let score = 0;
+          if (nameLc.includes(q) || codeLc.includes(q)) score += 4;
+          for (const t of tokens) {
+            if (codeLc === t || codeLc.startsWith(t)) score += 2;
+            else if (codeLc.includes(t) || nameLc.includes(t)) score += 1;
+          }
+          return { s, score };
+        })
+        .filter(x => x.score > 0)
+        .sort((a, b) => b.score - a.score || a.s.name.length - b.s.name.length)
+        .map(x => x.s)
     : options;
-  const suggestions = filtered.slice(0, 12);
+  const suggestions = scored.slice(0, 12);
   const exactMatch = options.some(s => s.code.toLowerCase() === q || s.name.toLowerCase() === q);
   // Show "+ Add new set" when:
   //   - both fields provided (AddPartModal style) — show full label

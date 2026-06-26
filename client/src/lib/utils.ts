@@ -13,6 +13,31 @@ export function formatCurrency(cents: number, currency = 'USD'): string {
   }).format(cents / 100);
 }
 
+// Lenient money-string parsers. parseFloat on "$38.58" returns NaN, which then
+// propagates through Math.round(...) * 100 and submits NaN to the server. The
+// fix is to strip everything that isn't a digit or decimal point before
+// parsing. Mirrors server/src/utils/cents.ts so client-side sums (display
+// totals, validation) agree with what the server stores.
+export function parseDollars(value: string | number | null | undefined): number {
+  if (value == null || value === '') return 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const cleaned = value.replace(/[^0-9.]/g, '');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function toCents(value: string | number | null | undefined): number {
+  return Math.round(parseDollars(value) * 100);
+}
+
+// Mirrors server/src/utils/card-number.ts. Pokemon card numbers print as
+// "215/172" (numerator over set size); we canonicalize to "215". Used to
+// avoid form drift after auto-fill returns the full "x/y" form.
+export function normalizeCardNumber(value: string | null | undefined): string {
+  if (value == null) return '';
+  return String(value).split('/')[0].trim();
+}
+
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return '—';
   const d = new Date(date);

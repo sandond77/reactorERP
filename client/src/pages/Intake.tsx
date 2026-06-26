@@ -7,7 +7,7 @@ import { AddPartModal, type CreatedPart } from '../components/catalog/AddPartMod
 import { SetCombobox, useMergedSets } from '../components/catalog/SetCombobox';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
-import { formatCurrency, formatDate } from '../lib/utils';
+import { formatCurrency, formatDate, parseDollars, toCents } from '../lib/utils';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import toast from 'react-hot-toast';
@@ -88,28 +88,45 @@ function PurchaseForm({
   const [lineCurrency, setLineCurrency] = useState<'JPY' | 'USD'>('JPY');
   const [singleUnnumbered, setSingleUnnumbered] = useState(false);
   const setOptions = useMergedSets(form.language);
+  // Modal-driven set-code entry (replaces window.prompt — forbidden by
+  // CLAUDE.md UI rules). idx points at which line item is being annotated;
+  // typedName is the set name the user typed in the combobox.
+  const [setCodePrompt, setSetCodePrompt] = useState<{ idx: number; typedName: string } | null>(null);
+  const [setCodeInput, setSetCodeInput] = useState('');
+  const [setCodeSaving, setSetCodeSaving] = useState(false);
 
   useEffect(() => {
     onMultiLineChange?.(!!lineItems);
   }, [lineItems, onMultiLineChange]);
   const qcLocal = useQueryClient();
 
-  async function addNewSetForLine(idx: number, typedName: string) {
-    const code = window.prompt(`Set code for "${typedName}"?\n(e.g. SV3, SWSH9, BS, CRC)`);
-    if (!code?.trim()) return;
+  function addNewSetForLine(idx: number, typedName: string) {
+    setSetCodeInput('');
+    setSetCodePrompt({ idx, typedName });
+  }
+
+  async function commitNewSetCode() {
+    if (!setCodePrompt) return;
+    const code = setCodeInput.trim().toUpperCase();
+    if (!code) return;
+    const { idx, typedName } = setCodePrompt;
+    setSetCodeSaving(true);
     try {
       await api.post('/sets/aliases', {
         language: form.language,
         game: 'pokemon',
         alias: typedName.toLowerCase(),
-        set_code: code.trim().toUpperCase(),
+        set_code: code,
         set_name: typedName,
       });
       qcLocal.invalidateQueries({ queryKey: ['set-aliases'] });
-      setLineItems((arr) => arr!.map((x, j) => j === idx ? { ...x, set_name: typedName, set_code: code.trim().toUpperCase() } : x));
-      toast.success(`Added set ${code.trim().toUpperCase()}`);
+      setLineItems((arr) => arr!.map((x, j) => j === idx ? { ...x, set_name: typedName, set_code: code } : x));
+      toast.success(`Added set ${code}`);
+      setSetCodePrompt(null);
     } catch {
       toast.error('Failed to register set');
+    } finally {
+      setSetCodeSaving(false);
     }
   }
 
@@ -287,9 +304,9 @@ function PurchaseForm({
   }
 
   useEffect(() => {
-    const yen  = parseFloat(form.total_cost_yen);
-    const rate = parseFloat(form.fx_rate);
-    if (!isNaN(yen) && !isNaN(rate) && rate > 0) {
+    const yen  = parseDollars(form.total_cost_yen);
+    const rate = parseDollars(form.fx_rate);
+    if (yen > 0 && rate > 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm((f) => ({ ...f, total_cost_usd: (yen / rate).toFixed(2) }));
     }
@@ -312,7 +329,7 @@ function PurchaseForm({
         if (!li.quantity || parseInt(li.quantity) < 1) e[`line_${i}_qty`] = 'Required';
         if (!li.cost) e[`line_${i}_cost`] = 'Required';
       });
-      if (lineCurrency === 'JPY' && (!form.fx_rate || parseFloat(form.fx_rate) <= 0)) {
+      if (lineCurrency === 'JPY' && (!form.fx_rate || parseDollars(form.fx_rate) <= 0)) {
         e.cost = '¥ → USD rate required when entering line costs in ¥';
       }
     } else {
@@ -347,10 +364,10 @@ function PurchaseForm({
     setSubmitting(true);
 
     if (lineItems && lineItems.length > 0) {
-      const fxRate = parseFloat(form.fx_rate);
+      const fxRate = parseDollars(form.fx_rate);
       const isJpy = lineCurrency === 'JPY';
       const payloads = lineItems.map((li) => {
-        const lineCost = parseFloat(li.cost) || 0;
+        const lineCost = parseDollars(li.cost);
         const lineCostUsd = isJpy && fxRate > 0 ? lineCost / fxRate : lineCost;
         return {
           type:           li.type,
@@ -373,7 +390,7 @@ function PurchaseForm({
       return;
     }
 
-    const usd = parseFloat(form.total_cost_usd);
+    const usdCents = form.total_cost_usd ? toCents(form.total_cost_usd) : undefined;
     onSave({
       type:           form.type,
       source:         form.source || undefined,
@@ -383,9 +400,9 @@ function PurchaseForm({
       set_name:       form.set_name  || undefined,
       card_number:    form.card_number || undefined,
       catalog_id:     catalogId ?? undefined,
-      total_cost_yen: form.total_cost_yen ? parseInt(form.total_cost_yen) : undefined,
-      fx_rate:        form.fx_rate ? parseFloat(form.fx_rate) : undefined,
-      total_cost_usd: !isNaN(usd) ? Math.round(usd * 100) : undefined,
+      total_cost_yen: form.total_cost_yen ? Math.round(parseDollars(form.total_cost_yen)) : undefined,
+      fx_rate:        form.fx_rate ? parseDollars(form.fx_rate) : undefined,
+      total_cost_usd: usdCents,
       card_count:     parseInt(form.card_count) || 1,
       purchased_at:   form.purchased_at || undefined,
       notes:          form.notes || undefined,
@@ -771,6 +788,42 @@ function PurchaseForm({
           />
         );
       })()}
+
+      <Modal
+        open={!!setCodePrompt}
+        onClose={() => setSetCodePrompt(null)}
+        title="Register set code">
+        {setCodePrompt && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-300 leading-relaxed">
+              Set code for <span className="text-zinc-100 font-medium">&ldquo;{setCodePrompt.typedName}&rdquo;</span>?
+            </p>
+            <input
+              type="text"
+              autoFocus
+              value={setCodeInput}
+              onChange={(e) => setSetCodeInput(e.target.value.toUpperCase())}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && setCodeInput.trim() && !setCodeSaving) commitNewSetCode();
+                if (e.key === 'Escape') setSetCodePrompt(null);
+              }}
+              placeholder="e.g. SV3, SWSH9, BS, CRC"
+              className="w-full px-3 py-2 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 font-mono uppercase placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={() => setSetCodePrompt(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!setCodeInput.trim() || setCodeSaving}
+                onClick={commitNewSetCode}>
+                {setCodeSaving ? 'Saving…' : 'Add Set'}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </form>
   );
 }

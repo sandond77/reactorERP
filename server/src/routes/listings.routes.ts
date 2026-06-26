@@ -76,7 +76,7 @@ listingsRouter.get('/by-url', requireAuth, async (req, res, next) => {
   try {
     const url = typeof req.query.url === 'string' ? req.query.url : null;
     if (!url) { res.status(400).json({ error: 'url required' }); return; }
-    const row = await buildByUrlQuery(req.user!.id, url).executeTakeFirst();
+    const row = await buildByUrlQuery(req.dataUserId, url).executeTakeFirst();
     if (!row) { res.status(404).json({ error: 'No active listing found for that URL' }); return; }
     res.json({ data: row });
   } catch (err) { next(err); }
@@ -88,7 +88,7 @@ listingsRouter.get('/by-url/all', requireAuth, async (req, res, next) => {
   try {
     const url = typeof req.query.url === 'string' ? req.query.url : null;
     if (!url) { res.status(400).json({ error: 'url required' }); return; }
-    const rows = await buildByUrlQuery(req.user!.id, url).execute();
+    const rows = await buildByUrlQuery(req.dataUserId, url).execute();
     if (!rows.length) { res.status(404).json({ error: 'No active listings found for that URL' }); return; }
     res.json({ data: rows });
   } catch (err) { next(err); }
@@ -96,7 +96,7 @@ listingsRouter.get('/by-url/all', requireAuth, async (req, res, next) => {
 
 listingsRouter.get('/filters', requireAuth, async (req, res, next) => {
   try {
-    const options = await listingsService.getListingFilterOptions(req.user!.id);
+    const options = await listingsService.getListingFilterOptions(req.dataUserId);
     res.json(options);
   } catch (err) { next(err); }
 });
@@ -105,7 +105,7 @@ listingsRouter.get('/', requireAuth, async (req, res, next) => {
   try {
     const q = querySchema.parse(req.query);
     const result = await listingsService.listListings(
-      req.user!.id,
+      req.dataUserId,
       { platforms: splitCSV(q.platforms), grades: splitCSV(q.grades), companies: splitCSV(q.companies), part_numbers: splitCSV(q.part_numbers), num_listed: splitCSV(q.num_listed), num_sold: splitCSV(q.num_sold), card_names: splitCSV(q.card_names), prices: splitCSV(q.prices), search: q.search, listing_type: q.listing_type },
       { page: q.page, limit: q.limit },
       q.sort_by,
@@ -118,7 +118,7 @@ listingsRouter.get('/', requireAuth, async (req, res, next) => {
 listingsRouter.post('/', requireAuth, async (req, res, next) => {
   try {
     const data = createListingSchema.parse(req.body);
-    const listing = await listingsService.createListing(req.user!.id, data as any);
+    const listing = await listingsService.createListing(req.dataUserId, data as any);
     res.status(201).json({ data: listing });
   } catch (err) { next(err); }
 });
@@ -141,7 +141,7 @@ const groupUpdateSchema = groupKeySchema.extend({
 
 listingsRouter.post('/migrate-order-urls', requireAuth, async (req, res, next) => {
   try {
-    const result = await listingsService.migrateOrderUrlListings(req.user!.id);
+    const result = await listingsService.migrateOrderUrlListings(req.dataUserId);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -154,7 +154,7 @@ listingsRouter.patch('/set-group/:groupId', requireAuth, async (req, res, next) 
       ebay_listing_url: z.string().url().nullable().optional(),
       list_price: z.union([z.string(), z.number()]).transform((v) => toCents(v)).optional(),
     }).parse(req.body);
-    const result = await listingsService.updateSetGroup(req.user!.id, groupId as string, body as any);
+    const result = await listingsService.updateSetGroup(req.dataUserId, groupId as string, body as any);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -169,14 +169,14 @@ listingsRouter.patch('/group', requireAuth, async (req, res, next) => {
     if (platform_new !== undefined) updates.platform = platform_new;
     if (currency_new !== undefined) updates.currency = currency_new;
     if (ebay_listing_url !== undefined) updates.ebay_listing_url = ebay_listing_url;
-    const result = await listingsService.updateListingsByGroup(req.user!.id, key, updates);
+    const result = await listingsService.updateListingsByGroup(req.dataUserId, key, updates);
     res.json(result);
   } catch (err) { next(err); }
 });
 
 listingsRouter.delete('/set-group/:groupId', requireAuth, async (req, res, next) => {
   try {
-    const result = await listingsService.cancelSetGroup(req.user!.id, req.params.groupId as string);
+    const result = await listingsService.cancelSetGroup(req.dataUserId, req.params.groupId as string);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -184,7 +184,7 @@ listingsRouter.delete('/set-group/:groupId', requireAuth, async (req, res, next)
 listingsRouter.delete('/group', requireAuth, async (req, res, next) => {
   try {
     const key = groupKeySchema.parse(req.body);
-    const result = await listingsService.cancelListingsByGroup(req.user!.id, key);
+    const result = await listingsService.cancelListingsByGroup(req.dataUserId, key);
     res.json(result);
   } catch (err) { next(err); }
 });
@@ -199,14 +199,14 @@ const singleUpdateSchema = z.object({
 listingsRouter.patch('/:listingId', requireAuth, async (req, res, next) => {
   try {
     const body = singleUpdateSchema.parse(req.body);
-    const updated = await listingsService.updateListing(req.user!.id, req.params.listingId as string, body);
+    const updated = await listingsService.updateListing(req.dataUserId, req.params.listingId as string, body);
     res.json(updated);
   } catch (err) { next(err); }
 });
 
 listingsRouter.delete('/:listingId', requireAuth, async (req, res, next) => {
   try {
-    const result = await listingsService.cancelSingleListing(req.user!.id, req.params.listingId as string);
+    const result = await listingsService.cancelSingleListing(req.dataUserId, req.params.listingId as string);
     res.json(result);
   } catch (err) { next(err); }
 });

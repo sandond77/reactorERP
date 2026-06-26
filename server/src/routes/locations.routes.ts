@@ -19,7 +19,7 @@ const updateSchema = createSchema.partial();
 
 locationsRouter.get('/', async (req, res, next) => {
   try {
-    const locations = await locationsService.listLocations(req.user!.id);
+    const locations = await locationsService.listLocations(req.dataUserId);
     res.json({ data: locations });
   } catch (err) { next(err); }
 });
@@ -27,7 +27,7 @@ locationsRouter.get('/', async (req, res, next) => {
 locationsRouter.post('/', async (req, res, next) => {
   try {
     const body = createSchema.parse(req.body);
-    const location = await locationsService.createLocation(req.user!.id, body);
+    const location = await locationsService.createLocation(req.dataUserId, body);
     res.status(201).json({ data: location });
   } catch (err) { next(err); }
 });
@@ -35,21 +35,21 @@ locationsRouter.post('/', async (req, res, next) => {
 locationsRouter.patch('/:id', async (req, res, next) => {
   try {
     const body = updateSchema.parse(req.body);
-    const location = await locationsService.updateLocation(req.user!.id, req.params.id, body);
+    const location = await locationsService.updateLocation(req.dataUserId, req.params.id, body);
     res.json({ data: location });
   } catch (err) { next(err); }
 });
 
 locationsRouter.delete('/:id', async (req, res, next) => {
   try {
-    await locationsService.deleteLocation(req.user!.id, req.params.id);
+    await locationsService.deleteLocation(req.dataUserId, req.params.id);
     res.status(204).send();
   } catch (err) { next(err); }
 });
 
 locationsRouter.get('/:id/cards', async (req, res, next) => {
   try {
-    const cards = await locationsService.getLocationCards(req.user!.id, req.params.id);
+    const cards = await locationsService.getLocationCards(req.dataUserId, req.params.id);
     res.json({ data: cards });
   } catch (err) { next(err); }
 });
@@ -60,7 +60,7 @@ locationsRouter.post('/assign', async (req, res, next) => {
       card_instance_id: z.string().uuid(),
       location_id: z.string().uuid().nullable(),
     }).parse(req.body);
-    await locationsService.assignLocation(req.user!.id, body.card_instance_id, body.location_id);
+    await locationsService.assignLocation(req.dataUserId, body.card_instance_id, body.location_id);
     res.status(204).send();
   } catch (err) { next(err); }
 });
@@ -71,7 +71,7 @@ locationsRouter.post('/assign-bulk', async (req, res, next) => {
       card_instance_ids: z.array(z.string().uuid()).min(1),
       location_id: z.string().uuid().nullable(),
     }).parse(req.body);
-    await locationsService.bulkAssignLocation(req.user!.id, body.card_instance_ids, body.location_id);
+    await locationsService.bulkAssignLocation(req.dataUserId, body.card_instance_ids, body.location_id);
     res.status(204).send();
   } catch (err) { next(err); }
 });

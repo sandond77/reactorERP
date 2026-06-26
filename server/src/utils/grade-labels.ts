@@ -5,15 +5,25 @@
  */
 
 // ── PSA ───────────────────────────────────────────────────────────────────────
+// PSA does issue half grades (9.5, 8.5, ...). The "+" suffix on the lower
+// descriptor is the standard PSA convention for half steps.
 const PSA_LABELS: Record<string, string> = {
   '10':  'GEM MINT 10',
+  '9.5': 'MINT+ 9.5',
   '9':   'MINT 9',
+  '8.5': 'NM-MT+ 8.5',
   '8':   'NEAR MINT-MINT 8',
+  '7.5': 'NM+ 7.5',
   '7':   'NEAR MINT 7',
+  '6.5': 'EX-MT+ 6.5',
   '6':   'EXCELLENT-MINT 6',
+  '5.5': 'EX+ 5.5',
   '5':   'EXCELLENT 5',
+  '4.5': 'VG-EX+ 4.5',
   '4':   'VERY GOOD-EXCELLENT 4',
+  '3.5': 'VG+ 3.5',
   '3':   'VERY GOOD 3',
+  '2.5': 'GOOD+ 2.5',
   '2':   'GOOD 2',
   '1.5': 'FAIR 1.5',
   '1':   'POOR 1',

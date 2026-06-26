@@ -2,6 +2,7 @@ import { sql } from 'kysely';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
+import { normalizeCardNumber } from '../utils/card-number';
 import { createRawPurchase } from './raw-purchases.service';
 import { logAudit } from '../utils/audit';
 import type { CardStatus, NewCardInstance, CardInstanceUpdate } from '../types/db';
@@ -31,6 +32,11 @@ export interface CardFilters {
   exclude_legacy_bucket?: boolean;
   is_card_show?: string;  // 'yes' | 'no'
   is_personal_collection?: string;  // 'yes' | 'no'
+  // Raw cards that have been converted to slabs via grading carry
+  // graded_out=true (see migration 057). Default behavior hides them from
+  // inventory views; set include_graded_out=true to opt in (lifecycle
+  // surfaces like sub detail do).
+  include_graded_out?: boolean;
 }
 
 export async function listCards(
@@ -121,6 +127,7 @@ export async function listCards(
   if (filters.is_card_show === 'no') query = query.where('ci.is_card_show', '=', false);
   if (filters.is_personal_collection === 'yes') query = query.where('ci.is_personal_collection', '=', true);
   if (filters.is_personal_collection === 'no') query = query.where('ci.is_personal_collection', '=', false);
+  if (!filters.include_graded_out) query = query.where('ci.graded_out', '=', false);
   if (filters.search) {
     if (filters.exact) {
       // Strict mode — whole-term case-insensitive equality across the same
@@ -266,6 +273,7 @@ export async function listCardsGroupedByPart(
       'ci.legacy_source_catalog_id',
     ])
     .where('ci.user_id', '=', userId)
+    .where('ci.graded_out', '=', false)
     // Include rows that are either part of a raw lot OR carry a legacy
     // bucket lineage. The second clause picks up returned slabs (which
     // have raw_purchase_id=null) so they cross-tally into their legacy
@@ -422,6 +430,12 @@ export async function createCard(
   data: Omit<NewCardInstance, 'user_id'>,
   slab?: { company: string; grade: number; grade_label?: string; cert_number?: string; additional_cost?: number }
 ) {
+  // Normalize "215/172" → "215" so the stored override lines up with how the
+  // catalog stores card_number. Suffix letters / leading zeros preserved.
+  if ((data as any).card_number_override !== undefined) {
+    (data as any).card_number_override = normalizeCardNumber((data as any).card_number_override);
+  }
+
   // 'bulk' is a raw_purchases.type, not a card_instances.purchase_type — map it to 'raw'
   const incomingType = slab ? 'pre_graded' : (data.purchase_type ?? 'raw');
   const rawPurchaseType = (incomingType as any) === 'bulk' ? 'bulk' : 'raw';
@@ -452,6 +466,26 @@ export async function createCard(
   if (locationId) {
     const loc = await db.selectFrom('locations').select('is_card_show').where('id', '=', locationId).executeTakeFirst();
     if (loc) isCardShow = loc.is_card_show;
+  }
+
+  // Cert-uniqueness guard for Add Slab. (company, cert_number) is globally
+  // unique inside a grading company; collisions are always typos. Reject
+  // before insert so we don't pollute slab_details with duplicates that
+  // later confuse reports + listings.
+  if (slab?.cert_number) {
+    const certNum = Number(slab.cert_number);
+    if (Number.isFinite(certNum)) {
+      const existing = await db
+        .selectFrom('slab_details')
+        .select('id')
+        .where('user_id', '=', userId)
+        .where('company', '=', slab.company as any)
+        .where('cert_number', '=', certNum)
+        .executeTakeFirst();
+      if (existing) {
+        throw new AppError(409, `${slab.company} cert # ${slab.cert_number} is already recorded on another slab.`);
+      }
+    }
   }
 
   const card = await db
@@ -501,6 +535,12 @@ export async function updateCard(
 
   const { slab_cert_number, slab_grade, slab_grade_label, slab_grading_cost, ...instanceData } = data;
 
+  // Normalize "215/172" → "215" so the stored override lines up with the
+  // catalog. Apply only when the field is touched.
+  if ((instanceData as any).card_number_override !== undefined) {
+    (instanceData as any).card_number_override = normalizeCardNumber((instanceData as any).card_number_override);
+  }
+
   // Quantity is invariant outside intake/inspection/sales — it's set at
   // purchase and only adjusted through sale splits. Strip any client-supplied
   // qty so a stale caller can't desync the lot pool.
@@ -529,11 +569,34 @@ export async function updateCard(
   const hasSlabFields = slab_cert_number !== undefined || slab_grade !== undefined ||
     slab_grade_label !== undefined || slab_grading_cost !== undefined;
   if (hasSlabFields) {
+    // Cert-uniqueness guard on edit — same rule as createCard. Reject if the
+    // user is changing this slab's cert to one that another slab on the same
+    // company already owns.
+    if (slab_cert_number != null && Number.isFinite(slab_cert_number)) {
+      const ownCompany = await db
+        .selectFrom('slab_details').select('company')
+        .where('card_instance_id', '=', cardId).where('user_id', '=', userId)
+        .executeTakeFirst();
+      if (ownCompany) {
+        const collision = await db
+          .selectFrom('slab_details').select('id')
+          .where('user_id', '=', userId)
+          .where('company', '=', ownCompany.company)
+          .where('cert_number', '=', slab_cert_number)
+          .where('card_instance_id', '!=', cardId)
+          .executeTakeFirst();
+        if (collision) {
+          throw new AppError(409, `${ownCompany.company} cert # ${slab_cert_number} is already recorded on another slab.`);
+        }
+      }
+    }
     const slabUpdate: Record<string, unknown> = { updated_at: new Date() };
     if (slab_cert_number !== undefined) slabUpdate.cert_number = slab_cert_number;
     if (slab_grade !== undefined)       slabUpdate.grade = slab_grade;
     if (slab_grade_label !== undefined) slabUpdate.grade_label = slab_grade_label;
-    if (slab_grading_cost !== undefined) slabUpdate.grading_cost = slab_grading_cost;
+    // grading_cost is NOT NULL DEFAULT 0; SlabDetailModal sends null when the
+    // input is empty. Coerce so the UPDATE doesn't violate the constraint.
+    if (slab_grading_cost !== undefined) slabUpdate.grading_cost = slab_grading_cost ?? 0;
     await db.updateTable('slab_details')
       .set(slabUpdate)
       .where('card_instance_id', '=', cardId)

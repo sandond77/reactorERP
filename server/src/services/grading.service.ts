@@ -168,6 +168,7 @@ export async function listSlabs(
     listing_url: string | null;
     listing_platform: string | null;
     listing_id: string | null;
+    is_set_listing: boolean;
     raw_cost: number;
     grading_cost: number;
     strike_price: number | null;
@@ -199,6 +200,24 @@ export async function listSlabs(
       l.ebay_listing_url                              AS listing_url,
       l.platform                                      AS listing_platform,
       l.id                                            AS listing_id,
+      -- A "set listing" is an eBay URL that holds active listings for
+      -- multiple DIFFERENT cards. Multiple copies of the SAME card sharing
+      -- the URL (a multi-qty single listing) is NOT a set. We detect by
+      -- checking for any sibling active listing under the same URL whose
+      -- card identity differs from this one.
+      COALESCE((
+        l.ebay_listing_url IS NOT NULL AND EXISTS (
+          SELECT 1
+          FROM listings l2
+          JOIN card_instances ci2 ON ci2.id = l2.card_instance_id
+          LEFT JOIN card_catalog cc2 ON cc2.id = ci2.catalog_id
+          WHERE l2.ebay_listing_url = l.ebay_listing_url
+            AND l2.listing_status = 'active'
+            AND l2.id <> l.id
+            AND COALESCE(ci2.card_name_override, cc2.card_name) IS DISTINCT FROM
+                COALESCE(ci.card_name_override, cc.card_name)
+        )
+      ), false)                                       AS is_set_listing,
       ci.purchase_cost                                AS raw_cost,
       sd.grading_cost,
       s.sale_price                                    AS strike_price,

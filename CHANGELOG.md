@@ -1,5 +1,250 @@
 # Reactor — Changelog
 
+## June 17, 2026 — late
+
+### Fixes
+
+**Reorder — table auto-listed every bulk card in inventory, not just tracked alerts**
+- `listBulkCardsWithThresholds` FULL OUTER JOINed `card_instances` (filtered to bulk) with `reorder_thresholds`, so any bulk card in stock auto-appeared as a roster candidate. The user got a 100+-row table dominated by cards they never asked to monitor, every row labeled green "Active" (because `AlertStatusBadge` fell through when `is_ignored` and `muted_until` were both null), and the Mute / Ignore / Trash actions correctly hid themselves on no-threshold rows — reading as a bug because the page surface implied every row was a tracked alert.
+- Switched to INNER JOIN from `reorder_thresholds` → `card_catalog` so only rows the user explicitly added via "Add Card" surface. Inventory stays LEFT JOINed so `to_grade` / `inbound` counts still render when the catalog row has stock. Every row now has a `threshold_id`, so the actions and status badge are correct without extra fallbacks.
+
+**Sales — eBay "Ship this cert" row hid the bin location**
+- The Location field rendered on its own row below "Ship this cert", only when `selectedCard.location_name` was set. A slab without a location quietly dropped the field, easy to miss when prepping a shipment.
+- Pulled Location inline next to the cert (graded path) and lot id (raw path), separated by a `·` mid-dot. When no location is assigned, render `No location` as muted italic so the eBay shipping flow always shows the field. Non-eBay platforms keep the original cert-only row.
+
+### Features
+
+**Reorder Alerts — Remove action on every surface**
+- `ReorderActionButtons` on the manage page exposed Mute / Ignore / Reset but no Trash, so the only way to drop a threshold was to clear the Min Qty cell. The Dashboard `OrderMoreSection` and `GradeMoreSection` widgets were missing Remove buttons too.
+- Added a `Trash2` button to all four surfaces — manage-page Reorder tab + Grade More tab, and the Dashboard Reorder Alerts widget + Grade More widget. Each hits the existing `DELETE /reorder/thresholds/<id>` (or `/grade-more/<id>`) endpoint that the manage page's MinQtyCell already used for its inline clear action.
+
+## June 17, 2026
+
+### Fixes
+
+**Trades — outgoing sale_price double-counted `cash_from_customer`**
+- `createTradeInner` distributed `cash_from_customer_cents` across each outgoing card's `sale_price`, but the client already sends `sale_price` as the user's full assigned trade value (i.e. the $125 Gengar includes the $80 Wiglett value + $45 cash that came back together). The server then added the $45 again, storing the Gengar's strike at $170. The Trades list flagged the row Unbalanced because `|$170 − $80 − $45| = $45`, and the slab's net profit reflected the inflated proceeds. The same pattern applied to `cash_to_customer` and incoming `purchase_cost`.
+- Store `sale_price` and `purchase_cost` exactly as the client sent them. Cash from / to customer stays on `trades.cash_*_customer_cents` as a ledger memo only — it never lands on a per-card value. Balance check `|out_card_total + cash_to − in_card_total − cash_from| < 1` now reduces to comparing card-only sums on each side (cash terms cancel because they're already inside both stored prices). The Gengar example now stores `$125` and renders as Balanced.
+
+**Sales — FIFO badge ignored grade and condition**
+- The Record Sale cert picker rendered a single FIFO badge on the lowest-cert non-set copy across the entire card, so a PSA 8 sale that listed both a PSA 6 (#152584779) and a PSA 8 (#152584780) cert flagged the PSA 6 as FIFO. Same bug on the raw card picker — it flagged `idx === 0` regardless of condition, so an NM sale got pointed at the oldest LP lot.
+- Track FIFO per `(company, grade_label)` bucket for graded and per `condition` bucket for raw. Each bucket gets its own badge on the earliest-cert / oldest-purchase non-set copy. Matches the per-grade picker already used in the listing-creation flow.
+
+**Add Slab — `074/071` card-number drift created duplicate catalog rows**
+- Auto-fill from a PSA label / pasted card name passed `s.card_number` to `setValue` verbatim and to `/catalog/search` verbatim. When the agent returned `"074/071"` (printed form with denominator), the catalog lookup couldn't match the stored `"074"` row, the badge flipped to "New part", and the user could end up proposing a duplicate catalog entry.
+- New `lib/utils.ts` `normalizeCardNumber` helper mirrors `server/src/utils/card-number.ts`. AddSlabForm runs it on the auto-fill `setValue` AND on the catalog/search params so both stay in lockstep with what the server stores.
+
+### Features
+
+**Add Slab — manual part-number search + reuse of the shared catalog picker**
+- AddSlabForm rolled its own debounced `/catalog/search` + Create-part badge that only resolved a SKU when card name + set + card number all aligned. There was no way to TYPE a known SKU and pin the slab to it (AddCardForm has that capability via the shared `PartNumberField`). The forked implementation also produced display drift — the inline badge showed `"PKMN-JP-S10A-074"` (agent's uppercase output) while the actual catalog row was `"PKMN-JP-S10a-074"` because the badge re-rendered the agent's returned SKU before the catalog lookup confirmed it.
+- Dropped the local `partNumber` / `createdCatalogId` / `showCreatePartModal` state and the embedded useEffect + AddPartModal block. Mounted the shared `PartNumberField` the same way AddCardForm does. The agent's auto-fill now sets `catalogMatch` when `catalog_exists + catalog_id` are present so the existing catalog row is pre-selected. Manual search, "+ Create new", single-match auto-pick, and onSelect form-fill all come for free.
+
+**Slabs — canonical grade-label library + auto-fill on Add / Edit**
+- Slab inventory had drift like `"10"` and `"GEM MINT 10"` coexisting under PSA grade 10, splitting the Grade column into separate buckets. CGC and ARS each had multiple in-use formats.
+- New `client/src/lib/grade-labels.ts` mirrors `server/src/utils/grade-labels.ts` — same canonical maps for PSA / BGS / CGC / SGC / HGA / ACE / ARS. Add Slab and Edit Slab auto-populate `slab_grade_label` when `grading_company` + numeric grade change (via `getCanonicalLabel`), and expose a `<datalist>` on the input with every option for the picked company (CGC `10 Pristine` vs `Gem Mint 10`, `ARS10+` vs `ARS10`). SubReturns already had its own canonical map + auto-derive fallback so the weak-CSV-match path stayed working without changes.
+
+## June 16, 2026
+
+### Fixes
+
+**Inventory Summary — Part Numbers parent row picked a random instance name; case-only variants over-split**
+- The Part Numbers parent picked `displayName = groupRows[0].card_name` which is `COALESCE(ci.card_name_override, cc.card_name)`. For PKMN-JP-S10a-074 (Gengar Dark Phantasma) the first sorted variant was a title-case PSA label, so renaming 4 raw instances to `"Gengar"` had no visible effect at the parent level — the parent stayed locked to the long uppercase PSA label. Level-2 buckets exposed case-only duplicates as separate variants ("2022 Pokemon..." title case vs "2022 POKEMON..." all caps for the same card).
+- Server returns `cc.card_name AS catalog_card_name` so the client can prefer the catalog's canonical name on the parent display. New `collapseCaseVariants` runs at the level-2 bucket boundary — groups bucket rows by lowercased `card_name`, sums all qty fields, keeps the longest casing as the display. PSA 10 GENGAR's 74 uppercase + 61 title-case now reads as a single 135-card variant instead of "2 variants".
+
+**Grading — Add Card picker re-exposed already-submitted cards in the next batch**
+- The picker's status filter included `grading_submitted`. When a card is added to a batch and submitted, the server creates a sibling ci row at `status='grading_submitted'` for the qty being graded (the source ci's qty drops by that amount). Including `grading_submitted` meant those sibling rows — physically at PSA already — re-appeared in the next batch's search.
+- Dropped `grading_submitted` from both pickers (Add Card + Edit Item Replace from Inventory). `purchased_raw + inspected` covers the eligible pool. Also added a `purchase_cost` `$N.NN/card` cell on each search-result row + selected row so the per-card raw cost is visible while picking.
+
+**Dashboard — Avg days at graders read `ci.updated_at` instead of batch submitted_at**
+- The Grading Pipeline tile's "Avg days at graders" stat was `AVG(NOW() − ci.updated_at)` over cards at `status='grading_submitted'`. `updated_at` gets bumped by any unrelated row update — the night-before's `decision='grade'` backfill on 221 cards rewound the average to **4d** on a screen where every visible active batch was 12–57d.
+- Compute it card-weighted from the `activeBatches` result instead, which already uses `gb.submitted_at` for its per-batch `days_elapsed`. New value matches the visible batches (27d for the sample data vs. 4d before). Dropped the bad expression from the pipeline query.
+
+**Org scoping — listings / locations / trades route handlers read `req.user!.id` instead of `req.dataUserId`**
+- Three routers were querying with the session user's id directly instead of the org-owner resolution that `requireAuth` writes to `req.dataUserId`. Org-member sessions could see / mutate the wrong tenant's data via these endpoints.
+- Switched every handler in `listings.routes.ts` / `locations.routes.ts` / `trades.routes.ts` to `req.dataUserId`. Matches the rule already enforced by `requireAuth` and stated in CLAUDE.md.
+
+### UI
+
+**Grading — Legacy tab label**
+- Dropped the parenthetical "(no lot)" from the Legacy tab — the tab body explains what it covers, and the suffix was duplicating the heading.
+
+## June 15, 2026
+
+### Fixes
+
+**Record Listing — case-only card name variants split a part number into two suggestions**
+- The "Search Card" picker in Record Listing grouped suggestions by raw `card_name`, so the same `PKMN-JP-Svg-051` part rendered as two distinct entries: one for "...Charmander" (2 on show / 4 unsold) and another for "...CHARMANDER" (11 unsold). Picking one missed the other casing's copies in the cert step. Same bug existed in the set-listing slot picker.
+- `SlabResult.sku` added to the response shape on the client. Both dedupe paths now key on `sku ?? lowercased(card_name)`; the canonical display name is the longest variant in the bucket. Phase 2 (cert picker) filters with the same key extractor, so a "Pokemon" selection collects "POKEMON" certs too.
+
+**Part Numbers — SET column truncated while CARD wrapped, making adjacent rows look like they overlapped**
+- All four row levels (single-grade, summary, level 2 bucket, level 3 variant) had `truncate whitespace-nowrap` on the SET cell but `whitespace-normal break-words` on CARD. Long set names like "Venusaur & Charizard & Blastoise Special Deck" got chopped to ellipsis while the matching card name wrapped to 2–3 lines, mismatching row heights and producing overlapping text from the next row.
+- Switched all four SET cells to `whitespace-normal break-words` so heights match the CARD column.
+
+**Sales — Edit Sale modal had no way to set/change the linked Card Show**
+- When a card_show sale was recorded without picking a show (or against the wrong one), there was no in-app fix: the show couldn't be added later, so any show-grouped report under-counted those sales. Discovered after 4 May 31 sales on the user's account ended up dated Jun 1 with no `card_show_id`, missing the CardCon roll-up entirely.
+- Added a Card Show `<select>` to the Edit Sale modal that mounts when `platform === 'card_show'`, reusing the `['card-shows']` query and the auto-fill-date behavior from Record Sale. Wired `card_show_id` through `PUT /sales/:id` — schema accepts UUID or `null` (set-or-clear), service spreads it through the update set, `RecordSaleInput.card_show_id` widened to `string | null`. Backfilled the 4 prod rows: `card_show_id = CardCon`, `sold_at = 2026-05-31`.
+
+**Money inputs — `$` and `,` in price fields broke parsing inconsistently across modals**
+- Bare `parseFloat("$38.58")` returns `NaN`, which then propagated through `Math.round(parseFloat(x) * 100)` and either submitted `NaN` to the server or zeroed display sums depending on the codepath. Some modals had their own local `toCents` with the same bug (e.g. `AddToCardShowModal`), others used inline `parseFloat`. Behavior diverged across Sales / Grading / Intake / Inspection / Add to Card Show.
+- New `lib/utils.ts` exports `parseDollars` + `toCents` that strip every non-digit / non-decimal char before parsing — mirrors `server/src/utils/cents.ts` so client display matches what the server stores. Every money-field `parseFloat` callsite replaced: Sales (single + bulk + listed/CS price commits + Edit Sale), Grading (purchase_cost, estimated_value, grading_cost), Intake (per-line cost, fx_rate, total_cost_yen/usd), InspectionPanel (purchase_cost), AddToCardShowModal (allValid check). Validation lines that previously used `isNaN(parseFloat(...))` now check `/\d/` so a lone `"$"` still gets rejected — `parseDollars("$") === 0` would otherwise let it through.
+
+**Grading — legacy-reassigned source rows showed `—` decision in the lot view**
+- `addLegacyItem` (and the relink-from-legacy path that delegates to it) creates the reassigned source `card_instances` row at `status='grading_submitted'` but never set `decision`, so it landed `NULL`. In the lot view those rows rendered with an em-dash decision next to `qty=0` (or `qty=1` if still out at PSA), reading like a state-machine gap. The parent legacy bucket carried the real `decision='grade'`, but the child row didn't.
+- Stamp `decision='grade'` on insert so the row reflects the same intent as the bucket it was pulled from, and matches what `processReturn` already writes when restoring source rows on revert (`status='inspected', decision='grade'`). Backfilled 221 existing rows on prod for the affected user.
+
+## June 13, 2026
+
+### Fixes
+
+**Imports — `card_instances.card_game` always written as 'pokemon' regardless of catalog game**
+- All three insert paths in `import.service.ts` (graded CSV, raw purchase, legacy cards) were hardcoded to write `card_game: 'pokemon'` when creating `card_instances` rows. Even though `pokemon_set_aliases` correctly tagged Weiss / Union Arena / Black Clover set codes (SAO, KGL, BCV, SPY, etc.) with the right game, and the resulting `card_catalog` row carried `game = 'weiss-schwarz'` / `union_arena` / etc., the inventory row attached to it was force-stamped Pokémon. Result: imports rendered correctly in the catalog but binned under Pokémon everywhere the frontend filtered on `ci.card_game` (Inventory Summary, Reports, listings).
+- Surfaced by a prod user (wanchi) whose entire Weiss Schwarz collection appeared under Pokémon. 80 instance rows + 4 catalog rows reconciled (4 of the catalog rows were also mislabeled as `pokemon` for clearly non-Pokémon cards: Noelle Silva / Miku Nakano / Catwoman / Coco — all updated to weiss-schwarz).
+- Fix reads `card_catalog.game` after `getOrCreateCatalogId` resolves and uses that for `card_game`. Falls back to 'pokemon' only when no catalog match exists (legacy import already supports an explicit `card_game` CSV column).
+
+### Features
+
+**Inventory — Add Card / Add Slab now have a dynamic game picker with inline "+ Add new game"**
+- Both quick-add forms had hardcoded `<select>` lists (Add Card: pokemon / one_piece / mtg / other; Add Slab: pokemon / one_piece / other) that didn't include Weiss Schwarz, Union Arena, or any user-registered game. The "Other" escape hatch produced rows tagged with the literal string `other`, which was useless — they couldn't be filtered, attributed to a set, or rolled up against any catalog.
+- New shared `CardGameSelect` component queries `/sets/games` (same query key as the Catalog page, so the dropdown stays in sync with the rest of the app) and renders one option per registered game. A "+ Add new game…" sentinel opens an inline name + SKU prefix panel that POSTs to `/sets/games` and refetches before assigning the new game to the form — same pattern as `AddPartModal`.
+- "Other" removed entirely. Every game must now be registered in `card_games`, which keeps `card_catalog.game` and `card_instances.card_game` aligned on a known vocabulary.
+
+**Slab Detail — cert-uniqueness guards on every write path**
+- `processReturn` rejects payloads that reuse a cert within the same return or against any existing slab for the company (catches the May 6 PSA dupe import and the cert 145655318 sub-return collision that produced two slabs from one return).
+- `createCard` (Add Slab API) and `updateCard` (Slab Detail edit) now check `(user_id, company, cert_number)` and 409 if the cert already exists on another slab.
+- Graded CSV import path checks the same constraint per row inside the existing try/catch so a single bad row doesn't kill the whole import.
+
+**Slab Detail — Personal Collection + Card Show mutual exclusion**
+- Personal Collection (intent: not for sale) and Card Show (intent: actively selling) are contradictory. The modal now shows an inline warning when both are toggled and the server still accepts either independently — the warning is purely a UX guardrail.
+
+**Card Number — normalize to numerator-only at every write site**
+- Users were typing card numbers as printed on the card (`215/172`, `110/100`) instead of just the numerator. New `normalizeCardNumber` util splits on `/` and trims; applied at every write site (`cards.service`, `catalog.service`, `raw-purchases.service`, `grading-submissions.service`, `import.service`).
+- UI placeholders updated: Add Slab "Card Number" placeholder changed from `e.g. 4/102` → `e.g. 4` with hint "numerator only — e.g. 4, not 4/102"; Add Part Number modal got the same hint inline.
+
+## June 11, 2026
+
+### Features
+
+**Edit Line Item — three tabs: Fix Identity, Replace from Inventory, Replace from Legacy**
+- The pending-sub Edit Line Item modal used to only let you change Qty / Expected Grade / Est. Value. When a wrong `card_instance` got accidentally linked at sub-add time, the only recovery was deleting the line and re-adding it — losing position and needing to retype every other field. Worse, by the time the sub came back as returned the misidentification was baked into the slab.
+- New tabbed UI mirrors Add Card to Batch:
+  - **Fix Identity** — auto-fill from a pasted card name, then edits the *existing* linked `card_instance`'s overrides (name, set, #, language) and re-resolves the catalog link via `createCatalogResolver`. Use when the typo is in the identity but the right physical card is linked. Drives the slab's display + catalog attribution on the next return because `processReturn` reads from the source ci.
+  - **Replace from Inventory** — single-card picker that points `gbi.card_instance_id` at a different inspected raw card via the new `POST /grading-subs/:id/items/:itemId/relink` endpoint. Restores the old `card_instance` to `inspected` / `decision=grade` (guarded — only flips when current status is `grading_submitted`, mirroring removeItem's guard so a back-linked sold slab can't be clobbered). Moves the new one to `grading_submitted` and clears `location_id`. Validates qty against the new card's available stock minus any other batch items already using it.
+  - **Replace from Legacy** — full PartNumberField + legacy bucket picker, same UX as Add Card → Legacy. Uses `POST /grading-subs/:id/items/:itemId/relink-legacy`, which delegates to `addLegacyItem` then deletes the old gbi, restores the old ci, and slides the new line into the old `line_item_num` slot so display order is preserved. Reordered so `line_item_num` capture happens *before* `addLegacyItem` runs — if the bucket-validation throws, the old gbi is untouched.
+- Fix Identity gains a **Raw ID** input. Pass `raw_purchase_label` (e.g. `2025R109`) and the server looks up the matching `raw_purchases.id` and re-links the source `card_instances.raw_purchase_id`. Blank string detaches. 404s cleanly if the label doesn't match.
+- Replace from Inventory placeholder updated to call out Raw ID search; **Exact** toggle renamed **Exact ID** with a tooltip. The `/cards` endpoint already supported `purchase_id` in both fuzzy and exact modes — this just makes the affordance obvious.
+- `relinkItem` rejects terminal-state targets (`graded` / `sold` / `lost_damaged`) so a direct API call can't clobber a slab by silently flipping its status to `grading_submitted`.
+
+**Part Numbers (Inventory Summary) — 3-level hierarchy + In Grading column**
+- Same part number with multiple grades + name variants used to render as a flat list of (sku × name × grade) tuples — 5+ rows for a single Slowpoke. Defeats the point of the catalog roll-up.
+- New hierarchy on the Part Numbers page:
+  - **Level 1**: part number summary (unchanged structure).
+  - **Level 2**: one row per `(grade_label, company)` for graded slabs, plus a single **Raw** row if any raw cards exist. Grade rows sort DESC; Raw goes at the bottom. Single-variant buckets render flat inline with no extra chevron; multi-variant buckets show `N variants` with an expand chevron.
+  - **Level 3**: `card_name_override` variants under multi-variant buckets, surfaced when level 2 is expanded.
+- Added an **In Grading** column. Server's `getInventorySummary` now splits the old unsold bucket: rows at `status='grading_submitted'` (cards in transit to PSA) move to `qty_in_grading` so they no longer inflate the "available stock" count. Invariant `qty_total = qty_unsold + qty_in_grading + qty_sold` verified to hold across every prod row. No other consumer reads `qty_unsold`. Returned slabs continue to count under their `(grade, company)` graded line; the original raw line (now `graded_out=true`, `quantity=0`) contributes 0 — so no double counting.
+
+**Dashboard — Pipeline tile splits Sell-Through into Graded + Raw 50/50**
+- Single Sell-Through number replaced with a 2-column micro-stat inside the same tile cell. Computed client-side from `cards.sold.graded / (cards.sold.graded + cards.unsold.graded)` and the same formula for raw. Underneath each %, a small `sold / total` count makes the underlying numbers visible without drilling in. No server change, no row-height change, no layout reshuffle.
+
+### Fixes
+
+**Grading — Edit Legacy form rows misaligned + auto-fill leaves stale catalog match**
+- The Replace from Legacy / Add Card → Legacy forms had a Quantity field that drifted out of vertical alignment with the Cost / Card cell next to it whenever the Cost label wrapped to two lines. Grid rows now use `items-end` so the input baselines stay aligned regardless of label height.
+- The Auto-fill button populated the form's identity fields but didn't reset `PartNumberField`'s cached match, so the stale lock-in stuck until the user manually clicked the X. Now clears `catalogMatch` + `catalogId` after a successful auto-fill so the field re-resolves against the freshly-filled identity.
+
+**Inspection — returned-graded raw lots falsely reappear in Needs Inspection**
+- `raw-purchases.service.listRawPurchases` and `reports.service` both computed a lot's processed count as `SUM(quantity) FROM card_instances WHERE raw_purchase_id = rp.id`. After `processReturn` zeroes the source raw row's quantity (graded_out=true) and creates the new slab `card_instance` with `raw_purchase_id = null`, that sum drops to zero — so a fully-graded raw lot fell back into the Needs Inspection filter on the Inspection page and into the dashboard's `awaiting_intake` gap.
+- Verified against prod: every raw lot whose source went through either of the two PSA returns (June 6, 11 lots; June 10, 42 lots) was stuck this way. The bug actually predates migration 057 — the prior hard-delete behavior produced the same zero-row sum — it just hadn't been noticed because the first really large return was the 195-card one.
+- Fix adds a slab-from-this-lot subcount to both the SELECT and the HAVING clauses: `+ COALESCE((SELECT COUNT(*) FROM slab_details sd JOIN card_instances src ON src.id = sd.source_raw_instance_id WHERE src.raw_purchase_id = rp.id), 0)`. Slab `raw_purchase_id` stays null so cost-basis reports and raw inventory totals are unchanged. Verified with the same prod query — all 53 affected lots now return processed = card_count.
+
+## June 9, 2026
+
+### Features
+
+**Sub Returns — View Return modal with grade distribution + origin context**
+- Returned-sub rows on the list page are now clickable; click anywhere on the row (except the Revert Return cell, which stops propagation so it stays a discrete action) to open a View Return modal styled to match the existing Review Return panel. Eye icon dropped — whole-row click felt more natural.
+- New endpoint `GET /api/v1/grading-subs/:id/returned-slabs` joins `slab_details` → `card_instances` → `card_catalog` → original raw `card_instances` (via `sd.source_raw_instance_id`) → `raw_purchases` → `grading_batch_items` for one batch.
+- Left pane lists every slab returned by that sub with Card / Cert # / Grade / Label / Raw ID / Expected Grade / Condition / Notes. Right pane shows a per-sub Grade / Count / % summary table (grade DESC, totals row). Expected-grade cell is colored green when the actual beat it and red when it missed. Slabs ordered by `cert_number` ascending so the list reads in natural cert order.
+
+### Fixes
+
+**Sub Returns — Cards column was counting line items, not cards**
+- Returned-sub list table column labeled "Cards" was showing `item_count` (count of `grading_batch_items` rows). For a 195-card sub split across ~80 line items it read "80". Mirrored the Grading page pattern: split into "Line Items" + "Total Cards" so both numbers are visible at a glance. `Batch` type gained `total_qty` (already returned by `listBatches`). Select Submission modal subtitle also updated to show both ("N cards · M lines").
+
+**Sub Returns — remap dropdown showed only the card name, slider scrollbar on Card column**
+- Remap column options were just card name + line # — same card across two lines was ambiguous. Options now read `#{line} {Name — Set — #card}`. Card column had a horizontal scrollbar because the textarea was fixed-width with overflow; switched to inline `fieldSizing: 'content'` with `overflow-hidden` so it word-wraps and auto-grows. Card column widened from 260px → 325px and Remap shrunk 220px → 155px to balance the gain. Native `<select>` can't render multi-line text in its closed state, so Remap is now an invisible native select overlaid on a wrapped text display — keeps native click/keyboard behavior with full word-wrap on the selected label.
+
+**Sub Returns — Select Submission modal listed newest sub first**
+- Returns come back from PSA in submission order so the oldest sub is almost always the next one to record. Submitted batches in the modal are now sorted `submitted_at` ascending (earliest first) and each row shows the submit date next to the batch ID.
+
+## June 8, 2026
+
+### Features
+
+**Dashboard — Today pill on the revenue window selector**
+- Added a Today option in front of 30D / 60D / 90D / This Year / Lifetime on the Overview revenue strip. Boundary is calendar-day midnight server-local, not a rolling 24h — matches how a card-show / POS day is read (clean $0 morning, no carry-over from yesterday's afternoon). Server gains a `queryToday` + `channelQueryToday` that hit the same SQL with `sold_at >= todayStart` and reuses the existing `expensesQuery` from-date branch. Response gets a `today` arm at top level and inside `by_channel`. Client added one arm to the `SalesWindow` union, the `wk`-key derivation, and the `SALES_WINDOWS` array — no render changes; the stat-tile grid was already keyed off `windowData`.
+
+**Dashboard — Card Shows by-channel tile shows graded/raw breakdown**
+- eBay tile already displayed `N listed · X Graded / Y Raw` but Card Shows only had `N unsold · M total inventory`. `cardCounts` query now also returns `card_show_graded` and `card_show_raw` via the existing `slabCheck` EXISTS pattern. Dashboard renders the new breakdown in place of the old total-inventory line.
+
+**Grading — returned-cert column + status filter tabs on sub detail / list**
+- Sub detail items table renders a Returned Cert column only when `data.status === 'returned'`. Server `getBatch` selects the slab's cert number + grade label via two scalar subqueries on `slab_details` (`source_raw_instance_id` matched in scope — kept live by migration 057's soft-convert refactor).
+- Sub list header gains All / Adding / Submitted / Returned tabs next to the title (later moved to the right side of the header next to the Start Sub button to match the Intake page's title-left/filters-right pattern). Each tab carries its own count. 'Adding' maps to `status='pending'` which already displayed as "Adding Cards". Empty state text adapts to the active filter.
+
+**Sales — clicking a cert in eBay set sale auto-pulls the whole set**
+- Recording a Set Listing sale required adding every cert one by one even though they all share the same eBay listing URL. Picking a graded row now: if `bulkIsEbay && r.listing_url` is non-null, GET `/listings/by-url/all`, add every sibling (deduped against the current cart) in one click. Toast confirms `Added N cards from set listing`. Falls back to single-card add if no URL or the fetch errors. `SlabResult` gained `listing_url`; URL-mode (Listing URL tab) was already a whole-set lookup and is unchanged.
+
+### Fixes
+
+**Sales — recordSale's slab guard + cache invalidation after sale + listings cert search**
+- Three connected issues. (1) `recordSale` only checked `card.status === 'sold'`. Confirmed on prod: cert 141640159 had a May-6 card_show sale; audit shows the card was silently reverted to `'inspected'` on May 23 without the sale row being deleted; today a second card_show sale was recorded against the same card. Added a slab-only secondary guard: if `slab_details` exists for this `card_instance_id` and any sale row exists, reject with `"A sale already exists for this slab"`. Raw lots with quantity>1 legitimately accumulate multiple sales so the guard is slab-gated. Prod data for the affected card was fixed via direct UPDATE (`status -> 'sold'`); zero other orphan slabs found.
+- (2) Only `['sales']` was invalidated on sale completion, leaving the card-name search, copies picker, bulk search, slab inventory, raw inventory, listings, and dashboard summary caches stale — letting the just-sold cert reappear in the picker on reopen until React Query's own `staleTime` kicked in. Centralized into `invalidateAfterSale()` covering all relevant keys and wired into the single-sale and bulk-sale completion sites.
+- (3) Listings page search box matched only against card name. Searching cert `152584770` returned "No listings found" even though the cert was listed under that name. Extended `searchCond` to OR against `sd.cert_number::text`, `cc.sku`, and `rp.purchase_id`. The graded-set CTE gained a `certs_concat` STRING_AGG and matches it under the same ILIKE so set rows surface when any sub-cert matches the query.
+
+**Grading — guard revert-to-inspected updates on batch_item removal (root cause of the May 23 corruption)**
+- `deleteBatch` and `removeBatchItem` unconditionally set the linked card's `status='inspected', decision='grade'` when reverting a batch item, regardless of what state the card was actually at. A back-linked sold slab (`decision='already_graded'`, `status='sold'`) that ever passed through a batch and got removed would have its terminal status silently clobbered to `'inspected'` without anyone touching its sale row — producing the exact `sold -> inspected` audit event on cert 141640159 that set up today's double-sell pretext. Added a `WHERE status='grading_submitted'` clause to both UPDATEs so the revert only fires when the card is actually in flight to the grader. Terminal states (sold, graded, lost_damaged) are left alone.
+
+**Sales — single-sale picker skips set-listing certs + auto-jumps on cert match**
+- Two footguns in the single graded sale flow. (1) FIFO auto-picked set-listing certs. Detection moved server-side via `is_set_listing` on `/grading/slabs`: TRUE iff the slab's `ebay_listing_url` has at least one sibling active listing for a different card. Same-card multi-qty listings correctly do *not* trip the flag; real cross-card sets are flagged regardless of which card the picker is filtered to. Client renders a rose SET badge alongside any FIFO badge with a rose-tinted card border; FIFO auto-pick uses `firstNonSetCopy`. Clicking a SET row or hitting Continue with a SET selection opens a Modal-driven confirm (rose action button) explaining the orphan-listing risk and offering the Set Listing flow. (2) Typing a numeric cert (3+ digits) that exactly matches a row's `cert_number` now skips the names dropdown and navigates directly to the copies step with the cert pre-selected; SET-cert guard on Continue still applies.
+
+**Sales — strike price re-pulls when switching certs in the picker**
+- Auto-fill effect bailed with `if (strikePrice) return`, so the FIFO copy's listed price would set strikePrice once and subsequent cert clicks couldn't update it. User picked a $1,484.99 cert and got the FIFO's $1,169.99 in Strike. Replaced with a `strikePriceDirty` flag that flips true only on user keypress. Auto-fill effects now re-pull on every `selectedCard` / `selectedRawCard` change unless dirty, so picker switches keep Strike in sync and manual edits are preserved. Dirty flag set from the three Strike onChange handlers. Modal unmount-on-close resets the flag naturally for the next sale.
+
+**Grading — lock line + details edits when sub is not pending**
+- Two leaks on the sub detail page allowed edits to a locked sub. Per-row trash gate was `data.status !== 'submitted'`, so it still rendered on `'returned'` subs and any future intermediate status. Edit Details button had no gate at all. Both now require `data.status === 'pending'`. For submitted subs the existing Unlock Sub button reverts to pending. For returned subs, unlocking requires reverting the return first (separate flow); the header shows a small *"Locked — revert the return to unlock"* note in place of the gone buttons so the path is obvious.
+
+### Refactor
+
+**UI — every native dialog call replaced with the styled Modal**
+- `window.confirm` / `window.alert` / `window.prompt` produce un-styled OS chrome that breaks the dark theme and is generally bad JS practice (blocks main thread, untestable, inconsistent across browsers). Converted the three remaining sites: (1) Sales single-sale set-cert confirm now uses a `setConfirm` state with `'pick' | 'continue'` context so OK does the right thing; (2) Grading Add Card tab-switch warning uses a `confirmSwitchTo` state with a red "Discard & switch" action; (3) Intake `addNewSetForLine` uses a Modal with a styled uppercase input, Enter-to-submit / Escape-to-cancel, and a saving spinner. CLAUDE.md gained a hard rule forbidding native dialogs with rationale and Modal/toast pointers. Codebase verified free of `window.confirm` / `alert` / `prompt` calls.
+
+### Security
+
+**GitGuardian incident — Railway Postgres URL leak**
+- `.claude/settings.json` got committed with a literal `postgresql://postgres:<password>@shinkansen.proxy.rlwy.net:22787/railway` baked into one of the auto-allow Bash patterns. GitGuardian flagged it within minutes of push. Credential rotated in Railway (auto-propagated to linked services). File scrubbed in a follow-up commit; `git rm --cached` untracked it; `.claude/settings.json` + `settings.local.json` added to `.gitignore`. Secret still exists in commit `6f08968` history but the credential is dead so it no longer matters.
+- CLAUDE.md gained a "Secret handling (non-negotiable)" section: never inline literal secrets anywhere outside `server/.env`; always resolve prod DB via `railway variables --kv` at runtime; tripwire substrings (`postgres://`, `sk-`, `_SECRET=`, etc.) that should pause before any commit; rotate-first recovery playbook.
+
+### Docs
+
+**CLAUDE.md — header layout, filter-pill styling, and dialog rules**
+- Recurring back-and-forth on filter placement and button styling (twice in the same session for the Grading page alone) prompted a mandatory pattern in CLAUDE.md. Header is `flex items-center justify-between px-6 py-4 border-b border-zinc-800` — title left, filters + primary action grouped right in a single `flex items-center gap-3` wrapper, modeled on `Intake.tsx`. Filter pills use exact class set: `px-3 py-1 text-xs rounded-md font-medium transition-colors` with `bg-indigo-600 text-white` active / `bg-zinc-800 text-zinc-400 hover:text-zinc-200` inactive. Count spans inside pills use `ml-1.5 text-[10px]` with `text-indigo-200` / `text-zinc-500`. Variations explicitly forbidden.
+
+## June 7, 2026
+
+### Features
+
+**Grading — raw cards are soft-converted on return instead of hard-deleted (migration 057)**
+- `processReturn` used to hard-delete the source raw card_instances when all copies were fully consumed by grading. The deletes cascaded two ways: `slab_details.source_raw_instance_id` (ON DELETE SET NULL) nulled out the slab's link back to its origin, and `grading_batch_items.card_instance_id` (FK dropped in migration 055 to even allow the delete) was left holding a dangling UUID. End result: reverted subs came back empty, audit-log re-insertion was needed to put cards back, and `revertReturn` had a 100-line audit-restore branch with edge cases. Worse, even a successful return left the sub detail page empty because the batch_items pointed at the deleted source.
+- Migration 057 adds `card_instances.graded_out boolean default false` + a partial index on the true subset, and relaxes `card_instances_quantity_check` from `> 0` to `>= 0` so a fully-consumed row can carry `quantity = 0`. `processReturn` now flips the source to `graded_out=true, quantity=0` instead of DELETE. The source row stays alive forever, slab linkage stays valid, batch_items references stay live, and the sub detail page can JOIN through them for lifecycle display.
+- `revertReturn` simplifies dramatically: no more audit-log re-insertion branch. For each batch_item, look up the live source and `UPDATE … SET graded_out=false, quantity = quantity + N, status='inspected', decision='grade'` where N is the count of slabs we just deleted from that source. Slabs are still found via `grading_batch_id` for the delete pass; `source_raw_instance_id` is also valid now (no cascade-to-null), so per-source attribution is exact.
+- Filter rules: raw inventory queries now default to `graded_out = false` so soft-converted rows don't double-count against the slabs they produced. `/cards` list endpoint gains an `include_graded_out` opt-in for lifecycle/audit surfaces that intentionally want them. `listCardsGroupedByPart`, the Raw Cards dashboard's `inventoryByType` / `condition` / `pipeline` / `sales` / `turnover` queries, and the global Pipeline's `at_graders` / `unsubmitted` / `unsubmitted_cost` / `avg_days_at_graders` all picked up the filter.
+- One-off prod cleanup: sub `26395859` had 11 orphan batch_items pointing at hard-deleted card_instances from before this migration. Restored the 11 sources from the audit-log snapshots with original UUIDs at `graded_out=true, quantity=0`, repointed the 11 slabs' `source_raw_instance_id` back via cert-number ordering, in a single Railway transaction. Sub view shows its line items again with correct slab linkage.
+
+### Fixes
+
+**Catalog — set picker token scoring**
+- The Set Name / Set Code combobox in Add Part Number was doing a single substring `.includes(query)` match, so multi-word inputs (e.g. "2025 Taruka Hoppip") returned zero suggestions when the relevant alias only contained "Taruka". Replaced with a small scoring model: 4 pts for full-string substring, 2 for code prefix, 1 per token hit in name or code; pure 4-digit year tokens ignored to avoid year-name pollution; sort score desc, tie-break shortest name.
+
 ## June 6, 2026
 
 ### Fixes

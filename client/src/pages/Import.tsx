@@ -78,7 +78,7 @@ const FIELD_DOCS: Record<string, string> = {
   // Card
   card_name:     'Full card name as printed. Required for graded + raw imports. For PSA labels, paste the entire label.',
   set_name:      'Set name. If a known set-code substring is present, language + set code are auto-resolved.',
-  card_number:   'Card number within the set (e.g. "025/108"). Optional but improves catalog matching.',
+  card_number:   'Card number within the set — numerator only (e.g. "025", not "025/108"). The "/108" denominator is auto-stripped on import. Optional but improves catalog matching.',
   card_game:     'Defaults to "pokemon". Accepts other game names if you have multi-game inventory.',
   language:      'EN or JP. If omitted, inferred from card name keywords.',
   condition:     'NM / NM- / LP / LP+ / MP / HP / DMG. Free text accepted; normalized server-side.',

@@ -6,7 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
-import { formatCurrency, formatDate, cn } from '../lib/utils';
+import { formatCurrency, formatDate, cn, parseDollars, toCents } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import toast from 'react-hot-toast';
@@ -58,7 +58,9 @@ interface SlabResult {
   raw_purchase_date: string | null;
   listed_price: number | null;
   listing_id: string | null;
+  listing_url: string | null;
   is_listed: boolean;
+  is_set_listing: boolean;
   is_personal_collection: boolean;
   location_name: string | null;
   card_show_price: number | null;
@@ -66,6 +68,33 @@ interface SlabResult {
 }
 
 type SortDir = 'asc' | 'desc';
+
+// Every React Query key whose data becomes stale the moment a sale is
+// recorded. The single sale path only invalidated ['sales'] which left
+// just-sold certs visible in the picker/bulk-search caches until they
+// became stale on their own — letting a user click through and re-attempt
+// a sale that the server then 409'd. Call this from every recordSale /
+// /sales/batch completion site so the next picker open is fresh.
+function invalidateAfterSale(qc: ReturnType<typeof useQueryClient>) {
+  for (const key of [
+    'sales',
+    'card-name-search',         // graded single-sale name dropdown
+    'card-copies',              // graded single-sale FIFO picker
+    'sale-raw-search',          // raw single-sale search
+    'bulk-sale-search',         // bulk graded search (eBay set + card show)
+    'bulk-sale-raw-search',     // bulk raw search
+    'card-show-raw',            // card show raw inventory chip
+    'inventory-slabs',          // /grading/slabs paginated tables
+    'raw-inventory-grouped',    // Raw Overall + grouped queries
+    'raw-overall',              // dashboard raw counts
+    'listings',                 // listings page (status flips to sold)
+    'inventory-summary',        // top-level dashboard counts
+    'sales-summary',            // dashboard sales totals
+    'audit-log',                // shows the new entry
+  ]) {
+    qc.invalidateQueries({ queryKey: [key] });
+  }
+}
 
 const PLATFORMS = [
   { value: 'ebay',       label: 'eBay' },
@@ -170,6 +199,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Step 1b — copy selection (graded)
   const [selectedCard, setSelectedCard] = useState<SlabResult | null>(null);
   const [listedOnly, setListedOnly] = useState(true);
+  // When the user clicks a SET cert, or hits Continue with one selected, we
+  // park the candidate here and render a Modal-based confirm (no window.confirm).
+  // confirmContext distinguishes the two paths so OK does the right thing.
+  const [setConfirm, setSetConfirm] = useState<{ copy: SlabResult; context: 'pick' | 'continue' } | null>(null);
 
   // Raw mode
   const [rawSearchMode, setRawSearchMode] = useState<'name' | 'id' | 'url'>('name');
@@ -209,6 +242,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [cardShowId, setCardShowId] = useState<string>('');
   const [showArchived, setShowArchived] = useState(false);
   const [strikePrice, setStrikePrice] = useState('');
+  // Becomes true once the user actually types into the Strike input. The
+  // auto-fill effects below check this instead of `if (strikePrice)` so
+  // switching certs in the picker re-pulls the strike from the newly
+  // selected card; only a user-typed value is left alone.
+  const [strikePriceDirty, setStrikePriceDirty] = useState(false);
   const [rawSaleQty, setRawSaleQty] = useState('1');
   // Reset Sell qty whenever the picked raw card changes so a stale value
   // (e.g. '5' typed for a prior 5-card lot) can't quietly flip the whole
@@ -219,27 +257,27 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   // Auto-fill Strike Price from the card's existing reference price when a
   // raw card is picked — CS sticker for card_show, list price for ebay.
-  // Matches what the bulk-sale cart already does on add. Only fires when
-  // Strike is still empty so user-typed values aren't clobbered.
+  // Always re-pulls when the selected card changes; only the user-typed
+  // dirty flag suppresses it so manual edits aren't clobbered.
   useEffect(() => {
     if (!selectedRawCard) return;
-    if (strikePrice) return;
+    if (strikePriceDirty) return;
     const ref = platform === 'card_show'
       ? selectedRawCard.card_show_price
       : platform === 'ebay'
         ? selectedRawCard.listed_price
         : null;
-    if (ref && ref > 0) setStrikePrice((ref / 100).toFixed(2));
+    setStrikePrice(ref && ref > 0 ? (ref / 100).toFixed(2) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedRawCard?.id, platform]);
 
-  // Same auto-fill for graded — defaults strike from the slab's active
-  // listing price when present and Strike is empty.
+  // Same auto-fill for graded — keep strike in sync with whichever cert is
+  // selected unless the user has typed a custom value.
   useEffect(() => {
     if (!selectedCard) return;
-    if (strikePrice) return;
+    if (strikePriceDirty) return;
     const ref = selectedCard.listed_price;
-    if (ref && ref > 0) setStrikePrice((ref / 100).toFixed(2));
+    setStrikePrice(ref && ref > 0 ? (ref / 100).toFixed(2) : '');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCard?.id]);
 
@@ -301,7 +339,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     if (!activeCard) return;
     const current = activeCard.card_show_price ?? null;
     const trimmed = csPriceInput.trim();
-    const cents = trimmed === '' ? null : Math.round(parseFloat(trimmed) * 100);
+    const cents = trimmed === '' ? null : toCents(trimmed);
     if (cents !== null && (!Number.isFinite(cents) || cents < 0)) {
       toast.error('Enter a valid CS price');
       return;
@@ -333,8 +371,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const row = bulkCart.find(c => c.cart_entry_id === cartEntryId);
     if (!row || row.cs_price_draft === undefined) return;
     const trimmed = row.cs_price_draft.trim();
-    const cents = trimmed === '' ? null : Math.round(parseFloat(trimmed) * 100);
-    if (cents !== null && (!Number.isFinite(cents) || cents < 0)) {
+    const cents = trimmed === '' ? null : toCents(trimmed);
+    if (cents !== null && cents < 0) {
       toast.error('Enter a valid CS price');
       return;
     }
@@ -353,8 +391,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       setBulkCart(prev => prev.map(c => c.cart_entry_id === cartEntryId ? { ...c, listed_price_draft: undefined } : c));
       return;
     }
-    const cents = Math.round(parseFloat(trimmed) * 100);
-    if (!Number.isFinite(cents) || cents < 0) {
+    const cents = toCents(trimmed);
+    if (cents < 0) {
       toast.error('Enter a valid listed price');
       return;
     }
@@ -375,8 +413,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       setListedPriceInput(current != null ? (current / 100).toFixed(2) : '');
       return;
     }
-    const cents = Math.round(parseFloat(trimmed) * 100);
-    if (!Number.isFinite(cents) || cents < 0) {
+    const cents = toCents(trimmed);
+    if (cents < 0) {
       toast.error('Enter a valid listed price');
       return;
     }
@@ -487,24 +525,63 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const copies = (platform === 'ebay' && listedOnly) ? allCopies.filter(c => c.is_listed) : allCopies;
   const listedCount = allCopies.filter(c => c.is_listed).length;
 
-  // Auto-select first copy in filtered list (FIFO) — only on the copies step.
-  // Use functional setState so we don't clobber a user's manual click on every
-  // render (copies is a fresh array ref each render).
+  // Set-listing detection comes from the server (is_set_listing): true when
+  // the slab's ebay_listing_url has at least one sibling active listing for
+  // a DIFFERENT card identity. Multiple copies of the same card on one URL
+  // (a qty-N single listing) is NOT a set and must not be flagged.
+  const setMemberIds = new Set(copies.filter(c => c.is_set_listing).map(c => c.id));
+  const firstNonSetCopy = copies.find(c => !setMemberIds.has(c.id)) ?? null;
+  // FIFO is per (company, grade_label) bucket: the FIFO badge should mark the
+  // earliest-cert non-set copy within each grade so the picker doesn't suggest
+  // a PSA 6 when the user is recording a PSA 8 sale.
+  const fifoIdByGrade = new Map<string, string>();
+  for (const c of copies) {
+    if (setMemberIds.has(c.id)) continue;
+    const key = `${c.company ?? '—'}|${c.grade_label ?? '—'}`;
+    if (!fifoIdByGrade.has(key)) fifoIdByGrade.set(key, c.id);
+  }
+  const fifoIds = new Set(fifoIdByGrade.values());
+
+  // Auto-select FIFO — first NON-set-listing copy. Skipping set members
+  // means clicking Record Sale on a card that happens to lead with a set
+  // never accidentally puts that cert in the cart.
+  // Use functional setState so we don't clobber a user's manual click on
+  // every render (copies is a fresh array ref each render).
   useEffect(() => {
     if (step !== 'copies') return;
     setSelectedCard(prev => {
       if (prev && copies.some(c => c.id === prev.id)) return prev;
-      return copies.length > 0 ? copies[0] : null;
+      return firstNonSetCopy;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [copies, step]);
+
+  // Auto-jump on exact cert-# search: when the user types a numeric cert #
+  // (3+ digits) into the graded search and it matches exactly one row's
+  // cert_number, skip the names dropdown and navigate straight to the
+  // copies step with that cert pre-selected. The set-member confirm gate
+  // on Continue still applies, so a set cert won't slip through silently.
+  useEffect(() => {
+    if (step !== 'search') return;
+    const term = debouncedSearch.trim();
+    if (!/^\d{3,}$/.test(term)) return;
+    const match = searchResults?.data.find(s => String(s.cert_number ?? '') === term);
+    if (!match || !match.card_name) return;
+    setSelectedCardName(match.card_name);
+    setCardSearch(match.card_name);
+    setSelectedCard(match);
+    setStep('copies');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchResults, debouncedSearch, step]);
 
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const cardId = saleMode === 'raw' ? selectedRawCard?.id : selectedCard?.id;
     if (!cardId) { toast.error('Select a card'); return; }
-    // Empty is invalid; 0 is allowed (giveaway / total loss).
-    if (!strikePrice.trim() || isNaN(parseFloat(strikePrice)) || parseFloat(strikePrice) < 0) {
+    // Empty is invalid; 0 is allowed (giveaway / total loss). Reject inputs
+    // that strip to nothing (e.g. "$") so we don't silently submit 0.
+    if (!strikePrice.trim() || !/\d/.test(strikePrice) || parseDollars(strikePrice) < 0) {
       toast.error('Enter a strike price (0 is OK for giveaways)'); return;
     }
     // Raw lots can carry quantity > 1; validate the user-entered qty.
@@ -516,8 +593,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       if (qty > max) { toast.error(`Only ${max} of these in inventory; can't sell ${qty}`); return; }
       qtyToSell = qty;
     }
-    const strikeCents = Math.round(parseFloat(strikePrice) * 100);
-    const earningsCents = platform === 'ebay' && orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : strikeCents;
+    const strikeCents = toCents(strikePrice);
+    const earningsCents = platform === 'ebay' && orderEarnings ? toCents(orderEarnings) : strikeCents;
     const feesCents = Math.max(0, strikeCents - earningsCents);
     setSubmitting(true);
     try {
@@ -536,7 +613,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         quantity: qtyToSell,
       });
       toast.success('Sale recorded!');
-      queryClient.invalidateQueries({ queryKey: ['sales'] });
+      invalidateAfterSale(queryClient);
       onClose();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
@@ -789,20 +866,32 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </div>
       ) : (
         <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-          {copies.map((copy, idx) => {
-            const isFifo = idx === 0;
+          {copies.map((copy) => {
+            const isFifo     = fifoIds.has(copy.id);
+            const isSet      = setMemberIds.has(copy.id);
             const isSelected = selectedCard?.id === copy.id;
             return (
               <button key={copy.id} type="button"
-                onClick={() => setSelectedCard(copy)}
+                onClick={() => {
+                  if (isSet && (!selectedCard || selectedCard.id !== copy.id)) {
+                    setSetConfirm({ copy, context: 'pick' });
+                    return;
+                  }
+                  setSelectedCard(copy);
+                }}
                 className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors ${
                   isSelected
                     ? 'border-amber-500/50 bg-amber-500/10'
-                    : 'border-zinc-700/50 bg-zinc-800/40 hover:bg-zinc-800'
+                    : isSet
+                      ? 'border-rose-500/30 bg-rose-500/5 hover:bg-rose-500/10'
+                      : 'border-zinc-700/50 bg-zinc-800/40 hover:bg-zinc-800'
                 }`}>
                 <div className="flex items-center gap-2">
                   {isFifo && (
                     <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-1 py-0.5">FIFO</span>
+                  )}
+                  {isSet && (
+                    <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-rose-500/20 text-rose-400 border border-rose-500/30 rounded px-1 py-0.5">SET</span>
                   )}
                   <span className="text-sm font-mono text-zinc-200">
                     {copy.cert_number ? `#${String(copy.cert_number).padStart(8, '0')}` : 'No cert'}
@@ -826,10 +915,55 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="button" disabled={!selectedCard} onClick={() => setStep('details')}>
+        <Button type="button" disabled={!selectedCard} onClick={() => {
+          // Final guard: if the user reached Continue with a set-listing cert
+          // selected (e.g. via the cert-search auto-jump), prompt via the
+          // styled Modal below so individual sale of a set member is never
+          // silent. window.confirm is forbidden — see CLAUDE.md UI rules.
+          if (selectedCard && setMemberIds.has(selectedCard.id)) {
+            setSetConfirm({ copy: selectedCard, context: 'continue' });
+            return;
+          }
+          setStep('details');
+        }}>
           Continue →
         </Button>
       </div>
+
+      <Modal
+        open={!!setConfirm}
+        onClose={() => setSetConfirm(null)}
+        title="Set listing cert">
+        {setConfirm && (
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-300 leading-relaxed">
+              Cert <span className="font-mono text-zinc-100">#{setConfirm.copy.cert_number ?? '?'}</span> is part of
+              an eBay <span className="text-rose-400 font-medium">set listing</span> (multiple different cards under
+              one URL). Selling it on its own will leave the rest of the set inside the listing.
+            </p>
+            <p className="text-xs text-zinc-500 leading-relaxed">
+              Use the <span className="text-zinc-300">Set Listing</span> sale flow (Record Sale → eBay → Set Listing)
+              to sell the whole set in one go. Or continue here to sell just this cert.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button type="button" variant="ghost" onClick={() => setSetConfirm(null)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                className="bg-rose-600 hover:bg-rose-500 text-white border-0"
+                onClick={() => {
+                  setSelectedCard(setConfirm.copy);
+                  const next = setConfirm.context;
+                  setSetConfirm(null);
+                  if (next === 'continue') setStep('details');
+                }}>
+                Sell single cert anyway
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 
@@ -957,8 +1091,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-        {rawCopiesForName.map((copy, idx) => {
-          const isFifo = idx === 0;
+        {rawCopiesForName.map((copy) => {
+          // FIFO per condition bucket: NM/LP/MP each get their own badge so a
+          // NM sale doesn't get pointed at the oldest LP lot.
+          const isFifo = rawCopiesForName.find(c => (c.condition ?? '—') === (copy.condition ?? '—'))?.id === copy.id;
           const isSelected = selectedRawCard?.id === copy.id;
           return (
             <button key={copy.id} type="button"
@@ -1095,16 +1231,19 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             </div>
             <button type="button" onClick={() => setStep('raw-select')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
           </div>
-          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2">
+          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2 flex-wrap">
             <span className="text-[10px] font-bold uppercase tracking-wide text-amber-400">Ship this card</span>
             <span className="font-mono text-sm text-zinc-200">{selectedRawCard.raw_purchase_label ?? '—'}</span>
+            {platform === 'ebay' && (
+              <>
+                <span className="text-zinc-700">·</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
+                <span className={`text-sm ${selectedRawCard.location_name ? 'text-zinc-300' : 'text-zinc-600 italic'}`}>
+                  {selectedRawCard.location_name ?? 'No location'}
+                </span>
+              </>
+            )}
           </div>
-          {platform === 'ebay' && selectedRawCard.location_name && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
-              <span className="text-sm text-zinc-300">{selectedRawCard.location_name}</span>
-            </div>
-          )}
           {/* Always render Sell qty for raw so the user can see/confirm
               what's about to flip sold — even for qty=1 lots where the
               field is effectively read-only. */}
@@ -1137,18 +1276,21 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             </div>
             <button type="button" onClick={() => setStep('copies')} className="text-[11px] text-indigo-400 hover:text-indigo-300 shrink-0">Change</button>
           </div>
-          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2">
+          <div className="border-t border-zinc-700/50 pt-2 flex items-center gap-2 flex-wrap">
             <span className="text-[10px] font-bold uppercase tracking-wide text-amber-400">Ship this cert</span>
             <span className="font-mono text-sm text-zinc-200">
               {selectedCard.cert_number ? `#${String(selectedCard.cert_number).padStart(8, '0')}` : '—'}
             </span>
+            {platform === 'ebay' && (
+              <>
+                <span className="text-zinc-700">·</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
+                <span className={`text-sm ${selectedCard.location_name ? 'text-zinc-300' : 'text-zinc-600 italic'}`}>
+                  {selectedCard.location_name ?? 'No location'}
+                </span>
+              </>
+            )}
           </div>
-          {platform === 'ebay' && selectedCard.location_name && (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Location</span>
-              <span className="text-sm text-zinc-300">{selectedCard.location_name}</span>
-            </div>
-          )}
         </div>
       ) : null}
 
@@ -1277,7 +1419,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         const sellQty = saleMode === 'raw' ? Math.max(1, parseInt(rawSaleQty || '1', 10) || 1) : 1;
         const isMulti = sellQty > 1;
         const strikeLabel = isMulti ? 'Strike Price (total)' : 'Strike Price';
-        const priceNum = parseFloat(strikePrice);
+        const priceNum = parseDollars(strikePrice);
         const perCard = isMulti && Number.isFinite(priceNum) && priceNum > 0
           ? (priceNum / sellQty).toFixed(2)
           : null;
@@ -1285,7 +1427,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1">
               <Input label={strikeLabel} type="text" inputMode="decimal" placeholder="0.00"
-                value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+                value={strikePrice} onChange={(e) => { setStrikePrice(e.target.value); setStrikePriceDirty(true); }} />
               {perCard && <p className="text-[11px] text-zinc-500">≈ ${perCard} per card</p>}
             </div>
             <Input label="Order Earnings (After Fees)" type="text" inputMode="decimal" placeholder="0.00"
@@ -1294,7 +1436,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         ) : (
           <div className="flex flex-col gap-1">
             <Input label={strikeLabel} type="text" inputMode="decimal" placeholder="0.00"
-              value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+              value={strikePrice} onChange={(e) => { setStrikePrice(e.target.value); setStrikePriceDirty(true); }} />
             {perCard && <p className="text-[11px] text-zinc-500">≈ ${perCard} per card</p>}
           </div>
         );
@@ -1438,32 +1580,55 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               const added = alreadyAdded.has(r.id);
               return (
                 <button key={r.id} type="button" disabled={added}
-                  onClick={() => {
+                  onClick={async () => {
                     if (added) return;
-                    const stickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
-                    const discPct = parseFloat(bulkDiscount || '0');
-                    const finalStr = stickerStr && discPct > 0
-                      ? (parseFloat(stickerStr) * (1 - discPct / 100)).toFixed(2)
-                      : stickerStr;
-                    setBulkCart(prev => [...prev, {
-                      cart_entry_id: crypto.randomUUID(),
-                      id: r.id,
-                      listing_id: r.listing_id ?? null,
-                      card_name: r.card_name,
-                      set_name: r.set_name,
-                      cert_number: r.cert_number,
-                      grade_label: r.grade_label,
-                      company: r.company,
-                      raw_purchase_label: null,
-                      sticker_price_input: stickerStr,
-                      final_price_input: finalStr,
-                      card_type: 'graded',
-                      quantity: 1,
-                      lot_quantity: 1,
-                      card_show_price: r.card_show_price ?? null,
-                      listed_price: r.listed_price ?? null,
-                      is_listed: r.is_listed ?? false,
-                    }]);
+                    const buildEntry = (row: SlabResult) => {
+                      const stickerStr = row.card_show_price ? (row.card_show_price / 100).toFixed(2) : '';
+                      const discPct = parseDollars(bulkDiscount);
+                      const finalStr = stickerStr && discPct > 0
+                        ? (parseDollars(stickerStr) * (1 - discPct / 100)).toFixed(2)
+                        : stickerStr;
+                      return {
+                        cart_entry_id: crypto.randomUUID(),
+                        id: row.id,
+                        listing_id: row.listing_id ?? null,
+                        card_name: row.card_name,
+                        set_name: row.set_name,
+                        cert_number: row.cert_number,
+                        grade_label: row.grade_label,
+                        company: row.company,
+                        raw_purchase_label: null,
+                        sticker_price_input: stickerStr,
+                        final_price_input: finalStr,
+                        card_type: 'graded' as const,
+                        quantity: 1,
+                        lot_quantity: 1,
+                        card_show_price: row.card_show_price ?? null,
+                        listed_price: row.listed_price ?? null,
+                        is_listed: row.is_listed ?? false,
+                      };
+                    };
+
+                    // eBay set-listing auto-pull: if this slab's listing has
+                    // siblings under the same listing URL, fetch all of them
+                    // and add the whole set in one click. Falls back to a
+                    // single-card add if no URL (card show, private sale) or
+                    // the fetch fails.
+                    if (bulkIsEbay && r.listing_url) {
+                      try {
+                        const res = await api.get('/listings/by-url/all', { params: { url: r.listing_url } });
+                        const siblings = (res.data?.data ?? []) as SlabResult[];
+                        const toAdd = siblings
+                          .filter(s => !alreadyAdded.has(s.id))
+                          .map(buildEntry);
+                        if (toAdd.length > 1) {
+                          setBulkCart(prev => [...prev, ...toAdd]);
+                          toast.success(`Added ${toAdd.length} cards from set listing`);
+                          return;
+                        }
+                      } catch { /* fall through to single-add */ }
+                    }
+                    setBulkCart(prev => [...prev, buildEntry(r)]);
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
                   <div className="min-w-0">
@@ -1489,9 +1654,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     if (added) return;
                     const doAdd = () => {
                       const rawStickerStr = r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '';
-                      const rawDiscPct = parseFloat(bulkDiscount || '0');
+                      const rawDiscPct = parseDollars(bulkDiscount);
                       const rawFinalStr = rawStickerStr && rawDiscPct > 0
-                        ? (parseFloat(rawStickerStr) * (1 - rawDiscPct / 100)).toFixed(2)
+                        ? (parseDollars(rawStickerStr) * (1 - rawDiscPct / 100)).toFixed(2)
                         : rawStickerStr;
                       setBulkCart(prev => [...prev, {
                         cart_entry_id: crypto.randomUUID(),
@@ -1686,17 +1851,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const n = bulkCart.length;
 
     // For eBay set listings: total inputs that divide evenly per card
-    const totalStrikeCents = Math.round(parseFloat(strikePrice || '0') * 100);
-    const totalEarningsCents = orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : totalStrikeCents;
+    const totalStrikeCents = toCents(strikePrice);
+    const totalEarningsCents = orderEarnings ? toCents(orderEarnings) : totalStrikeCents;
     const perCardStrike = n > 0 ? (totalStrikeCents / n / 100).toFixed(2) : '0.00';
     const perCardEarnings = n > 0 ? (totalEarningsCents / n / 100).toFixed(2) : '0.00';
     const perCardFees = n > 0 ? ((totalStrikeCents - totalEarningsCents) / n / 100).toFixed(2) : '0.00';
 
     // Card show total (manual per-card pricing)
-    const total = bulkCart.reduce((s, item) => {
-      const final = Math.round(parseFloat(item.final_price_input || '0') * 100);
-      return s + final;
-    }, 0);
+    const total = bulkCart.reduce((s, item) => s + toCents(item.final_price_input), 0);
 
     function updateReviewField(entryId: string, field: 'sticker_price_input' | 'final_price_input', val: string) {
       setBulkCart(prev => prev.map(c => {
@@ -1705,10 +1867,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         // entering only sticker, then bouncing off a disabled Review &
         // Confirm because every row needs final to be > 0.
         if (field === 'sticker_price_input') {
-          const currentFinal = parseFloat(c.final_price_input || '0');
-          // Cascade only when final is empty / non-numeric / negative, NOT
+          // Cascade only when final is empty / has no digits / negative, NOT
           // when final has been intentionally set to 0 (giveaway).
-          const finalEmpty = !c.final_price_input.trim() || isNaN(currentFinal) || currentFinal < 0;
+          const finalEmpty = !c.final_price_input.trim() || !/\d/.test(c.final_price_input) || parseDollars(c.final_price_input) < 0;
           return { ...c, sticker_price_input: val, ...(finalEmpty ? { final_price_input: val } : {}) };
         }
         return { ...c, [field]: val };
@@ -1729,14 +1890,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <p className="text-xs font-medium text-zinc-400 mb-2">Set Listing Totals — split evenly across {n} card{n !== 1 ? 's' : ''}</p>
               <div className="grid grid-cols-2 gap-3">
                 <Input label="Total Strike Price" type="text" inputMode="decimal" placeholder="0.00"
-                  value={strikePrice} onChange={(e) => setStrikePrice(e.target.value)} />
+                  value={strikePrice} onChange={(e) => { setStrikePrice(e.target.value); setStrikePriceDirty(true); }} />
                 <Input label="Total After Fees" type="text" inputMode="decimal" placeholder="0.00"
                   value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
               </div>
               {strikePrice && (
                 <p className="text-xs text-zinc-500 mt-2">
                   Per card: <span className="text-zinc-300">${perCardStrike} strike</span>
-                  {orderEarnings && parseFloat(perCardFees) > 0 && <> · <span className="text-zinc-300">${perCardEarnings} after fees</span> · <span className="text-amber-400">${perCardFees} fees</span></>}
+                  {orderEarnings && parseDollars(perCardFees) > 0 && <> · <span className="text-zinc-300">${perCardEarnings} after fees</span> · <span className="text-amber-400">${perCardFees} fees</span></>}
                 </p>
               )}
             </div>
@@ -1759,19 +1920,19 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             <div className="w-36">
               <Input label="Discount % (all)" type="number" min="0" max="100" step="1"
                 placeholder="0" value={bulkDiscount} onChange={(e) => {
-                  const pct = parseFloat(e.target.value || '0');
+                  const pct = parseDollars(e.target.value);
                   setBulkDiscount(e.target.value);
                   const multiplier = 1 - pct / 100;
                   setBulkCart(prev => prev.map(c => ({
                     ...c,
                     final_price_input: c.sticker_price_input
-                      ? (parseFloat(c.sticker_price_input) * multiplier).toFixed(2)
+                      ? (parseDollars(c.sticker_price_input) * multiplier).toFixed(2)
                       : c.final_price_input,
                   })));
                 }} />
             </div>
-            {parseFloat(bulkDiscount || '0') > 0 && (
-              <p className="text-xs text-zinc-500 pb-2">{parseFloat(bulkDiscount)}% off each card</p>
+            {parseDollars(bulkDiscount) > 0 && (
+              <p className="text-xs text-zinc-500 pb-2">{parseDollars(bulkDiscount)}% off each card</p>
             )}
           </div>
         )}
@@ -1791,8 +1952,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           </div>
           <div className="max-h-[280px] overflow-y-auto">
           {bulkCart.map((item) => {
-            const sticker = parseFloat(item.sticker_price_input || '0');
-            const final = parseFloat(item.final_price_input || '0');
+            const sticker = parseDollars(item.sticker_price_input);
+            const final = parseDollars(item.final_price_input);
             const discountPct = sticker > 0 ? Math.round((1 - final / sticker) * 100) : 0;
             return (
               <div key={item.cart_entry_id} className={cn('gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start',
@@ -1909,13 +2070,13 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 // doesn't flicker disabled mid-typing (which made users think
                 // it was permanently broken).
                 if (isEbaySet) {
-                  if (!strikePrice.trim() || isNaN(parseFloat(strikePrice)) || parseFloat(strikePrice) < 0) {
+                  if (!strikePrice.trim() || !/\d/.test(strikePrice) || parseDollars(strikePrice) < 0) {
                     toast.error('Enter a total strike price (0 is OK for giveaways)');
                     return;
                   }
                 } else {
-                  // 0 is valid (giveaway). Flag only empty / non-numeric / negative.
-                  const blocked = bulkCart.filter(i => { const raw = i.final_price_input; const n = parseFloat(raw); return !raw.trim() || isNaN(n) || n < 0; });
+                  // 0 is valid (giveaway). Flag only empty / no digits / negative.
+                  const blocked = bulkCart.filter(i => { const raw = i.final_price_input; return !raw.trim() || !/\d/.test(raw) || parseDollars(raw) < 0; });
                   if (blocked.length > 0) {
                     const names = blocked.slice(0, 3).map(b => b.card_name ?? '(unnamed)').join(', ');
                     toast.error(`Missing final price: ${names}${blocked.length > 3 ? ` +${blocked.length - 3} more` : ''}`);
@@ -1939,8 +2100,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const n = bulkCart.length;
 
     // eBay set: split total evenly per card
-    const totalStrikeCents = Math.round(parseFloat(strikePrice || '0') * 100);
-    const totalEarningsCents = orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : totalStrikeCents;
+    const totalStrikeCents = toCents(strikePrice);
+    const totalEarningsCents = orderEarnings ? toCents(orderEarnings) : totalStrikeCents;
     const totalFeesCents = Math.max(0, totalStrikeCents - totalEarningsCents);
     // Distribute remainder to first card to avoid rounding loss
     const basePerCard = Math.floor(totalStrikeCents / n);
@@ -1954,7 +2115,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         const platform_fees = baseFeesPerCard + (idx === 0 ? feesRemainder : 0);
         return { ...item, final_price: sale_price, platform_fees };
       }
-      return { ...item, final_price: Math.round(parseFloat(item.final_price_input || '0') * 100), platform_fees: 0 };
+      return { ...item, final_price: toCents(item.final_price_input), platform_fees: 0 };
     });
     const total = itemsWithFinal.reduce((s, i) => s + i.final_price, 0);
     const selectedShow = (cardShowsData?.data ?? []).find(s => s.id === cardShowId);
@@ -1986,7 +2147,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           unique_id_2: notes || undefined,
         });
         toast.success(`${itemsWithFinal.length} sales recorded!`);
-        queryClient.invalidateQueries({ queryKey: ['sales'] });
+        invalidateAfterSale(queryClient);
         onClose();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
@@ -2083,7 +2244,14 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
   const [soldAt, setSoldAt] = useState(sale.sold_at ? sale.sold_at.slice(0, 10) : '');
   const [orderNumber, setOrderNumber] = useState(sale.unique_id ?? '');
   const [quantity, setQuantity] = useState(String(sale.quantity ?? 1));
+  const [cardShowId, setCardShowId] = useState<string>(sale.card_show_id ?? '');
   const [submitting, setSubmitting] = useState(false);
+
+  const { data: cardShowsData } = useQuery<{ data: Array<{ id: string; name: string; show_date: string; end_date: string | null; num_days: number; location: string | null }> }>({
+    queryKey: ['card-shows'],
+    queryFn: () => api.get('/card-shows').then((r) => r.data),
+    enabled: platform === 'card_show',
+  });
 
   // Max sale qty = what's on this sale today + what's still available in the
   // same lot to grow into. Keeps the lot's original total invariant.
@@ -2098,8 +2266,8 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       return;
     }
     setSubmitting(true);
-    const strikeCents = Math.round(parseFloat(strikePrice) * 100);
-    const earningsCents = platform === 'ebay' && orderEarnings ? Math.round(parseFloat(orderEarnings) * 100) : strikeCents;
+    const strikeCents = toCents(strikePrice);
+    const earningsCents = platform === 'ebay' && orderEarnings ? toCents(orderEarnings) : strikeCents;
     const feesCents = Math.max(0, strikeCents - earningsCents);
     try {
       await api.put(`/sales/${sale.id}`, {
@@ -2113,6 +2281,7 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
         unique_id_2: notes || undefined,
         order_details_link: platform === 'ebay' ? (ebayLink || undefined) : undefined,
         quantity: qtyParsed,
+        card_show_id: platform === 'card_show' ? (cardShowId || null) : null,
       });
       toast.success('Sale updated');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
@@ -2208,6 +2377,32 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
         <input type="date" value={soldAt} onChange={(e) => setSoldAt(e.target.value)}
           className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
       </div>
+      {platform === 'card_show' && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Card Show</label>
+          <select
+            value={cardShowId}
+            onChange={(e) => {
+              const val = e.target.value;
+              setCardShowId(val);
+              const show = (cardShowsData?.data ?? []).find((s) => s.id === val);
+              if (show) setSoldAt(show.show_date.slice(0, 10));
+            }}
+            className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors"
+          >
+            <option value="">— No show —</option>
+            {(cardShowsData?.data ?? []).map((s) => {
+              const fmt = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+              const dateLabel = s.num_days > 1 && s.end_date ? `${fmt(s.show_date)} – ${fmt(s.end_date)}` : fmt(s.show_date);
+              return (
+                <option key={s.id} value={s.id}>
+                  {s.name} · {dateLabel}{s.location ? ` · ${s.location}` : ''}
+                </option>
+              );
+            })}
+          </select>
+        </div>
+      )}
       <Input label="Notes" placeholder="Card Show, Location, Person, Etc..." value={notes} onChange={(e) => setNotes(e.target.value)} />
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={() => setMode('prompt')}>Back</Button>

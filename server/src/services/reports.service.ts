@@ -291,17 +291,18 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
   `.execute(db);
 
   // ── Pipeline ────────────────────────────────────────────────────────────────
+  // graded_out=false on the raw-side counters (at_graders / unsubmitted) so
+  // post-return rows that got soft-converted to slabs (migration 057) don't
+  // get double-counted alongside the slabs they produced. returned counts
+  // status='graded' which only the actual slab rows hold.
   const pipelineQuery = db
     .selectFrom('card_instances as ci')
     .select([
-      sql<number>`COUNT(*) FILTER (WHERE ci.status = 'grading_submitted')::int`.as('at_graders'),
-      sql<number>`COALESCE(SUM(ci.purchase_cost) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('at_graders_cost'),
-      sql<number>`COUNT(*) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw')::int`.as('unsubmitted'),
-      sql<number>`COALESCE(SUM(ci.purchase_cost) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw'), 0)::int`.as('unsubmitted_cost'),
-      sql<number>`COUNT(*) FILTER (WHERE ci.status = 'graded')::int`.as('returned'),
-      sql<number>`COALESCE(AVG(
-        EXTRACT(DAY FROM NOW() - ci.updated_at)
-      ) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int`.as('avg_days_at_graders'),
+      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'grading_submitted' AND ci.graded_out = false), 0)::int`.as('at_graders'),
+      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.status = 'grading_submitted' AND ci.graded_out = false), 0)::int`.as('at_graders_cost'),
+      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw' AND ci.graded_out = false), 0)::int`.as('unsubmitted'),
+      sql<number>`COALESCE(SUM(ci.purchase_cost * ci.quantity) FILTER (WHERE ci.decision = 'grade' AND ci.status = 'inspected' AND ci.purchase_type = 'raw' AND ci.graded_out = false), 0)::int`.as('unsubmitted_cost'),
+      sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'graded'), 0)::int`.as('returned'),
     ])
     .where('ci.user_id', '=', userId)
     .executeTakeFirst();
@@ -326,7 +327,11 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
       sql<number>`COALESCE(EXTRACT(DAY FROM NOW() - gb.submitted_at), 0)::int`.as('days_elapsed'),
     ])
     .where('gb.user_id', '=', userId)
-    .where('gb.status', '!=', 'returned')
+    // Active means actually at the grader. Pending batches (still being
+    // assembled, no submit date) and reverted-back-to-pending batches
+    // shouldn't appear here even though they're not yet returned —
+    // they're counted under "Unsubmitted" in the pipeline tile above.
+    .where('gb.status', '=', 'submitted')
     .groupBy('gb.id')
     .orderBy('gb.submitted_at', 'asc')
     .execute();
@@ -446,7 +451,16 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
       unsubmitted: pipeline?.unsubmitted ?? 0,
       unsubmitted_cost: pipeline?.unsubmitted_cost ?? 0,
       returned: pipeline?.returned ?? 0,
-      avg_days_at_graders: pipeline?.avg_days_at_graders ?? 0,
+      // Card-weighted average over every actively-submitted batch. Computed
+      // from activeBatches (which uses gb.submitted_at) instead of
+      // ci.updated_at — the latter gets bumped by any unrelated row update
+      // (decision backfills, edits) and produced 4d on a screen where every
+      // visible batch was 12–57d.
+      avg_days_at_graders: (() => {
+        const totalCardDays = activeBatches.reduce((s, b) => s + Number(b.card_count) * Number(b.days_elapsed), 0);
+        const totalCards = activeBatches.reduce((s, b) => s + Number(b.card_count), 0);
+        return totalCards > 0 ? Math.round(totalCardDays / totalCards) : 0;
+      })(),
       active_batches: activeBatches.map((b) => {
         const cardCount = Number(b.card_count);
         const rawCost = Number(b.raw_cost);
@@ -539,6 +553,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     WHERE ci.user_id = ${userId}
       AND ci.purchase_type = 'raw'
+      AND ci.graded_out = false
       AND ${noSlabCondition}
       AND ${statusFilter}
       AND ${typeFilter}
@@ -554,6 +569,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     WHERE ci.user_id = ${userId}
       AND ci.purchase_type = 'raw'
+      AND ci.graded_out = false
       AND ${noSlabCondition}
       AND ${statusFilter}
       AND ${typeFilter}
@@ -571,9 +587,16 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
   }>`
     WITH rp_intake AS (
       SELECT rp.id, rp.status, rp.card_count,
-        GREATEST(rp.card_count - COALESCE((
-          SELECT SUM(ci.quantity) FROM card_instances ci WHERE ci.raw_purchase_id = rp.id
-        ), 0), 0) AS gap
+        GREATEST(rp.card_count - (
+          COALESCE((
+            SELECT SUM(ci.quantity) FROM card_instances ci WHERE ci.raw_purchase_id = rp.id
+          ), 0)
+          + COALESCE((
+            SELECT COUNT(*) FROM slab_details sd
+            JOIN card_instances src ON src.id = sd.source_raw_instance_id
+            WHERE src.raw_purchase_id = rp.id
+          ), 0)
+        ), 0) AS gap
       FROM raw_purchases rp
       WHERE rp.user_id = ${userId}
         ${type !== 'both' ? sql`AND rp.type = ${type}` : sql``}
@@ -609,6 +632,7 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     WHERE ci.user_id = ${userId}
       AND ci.purchase_type = 'raw'
+      AND ci.graded_out = false
       AND ${noSlabCondition}
       AND ${typeFilter}
   `.execute(db);
@@ -922,6 +946,7 @@ export async function getPendingGradingSub(userId: string) {
     .where('ci.user_id', '=', userId)
     .where('ci.status', '=', 'inspected')
     .where('ci.decision', '=', 'grade')
+    .where('ci.quantity', '>', 0)
     .where('rp.type', '=', 'raw')
     .orderBy('ci.created_at', 'asc')
     .execute();

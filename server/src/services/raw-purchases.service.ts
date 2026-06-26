@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { normalizeCardNumber } from '../utils/card-number';
 import { AppError } from '../middleware/errorHandler';
 import type { RawPurchaseType, RawPurchaseStatus } from '../types/db';
 
@@ -249,9 +250,22 @@ export async function listRawPurchases(
       'rp.reserved',
       'rp.notes',
       'rp.receipt_url',
-      sql<number>`COALESCE(SUM(ci.quantity), 0)`.as('inspected_count'),
+      // Includes slabs whose source raw came from this lot. processReturn
+      // creates the new slab card_instance with raw_purchase_id=null and zeroes
+      // the source raw row's quantity (graded_out=true), so without the slab
+      // subcount a fully-graded lot would falsely drop back to 0/N and reappear
+      // in "Needs Inspection."
+      sql<number>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+        SELECT COUNT(*)::int FROM slab_details sd
+        JOIN card_instances src ON src.id = sd.source_raw_instance_id
+        WHERE src.raw_purchase_id = rp.id
+      ), 0)`.as('inspected_count'),
       sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'sell_raw' THEN ci.quantity END), 0)`.as('sell_raw_count'),
-      sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'grade' THEN ci.quantity END), 0)`.as('grade_count'),
+      sql<number>`COALESCE(SUM(CASE WHEN ci.decision = 'grade' THEN ci.quantity END), 0) + COALESCE((
+        SELECT COUNT(*)::int FROM slab_details sd
+        JOIN card_instances src ON src.id = sd.source_raw_instance_id
+        WHERE src.raw_purchase_id = rp.id
+      ), 0)`.as('grade_count'),
     ])
     .where('rp.user_id', '=', userId)
     .groupBy(['rp.id', 'cc.sku', 'cc.card_name', 'cc.set_name', 'cc.card_number'])
@@ -270,11 +284,19 @@ export async function listRawPurchases(
   if (needs_inspection || inspection_state === 'needs') {
     query = query
       .where('rp.status', '=', 'received')
-      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`);
+      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+        SELECT COUNT(*)::int FROM slab_details sd
+        JOIN card_instances src ON src.id = sd.source_raw_instance_id
+        WHERE src.raw_purchase_id = rp.id
+      ), 0) < rp.card_count`);
   } else if (inspection_state === 'done') {
     query = query
       .where('rp.status', '=', 'received')
-      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) >= rp.card_count`);
+      .having(sql<boolean>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+        SELECT COUNT(*)::int FROM slab_details sd
+        JOIN card_instances src ON src.id = sd.source_raw_instance_id
+        WHERE src.raw_purchase_id = rp.id
+      ), 0) >= rp.card_count`);
   }
   if (search) {
     const term = `%${search}%`;
@@ -305,8 +327,16 @@ export async function listRawPurchases(
           .$if(!!type, (q) => q.where('rp.type', '=', type!))
           .groupBy(['rp.id'])
           .having(inspectionDoneSide
-            ? sql<boolean>`COALESCE(SUM(ci.quantity), 0) >= rp.card_count`
-            : sql<boolean>`COALESCE(SUM(ci.quantity), 0) < rp.card_count`)
+            ? sql<boolean>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+                SELECT COUNT(*)::int FROM slab_details sd
+                JOIN card_instances src ON src.id = sd.source_raw_instance_id
+                WHERE src.raw_purchase_id = rp.id
+              ), 0) >= rp.card_count`
+            : sql<boolean>`COALESCE(SUM(ci.quantity), 0) + COALESCE((
+                SELECT COUNT(*)::int FROM slab_details sd
+                JOIN card_instances src ON src.id = sd.source_raw_instance_id
+                WHERE src.raw_purchase_id = rp.id
+              ), 0) < rp.card_count`)
           .execute()
           .then((rows) => ({ total: rows.length }))
       : db
@@ -413,7 +443,7 @@ export async function createRawPurchase(userId: string, input: CreateRawPurchase
       catalog_id: input.catalog_id ?? null,
       card_name: input.card_name ?? null,
       set_name: input.set_name ?? null,
-      card_number: input.card_number ?? null,
+      card_number: normalizeCardNumber(input.card_number) ?? null,
       total_cost_yen: input.total_cost_yen ?? null,
       fx_rate: input.fx_rate ?? null,
       total_cost_usd: input.total_cost_usd ?? null,
@@ -455,7 +485,7 @@ export async function updateRawPurchase(
   if (input.catalog_id !== undefined)    update.catalog_id = input.catalog_id;
   if (input.card_name !== undefined)     update.card_name = input.card_name;
   if (input.set_name !== undefined)      update.set_name = input.set_name;
-  if (input.card_number !== undefined)   update.card_number = input.card_number;
+  if (input.card_number !== undefined)   update.card_number = normalizeCardNumber(input.card_number);
   if (input.total_cost_yen !== undefined) update.total_cost_yen = input.total_cost_yen;
   if (input.fx_rate !== undefined)       update.fx_rate = input.fx_rate;
   if (input.total_cost_usd !== undefined) update.total_cost_usd = input.total_cost_usd;
@@ -487,6 +517,13 @@ export async function updateRawPurchase(
     if (updated.set_name != null)    fill.set_name_override = updated.set_name;
     if (updated.card_number != null) fill.card_number_override = updated.card_number;
     for (const [col, val] of Object.entries(fill)) {
+      const beforeRows = await db
+        .selectFrom('card_instances')
+        .selectAll()
+        .where('raw_purchase_id', '=', id)
+        .where('user_id', '=', userId)
+        .where(col as any, 'is', null)
+        .execute();
       await db
         .updateTable('card_instances')
         .set({ [col]: val })
@@ -494,6 +531,9 @@ export async function updateRawPurchase(
         .where('user_id', '=', userId)
         .where(col as any, 'is', null)
         .execute();
+      for (const row of beforeRows) {
+        await logAudit(userId, 'card_instances', row.id, 'updated', row, { ...row, [col]: val });
+      }
     }
   }
 
@@ -515,13 +555,22 @@ export async function saveReceiptUrl(userId: string, id: string, receiptUrl: str
 export async function deleteRawPurchase(userId: string, id: string) {
   const existing = await db.selectFrom('raw_purchases').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
 
-  // Unlink cards first
+  // Unlink cards first (audit each unlink so the lot lineage is recoverable)
+  const cardsToUnlink = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('raw_purchase_id', '=', id)
+    .where('user_id', '=', userId)
+    .execute();
   await db
     .updateTable('card_instances')
     .set({ raw_purchase_id: null })
     .where('raw_purchase_id', '=', id)
     .where('user_id', '=', userId)
     .execute();
+  for (const card of cardsToUnlink) {
+    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, raw_purchase_id: null });
+  }
 
   const result = await db
     .deleteFrom('raw_purchases')

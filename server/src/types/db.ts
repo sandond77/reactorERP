@@ -162,6 +162,7 @@ export interface CardInstancesTable {
   card_show_added_at: Date | null;
   card_show_price: number | null;
   is_personal_collection: Generated<boolean>;
+  graded_out: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -284,6 +285,8 @@ export interface AuditLogTable {
   action: string;
   actor: string; // 'user' | 'agent'
   actor_name: string | null;
+  request_id: string | null;
+  reason: string | null;
   old_data: unknown | null;
   new_data: unknown | null;
   ip_address: string | null;

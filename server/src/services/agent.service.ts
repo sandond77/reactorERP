@@ -696,13 +696,14 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'record_sale',
-    description: 'Record a sale for a card. Use list_inventory first to find the card_instance_id. Sale price and fees are in dollars (e.g. 150.00). For card_show platform, the show is auto-resolved from sold_at if no card_show_id is provided.',
+    description: 'Record a sale for a card. Use list_inventory first to find the card_instance_id. Sale price and fees are in dollars (e.g. 150.00). For raw lots with quantity > 1 you MUST pass quantity (the number of copies sold) — do NOT default to the full row quantity. For card_show platform, the show is auto-resolved from sold_at if no card_show_id is provided.',
     input_schema: {
       type: 'object' as const,
       properties: {
         card_instance_id: { type: 'string', description: 'UUID of the card instance being sold (from list_inventory)' },
         platform: { type: 'string', enum: ['ebay', 'tcgplayer', 'card_show', 'facebook', 'instagram', 'local', 'other'], description: 'Platform where it was sold' },
         sale_price: { type: 'number', description: 'Sale price in dollars (e.g. 150.00)' },
+        quantity: { type: 'number', description: 'Number of copies sold from this row. Required when the source row has quantity > 1. For slabs / qty=1 rows, omit.' },
         platform_fees: { type: 'number', description: 'Platform/seller fees in dollars' },
         shipping_cost: { type: 'number', description: 'Shipping cost in dollars' },
         currency: { type: 'string', enum: ['USD', 'JPY'], description: 'Currency (default USD)' },
@@ -715,7 +716,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
   },
   {
     name: 'record_bulk_sale',
-    description: 'Record multiple card show sales in one call. Use list_inventory with is_card_show=true first to find card_instance_ids. All cards share the same platform (card_show), date, and optional card_show_id.',
+    description: 'Record multiple card show sales in one call. Use list_inventory with is_card_show=true first to find card_instance_ids. All cards share the same platform (card_show), date, and optional card_show_id. For raw multi-qty rows each item MUST include quantity (copies sold) — do not default to the full row quantity.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -727,6 +728,7 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
             properties: {
               card_instance_id: { type: 'string', description: 'UUID of the card instance (from list_inventory)' },
               sale_price: { type: 'number', description: 'Final sale price in dollars (e.g. 150.00)' },
+              quantity: { type: 'number', description: 'Number of copies sold from this row. Required when source row has quantity > 1.' },
             },
             required: ['card_instance_id', 'sale_price'],
           },
@@ -997,6 +999,63 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
     },
   },
 ];
+
+// Block agent-initiated sales against legacy-bucket stash rows. The catch-all
+// LEGACY catalog entries represent untagged stash in a raw_purchase lot; when
+// recordSale splits them into sibling sold rows, the leftover fragments don't
+// merge back if the user reverses the sale, so the stash ends up shredded
+// across many tiny ci rows. The UI's Card Show / Sales flows handle this
+// correctly; the agent currently does not, so refuse here and tell the user
+// to use the UI for legacy-bucket sales.
+async function assertNotLegacyBucket(userId: string, cardInstanceIds: string[]): Promise<void> {
+  if (cardInstanceIds.length === 0) return;
+  const rows = await db
+    .selectFrom('card_instances as ci')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .select(['ci.id', 'cc.set_code'])
+    .where('ci.user_id', '=', userId)
+    .where('ci.id', 'in', cardInstanceIds)
+    .execute();
+  const offenders = rows.filter((r) => (r.set_code ?? '').toUpperCase() === 'LEGACY').map((r) => r.id);
+  if (offenders.length > 0) {
+    throw new Error(
+      `Refusing sale: ${offenders.length === 1 ? 'card' : 'cards'} ${offenders.join(', ')} belongs to a legacy bucket stash. Legacy-bucket sales must be recorded through the UI (Card Show or Sales page) so the stash row stays intact. Ask the user to do this manually.`,
+    );
+  }
+}
+
+// Guard against the agent silently selling an entire multi-qty raw stash.
+// recordSale defaults sellQty to the full row quantity when the caller omits
+// `quantity`, so an agent call missing quantity against a qty=1453 stash will
+// mark the whole stash sold. For any source row with quantity > 1, require
+// the agent to pass an explicit quantity (which it should ask the user for).
+// Slabs and qty=1 rows are unaffected.
+async function assertQuantitySpecifiedForMultiQty(
+  userId: string,
+  items: Array<{ card_instance_id: string; quantity?: number }>,
+): Promise<void> {
+  if (items.length === 0) return;
+  const ids = items.map((i) => i.card_instance_id);
+  const rows = await db
+    .selectFrom('card_instances')
+    .select(['id', 'quantity'])
+    .where('user_id', '=', userId)
+    .where('id', 'in', ids)
+    .execute();
+  const qtyById = new Map(rows.map((r) => [r.id, r.quantity]));
+  const missing: string[] = [];
+  for (const item of items) {
+    const rowQty = qtyById.get(item.card_instance_id);
+    if (rowQty != null && rowQty > 1 && (item.quantity == null)) {
+      missing.push(`${item.card_instance_id} (row holds ${rowQty})`);
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `Refusing sale: source ${missing.length === 1 ? 'row holds' : 'rows hold'} more than one copy and the agent did not specify how many were sold. Ask the user how many copies to sell from ${missing.join('; ')}, then retry with the quantity arg set.`,
+    );
+  }
+}
 
 async function executeAgentTool(userId: string, toolName: string, toolInput: Record<string, unknown>): Promise<unknown> {
   if (toolName === 'create_raw_purchase') {
@@ -1356,12 +1415,15 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
   }
 
   if (toolName === 'record_sale') {
-    const { card_instance_id, platform, sale_price, platform_fees, shipping_cost, currency, sold_at, unique_id, card_show_id } =
-      toolInput as { card_instance_id: string; platform: string; sale_price: number; platform_fees?: number; shipping_cost?: number; currency?: string; sold_at?: string; unique_id?: string; card_show_id?: string };
+    const { card_instance_id, platform, sale_price, quantity, platform_fees, shipping_cost, currency, sold_at, unique_id, card_show_id } =
+      toolInput as { card_instance_id: string; platform: string; sale_price: number; quantity?: number; platform_fees?: number; shipping_cost?: number; currency?: string; sold_at?: string; unique_id?: string; card_show_id?: string };
+    await assertNotLegacyBucket(userId, [card_instance_id]);
+    await assertQuantitySpecifiedForMultiQty(userId, [{ card_instance_id, quantity }]);
     const sale = await recordSale(userId, {
       card_instance_id,
       platform: platform as any,
       sale_price: Math.round(sale_price * 100),
+      quantity,
       platform_fees: platform_fees ? Math.round(platform_fees * 100) : 0,
       shipping_cost: shipping_cost ? Math.round(shipping_cost * 100) : 0,
       currency: currency ?? 'USD',
@@ -1374,7 +1436,9 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
 
   if (toolName === 'record_bulk_sale') {
     const { items, card_show_id, sold_at, currency, notes } =
-      toolInput as { items: Array<{ card_instance_id: string; sale_price: number }>; card_show_id?: string; sold_at?: string; currency?: string; notes?: string };
+      toolInput as { items: Array<{ card_instance_id: string; sale_price: number; quantity?: number }>; card_show_id?: string; sold_at?: string; currency?: string; notes?: string };
+    await assertNotLegacyBucket(userId, items.map((i) => i.card_instance_id));
+    await assertQuantitySpecifiedForMultiQty(userId, items);
     const soldDate = sold_at ? new Date(sold_at) : new Date();
     const results = [];
     for (const item of items) {
@@ -1382,6 +1446,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         card_instance_id: item.card_instance_id,
         platform: 'card_show' as any,
         sale_price: Math.round(item.sale_price * 100),
+        quantity: item.quantity,
         platform_fees: 0,
         shipping_cost: 0,
         currency: currency ?? 'USD',
@@ -1961,6 +2026,8 @@ record_trade: outgoing_cards [{card_instance_id, trade_value}], incoming_cards [
 7. Never guess condition, platform, or price — always get from user.
 8. delete_card / delete_expense: always show the name/description + ID and get explicit confirmation before calling.
 9. Graded vs raw: image with PSA/BGS/CGC label + cert + grade → add_graded_card. No exceptions.
+10. Legacy bucket sales: any inventory row whose part_number / SKU contains "-LEGACY-" (set_code=LEGACY) is a generic catch-all stash for untagged cards in a lot. Do NOT call record_sale or record_bulk_sale on these — recordSale's partial-split creates orphaned sibling rows that fragment the stash if the sale is ever reversed. If the user asks to sell from a legacy bucket, tell them to record the sale through the UI (Card Show or Sales page) instead. You may still answer read-only questions about legacy bucket stock from list_inventory.
+11. Multi-qty raw rows: list_inventory returns a 'quantity' field per row. For any sale where quantity > 1, you MUST ask the user how many copies were sold and pass that explicit number as the 'quantity' arg to record_sale / record_bulk_sale. NEVER default to the row's full quantity — silently selling a 1453-card stash because the user said "I sold a card" is the worst kind of mistake. For slabs and qty=1 rows, omit the quantity arg. If the user is ambiguous ("I sold some Charizards"), ask: "How many copies of [card] at [price] each did you sell? The row currently has [N] in stock."
 
 IMAGE HANDLING:
 - Slab photo: read company, grade, cert number, card name from label. Extract year, set, language, card number. Then call lookup_catalog using the SHORT card name (e.g. "Gengar") or set name (e.g. "Dark Phantasma") or card number (e.g. "074") — NOT the full PSA-format string. If lookup_catalog returns an established_name, use that exactly as card_name_override. Only construct a PSA-format name when lookup_catalog finds NO match.
@@ -2037,10 +2104,17 @@ ${JSON.stringify(summary, null, 2)}${earlierContextSummary ? `\n\n=== EARLIER IN
 
       // Execute each tool call and collect results
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      // Carry the originating user message into the audit reason so we can
+      // trace any agent-driven mutation back to "what did the user say".
+      // Cap at 200 chars to keep audit rows small; full transcript is in
+      // chat history anyway.
+      const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+      const userExcerpt = lastUserMsg.length > 200 ? lastUserMsg.slice(0, 197) + '...' : lastUserMsg;
       for (const block of response.content) {
         if (block.type !== 'tool_use') continue;
         try {
-          const result = await auditContext.run({ actor: 'agent', actor_name: actorName ?? 'AI Agent' }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
+          const reason = `agent:${block.name} | user: ${userExcerpt}`;
+          const result = await auditContext.run({ actor: 'agent', actor_name: actorName ?? 'AI Agent', reason }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
           // Track any card instance IDs created
           if ((block.name === 'add_card_to_purchase' || block.name === 'add_graded_card') && typeof result === 'object' && result !== null && 'id' in result) {
             createdCardIds.push(result.id as string);

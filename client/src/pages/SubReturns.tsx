@@ -30,6 +30,7 @@ interface Batch {
   notes: string | null;
   created_at: string;
   item_count: number;
+  total_qty: number;
 }
 
 interface BatchItem {
@@ -96,13 +97,21 @@ function gradeLabel(company: string, grade: number): string {
   if (co === 'PSA') {
     const map: Record<number, string> = {
       10:  'GEM MINT',
+      9.5: 'MINT+',
       9:   'MINT',
+      8.5: 'NM-MT+',
       8:   'NEAR MINT-MINT',
+      7.5: 'NM+',
       7:   'NEAR MINT',
+      6.5: 'EX-MT+',
       6:   'EXCELLENT-MINT',
+      5.5: 'EX+',
       5:   'EXCELLENT',
+      4.5: 'VG-EX+',
       4:   'VERY GOOD-EXCELLENT',
+      3.5: 'VG+',
       3:   'VERY GOOD',
+      2.5: 'GOOD+',
       2:   'GOOD',
       1.5: 'FAIR',
       1:   'POOR',
@@ -193,13 +202,21 @@ function todayIso(): string {
 const COMPANY_LABEL_MAP: Record<string, Record<number, string[]>> = {
   PSA: {
     10:  ['GEM MINT'],
+    9.5: ['MINT+'],
     9:   ['MINT'],
+    8.5: ['NM-MT+'],
     8:   ['NEAR MINT-MINT'],
+    7.5: ['NM+'],
     7:   ['NEAR MINT'],
+    6.5: ['EX-MT+'],
     6:   ['EXCELLENT-MINT'],
+    5.5: ['EX+'],
     5:   ['EXCELLENT'],
+    4.5: ['VG-EX+'],
     4:   ['VERY GOOD-EXCELLENT'],
+    3.5: ['VG+'],
     3:   ['VERY GOOD'],
+    2.5: ['GOOD+'],
     2:   ['GOOD'],
     1.5: ['FAIR'],
     1:   ['POOR'],
@@ -488,11 +505,14 @@ function SelectBatchModal({
                 >
                   <div className="flex-1">
                     <p className="text-sm font-medium text-zinc-100">{b.name ?? b.batch_id}</p>
-                    <p className="text-[10px] text-zinc-500 font-mono mt-0.5">{b.batch_id}</p>
+                    <p className="text-[10px] text-zinc-500 font-mono mt-0.5">
+                      {b.batch_id}
+                      {b.submitted_at && <span className="text-zinc-600"> · sub {formatDate(b.submitted_at)}</span>}
+                    </p>
                   </div>
                   <div className="text-right text-xs text-zinc-400 shrink-0">
                     <p>{b.company} · {b.tier}</p>
-                    <p className="text-zinc-600">{b.item_count} card{b.item_count !== 1 ? 's' : ''}</p>
+                    <p className="text-zinc-600">{b.total_qty} card{b.total_qty !== 1 ? 's' : ''} · {b.item_count} line{b.item_count !== 1 ? 's' : ''}</p>
                   </div>
                   <Badge className={BATCH_STATUS_COLORS['submitted']}>submitted</Badge>
                 </button>
@@ -792,7 +812,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-400 uppercase tracking-wide text-[10px]">
                 <th className="px-2 py-2 text-left  font-medium w-10">Line</th>
-                <th className="px-3 py-2 text-left  font-medium min-w-[260px]">Card</th>
+                <th className="px-3 py-2 text-left  font-medium min-w-[325px]">Card</th>
                 <th className="px-2 py-2 text-left  font-medium">ID</th>
                 <th className="px-2 py-2 text-right font-medium">Cost</th>
                 <th className="px-2 py-2 text-right font-medium">Exp</th>
@@ -801,7 +821,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                 <th className="px-2 py-2 text-left  font-medium">Grade</th>
                 <th className="px-2 py-2 text-left  font-medium">Label</th>
                 <th className="px-2 py-2 text-left  font-medium">Match</th>
-                <th className="px-2 py-2 text-left  font-medium min-w-[220px]">Remap</th>
+                <th className="px-2 py-2 text-left  font-medium min-w-[155px]">Remap</th>
                 <th className="px-2 py-2 text-left  font-medium">Disposition</th>
                 <th className="px-2 py-2 text-center font-medium w-8" />
               </tr>
@@ -838,9 +858,10 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                         rows={2}
                         value={slot.card_name_override ?? item.card_name ?? ''}
                         onChange={(e) => updateSlot(idx, { card_name_override: e.target.value })}
-                        className="w-full px-2 py-1 text-xs bg-transparent border border-transparent hover:border-zinc-700 focus:border-indigo-500 focus:bg-zinc-900 rounded text-zinc-200 font-medium focus:outline-none transition-colors resize-none whitespace-normal break-words leading-snug"
+                        style={{ fieldSizing: 'content' } as React.CSSProperties}
+                        className="w-full px-2 py-1 text-xs bg-transparent border border-transparent hover:border-zinc-700 focus:border-indigo-500 focus:bg-zinc-900 rounded text-zinc-200 font-medium focus:outline-none transition-colors resize-none whitespace-normal break-words leading-snug overflow-hidden"
                       />
-                      <p className="text-[10px] text-zinc-600 px-2">
+                      <p className="text-[10px] text-zinc-600 px-2 break-words">
                         {item.set_name ?? '—'}{item.card_number ? ` · #${item.card_number}` : ''}
                       </p>
                     </td>
@@ -931,17 +952,46 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                       </div>
                     </td>
                     <td className="px-2 py-2">
-                      <select
-                        value={slot.batch_item_id}
-                        onChange={(e) => remapSlot(idx, e.target.value)}
-                        className="w-full px-1.5 py-1 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 focus:outline-none focus:border-indigo-500 truncate"
-                      >
-                        {batch.items.map((bi) => (
-                          <option key={bi.id} value={bi.id}>
-                            #{bi.line_item_num} {bi.card_name ?? '(unnamed)'}
-                          </option>
-                        ))}
-                      </select>
+                      {(() => {
+                        const selected = batch.items.find((bi) => bi.id === slot.batch_item_id);
+                        const selectedParts = selected
+                          ? [
+                              selected.card_name ?? '(unnamed)',
+                              selected.set_name,
+                              selected.card_number ? `#${selected.card_number}` : null,
+                            ].filter(Boolean)
+                          : [];
+                        const selectedLabel = selected
+                          ? `#${selected.line_item_num} ${selectedParts.join(' — ')}`
+                          : '—';
+                        return (
+                          <div className="relative">
+                            <div className="px-1.5 py-1 pr-5 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 whitespace-normal break-words min-h-[26px]">
+                              {selectedLabel}
+                            </div>
+                            <span className="pointer-events-none absolute right-1.5 top-1.5 text-zinc-500 text-[9px]">▾</span>
+                            <select
+                              value={slot.batch_item_id}
+                              onChange={(e) => remapSlot(idx, e.target.value)}
+                              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer focus:outline-none"
+                              aria-label="Remap to batch item"
+                            >
+                              {batch.items.map((bi) => {
+                                const parts = [
+                                  bi.card_name ?? '(unnamed)',
+                                  bi.set_name,
+                                  bi.card_number ? `#${bi.card_number}` : null,
+                                ].filter(Boolean);
+                                return (
+                                  <option key={bi.id} value={bi.id}>
+                                    #{bi.line_item_num} {parts.join(' — ')}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          </div>
+                        );
+                      })()}
                     </td>
                     <td className="px-2 py-2">
                       <div className="flex items-center gap-1.5">
@@ -1079,6 +1129,176 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
   );
 }
 
+// ── View Return Modal ─────────────────────────────────────────────────────────
+
+interface ReturnedSlab {
+  id: string;
+  cert_number: number | null;
+  grade: number | null;
+  grade_label: string | null;
+  company: string;
+  card_instance_id: string;
+  card_name: string;
+  set_name: string | null;
+  card_number: string | null;
+  inspection_condition: string | null;
+  inspection_note: string | null;
+  raw_purchase_label: string | null;
+  expected_grade: number | null;
+}
+
+interface ReturnedSlabsResponse {
+  batch: {
+    id: string;
+    batch_id: string;
+    name: string | null;
+    company: string;
+    tier: string;
+    status: string;
+    submitted_at: string | null;
+  };
+  slabs: ReturnedSlab[];
+}
+
+function ViewReturnModal({ batchId, onClose }: { batchId: string; onClose: () => void }) {
+  const { data, isLoading } = useQuery<ReturnedSlabsResponse>({
+    queryKey: ['returned-slabs', batchId],
+    queryFn:  () => api.get(`/grading-subs/${batchId}/returned-slabs`).then((r) => r.data),
+  });
+
+  // Build grade distribution — descending grade, with counts and percentages
+  // across only graded slabs (cert_number !== null && grade !== null).
+  const slabs = data?.slabs ?? [];
+  const graded = slabs.filter((s) => s.grade != null);
+  const total  = graded.length;
+  const buckets = new Map<number, number>();
+  for (const s of graded) {
+    if (s.grade == null) continue;
+    buckets.set(s.grade, (buckets.get(s.grade) ?? 0) + 1);
+  }
+  const summary = Array.from(buckets.entries())
+    .sort((a, b) => b[0] - a[0])
+    .map(([grade, count]) => ({
+      grade,
+      count,
+      pct: total > 0 ? (count / total) * 100 : 0,
+    }));
+
+  const batch = data?.batch;
+  const title = batch ? `${batch.company} · ${batch.batch_id}` : 'Return';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
+      <div className="bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden mx-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-100">View Return — {title}</h2>
+            {batch?.name && <p className="text-[10px] text-zinc-500 mt-0.5">{batch.name}</p>}
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={15} />
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>
+        ) : (
+          <div className="flex max-h-[70vh]">
+            {/* Slab list */}
+            <div className="flex-1 overflow-y-auto border-r border-zinc-800">
+              <table className="w-full text-xs border-collapse">
+                <thead className="sticky top-0 bg-zinc-900">
+                  <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wide text-[10px]">
+                    <th className="px-4 py-2 text-left   font-medium">Card</th>
+                    <th className="px-4 py-2 text-left   font-medium">Cert #</th>
+                    <th className="px-4 py-2 text-left   font-medium">Grade</th>
+                    <th className="px-4 py-2 text-left   font-medium">Label</th>
+                    <th className="px-4 py-2 text-left   font-medium">Raw ID</th>
+                    <th className="px-4 py-2 text-right  font-medium">Expected Grade</th>
+                    <th className="px-4 py-2 text-left   font-medium">Condition</th>
+                    <th className="px-4 py-2 text-left   font-medium">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/50">
+                  {slabs.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-8 text-center text-zinc-600 text-xs">
+                        No slabs returned for this batch.
+                      </td>
+                    </tr>
+                  ) : slabs.map((s) => {
+                    const beatExpected = s.grade != null && s.expected_grade != null && s.grade > s.expected_grade;
+                    const missedExpected = s.grade != null && s.expected_grade != null && s.grade < s.expected_grade;
+                    const expColor = beatExpected ? 'text-emerald-400' : missedExpected ? 'text-red-400' : 'text-zinc-500';
+                    return (
+                      <tr key={s.id} className="hover:bg-zinc-800/20">
+                        <td className="px-4 py-2.5">
+                          <p className="text-zinc-200 font-medium">{s.card_name}</p>
+                          {s.set_name && <p className="text-[10px] text-zinc-600">{s.set_name}{s.card_number ? ` · #${s.card_number}` : ''}</p>}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-400 font-mono">{s.cert_number ?? '—'}</td>
+                        <td className="px-4 py-2.5">
+                          {s.grade != null
+                            ? <span className="text-emerald-400 font-semibold">{s.grade}</span>
+                            : <span className="text-zinc-600">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-zinc-400">{s.grade_label ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-zinc-500 font-mono text-[10px]">{s.raw_purchase_label ?? '—'}</td>
+                        <td className={`px-4 py-2.5 text-right ${expColor}`}>{s.expected_grade ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-zinc-400 uppercase text-[11px]">{s.inspection_condition ?? '—'}</td>
+                        <td className="px-4 py-2.5 text-zinc-500 text-[11px] max-w-[280px] whitespace-normal break-words">
+                          {s.inspection_note ?? '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Grade summary panel */}
+            <div className="w-64 p-5 shrink-0">
+              <h3 className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-3">Grade Summary</h3>
+              {summary.length === 0 ? (
+                <p className="text-xs text-zinc-600">No graded slabs.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
+                      <th className="text-left  py-1.5 font-medium">Grade</th>
+                      <th className="text-right py-1.5 font-medium">Count</th>
+                      <th className="text-right py-1.5 font-medium">%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/50">
+                    {summary.map((row) => (
+                      <tr key={row.grade}>
+                        <td className="py-1.5 text-emerald-400 font-semibold">{row.grade}</td>
+                        <td className="py-1.5 text-right text-zinc-300">{row.count}</td>
+                        <td className="py-1.5 text-right text-zinc-500">{row.pct.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t border-zinc-700">
+                      <td className="py-1.5 text-zinc-400 font-medium">Total</td>
+                      <td className="py-1.5 text-right text-zinc-200 font-medium">{total}</td>
+                      <td className="py-1.5 text-right text-zinc-400">100.00%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between px-5 py-3 border-t border-zinc-800">
+          <p className="text-[11px] text-zinc-500">{slabs.length} slab{slabs.length !== 1 ? 's' : ''} · {total} graded</p>
+          <Button variant="ghost" size="sm" onClick={onClose}>Close</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export function SubReturns() {
@@ -1086,6 +1306,7 @@ export function SubReturns() {
   const [selectOpen, setSelectOpen] = useState(false);
   const [revertingId, setRevertingId] = useState<string | null>(null);
   const [confirmRevertId, setConfirmRevertId] = useState<string | null>(null);
+  const [viewingId, setViewingId] = useState<string | null>(null);
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery<Batch[]>({
@@ -1120,7 +1341,16 @@ export function SubReturns() {
     return <ReturnForm batch={batchDetail} onBack={() => setSelectedId(null)} />;
   }
 
-  const submitted = data?.filter((b) => b.status === 'submitted') ?? [];
+  // Earliest-submitted first — when returns come back from the grader they
+  // come back in submission order, so the oldest sub is almost always the
+  // one being returned next.
+  const submitted = (data?.filter((b) => b.status === 'submitted') ?? [])
+    .slice()
+    .sort((a, b) => {
+      const aT = a.submitted_at ? new Date(a.submitted_at).getTime() : Infinity;
+      const bT = b.submitted_at ? new Date(b.submitted_at).getTime() : Infinity;
+      return aT - bT;
+    });
   const returned  = data?.filter((b) => b.status === 'returned') ?? [];
 
   return (
@@ -1150,7 +1380,8 @@ export function SubReturns() {
                 <th className="px-4 py-2 text-left font-medium">Batch</th>
                 <th className="px-4 py-2 text-left font-medium">Company</th>
                 <th className="px-4 py-2 text-left font-medium">Tier</th>
-                <th className="px-4 py-2 text-right font-medium">Cards</th>
+                <th className="px-4 py-2 text-right font-medium">Line Items</th>
+                <th className="px-4 py-2 text-right font-medium">Total Cards</th>
                 <th className="px-4 py-2 text-left font-medium">Status</th>
                 <th className="px-4 py-2 text-left font-medium">Submitted</th>
                 <th className="w-48" />
@@ -1158,7 +1389,11 @@ export function SubReturns() {
             </thead>
             <tbody className="divide-y divide-zinc-800/50">
               {returned.map((batch) => (
-                <tr key={batch.id} className="hover:bg-zinc-800/25 transition-colors">
+                <tr
+                  key={batch.id}
+                  onClick={() => confirmRevertId !== batch.id && setViewingId(batch.id)}
+                  className="hover:bg-zinc-800/25 transition-colors cursor-pointer"
+                >
                   <td className="px-4 py-2.5">
                     <p className="text-zinc-100 font-medium">{batch.name ?? batch.batch_id}</p>
                     <p className="text-[10px] text-zinc-600 font-mono">{batch.batch_id}</p>
@@ -1166,13 +1401,14 @@ export function SubReturns() {
                   <td className="px-4 py-2.5 text-zinc-300">{batch.company}</td>
                   <td className="px-4 py-2.5 text-zinc-400">{batch.tier}</td>
                   <td className="px-4 py-2.5 text-right text-zinc-300">{batch.item_count}</td>
+                  <td className="px-4 py-2.5 text-right text-zinc-300">{batch.total_qty}</td>
                   <td className="px-4 py-2.5">
                     <Badge className={BATCH_STATUS_COLORS[batch.status] ?? 'bg-zinc-700/50 text-zinc-400'}>
                       {batch.status}
                     </Badge>
                   </td>
                   <td className="px-4 py-2.5 text-zinc-500">{formatDate(batch.submitted_at)}</td>
-                  <td className="px-4 py-2.5 text-right">
+                  <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                     {confirmRevertId === batch.id ? (
                       <div className="flex items-center justify-end gap-2">
                         <span className="text-[10px] text-zinc-400">Undo return &amp; restore raw cards?</span>
@@ -1206,6 +1442,10 @@ export function SubReturns() {
           onSelect={(id) => { setSelectOpen(false); setSelectedId(id); }}
           onClose={() => setSelectOpen(false)}
         />
+      )}
+
+      {viewingId && (
+        <ViewReturnModal batchId={viewingId} onClose={() => setViewingId(null)} />
       )}
     </div>
   );

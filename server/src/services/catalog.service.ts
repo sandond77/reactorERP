@@ -2,6 +2,7 @@ import axios from 'axios';
 import { sql } from 'kysely';
 import { db } from '../config/database';
 import { lookupSetCode, generatePartNumber } from '../utils/set-codes';
+import { normalizeCardNumber } from '../utils/card-number';
 
 // ── Rarity code map ──────────────────────────────────────────────────────────
 // Maps TCGdex rarity strings AND PSA label rarity terms → SKU abbreviation
@@ -421,17 +422,20 @@ export async function getInventorySummary(userId: string) {
     grade_label: string | null;
     qty_total: number;
     qty_unsold: number;
+    qty_in_grading: number;
     qty_sold: number;
     qty_pending: number;
     total_cost: number;
     avg_cost: number;
     qty_listed: number;
     catalog_id: string | null;
+    catalog_card_name: string | null;
   }>`
     SELECT
       COALESCE(cc.game, 'pokemon')                     AS game,
       cc.sku,
       COALESCE(ci.card_name_override, cc.card_name)   AS card_name,
+      cc.card_name                                     AS catalog_card_name,
       COALESCE(cc.set_name,  ci.set_name_override)    AS set_name,
       cc.set_code,
       COALESCE(cc.card_number, ci.card_number_override) AS card_number,
@@ -442,7 +446,11 @@ export async function getInventorySummary(userId: string) {
       sd.grade,
       sd.grade_label,
       COALESCE(SUM(ci.quantity), 0)::int                                                    AS qty_total,
-      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status != 'sold'), 0)::int                  AS qty_unsold,
+      -- Unsold = available raw/graded inventory. Excludes 'sold' AND
+      -- 'grading_submitted' so cards in transit to the grader don't show up
+      -- as available stock. They get their own qty_in_grading bucket.
+      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status NOT IN ('sold', 'grading_submitted')), 0)::int AS qty_unsold,
+      COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'grading_submitted'), 0)::int      AS qty_in_grading,
       COALESCE(SUM(ci.quantity) FILTER (WHERE ci.status = 'sold'), 0)::int                   AS qty_sold,
       0::int                                                                                 AS qty_pending,
       SUM(ci.purchase_cost + COALESCE(sd.grading_cost, 0))::int                              AS total_cost,
@@ -489,8 +497,10 @@ export async function createCatalogCard(userId: string, params: {
   variant?: string | null;
 }): Promise<string> {
   const lang = params.language.toUpperCase() === 'JP' || params.language.toUpperCase() === 'JPN' ? 'JP' : 'EN';
-  const autoSku = (!params.sku && params.set_code && params.card_number)
-    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: params.card_number })
+  // Canonicalize "215/172" → "215" before SKU autogen and storage.
+  const normalizedNumber = normalizeCardNumber(params.card_number);
+  const autoSku = (!params.sku && params.set_code && normalizedNumber)
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber })
     : null;
 
   const result = await db
@@ -502,7 +512,7 @@ export async function createCatalogCard(userId: string, params: {
       card_name: params.card_name,
       set_name: params.set_name,
       set_code: params.set_code ?? null,
-      card_number: params.card_number ?? null,
+      card_number: normalizedNumber ?? null,
       language: params.language,
       rarity: params.rarity ?? null,
       variant: params.variant ?? null,
@@ -635,7 +645,7 @@ export async function reassignCatalogRow(userId: string, params: {
       AND ci.catalog_id = ${params.old_catalog_id}
       AND LOWER(TRIM(COALESCE(ci.card_name_override, ''))) = LOWER(TRIM(${params.card_name ?? ''}))
       AND sd.company = ${params.company}
-      AND sd.grade IS NOT DISTINCT FROM ${params.grade}::int
+      AND sd.grade IS NOT DISTINCT FROM ${params.grade}::numeric(4,1)
   `.execute(db);
   return { updated: Number(result.numAffectedRows ?? 0) };
 }
@@ -721,8 +731,10 @@ export async function linkUnlinkedByCardName(userId: string, params: {
   variant?: string | null;
 }): Promise<{ catalog_id: string; linked_count: number }> {
   const lang = params.language.toUpperCase() === 'JP' ? 'JP' : params.language.toUpperCase();
-  const autoSku = (!params.sku && params.set_code && params.card_number)
-    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: params.card_number })
+  // Canonicalize "215/172" → "215" so SKU autogen and stored value match catalog form.
+  const normalizedNumber = normalizeCardNumber(params.card_number);
+  const autoSku = (!params.sku && params.set_code && normalizedNumber)
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber })
     : null;
 
   // Look up an existing entry: first by SKU (if we can compute one), then by card_name+set_code
@@ -754,7 +766,7 @@ export async function linkUnlinkedByCardName(userId: string, params: {
       card_name: params.card_name,
       set_name: params.set_name,
       set_code: params.set_code ?? null,
-      card_number: params.card_number ?? null,
+      card_number: normalizedNumber ?? null,
       language: params.language,
       rarity: params.rarity ?? null,
       variant: params.variant ?? null,
@@ -788,6 +800,12 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
   variant?: string | null;
   language?: string;
 }) {
+  // Canonicalize "215/172" → "215" when card_number is being updated.
+  if (fields.card_number !== undefined) {
+    const normalized = normalizeCardNumber(fields.card_number);
+    fields.card_number = normalized ?? undefined;
+  }
+
   // Auto-generate SKU when card_number is being set but no explicit sku is provided
   let effectiveSku = fields.sku;
   if (!effectiveSku && fields.card_number) {

@@ -12,6 +12,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **No comments on unchanged code** — only add comments where logic isn't self-evident.
 - **Migrations are plain SQL files** — sequential numbered files in `server/src/db/migrations/`. When the migration runner has ordering issues, apply SQL directly via the Node.js pg Pool.
 
+## Secret handling (non-negotiable)
+
+This codebase had a GitGuardian incident in June 2026 where a Railway Postgres URL was leaked via `.claude/settings.json`. To prevent recurrence:
+
+- **Never write a literal secret anywhere outside `server/.env`** — no DB URLs with passwords, no API keys, no `SESSION_SECRET`, no OAuth client secrets, no Anthropic keys. Not in source files, not in markdown, not in commit messages, not in `.claude/settings.json` auto-allow patterns, not in shell history examples in docs.
+- **For prod DB access, always resolve via `railway variables --kv`** at runtime: `PROD_URL=$(railway variables --kv 2>/dev/null | grep DATABASE_PUBLIC_URL | head -1 | cut -d= -f2-)`. The literal URL must never appear in a Bash command that could be saved (auto-allow patterns, scripts, snippets).
+- **Local DB access uses `DATABASE_URL` from `server/.env`** via `require('dotenv').config({ path: 'server/.env' })`. Never inline the local URL either, even though it's a Docker localhost — `localhost:5432` with a password is still a credential pattern, and the password may match another env.
+- **`.claude/settings.json` is gitignored** and must stay that way. If a Bash command needs approval at the user's tier, write the pattern as a wildcard (`Bash(node -e *)`) — never paste the actual command with secrets in it.
+- **When in doubt, ask before committing anything containing the strings**: `postgres://`, `postgresql://`, `Bearer `, `sk-`, `password=`, `_SECRET=`, `_KEY=`, `_TOKEN=`. These are tripwires; pause and verify the file going into the commit has no literal value attached.
+- **If a leak happens anyway**: rotate the credential *first* (the only thing that actually fixes it), scrub the file in a new commit, and add the source to `.gitignore`. Don't rely on `git filter-repo` + force-push to undo the exposure — by then it's already cached.
+
 ---
 
 ## System Overview
@@ -137,6 +148,13 @@ No test suite exists. Validate changes by running the dev server.
 **Table columns:** Resizable via `useColWidths` + `ColHeader` (`client/src/components/ui/TableHeader.tsx`). Each column needs a key in both `MINS` (min-width) and the `useColWidths` call, plus a `ColHeader` in `<thead>` and a `<td>` in `<tbody>` — all three must stay in sync.
 
 **Page consistency rule:** All inventory pages must have: search input, Add button, Clear Filters button, filter pattern, and empty state in `<tbody>`.
+
+**Header + filter layout (mandatory pattern):** Every list page header is `flex items-center justify-between px-6 py-4 border-b border-zinc-800`. **Title goes on the left**, **filter pill group + primary action button go on the right** inside a single `flex items-center gap-3` wrapper. Never split filters away from the action button; never left-align filters next to the title. Reference implementation: `Intake.tsx` (Raw/Bulk + status filters + Add button). When adding tabs to a new page, copy this layout exactly — do not invent a new one.
+
+**Filter pill styling (mandatory):** Filter tabs use this exact class set:
+`px-3 py-1 text-xs rounded-md font-medium transition-colors` then conditionally `bg-indigo-600 text-white` when active, `bg-zinc-800 text-zinc-400 hover:text-zinc-200` when inactive. Group buttons with `flex gap-1` (or `flex gap-1 border-l border-zinc-800 pl-3` when adjacent to another filter group). Counts inside a pill use `ml-1.5 text-[10px]` with `text-indigo-200` (active) or `text-zinc-500` (inactive). **Do not invent variations** (`py-1.5`, `bg-zinc-800/60` hover, rounded-lg, etc.) — they all need to look identical across pages.
+
+**No `window.confirm` / `window.alert` / `window.prompt` — ever.** Not just here — they're a general JS anti-pattern. They block the main thread, are un-styled (white OS chrome that clashes with the dark theme), can't be themed or tested, and behave inconsistently across browsers. Use the `Modal` component (`client/src/components/ui/Modal.tsx`) with a small body and two buttons (Cancel + a styled action), or an inline confirm row when the affordance lives next to a single button (see the Delete batch row in `Grading.tsx` for the inline pattern). For info/feedback, use the existing `react-hot-toast` (`toast.success` / `toast.error`). If you find yourself reaching for `window.confirm` while implementing a feature, stop and add a Modal — it's the same lines of code.
 
 **Environment:** Server runs on port 3001. Vite dev server on 5173 and proxies `/api` and `/uploads` to `localhost:3001`. Server `.env` needs `DATABASE_URL`, `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SESSION_SECRET`, `CLIENT_URL`.
 

@@ -1,6 +1,7 @@
 import { db } from '../config/database';
 import { sql } from 'kysely';
 import { logAudit } from '../utils/audit';
+import { normalizeCardNumber } from '../utils/card-number';
 import { AppError } from '../middleware/errorHandler';
 import type { GradingCompany } from '../types/db';
 
@@ -123,6 +124,12 @@ export async function getBatch(userId: string, id: string) {
       sql<string>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
       'ci.catalog_id',
       'cc.sku',
+      // Returned-slab info — when this batch has been processed, the slab
+      // produced from this source is tied to it via slab_details.source_raw_instance_id.
+      // We surface the cert # + grade label so the sub detail view can show
+      // "what came back" per line item without an extra round trip.
+      sql<string | null>`(SELECT sd.cert_number::text FROM slab_details sd WHERE sd.source_raw_instance_id = ci.id AND sd.grading_batch_id = ${id} LIMIT 1)`.as('slab_cert_number'),
+      sql<string | null>`(SELECT sd.grade_label FROM slab_details sd WHERE sd.source_raw_instance_id = ci.id AND sd.grading_batch_id = ${id} LIMIT 1)`.as('slab_grade_label'),
     ])
     .where('gbi.batch_id', '=', id)
     .orderBy('gbi.line_item_num', 'asc')
@@ -150,6 +157,52 @@ export async function getBatch(userId: string, id: string) {
     items: itemsWithRolling,
     stats: { totalQty, rawCost, gradingCost, totalCost, totalValue, maxGain, estimate80 },
   };
+}
+
+// Slabs produced by this batch, with card name + cert + grade.
+// Used by the Sub Returns "View Return" modal.
+export async function getReturnedSlabs(userId: string, batchId: string) {
+  const batch = await db
+    .selectFrom('grading_batches')
+    .select(['id', 'batch_id', 'name', 'company', 'tier', 'status', 'submitted_at'])
+    .where('id', '=', batchId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!batch) return null;
+
+  const slabs = await db
+    .selectFrom('slab_details as sd')
+    .innerJoin('card_instances as ci', 'ci.id', 'sd.card_instance_id')
+    .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+    .leftJoin('card_instances as raw_ci', 'raw_ci.id', 'sd.source_raw_instance_id')
+    .leftJoin('raw_purchases as rp', 'rp.id', 'raw_ci.raw_purchase_id')
+    .select([
+      'sd.id',
+      'sd.cert_number',
+      'sd.grade',
+      'sd.grade_label',
+      'sd.company',
+      'ci.id as card_instance_id',
+      sql<string>`COALESCE(ci.card_name_override, cc.card_name)`.as('card_name'),
+      sql<string | null>`COALESCE(cc.set_name, ci.set_name_override)`.as('set_name'),
+      sql<string | null>`COALESCE(cc.card_number, ci.card_number_override)`.as('card_number'),
+      'raw_ci.condition as inspection_condition',
+      'raw_ci.condition_notes as inspection_note',
+      'rp.purchase_id as raw_purchase_label',
+      sql<number | null>`(
+        SELECT gbi.expected_grade
+        FROM grading_batch_items gbi
+        WHERE gbi.batch_id = ${batchId}
+          AND gbi.card_instance_id = sd.source_raw_instance_id
+        LIMIT 1
+      )`.as('expected_grade'),
+    ])
+    .where('sd.grading_batch_id', '=', batchId)
+    .where('sd.user_id', '=', userId)
+    .orderBy('sd.cert_number', 'asc')
+    .execute();
+
+  return { batch, slabs };
 }
 
 export async function createBatch(userId: string, input: CreateBatchInput) {
@@ -214,6 +267,12 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
     existing &&
     existing.grading_cost !== update.grading_cost
   ) {
+    const slabsBefore = await db
+      .selectFrom('slab_details')
+      .selectAll()
+      .where('grading_batch_id', '=', id)
+      .where('user_id', '=', userId)
+      .execute();
     const affected = await db
       .updateTable('slab_details')
       .set({ grading_cost: update.grading_cost as number, updated_at: new Date() })
@@ -221,12 +280,15 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
       .where('user_id', '=', userId)
       .returning('card_instance_id')
       .execute();
+    for (const before of slabsBefore) {
+      await logAudit(userId, 'slab_details', before.card_instance_id, 'updated', before, { ...before, grading_cost: update.grading_cost as number });
+    }
 
     if (affected.length > 0) {
       const cardIds = affected.map((r) => r.card_instance_id);
       const sales = await db
         .selectFrom('sales')
-        .select(['id', 'card_instance_id'])
+        .selectAll()
         .where('user_id', '=', userId)
         .where('card_instance_id', 'in', cardIds)
         .execute();
@@ -239,6 +301,7 @@ export async function updateBatch(userId: string, id: string, input: UpdateBatch
           .where('id', '=', sale.id)
           .where('user_id', '=', userId)
           .execute();
+        await logAudit(userId, 'sales', sale.id, 'updated', sale, { ...sale, total_cost_basis: newBasis });
       }
     }
   }
@@ -317,12 +380,14 @@ export async function deleteBatch(userId: string, id: string): Promise<DeleteBat
         .executeTakeFirst();
 
       if (stash) {
+        const newStashQty = stash.quantity + qty;
         await db.updateTable('card_instances')
-          .set({ quantity: stash.quantity + qty, updated_at: new Date() })
+          .set({ quantity: newStashQty, updated_at: new Date() })
           .where('id', '=', stash.id)
           .execute();
+        await logAudit(userId, 'card_instances', stash.id, 'updated', stash, { ...stash, quantity: newStashQty });
       } else {
-        await db.insertInto('card_instances').values({
+        const created = await db.insertInto('card_instances').values({
           user_id:        userId,
           catalog_id:     bucketId,
           card_game:      card.card_game,
@@ -333,7 +398,8 @@ export async function deleteBatch(userId: string, id: string): Promise<DeleteBat
           quantity:       qty,
           purchase_cost:  card.purchase_cost,
           currency:       card.currency,
-        } as any).execute();
+        } as any).returningAll().executeTakeFirstOrThrow();
+        await logAudit(userId, 'card_instances', created.id, 'created', null, created);
       }
 
       await logAudit(userId, 'card_instances', card.id, 'deleted', card, null);
@@ -343,11 +409,22 @@ export async function deleteBatch(userId: string, id: string): Promise<DeleteBat
         .execute();
       recreditedToLegacy++;
     } else {
-      await db.updateTable('card_instances')
-        .set({ status: 'inspected', decision: 'grade' })
-        .where('id', '=', card.id)
-        .where('user_id', '=', userId)
-        .execute();
+      // Only flip back to inspected when the card is actually in flight
+      // (status='grading_submitted'). Without this guard, a back-linked
+      // sold slab (decision='already_graded', status='sold') that ever
+      // ended up referenced by a batch_item would have its terminal
+      // status clobbered to 'inspected' here without anyone touching its
+      // sale row — silently corrupting the slab and letting it reappear
+      // in raw inventory pickers.
+      if (card.status === 'grading_submitted') {
+        await db.updateTable('card_instances')
+          .set({ status: 'inspected', decision: 'grade' })
+          .where('id', '=', card.id)
+          .where('user_id', '=', userId)
+          .where('status', '=', 'grading_submitted')
+          .execute();
+        await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, status: 'inspected' as const, decision: 'grade' as const });
+      }
     }
   }
 
@@ -443,12 +520,21 @@ export async function addItem(userId: string, batchId: string, input: AddItemInp
 
   // Move card instance to grading_submitted and clear physical location —
   // the card is at the grader, not in any of our locations.
+  const ciBefore = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
   await db
     .updateTable('card_instances')
     .set({ status: 'grading_submitted', location_id: null })
     .where('id', '=', input.card_instance_id)
     .where('user_id', '=', userId)
     .execute();
+  if (ciBefore) {
+    await logAudit(userId, 'card_instances', input.card_instance_id, 'updated', ciBefore, { ...ciBefore, status: 'grading_submitted' as const, location_id: null });
+  }
 
   return item;
 }
@@ -591,11 +677,18 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
       catalog_id: catalogId,
       card_name_override: input.card_name,
       set_name_override: input.set_name ?? null,
-      card_number_override: input.card_number ?? null,
+      card_number_override: normalizeCardNumber(input.card_number) ?? null,
       card_game: 'pokemon',
       language: input.language,
       purchase_type: 'raw',
       status: 'grading_submitted',
+      // The reassigned row never goes through inspection, so it would otherwise
+      // land with decision=NULL and render as "—" in the lot view. Stamping
+      // 'grade' makes it visually consistent with where it was pulled from
+      // (the parent legacy bucket's decision='grade' stash) and with how
+      // processReturn restores source rows on revert (status='inspected',
+      // decision='grade').
+      decision: 'grade',
       quantity: qty,
       purchase_cost: perCardCost,
       currency: 'USD',
@@ -626,10 +719,197 @@ export async function addLegacyItem(userId: string, batchId: string, input: AddL
   return { card_instance: ci, batch_item: item };
 }
 
+// ── Relink (swap underlying card_instance on a line item) ────────────────────
+
+export interface RelinkItemInput {
+  // Replace the gbi's linked ci with this one (must exist in inventory).
+  card_instance_id: string;
+  // Optional gbi field updates applied alongside the swap.
+  quantity?: number;
+  expected_grade?: number | null;
+  estimated_value?: number | null;
+}
+
+export async function relinkItem(userId: string, itemId: string, input: RelinkItemInput) {
+  const existing = await db
+    .selectFrom('grading_batch_items as gbi')
+    .innerJoin('grading_batches as gb', 'gb.id', 'gbi.batch_id')
+    .select(['gbi.id', 'gbi.card_instance_id', 'gbi.quantity as gbi_qty', 'gbi.batch_id', 'gb.status as batch_status'])
+    .where('gbi.id', '=', itemId)
+    .where('gb.user_id', '=', userId)
+    .executeTakeFirst();
+  if (!existing) throw new AppError(404, 'Line item not found');
+  if (existing.batch_status !== 'pending') {
+    throw new AppError(409, 'Sub must be in Adding state to relink a line');
+  }
+
+  // No swap — fall through to the regular update path.
+  if (input.card_instance_id === existing.card_instance_id) {
+    return updateItem(userId, itemId, {
+      quantity: input.quantity,
+      expected_grade: input.expected_grade,
+      estimated_value: input.estimated_value,
+    });
+  }
+
+  const newCi = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!newCi) throw new AppError(404, 'New card not found');
+
+  // Reject terminal-state targets. Prevents a direct API call from clobbering
+  // a graded slab or sold card by silently flipping its status to
+  // grading_submitted further down.
+  if (['graded', 'sold', 'lost_damaged'].includes(newCi.status)) {
+    throw new AppError(409, `Cannot relink to a card in '${newCi.status}' state`);
+  }
+
+  const qty = input.quantity ?? existing.gbi_qty;
+
+  // Sum existing usage of the new ci across the same batch (excluding the row
+  // we're about to mutate) so we don't over-allocate.
+  const others = await db
+    .selectFrom('grading_batch_items')
+    .select(db.fn.sum<number>('quantity').as('total'))
+    .where('batch_id', '=', existing.batch_id)
+    .where('card_instance_id', '=', input.card_instance_id)
+    .where('id', '!=', itemId)
+    .executeTakeFirst();
+  const alreadyInBatch = Number(others?.total ?? 0);
+  if (alreadyInBatch + qty > newCi.quantity) {
+    throw new AppError(400, `Only ${newCi.quantity - alreadyInBatch} of selected card available (${alreadyInBatch} already in batch).`);
+  }
+
+  // Update gbi to point at the new ci with the new field values.
+  const update: Record<string, unknown> = {
+    card_instance_id: input.card_instance_id,
+    quantity:         qty,
+  };
+  if (input.expected_grade  !== undefined) update.expected_grade  = input.expected_grade;
+  if (input.estimated_value !== undefined) update.estimated_value = input.estimated_value;
+
+  const updated = await db
+    .updateTable('grading_batch_items')
+    .set(update)
+    .where('id', '=', itemId)
+    .returningAll()
+    .executeTakeFirstOrThrow();
+
+  // Restore old ci to inspected/grade — only if no other batch_item still
+  // references it and it's currently in flight. Mirrors removeItem guard.
+  const stillReferenced = await db
+    .selectFrom('grading_batch_items')
+    .select('id')
+    .where('card_instance_id', '=', existing.card_instance_id)
+    .executeTakeFirst();
+  if (!stillReferenced) {
+    const oldCiBefore = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', existing.card_instance_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (oldCiBefore && oldCiBefore.status === 'grading_submitted') {
+      await db
+        .updateTable('card_instances')
+        .set({ status: 'inspected', decision: 'grade', updated_at: new Date() })
+        .where('id', '=', existing.card_instance_id)
+        .where('user_id', '=', userId)
+        .where('status', '=', 'grading_submitted')
+        .execute();
+      await logAudit(userId, 'card_instances', existing.card_instance_id, 'updated', oldCiBefore, { ...oldCiBefore, status: 'inspected' as const, decision: 'grade' as const });
+    }
+  }
+
+  // Move the new ci into grading_submitted (matches addItem semantics).
+  await db
+    .updateTable('card_instances')
+    .set({ status: 'grading_submitted', location_id: null })
+    .where('id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .execute();
+  await logAudit(userId, 'card_instances', input.card_instance_id, 'updated', newCi, { ...newCi, status: 'grading_submitted' as const, location_id: null });
+
+  return updated;
+}
+
+export async function relinkItemLegacy(userId: string, itemId: string, input: AddLegacyItemInput) {
+  const existing = await db
+    .selectFrom('grading_batch_items as gbi')
+    .innerJoin('grading_batches as gb', 'gb.id', 'gbi.batch_id')
+    .select(['gbi.id', 'gbi.card_instance_id', 'gbi.batch_id', 'gb.status as batch_status'])
+    .where('gbi.id', '=', itemId)
+    .where('gb.user_id', '=', userId)
+    .executeTakeFirst();
+  if (!existing) throw new AppError(404, 'Line item not found');
+  if (existing.batch_status !== 'pending') {
+    throw new AppError(409, 'Sub must be in Adding state to relink a line');
+  }
+
+  // Capture the displaced slot BEFORE we touch addLegacyItem so partial-
+  // failure paths don't lose ordering info.
+  const oldCiId = existing.card_instance_id;
+  const oldRow = await db
+    .selectFrom('grading_batch_items')
+    .select(['line_item_num'])
+    .where('id', '=', itemId)
+    .executeTakeFirst();
+  const oldLine = oldRow?.line_item_num ?? null;
+
+  // Reuse the addLegacyItem path: it creates a new ci + a new gbi. If this
+  // throws (e.g. bucket empty / not legacy), we haven't touched the old gbi
+  // so the user can retry.
+  const created = await addLegacyItem(userId, existing.batch_id, input);
+
+  // Drop the old gbi.
+  await db.deleteFrom('grading_batch_items').where('id', '=', itemId).execute();
+
+  // Restore the old ci if nothing else references it.
+  const stillReferenced = await db
+    .selectFrom('grading_batch_items')
+    .select('id')
+    .where('card_instance_id', '=', oldCiId)
+    .executeTakeFirst();
+  if (!stillReferenced) {
+    await db
+      .updateTable('card_instances')
+      .set({ status: 'inspected', decision: 'grade', updated_at: new Date() })
+      .where('id', '=', oldCiId)
+      .where('user_id', '=', userId)
+      .where('status', '=', 'grading_submitted')
+      .execute();
+  }
+
+  // Slide the new gbi into the old slot so display order is preserved.
+  if (oldLine != null) {
+    await db
+      .updateTable('grading_batch_items')
+      .set({ line_item_num: oldLine })
+      .where('id', '=', created.batch_item.id)
+      .execute();
+  }
+
+  return created.batch_item;
+}
+
 export interface UpdateItemInput {
   quantity?: number;
   expected_grade?: number | null;
   estimated_value?: number | null;
+  // Identity fixups — propagated to the linked card_instance. When any of the
+  // four are present, the catalog link is re-resolved so a typo'd line points
+  // at the correct catalog row going forward (slabs created on return inherit
+  // the corrected overrides + catalog_id from the source ci).
+  card_name_override?: string | null;
+  set_name_override?: string | null;
+  card_number_override?: string | null;
+  language?: string;
+  // Pass the human-facing purchase_id label (e.g. "2025R109") to re-link the
+  // source card to a different raw lot. Pass empty string or null to detach.
+  raw_purchase_label?: string | null;
 }
 
 export async function updateItem(userId: string, itemId: string, input: UpdateItemInput) {
@@ -681,15 +961,92 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
       .set({ quantity: stash.quantity - delta, updated_at: new Date() })
       .where('id', '=', stash.id).execute();
     await logAudit(userId, 'card_instances', stash.id, 'updated', stashBefore, { ...stashBefore, quantity: stash.quantity - delta });
+    const ciBefore = await db.selectFrom('card_instances').selectAll().where('id', '=', existing.card_instance_id).executeTakeFirst();
     await db.updateTable('card_instances')
       .set({ quantity: existing.ci_qty + delta, updated_at: new Date() })
       .where('id', '=', existing.card_instance_id).execute();
+    if (ciBefore) {
+      await logAudit(userId, 'card_instances', existing.card_instance_id, 'updated', ciBefore, { ...ciBefore, quantity: existing.ci_qty + delta });
+    }
+  }
+
+  // Identity fixups on the linked card_instance — names/set/#/language/raw lot.
+  // Done first so any failure here aborts before the gbi row is touched.
+  const ciFieldsTouched =
+    input.card_name_override   !== undefined ||
+    input.set_name_override    !== undefined ||
+    input.card_number_override !== undefined ||
+    input.language             !== undefined ||
+    input.raw_purchase_label   !== undefined;
+
+  if (ciFieldsTouched) {
+    const ciBefore = await db
+      .selectFrom('card_instances')
+      .selectAll()
+      .where('id', '=', existing.card_instance_id)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!ciBefore) throw new AppError(404, 'Linked card not found');
+
+    const ciUpdate: Record<string, unknown> = { updated_at: new Date() };
+    if (input.card_name_override   !== undefined) ciUpdate.card_name_override   = input.card_name_override   || null;
+    if (input.set_name_override    !== undefined) ciUpdate.set_name_override    = input.set_name_override    || null;
+    if (input.card_number_override !== undefined) ciUpdate.card_number_override = normalizeCardNumber(input.card_number_override) || null;
+    if (input.language             !== undefined) ciUpdate.language             = input.language;
+    if (input.raw_purchase_label   !== undefined) {
+      const label = (input.raw_purchase_label ?? '').trim();
+      if (!label) {
+        ciUpdate.raw_purchase_id = null;
+      } else {
+        const rp = await db
+          .selectFrom('raw_purchases')
+          .select('id')
+          .where('purchase_id', '=', label)
+          .where('user_id', '=', userId)
+          .executeTakeFirst();
+        if (!rp) throw new AppError(404, `Raw purchase ${label} not found`);
+        ciUpdate.raw_purchase_id = rp.id;
+      }
+    }
+
+    // Re-resolve catalog link if identity fields changed — typo'd lines link
+    // to the wrong (or no) catalog row; refresh so future joins/reports use
+    // the right one. Fall back to keeping the existing link on failure.
+    const newName = input.card_name_override   ?? ciBefore.card_name_override;
+    const newSet  = input.set_name_override    ?? ciBefore.set_name_override;
+    const newNum  = input.card_number_override ?? ciBefore.card_number_override;
+    const newLang = input.language             ?? ciBefore.language;
+    if (newName) {
+      try {
+        const resolve = await resolveLazyForUser(userId);
+        const resolved = await resolve(newName, newSet, newNum, newLang, 0);
+        if (resolved) ciUpdate.catalog_id = resolved;
+      } catch { /* keep existing catalog_id */ }
+    }
+
+    await db
+      .updateTable('card_instances')
+      .set(ciUpdate)
+      .where('id', '=', existing.card_instance_id)
+      .where('user_id', '=', userId)
+      .execute();
+    await logAudit(userId, 'card_instances', existing.card_instance_id, 'updated', ciBefore, { ...ciBefore, ...ciUpdate });
   }
 
   const update: Record<string, unknown> = {};
   if (input.quantity        !== undefined) update.quantity        = input.quantity;
   if (input.expected_grade  !== undefined) update.expected_grade  = input.expected_grade;
   if (input.estimated_value !== undefined) update.estimated_value = input.estimated_value;
+
+  // No gbi fields to update — bail with a fresh fetch so the controller can
+  // still respond with the current row.
+  if (Object.keys(update).length === 0) {
+    return db
+      .selectFrom('grading_batch_items')
+      .selectAll()
+      .where('id', '=', itemId)
+      .executeTakeFirst();
+  }
 
   return db
     .updateTable('grading_batch_items as gbi')
@@ -705,6 +1062,14 @@ export async function updateItem(userId: string, itemId: string, input: UpdateIt
     )
     .returningAll()
     .executeTakeFirst();
+}
+
+// One-shot catalog resolver helper for updateItem — mirrors the lazy import
+// pattern processReturn uses, scoped to a single call.
+async function resolveLazyForUser(userId: string) {
+  const { createCatalogResolver } = await import('./import/import.service');
+  const { getOrCreateCatalogId } = await createCatalogResolver(userId);
+  return getOrCreateCatalogId;
 }
 
 export type ReturnDisposition = 'graded' | 'lost' | 'not_graded' | 'not_submitted';
@@ -763,6 +1128,44 @@ export async function processReturn(userId: string, batchId: string, input: Proc
       if (!Number.isFinite(g) || g < 0 || g > 10) {
         throw new AppError(400, `Grade must be 0-10. Got: ${it.grade}`);
       }
+    }
+  }
+
+  // Cert-uniqueness guards. Two checks:
+  //  (a) Within this payload — same cert across two slots = copy/paste typo.
+  //      Caught the 2026-06-10 incident where one Rayquaza slot was filled in
+  //      with the Ampharos cert + name override, producing a phantom slab.
+  //  (b) Cross-batch — cert already present in slab_details (any company).
+  //      Cert numbers are globally unique within their grading company; a
+  //      collision means either a typo or an attempt to re-record an
+  //      already-returned slab.
+  const gradedCerts: { idx: number; cert: string }[] = [];
+  for (let i = 0; i < input.items.length; i++) {
+    const it = input.items[i];
+    const disp = it.disposition ?? (it.lost ? 'lost' : 'graded');
+    if (disp === 'graded' && it.cert_number) {
+      gradedCerts.push({ idx: i, cert: String(it.cert_number).trim() });
+    }
+  }
+  const seen = new Map<string, number>();
+  for (const { idx, cert } of gradedCerts) {
+    if (seen.has(cert)) {
+      throw new AppError(400, `Cert # ${cert} is used twice in this return (items #${seen.get(cert)! + 1} and #${idx + 1}). Each cert can only appear once.`);
+    }
+    seen.set(cert, idx);
+  }
+  if (gradedCerts.length > 0) {
+    const certNums = gradedCerts.map((c) => Number(c.cert));
+    const existingDupes = await db
+      .selectFrom('slab_details')
+      .select(['cert_number', 'company'])
+      .where('user_id', '=', userId)
+      .where('cert_number', 'in', certNums)
+      .where('company', '=', batch.company as GradingCompany)
+      .execute();
+    if (existingDupes.length > 0) {
+      const list = existingDupes.map((d) => d.cert_number).join(', ');
+      throw new AppError(409, `Cert # ${list} already exist${existingDupes.length === 1 ? 's' : ''} on a returned slab. Each ${batch.company} cert can only be recorded once.`);
     }
   }
 
@@ -925,9 +1328,18 @@ export async function processReturn(userId: string, batchId: string, input: Proc
 
     const newQty = original.quantity - totalConsumed;
     if (newQty <= 0) {
-      // All copies consumed — hard-delete the raw instance
-      await logAudit(userId, 'card_instances', original.id, 'deleted', original, null);
-      await db.deleteFrom('card_instances').where('id', '=', original.id).where('user_id', '=', userId).execute();
+      // All copies converted to slabs — flag as graded_out so the row stays
+      // around for lifecycle/audit/sub-display purposes but drops out of any
+      // "active raw inventory" view that filters on graded_out=false. The
+      // slab carries the cost basis now; the raw row is purely historical.
+      await db
+        .updateTable('card_instances')
+        .set({ graded_out: true, quantity: 0, updated_at: new Date() })
+        .where('id', '=', original.id)
+        .where('user_id', '=', userId)
+        .execute();
+      await logAudit(userId, 'card_instances', original.id, 'updated',
+        original, { ...original, graded_out: true, quantity: 0 });
     } else {
       await db
         .updateTable('card_instances')
@@ -935,6 +1347,8 @@ export async function processReturn(userId: string, batchId: string, input: Proc
         .where('id', '=', original.id)
         .where('user_id', '=', userId)
         .execute();
+      await logAudit(userId, 'card_instances', original.id, 'updated',
+        original, { ...original, quantity: newQty });
     }
   }
 
@@ -985,10 +1399,11 @@ export async function revertReturn(
   const keptSlabs: RevertReturnResult['kept_slabs'] = [];
 
   // ── Step 1: Delete every slab from this batch ──────────────────────────
-  // Use grading_batch_id (preserved through any source-raw deletes) instead
-  // of source_raw_instance_id — the latter is ON DELETE SET NULL, so slabs
-  // whose source was hard-deleted in processReturn would otherwise be
-  // invisible here. Track per-source counts for the restore step.
+  // Key on grading_batch_id (always preserved). source_raw_instance_id is
+  // also preserved now that processReturn marks sources graded_out=true
+  // instead of hard-deleting (migration 057) — so the SET NULL cascade no
+  // longer fires. We use it to attribute slab deletions back to the right
+  // source for quantity restoration.
   const allSlabs = await db
     .selectFrom('slab_details')
     .select(['card_instance_id', 'source_raw_instance_id'])
@@ -996,7 +1411,6 @@ export async function revertReturn(
     .execute();
 
   const slabsDeletedBySource = new Map<string, number>();
-  let orphanSlabsDeleted = 0;
 
   for (const slab of allSlabs) {
     const slabCard = await db
@@ -1038,78 +1452,41 @@ export async function revertReturn(
         slab.source_raw_instance_id,
         (slabsDeletedBySource.get(slab.source_raw_instance_id) ?? 0) + 1,
       );
-    } else {
-      orphanSlabsDeleted++;
     }
   }
 
-  // ── Step 2: Restore each batch_item's source raw card to status=inspected.
+  // ── Step 2: Restore each batch_item's source raw card to status=inspected,
+  // graded_out=false. After migration 057 the source row is always present
+  // (graded_out=true at quantity=0 when fully consumed), so a simple UPDATE
+  // covers both partial and full-consumption cases. The earlier audit-log
+  // re-insertion branch is no longer needed.
   for (const batchItem of batchItems) {
+    const addBack = slabsDeletedBySource.get(batchItem.card_instance_id) ?? 0;
     const original = await db
       .selectFrom('card_instances')
       .selectAll()
       .where('id', '=', batchItem.card_instance_id)
       .where('user_id', '=', userId)
       .executeTakeFirst();
-
-    if (original) {
-      // Partial-consumption case: source still exists. Add back the qty for
-      // however many of its slabs we just deleted, and flip back to inspected.
-      const addBack = slabsDeletedBySource.get(batchItem.card_instance_id) ?? 0;
-      await db.updateTable('card_instances')
-        .set({
-          quantity: original.quantity + addBack,
-          status:   'inspected',
-          decision: 'grade',
-          updated_at: new Date(),
-        })
-        .where('id', '=', original.id).execute();
-    } else {
-      // Fully-consumed case: source was hard-deleted in processReturn.
-      // Re-insert from the audit snapshot at the original quantity, at
-      // status=inspected so it shows back in the sub as inspected.
-      const auditRow = await db
-        .selectFrom('audit_log')
-        .select('old_data')
-        .where('entity_type', '=', 'card_instances')
-        .where('entity_id', '=', batchItem.card_instance_id)
-        .where('action', '=', 'deleted')
-        .orderBy('created_at', 'desc')
-        .limit(1)
-        .executeTakeFirst();
-      if (auditRow?.old_data) {
-        const snap = auditRow.old_data as Record<string, any>;
-        await db.insertInto('card_instances').values({
-          id: snap.id,
-          user_id: snap.user_id,
-          raw_purchase_id: snap.raw_purchase_id ?? null,
-          card_name_override: snap.card_name_override ?? null,
-          set_name_override: snap.set_name_override ?? null,
-          card_number_override: snap.card_number_override ?? null,
-          card_game: snap.card_game ?? 'pokemon',
-          language: snap.language ?? 'JP',
-          variant: snap.variant ?? null,
-          rarity: snap.rarity ?? null,
-          status: 'inspected',
-          quantity: snap.quantity ?? 1,
-          purchase_cost: snap.purchase_cost ?? 0,
-          currency: snap.currency ?? 'USD',
-          purchase_type: snap.purchase_type ?? 'raw',
-          condition: snap.condition ?? null,
-          decision: 'grade',
-          notes: snap.notes ?? null,
-          catalog_id: snap.catalog_id ?? null,
-          legacy_source_catalog_id: snap.legacy_source_catalog_id ?? null,
-          location_id: null,
-          trade_id: snap.trade_id ?? null,
-          purchased_at: snap.purchased_at ? new Date(snap.purchased_at) : null,
-          created_at: snap.created_at ? new Date(snap.created_at) : new Date(),
-          updated_at: new Date(),
-        } as any).execute();
-      }
-    }
+    if (!original) continue;
+    const restored = {
+      ...original,
+      quantity:   original.quantity + addBack,
+      graded_out: false,
+      status:     'inspected' as const,
+      decision:   'grade' as const,
+    };
+    await db.updateTable('card_instances')
+      .set({
+        quantity:   restored.quantity,
+        graded_out: false,
+        status:     'inspected',
+        decision:   'grade',
+        updated_at: new Date(),
+      })
+      .where('id', '=', original.id).execute();
+    await logAudit(userId, 'card_instances', original.id, 'updated', original, restored);
   }
-  void orphanSlabsDeleted;
 
   await db
     .updateTable('grading_batches')
@@ -1151,11 +1528,25 @@ export async function removeItem(userId: string, itemId: string) {
     .executeTakeFirst();
 
   if (!remaining) {
-    await db
-      .updateTable('card_instances')
-      .set({ status: 'inspected', decision: 'grade' })
+    // Guarded for the same reason as deleteBatch above — only flip a card
+    // back to inspected when its current status is grading_submitted.
+    // Otherwise a back-linked sold slab gets its terminal status silently
+    // clobbered on batch_item removal.
+    const ciBefore = await db
+      .selectFrom('card_instances')
+      .selectAll()
       .where('id', '=', item.card_instance_id)
       .where('user_id', '=', userId)
-      .execute();
+      .executeTakeFirst();
+    if (ciBefore && ciBefore.status === 'grading_submitted') {
+      await db
+        .updateTable('card_instances')
+        .set({ status: 'inspected', decision: 'grade' })
+        .where('id', '=', item.card_instance_id)
+        .where('user_id', '=', userId)
+        .where('status', '=', 'grading_submitted')
+        .execute();
+      await logAudit(userId, 'card_instances', item.card_instance_id, 'updated', ciBefore, { ...ciBefore, status: 'inspected' as const, decision: 'grade' as const });
+    }
   }
 }
