@@ -273,6 +273,10 @@ interface StaleEbayRow {
   listed_at: string | null;
   ebay_listing_url: string | null;
   days_listed: number;
+  grading_company: string | null;
+  grade_label: string | null;
+  cert_number: string | null;
+  condition: string | null;
   is_ignored: boolean;
   muted_until: string | null;
 }
@@ -289,6 +293,17 @@ function EbayActionButtons({ row }: { row: StaleEbayRow }) {
   const silenced = isMuted(row.muted_until);
   return (
     <div className="flex items-center gap-2">
+      {row.ebay_listing_url && (
+        <a
+          href={row.ebay_listing_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open eBay listing"
+          className="text-indigo-400 hover:text-indigo-300 transition-colors"
+        >
+          <ExternalLink size={13} />
+        </a>
+      )}
       {silenced ? (
         <button onClick={() => reset.mutate()} title="Re-enable" className="text-zinc-500 hover:text-zinc-300"><RotateCcw size={13} /></button>
       ) : (
@@ -297,6 +312,33 @@ function EbayActionButtons({ row }: { row: StaleEbayRow }) {
       <button onClick={() => ignore.mutate()} title="Dismiss permanently" className="text-zinc-600 hover:text-red-400"><Trash2 size={13} /></button>
     </div>
   );
+}
+
+// ── Shared: Grade / Cert cell ───────────────────────────────────────────────
+// Displays grading company + grade label on top, cert number underneath.
+// Falls back to "Raw" + condition for ungraded cards. Empty cell for cards
+// without either.
+
+function GradeCertCell({ row }: { row: { grading_company: string | null; grade_label: string | null; cert_number: string | null; condition: string | null } }) {
+  if (row.grading_company || row.grade_label) {
+    return (
+      <div className="text-xs leading-tight">
+        <p className="text-zinc-200">
+          {row.grading_company && <span className="text-zinc-500 mr-1">{row.grading_company}</span>}
+          {row.grade_label ?? ''}
+        </p>
+        {row.cert_number && <p className="text-[10px] text-zinc-500 font-mono">#{row.cert_number}</p>}
+      </div>
+    );
+  }
+  if (row.condition) {
+    return (
+      <p className="text-xs text-zinc-400">
+        <span className="text-zinc-500 mr-1">Raw</span>{row.condition}
+      </p>
+    );
+  }
+  return <span className="text-zinc-700 text-xs">—</span>;
 }
 
 const PAGE_SIZE = 15;
@@ -342,39 +384,43 @@ function EbayListingsTab() {
       <div className="rounded-lg border border-zinc-800">
         <table className="w-full text-sm table-fixed">
           <colgroup>
-            <col className="w-[30%]" />
-            <col className="w-[35%]" />
-            <col className="w-[12%]" />
-            <col className="w-[10%]" />
-            <col className="w-[13%]" />
+            <col className="w-[25%]" />
+            <col className="w-[24%]" />
+            <col className="w-[9%]" />
+            <col className="w-[17%]" />
+            <col className="w-[8%]" />
+            <col className="w-[17%]" />
           </colgroup>
           <thead>
             <tr className="border-b border-zinc-800 bg-zinc-900">
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card Name</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Set</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card #</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Grade / Cert</th>
               <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Days</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
             ) : allRows.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-600 text-xs">No stale listings for this threshold.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-600 text-xs">No stale listings for this threshold.</td></tr>
             ) : rows.map((row) => (
               <tr key={row.id} className={cn('border-t border-zinc-800/60 hover:bg-zinc-900/40 transition-colors', row.is_ignored && 'opacity-40')}>
                 <td className="px-4 py-2.5">
                   {row.ebay_listing_url ? (
                     <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-indigo-400 hover:text-indigo-300 transition-colors">
-                      {row.card_name ?? '—'} <ExternalLink size={11} className="shrink-0 opacity-60" />
+                      <span className="truncate">{row.card_name ?? '—'}</span>
+                      <ExternalLink size={11} className="shrink-0 opacity-60" />
                     </a>
                   ) : (
                     <span className="text-zinc-200">{row.card_name ?? '—'}</span>
                   )}
                 </td>
-                <td className="px-4 py-2.5 text-xs text-zinc-500">{row.set_name ?? '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500 truncate">{row.set_name ?? '—'}</td>
                 <td className="px-4 py-2.5 text-xs text-zinc-500">{row.card_number ?? '—'}</td>
+                <td className="px-4 py-2.5"><GradeCertCell row={row} /></td>
                 <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium', row.days_listed >= 90 ? 'text-red-400' : row.days_listed >= 60 ? 'text-orange-400' : 'text-yellow-500')}>{row.days_listed}d</td>
                 <td className="px-4 py-2.5"><EbayActionButtons row={row} /></td>
               </tr>
@@ -399,6 +445,10 @@ interface StaleCardShowRow {
   purchase_cost: number;
   card_show_added_at: string | null;
   days_held: number;
+  grading_company: string | null;
+  grade_label: string | null;
+  cert_number: string | null;
+  condition: string | null;
   is_ignored: boolean;
   muted_until: string | null;
 }
@@ -452,18 +502,20 @@ function CardShowTab() {
       <div className="rounded-lg border border-zinc-800">
         <table className="w-full text-sm table-fixed">
           <colgroup>
-            <col className="w-[28%]" />
-            <col className="w-[32%]" />
-            <col className="w-[12%]" />
+            <col className="w-[23%]" />
+            <col className="w-[22%]" />
             <col className="w-[8%]" />
-            <col className="w-[9%]" />
-            <col className="w-[11%]" />
+            <col className="w-[17%]" />
+            <col className="w-[7%]" />
+            <col className="w-[8%]" />
+            <col className="w-[15%]" />
           </colgroup>
           <thead>
             <tr className="border-b border-zinc-800 bg-zinc-900">
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card Name</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Set</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Card #</th>
+              <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Grade / Cert</th>
               <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Qty</th>
               <th className="text-right text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Days</th>
               <th className="text-left text-[10px] text-zinc-500 uppercase tracking-widest px-4 py-2.5 font-medium">Actions</th>
@@ -471,14 +523,15 @@ function CardShowTab() {
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-600 text-xs">Loading…</td></tr>
             ) : allRows.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-600 text-xs">No stale card show inventory for this threshold.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-600 text-xs">No stale card show inventory for this threshold.</td></tr>
             ) : rows.map((row) => (
               <tr key={row.id} className={cn('border-t border-zinc-800/60 hover:bg-zinc-900/40 transition-colors', row.is_ignored && 'opacity-40')}>
-                <td className="px-4 py-2.5 text-zinc-200">{row.card_name ?? '—'}</td>
-                <td className="px-4 py-2.5 text-xs text-zinc-500">{row.set_name ?? '—'}</td>
+                <td className="px-4 py-2.5 text-zinc-200 truncate">{row.card_name ?? '—'}</td>
+                <td className="px-4 py-2.5 text-xs text-zinc-500 truncate">{row.set_name ?? '—'}</td>
                 <td className="px-4 py-2.5 text-xs text-zinc-500">{row.card_number ?? '—'}</td>
+                <td className="px-4 py-2.5"><GradeCertCell row={row} /></td>
                 <td className="px-4 py-2.5 text-zinc-400 text-right tabular-nums">{row.quantity}</td>
                 <td className={cn('px-4 py-2.5 text-right tabular-nums font-medium', row.days_held >= 90 ? 'text-red-400' : row.days_held >= 60 ? 'text-orange-400' : 'text-yellow-500')}>{row.days_held}d</td>
                 <td className="px-4 py-2.5"><CardShowActionButtons row={row} /></td>
