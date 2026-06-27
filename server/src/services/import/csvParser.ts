@@ -98,6 +98,7 @@ export const FIELD_ALIASES: Record<string, string[]> = {
   grade: ['grade', 'psa grade', 'bgs grade', 'cgc grade', 'score', 'slab grade'],
   company: ['company', 'grader', 'grading company', 'graded by', 'grading service', 'grading co'],
   grading_cost: ['grading fee', 'grading cost', 'submission cost', 'grading cost', 'sub cost', 'grading'],
+  purchase_id: ['purchase id', 'purchase_id', 'lot', 'lot id', 'lot #', 'purchase #', 'raw purchase', 'raw purchase id'],
   // Sale-specific
   sale_price:   ['sale price', 'sell price', 'sold for', 'selling price', 'final price', 'sold price', 'strike price', 'strike'],
   after_fees:   ['after fees', 'after ebay', 'net proceeds', 'after platform fees'],
@@ -129,7 +130,7 @@ export async function aiDetectImport(headers: string[], sampleRows: Record<strin
   ).join('\n');
 
   const fieldOptions = {
-    graded:       ['card_name', 'set_name', 'card_number', 'cert_number', 'grade', 'company', 'purchase_cost', 'grading_cost', 'currency', 'purchased_at', 'order_number', 'notes', 'sold_at', 'sale_price', 'after_fees', 'platform', 'is_listed', 'list_price', 'listing_url', 'listed_at', 'shipping_cost'],
+    graded:       ['card_name', 'set_name', 'card_number', 'cert_number', 'grade', 'company', 'purchase_cost', 'grading_cost', 'currency', 'purchased_at', 'order_number', 'notes', 'purchase_id', 'sold_at', 'sale_price', 'after_fees', 'platform', 'is_listed', 'list_price', 'listing_url', 'listed_at', 'shipping_cost'],
     raw_purchase: ['card_name', 'set_name', 'card_number', 'condition', 'quantity', 'cost', 'currency', 'order_number', 'source', 'purchased_at', 'language', 'type', 'notes'],
     bulk_sale:    ['identifier', 'sale_price', 'platform', 'platform_fees', 'shipping_cost', 'currency', 'sold_at', 'unique_id'],
     expenses:     ['description', 'amount', 'type', 'date', 'order_number', 'currency', 'link'],
@@ -168,6 +169,7 @@ Column name hints (common aliases users use):
 - "Listed Price" or "List Price" → list_price
 - "Listing" or "Listing URL" → listing_url
 - "Date Listed" or "Listed Date" → listed_at
+- "Purchase ID" or "Lot" or "Lot ID" → purchase_id (links a graded slab back to its originating raw purchase lot, e.g. "2025R80")
 
 Target fields per type:
 ${JSON.stringify(fieldOptions, null, 2)}

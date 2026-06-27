@@ -527,6 +527,27 @@ async function executeGradedImport(
   let importedCount = 0;
   const { getOrCreateCatalogId } = await createCatalogResolver(userId, languageOverrides, catalogOverrides);
 
+  // Optional purchase_id (lot) linking. When a graded row carries a purchase_id, link the
+  // imported slab back to that raw purchase lot (raw_purchase_id + decision='already_graded'),
+  // mirroring backLinkSlabsToLot. This keeps graded re-imports (e.g. PSA sub-returns) tied to
+  // their originating lot so the lot's "Needs Inspection" count stays correct instead of the
+  // slab orphaning the lot. Resolve all referenced lot ids up front in one query.
+  const lotIdByPurchaseId = new Map<string, string>();
+  const requestedPurchaseIds = new Set<string>();
+  for (const r of rows) {
+    const pid = applyMapping(r, mapping)['purchase_id']?.trim();
+    if (pid) requestedPurchaseIds.add(pid);
+  }
+  if (requestedPurchaseIds.size > 0) {
+    const lots = await db
+      .selectFrom('raw_purchases')
+      .select(['id', 'purchase_id'])
+      .where('user_id', '=', userId)
+      .where('purchase_id', 'in', [...requestedPurchaseIds])
+      .execute();
+    for (const l of lots) lotIdByPurchaseId.set(l.purchase_id, l.id);
+  }
+
   // Pre-pass: detect set listings — same non-order listing URL shared by 2+ DIFFERENT cards.
   // "Different" means: no two rows share the same card_name OR the same card_number.
   // If either matches between any pair, it's a duplicate/quantity listing, not a set.
@@ -642,6 +663,17 @@ async function executeGradedImport(
       // the canonical name — otherwise each PSA label variation creates a separate group.
       // Store the raw PSA label in notes for reference if no notes already provided.
       const existingNotes = row['notes']?.trim() ?? null;
+
+      // Resolve optional lot link for this slab (see lotIdByPurchaseId above).
+      const purchaseIdRaw = row['purchase_id']?.trim();
+      let linkedLotId: string | null = null;
+      if (purchaseIdRaw) {
+        linkedLotId = lotIdByPurchaseId.get(purchaseIdRaw) ?? null;
+        if (!linkedLotId) {
+          errorLog.push({ row: rowIndex, message: `purchase_id "${purchaseIdRaw}" not found — slab imported without lot link.` });
+        }
+      }
+
       const ci = await db.insertInto('card_instances').values({
         user_id:              userId,
         catalog_id:           catalogId,
@@ -665,10 +697,10 @@ async function executeGradedImport(
         image_front_url:      null,
         image_back_url:       null,
         purchased_at:         purchasedAt,
-        raw_purchase_id:      null,
+        raw_purchase_id:      linkedLotId,
         trade_id:             null,
         location_id:          null,
-        decision:             null,
+        decision:             linkedLotId ? 'already_graded' : null,
       }).returningAll().executeTakeFirstOrThrow();
 
       await db.insertInto('slab_details').values({

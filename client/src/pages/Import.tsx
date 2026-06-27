@@ -64,7 +64,7 @@ const IMPORT_TYPES: { key: ImportType; label: string }[] = [
 // Organized by category for readability in the UI.
 const ALL_TARGET_FIELDS: { group: string; fields: string[] }[] = [
   { group: 'Card',     fields: ['card_name', 'set_name', 'card_number', 'card_game', 'language', 'condition', 'notes'] },
-  { group: 'Graded',   fields: ['cert_number', 'grade', 'company', 'grading_cost'] },
+  { group: 'Graded',   fields: ['cert_number', 'grade', 'company', 'grading_cost', 'purchase_id'] },
   { group: 'Purchase', fields: ['purchase_cost', 'cost', 'quantity', 'currency', 'purchased_at', 'order_number', 'source', 'type'] },
   { group: 'Sale',     fields: ['sold_at', 'sale_price', 'after_fees', 'net', 'platform_fees', 'shipping_cost', 'platform', 'unique_id', 'listing_url'] },
   { group: 'Listing',  fields: ['is_listed', 'list_price', 'listed_at'] },
@@ -88,6 +88,7 @@ const FIELD_DOCS: Record<string, string> = {
   grade:         'Numeric grade (e.g. 10, 9.5). Range 0–10.',
   company:       'PSA / BGS / CGC / ARS / TAG / ACE. Defaults to PSA if missing.',
   grading_cost:  'What you paid to grade the card. Stored in cents server-side; enter as dollars.',
+  purchase_id:   'Optional. Lot ID of the originating raw purchase (e.g. "2025R80"). Links the slab back to that lot (marked already-graded) so the lot stays fully inspected. Unknown IDs are reported and the slab imports unlinked.',
   // Purchase
   purchase_cost: 'Per-card raw cost. Use for graded imports where each row is one card.',
   cost:          'Total cost of the order. Use for raw purchase imports (sums per row × quantity).',
