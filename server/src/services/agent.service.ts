@@ -157,6 +157,7 @@ export async function lookupCardInfo(
 ): Promise<CardInfoResult[]> {
   // 1. Check the user's catalog first — word-split fuzzy: each word must match at least one field
   const words = query.trim().split(/\s+/).filter(Boolean);
+  const trimmed = query.trim();
   let catalogQuery = db
     .selectFrom('card_catalog')
     .selectAll()
@@ -170,9 +171,28 @@ export async function lookupCardInfo(
         eb('card_name', 'ilike', term),
         eb('set_name', 'ilike', term),
         eb('card_number', 'ilike', term),
+        eb('sku', 'ilike', term),
       ])
     );
   }
+
+  // Relevance ranking — exact card-name match beats card-number-only beats
+  // partial. Cuts the number of cases where AI fallback fires (and burns
+  // an extra ~$0.001 per autofill) by putting the best DB match first.
+  // Also penalises catalog rows missing card_number so a fully-specified
+  // hit wins over a name-only stub.
+  catalogQuery = catalogQuery
+    .orderBy(sql<number>`
+      CASE
+        WHEN LOWER(card_name) = LOWER(${trimmed})       THEN 0
+        WHEN LOWER(card_number) = LOWER(${trimmed})     THEN 1
+        WHEN LOWER(sku) = LOWER(${trimmed})              THEN 1
+        WHEN LOWER(card_name) LIKE LOWER(${trimmed + '%'}) THEN 2
+        WHEN card_number IS NOT NULL                     THEN 3
+        ELSE 4
+      END
+    ` as any, 'asc')
+    .orderBy('card_name', 'asc');
 
   const catalogResults = await catalogQuery.limit(10).execute();
 
@@ -2084,12 +2104,29 @@ ${JSON.stringify(summary, null, 2)}${earlierContextSummary ? `\n\n=== EARLIER IN
   // Use Opus when the conversation has images (OCR-critical) and Sonnet
   // otherwise — text-only follow-ups don't need the upgrade.
   const loopModel = hasImages ? 'claude-opus-4-7' : 'claude-sonnet-4-6';
+
+  // Prompt caching: mark the system prompt and the tools block as cacheable
+  // so iteration 2+ and follow-up turns within the 5-minute TTL skip the
+  // big tokens. The system prompt and tools array are static across every
+  // turn for this user, so caching them saves the bulk of input tokens
+  // (system prompt ~5k tokens, 28 tool definitions ~3k tokens). Anthropic
+  // charges the full price only on the cache write; subsequent reads are
+  // ~10% of the input price.
+  const cachedSystem = [
+    { type: 'text' as const, text: systemPrompt, cache_control: { type: 'ephemeral' as const } },
+  ];
+  const cachedTools = AGENT_TOOLS.map((t, i) =>
+    i === AGENT_TOOLS.length - 1
+      ? { ...t, cache_control: { type: 'ephemeral' as const } }
+      : t
+  );
+
   for (let i = 0; i < 8; i++) {
     const response = await client.messages.create({
       model: loopModel,
       max_tokens: 2048,
-      system: systemPrompt,
-      tools: AGENT_TOOLS,
+      system: cachedSystem,
+      tools: cachedTools,
       messages: apiMessages,
     });
 
