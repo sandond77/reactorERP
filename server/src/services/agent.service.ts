@@ -410,26 +410,13 @@ function buildSetCodeReference(): string {
   return `EN set codes — ${enLines}\nJP set codes — ${jpLines}`;
 }
 
-async function extractCardInfoFromImage(
-  imageBase64: string,
-  mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
-  game: string
-): Promise<ImageExtractionResult | null> {
+// Module-scoped: build once at process start, reuse for every image OCR call.
+// The set code reference is ~2.5k tokens of static text — moving it into a
+// cached system prompt means it costs ~10% of the input price on hit (instead
+// of full price on every image).
+function buildImageExtractionSystemPrompt(game: string): string {
   const setCodeRef = buildSetCodeReference();
-  const response = await client.messages.create({
-    model: 'claude-opus-4-7',
-    max_tokens: 768,
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: imageBase64 },
-          },
-          {
-            type: 'text',
-            text: `This image may be a graded trading card slab (PSA, BGS, CGC, etc.) or a raw card.
+  return `This image may be a graded trading card slab (PSA, BGS, CGC, etc.) or a raw card.
 
 Extract all visible information. Return ONLY this JSON (no markdown):
 {
@@ -452,8 +439,37 @@ CRITICAL: card_name and set_name MUST be in English even when the card is Japane
 Set code reference (canonical English names — match these exactly when the card's set is in the list):
 ${setCodeRef}
 
-If not a card image, return null.`,
+If not a card image, return null.`;
+}
+
+// Cached per game so we don't rebuild the set-code reference on every call.
+const imageSystemPromptCache = new Map<string, string>();
+
+async function extractCardInfoFromImage(
+  imageBase64: string,
+  mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
+  game: string
+): Promise<ImageExtractionResult | null> {
+  let systemPrompt = imageSystemPromptCache.get(game);
+  if (!systemPrompt) {
+    systemPrompt = buildImageExtractionSystemPrompt(game);
+    imageSystemPromptCache.set(game, systemPrompt);
+  }
+  const response = await client.messages.create({
+    model: 'claude-opus-4-7',
+    max_tokens: 768,
+    system: [
+      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+    ],
+    messages: [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: { type: 'base64', media_type: mediaType, data: imageBase64 },
           },
+          { type: 'text', text: 'Extract per the schema above. Return null if not a card.' },
         ],
       },
     ],

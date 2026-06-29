@@ -231,10 +231,10 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
          WHERE user_id = ${req.dataUserId} AND status = 'ordered') AS pending_orders
     `.execute(db);
 
-    const [dToday, d30, d60, d90, dYear, lifetime, chToday, ch30, ch60, ch90, chYear, chLifetime, expToday, exp30, exp60, exp90, expYear, expLifetime, pipeline, perfResult] = await Promise.all([
-      queryToday(), query(30), query(60), query(90), queryYear(), query(null),
-      channelQueryToday(), channelQuery(30), channelQuery(60), channelQuery(90), channelQueryYear(), channelQuery(null),
-      expensesQuery(null, todayStart), expensesQuery(30), expensesQuery(60), expensesQuery(90), expensesQuery(null, yearStart), expensesQuery(null),
+    const [dToday, d7, d30, d60, d90, dYear, lifetime, chToday, ch7, ch30, ch60, ch90, chYear, chLifetime, expToday, exp7, exp30, exp60, exp90, expYear, expLifetime, pipeline, perfResult] = await Promise.all([
+      queryToday(), query(7), query(30), query(60), query(90), queryYear(), query(null),
+      channelQueryToday(), channelQuery(7), channelQuery(30), channelQuery(60), channelQuery(90), channelQueryYear(), channelQuery(null),
+      expensesQuery(null, todayStart), expensesQuery(7), expensesQuery(30), expensesQuery(60), expensesQuery(90), expensesQuery(null, yearStart), expensesQuery(null),
       pipelineQuery, performanceQuery,
     ]);
     const perf = perfResult.rows[0] ?? { avg_hold_days: null, avg_listed_days: null, listings_value: 0 };
@@ -261,6 +261,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
     });
     res.json({
       today:        snap(dToday, expToday),
+      last_7_days:  snap(d7, exp7),
       last_30_days: snap(d30, exp30),
       last_60_days: snap(d60, exp60),
       last_90_days: snap(d90, exp90),
@@ -268,6 +269,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       lifetime:     snap(lifetime, expLifetime),
       by_channel: {
         today:        channelGroup(chToday as CRow[]),
+        last_7_days:  channelGroup(ch7 as CRow[]),
         last_30_days: channelGroup(ch30 as CRow[]),
         last_60_days: channelGroup(ch60 as CRow[]),
         last_90_days: channelGroup(ch90 as CRow[]),
