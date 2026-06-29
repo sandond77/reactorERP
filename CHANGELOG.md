@@ -1,6 +1,104 @@
 # Reactor — Changelog
 
-## June 17, 2026 — late
+## June 27, 2026
+
+### Features
+
+**Import — link graded slabs to raw purchase lots via purchase_id**
+- Graded imports (CSV) now accept an optional `purchase_id` column that backlinks each imported slab to its originating raw lot, mirroring `backLinkSlabsToLot`. PSA sub-return re-imports stay tied to their lot so the lot's "Needs Inspection" count stays correct instead of orphaning when the slab arrives. Unknown purchase_ids surface as per-row warnings and the slab still imports unlinked.
+
+**Alerts — grade / cert on stale-inventory tabs + explicit eBay link**
+- Both review tabs (eBay stale listings + card show stale inventory) were missing the most important context for telling cards apart: company, grade label, cert number. The eBay tab's only "open listing" affordance was an ExternalLink icon hidden inside the wrapped card name — discoverable but easy to miss.
+- Server `getStaleEbayListingsFull` / `getStaleCardShowFull` now LEFT JOIN `slab_details` and return `company`, `grade_label`, `cert_number`, plus `ci.condition` for raw fallback.
+- Client adds a shared `GradeCertCell` rendering "PSA GEM MINT 10" with `#145655307` stacked underneath (falls back to "Raw NM" for ungraded, em-dash for neither). New column on both tabs between Card # and Days. eBay action row also gains a dedicated ExternalLink button when the listing URL is present.
+
+### Fixes
+
+**Modal — default `max-w-lg lg:max-w-xl` shrank every wider modal on desktop**
+- The mediaQuery-era bump from `max-w-lg` to `max-w-lg lg:max-w-xl` backfired through `cn()`'s `twMerge`: when a caller overrode with `max-w-3xl` the base `max-w-lg` got dropped (good), but the responsive `lg:max-w-xl` survived (different bucket). At lg+ viewports the responsive variant won, capping Record Sale (`3xl` = 768px), Card Detail (`2xl` = 672px), Card Trend (`4xl`), and Add To Card Show (`5xl`) all to 576px on desktop.
+- Reverted to plain `max-w-lg`. The 64px we'd have gained on default modals at tablet wasn't worth breaking every page-level modal on desktop. Modals that need to be wider on tablet can pass their own responsive classes and have them work predictably.
+
+## June 26, 2026 — Export + tablet-responsive sweep merged to main
+
+### Features
+
+**Unified Export page (`/export`) — sales / inventory / expenses across CSV, Excel, PDF**
+- New `/export` route accessible from the sidebar nav directly under Import, with a Download icon. Step-by-step wizard: dataset → format → filters → download. Each step shows breadcrumbs of prior choices.
+- Server: nine generators (3 datasets × 3 formats) sharing CSV / XLSX / PDF helpers. xlsx via the existing `xlsx` dep, pdf via pdfkit (landscape Letter, paginated). Endpoints at `/api/v1/exports/{sales,inventory,expenses}` with zod-validated query params and proper Content-Type / Content-Disposition for browser downloads.
+- Sales export: date range + platform filter; full columns (date, card, set, cert/lot, company, grade/cond, qty, platform, sale price, fees, shipping, net, cost basis, profit, currency).
+- Inventory export: type (graded/raw/all) + status filter; full columns (id/cert, part #, card, set, #, lang, status, decision, qty, company, grade, condition, purchase cost, grading cost, location, on-show, show price).
+- Expenses export: date range + types filter; full columns (id, date, type, description, amount, currency, order #, link).
+
+**mediaQuery branch merged — tablet-width (768–1023px) usability sweep across the app**
+- Sidebar collapses to icon-rail at <lg with a slide-in overlay drawer. Floating Menu button (mirrors the AI Agent button at bottom-right); both hide while the sidebar overlay is open so they don't sit on the backdrop.
+- 14 list-page headers restacked at <lg: title on row 1, filter pills + search + action button on row 2 with `flex-wrap` and right-aligned. Desktop layout unchanged.
+- Minimal-row tables on the heaviest pages (Overall/Slabs, Sales, Listings, Inventory, Grading batch list). Desktop tables hidden:lg:table; sibling 5-col tablet tables with whole-row tap opening the existing detail modal (`SlabDetailModal`, `SaleActionModal`, edit listing modal, `CardDetailModal`).
+- Intake receipt parser rebuilt as a responsive grid — 2-col stacked at tablet with inline field labels, 14-col single row at lg+. Same React state and handlers; only layout flexes.
+- Dashboard grid breakpoints: Revenue card `grid-cols-2 sm:grid-cols-3 lg:grid-cols-6` (6 metrics no longer stack vertically at tablet); Inventory always `grid-cols-3`; channel tiles (eBay / Card Shows / Other) `grid-cols-1 sm:grid-cols-3`.
+- New `FilterDrawer` / `FilterDrawerLauncher` components for surfacing column-header filters that disappear at <lg when desktop tables are hidden. Applied to Sales (Platform + Sold Date) and Listings (8 filters including conditional Company/Grade by tab).
+- Pagination footers centered at <lg with `px-28` gutter so floating Menu + AI Agent buttons don't overlap.
+
+### Fixes
+
+**Overall minimal-row used wrong SlabRow grade field**
+- The tablet minimal-row table fell back to `row.grade` when `grade_label` was null, but `SlabRow` exposes the numeric grade as `numeric_grade` (matches `Inventory.tsx`). Railway's `tsc -b` caught it where local `tsc --noEmit` had silently let it pass. Swapped to `row.numeric_grade`.
+
+## June 25, 2026
+
+### Features
+
+**Grading — full PSA half-grade support end-to-end**
+- PSA does issue half grades (9.5, 8.5, 7.5, 6.5, 5.5, 4.5, 3.5, 2.5); the canonical PSA label maps only had 1.5. Added the missing half-grade entries to all four mirrored maps (`server/utils/grade-labels.ts`, `client/lib/grade-labels.ts`, `client/pages/SubReturns.tsx` `gradeLabel()` and `COMPANY_LABEL_MAP`) using the standard "+" suffix on the lower descriptor (`NM-MT+ 8.5`, `EX-MT+ 6.5`, etc.). Half-grade slabs now stamp with proper canonical labels instead of a bare `PSA 8.5` fallback.
+
+### Fixes
+
+**Catalog reassign silently skipped half-grade slabs**
+- `catalog.service.ts reassignCatalogRow` casted grade to `::int`, which would silently drop any half-grade slab (8.5 → 8, miss-match, slab stranded under the old catalog). Cast to `::numeric(4,1)` to match the column type.
+
+## June 21, 2026 — Audit-coverage sweep
+
+### Features
+
+**Audit log — request_id + reason for full mutation traceability**
+- Two new `audit_log` columns, both nullable so existing call sites keep working. `request_id` (uuid) is generated once per authenticated HTTP request in `requireAuth` middleware and propagated via `AsyncLocalStorage`, so every audit row written during that request shares the same id — a cascading mutation (delete a `raw_purchase` that unlinks 50 ci rows) can now be queried as one unit: `WHERE request_id = $1`. Indexed for that lookup.
+- `reason` (text) captures the "why" for a mutation. Picked up from audit-context by default; `logAudit()` also accepts an explicit override. Agent path populates it as `agent:<tool_name> | user: <last user message capped at 200 chars>` so any agent-driven write is traceable back to the conversation turn that triggered it. Replaces the previous habit of cramming context into `actor_name` ("sandond77 (data restore)").
+- Migration 058 adds both columns + `idx_audit_log_request`.
+
+### Fixes
+
+**Audit-log coverage — closed silent-mutation gaps across sales, grading, listings, trades, raw lots, locations**
+- 12+ sites across the server were mutating `card_instances.quantity` / `status` (and `sales` / `listings` rows) without calling `logAudit`, making post-incident reconstruction impossible. Two recent incidents (the agent silently selling a 1453-card legacy stash, and the Rayquaza phantom row that crept back from 0 → 1 with no breadcrumb) traced to exactly this gap.
+- `sales.service`: `recordSale` partial-split source qty decrement + sold-sibling insert + full-row status flip + listing status flip; `updateSale` qty rebalance (both delta>0 and delta<0 branches including recreated source row); `deleteSale` ci status revert + listing revert.
+- `grading-submissions.service`: `addItem` status='grading_submitted' flip; `deleteBatch` legacy-bucket re-credit + non-legacy status revert (gated on actual state change); `removeItem` revert; `relinkItem` old/new ci status flips; `updateItem` legacy qty rebalance; `processReturn` partial-decrement branch; `revertReturn` source restoration; `updateBatch` grading_cost propagation across `slab_details` + recomputed `sales.total_cost_basis`.
+- `listings.service`: 5 sites covering `updateSetGroupPrices`, `cancelSingleListing` (listing + ci revert), `cancelSetGroup`, `updateListingsByGroup`, `cancelListingsByGroup`.
+- `trades.service`: `createTradeInner` sale.trade_id link + ci.trade_id link; `deleteTrade` per-sale deletion + ci status/trade_id/location restore + listing revert.
+- `raw-purchases.service`: `updateRawPurchase` per-row catalog/name/set/number backfill; `deleteRawPurchase` per-row raw_purchase_id unlink.
+- `locations.service`: `deleteLocation` per-card location unassign + location deletion; `assignLocation` full ci diff covering location_id + is_card_show + card_show_added_at.
+- Every existing sale, slab, and grading mutation now writes an append-only audit row with `before` / `after` snapshots so any past state can be reconstructed from the log alone.
+
+**AI Agent — guard sales against legacy buckets + multi-qty drains**
+- Two stacked safeguards after the agent silently sold an entire 1453-card legacy raw stash by calling `recordSale` without a `quantity` arg (recordSale defaults `sellQty` to the full row quantity).
+- `record_sale` / `record_bulk_sale` schemas now accept `quantity` and instruct the agent to ask the user for it on any multi-qty source row.
+- New `assertQuantitySpecifiedForMultiQty` refuses the tool call when the source row has quantity > 1 and the agent omitted `quantity`.
+- New `assertNotLegacyBucket` refuses any agent sale on a `set_code=LEGACY` catalog row — split-and-orphan behavior fragments the stash beyond practical recovery; legacy sales must go through the UI.
+- System-prompt rules #10 (legacy) and #11 (multi-qty) added.
+
+**Grading — audit source-row qty changes on return + revert**
+- `processReturn`'s partial-decrement branch and `revertReturn`'s source-row restoration were mutating `card_instances.quantity` without calling `logAudit`, which made silent qty drift after a return+revert impossible to trace. Discovered when investigating a phantom raw row that reappeared in the "Needs Grading Submission" widget after both Legend halves were already slabbed and sold: source qty went 0 → 1 with no audit entry. Both paths now log a full before/after.
+
+**Dashboard — Needs Grading Submission widget showed qty=0 stubs**
+- `getPendingGradingSub` returned every `status='inspected'` / `decision='grade'` row, including the qty=0 leftovers that `submit_to_grading` leaves behind once a source row is fully consumed. Added a `quantity > 0` filter so the widget only shows rows that actually still need submission.
+
+## June 20, 2026
+
+### Features
+
+**Dashboard — channel tiles show Gross / Cost / Net (not just Net)**
+- The eBay / Card Shows / Other tiles previously showed only the net profit. Extended both server (`reports.controller` channel query) and client (`ChannelRow` interface + tile render) so each tile shows a 3-column Gross / Cost / Net breakdown under the sales count. Net keeps the green/red color treatment; Gross + Cost are neutral zinc.
+
+---
+
+
 
 ### Fixes
 
