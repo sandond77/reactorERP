@@ -525,10 +525,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
 
         {viewMode === 'infinite' && (cardShowMode && cardType === 'raw' ? rawQ.hasMore : slabQ.hasMore) && (
           <div
-            ref={(el) => {
-              if (cardShowMode && cardType === 'raw') rawSentinelRef.current = el;
-              else                                    slabSentinelRef.current = el;
-            }}
+            ref={(cardShowMode && cardType === 'raw') ? rawSentinelRef : slabSentinelRef}
             className="px-3 py-4 text-center text-zinc-500 text-[11px]"
           >
             {(cardShowMode && cardType === 'raw' ? rawQ.isFetchingMore : slabQ.isFetchingMore) ? 'Loading more…' : 'Scroll for more'}

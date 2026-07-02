@@ -711,7 +711,7 @@ export function RawOverall() {
 
         {!isSummary && viewMode === 'infinite' && rawQ.hasMore && (
           <div
-            ref={(el) => { rawSentinelRef.current = el; }}
+            ref={rawSentinelRef}
             className="px-3 py-4 text-center text-zinc-500 text-[11px]"
           >
             {rawQ.isFetchingMore ? 'Loading more…' : 'Scroll for more'}

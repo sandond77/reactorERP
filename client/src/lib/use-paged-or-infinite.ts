@@ -91,19 +91,32 @@ export function usePagedOrInfinite<T>(opts: Opts<T>): Result<T> {
   };
 }
 
-// Attach to any element that should trigger fetchNextPage when it enters
-// the viewport (e.g. a sentinel <div> at the bottom of the table). The
-// ref is stable so the effect only re-runs when hasMore / callback change.
-export function useInfiniteSentinel(hasMore: boolean, isFetchingMore: boolean, loadMore: () => void) {
-  const ref = useRef<HTMLElement | null>(null);
+// Returns a callback ref to attach to a sentinel element at the bottom of
+// the list. The observer stays alive whenever there's more to fetch, so the
+// next batch prefetches the moment the sentinel enters the pre-load margin.
+// Uses state-based ref (not useRef) so the effect re-runs when the sentinel
+// element itself mounts/unmounts — a useRef mutation wouldn't trigger the
+// effect, and inline (el)=>ref.current=el callbacks fire on every render
+// which caused the previous "sentinel goes null mid-fetch" clunkiness.
+export function useInfiniteSentinel(
+  hasMore: boolean,
+  _isFetchingMore: boolean, // kept in signature for backwards compat; unused
+  loadMore: () => void,
+): (el: HTMLElement | null) => void {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
   useEffect(() => {
-    const el = ref.current;
-    if (!el || !hasMore || isFetchingMore) return;
+    if (!el || !hasMore) return;
+    // 800px root margin means "start loading when the sentinel is within a
+    // full viewport-height of coming into view." At typical scroll speeds
+    // that gives fetches ~300ms of head start — long enough that new rows
+    // are usually rendered by the time the user reaches them.
     const io = new IntersectionObserver((entries) => {
-      if (entries.some((e) => e.isIntersecting)) loadMore();
-    }, { rootMargin: '400px' });
+      if (entries.some((e) => e.isIntersecting)) loadMoreRef.current();
+    }, { rootMargin: '800px' });
     io.observe(el);
     return () => io.disconnect();
-  }, [hasMore, isFetchingMore, loadMore]);
-  return ref;
+  }, [el, hasMore]);
+  return setEl;
 }
