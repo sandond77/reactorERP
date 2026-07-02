@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Plus, X } from 'lucide-react';
-import { api, type PaginatedResult } from '../lib/api';
+import { ExternalLink, Plus, X, List, MoveVertical } from 'lucide-react';
+import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency } from '../lib/utils';
@@ -12,6 +12,7 @@ import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { AddToCardShowModal } from '../components/inventory/AddToCardShowModal';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { invalidateResources } from '../lib/query-invalidation';
+import { usePagedOrInfinite, useViewMode, useInfiniteSentinel } from '../lib/use-paged-or-infinite';
 
 interface SlabRow {
   id: string;
@@ -234,25 +235,44 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
     sold_dates:     fSoldDates.length  ? fSoldDates.join(',')  : undefined,
   };
 
-  const { data, isLoading } = useQuery<PaginatedResult<SlabRow>>({
+  const [viewMode, setViewMode] = useViewMode('overall');
+
+  const slabQ = usePagedOrInfinite<SlabRow>({
     queryKey: ['overall', params],
-    queryFn: () => api.get('/grading/slabs', { params }).then((r) => r.data),
+    fetch: (p) => api.get('/grading/slabs', { params: { ...params, page: p } }).then((r) => r.data),
+    mode: viewMode,
+    page,
     enabled: !cardShowMode || cardType === 'graded',
   });
 
-  const { data: rawData, isLoading: isRawLoading } = useQuery<PaginatedResult<RawCardShowRow>>({
-    queryKey: ['card-show-raw', debouncedSearch, page],
-    queryFn: () => api.get('/cards', {
+  const rawQ = usePagedOrInfinite<RawCardShowRow>({
+    queryKey: ['card-show-raw', debouncedSearch],
+    fetch: (p) => api.get('/cards', {
       params: {
         is_card_show: 'yes',
         status: 'raw_for_sale',
         search: debouncedSearch || undefined,
         limit: 100,
-        page,
+        page: p,
       },
     }).then((r) => r.data),
+    mode: viewMode,
+    page,
     enabled: cardShowMode && cardType === 'raw',
   });
+
+  // Legacy variable names kept so downstream reads compile without touching
+  // every table cell.
+  const data       = { data: slabQ.data, total: slabQ.total, total_pages: slabQ.totalPages };
+  const isLoading  = slabQ.isLoading;
+  const rawData    = { data: rawQ.data, total: rawQ.total, total_pages: rawQ.totalPages };
+  const isRawLoading = rawQ.isLoading;
+
+  // Infinite-scroll sentinel refs — attach to a <tr> at the bottom of each
+  // table when in infinite mode. IntersectionObserver triggers fetchNextPage
+  // once the sentinel enters (or nearly enters) the viewport.
+  const slabSentinelRef = useInfiniteSentinel(slabQ.hasMore, slabQ.isFetchingMore, slabQ.loadMore);
+  const rawSentinelRef  = useInfiniteSentinel(rawQ.hasMore,  rawQ.isFetchingMore,  rawQ.loadMore);
 
   const hasActiveFilters = fPersonal || fPurchDates.length || fListDates.length || fSoldDates.length ||
     [fCompany, fGrade, fListed, fCardShow, fPurchYear, fListYear, fSoldYear].some((f) => f !== null && f.length > 0);
@@ -311,6 +331,13 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
             onChange={(e) => handleSearchChange(e.target.value)}
             className="w-64 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           />
+          <button
+            onClick={() => { setViewMode(viewMode === 'pagination' ? 'infinite' : 'pagination'); setPage(1); }}
+            title={viewMode === 'pagination' ? 'Switch to infinite scroll' : 'Switch to pagination'}
+            className={`p-2 rounded-lg text-xs font-medium transition-colors ${viewMode === 'infinite' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+          >
+            {viewMode === 'infinite' ? <MoveVertical size={14} /> : <List size={14} />}
+          </button>
           {cardShowMode ? (
             <Button size="sm" onClick={() => setAddToCardShowOpen(true)}>
               <Plus size={14} /> Add to Card Show
@@ -495,6 +522,18 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
             </tbody>
           </table>
         ) : null}
+
+        {viewMode === 'infinite' && (cardShowMode && cardType === 'raw' ? rawQ.hasMore : slabQ.hasMore) && (
+          <div
+            ref={(el) => {
+              if (cardShowMode && cardType === 'raw') rawSentinelRef.current = el;
+              else                                    slabSentinelRef.current = el;
+            }}
+            className="px-3 py-4 text-center text-zinc-500 text-[11px]"
+          >
+            {(cardShowMode && cardType === 'raw' ? rawQ.isFetchingMore : slabQ.isFetchingMore) ? 'Loading more…' : 'Scroll for more'}
+          </div>
+        )}
       </div>
 
       {selectedSlab && (
@@ -523,10 +562,15 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
         // rows. Pick the right paged response per active view.
         const pageData = cardShowMode && cardType === 'raw' ? rawData : data;
         if (!pageData) return null;
+        const loadedCount = pageData.data.length;
         return (
           <div className="flex items-center justify-center lg:justify-between gap-6 lg:gap-0 px-28 lg:px-6 lg:pr-44 py-3 border-t border-zinc-800 text-xs text-zinc-500">
-            <span>{(pageData.total ?? 0).toLocaleString()} total records</span>
-            {pageData.total_pages > 1 && (
+            <span>
+              {viewMode === 'infinite' && loadedCount < (pageData.total ?? 0)
+                ? `${loadedCount.toLocaleString()} of ${(pageData.total ?? 0).toLocaleString()} loaded`
+                : `${(pageData.total ?? 0).toLocaleString()} total records`}
+            </span>
+            {viewMode === 'pagination' && pageData.total_pages > 1 && (
               <div className="flex items-center gap-2">
                 <Button variant="ghost" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
                 <span>{page} / {pageData.total_pages}</span>

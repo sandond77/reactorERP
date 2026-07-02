@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { List, MoveVertical } from 'lucide-react';
+import { usePagedOrInfinite, useViewMode, useInfiniteSentinel } from '../lib/use-paged-or-infinite';
 import { ExternalLink, Plus, X, ChevronRight } from 'lucide-react';
-import { api, type PaginatedResult } from '../lib/api';
+import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency } from '../lib/utils';
@@ -246,11 +248,18 @@ export function RawOverall() {
     sold_dates:     fSoldDates.length  ? fSoldDates.join(',')  : undefined,
   };
 
-  const { data, isLoading } = useQuery<PaginatedResult<RawRow>>({
+  const [viewMode, setViewMode] = useViewMode('raw-overall');
+
+  const rawQ = usePagedOrInfinite<RawRow>({
     queryKey: ['raw-overall', flatParams],
-    queryFn: () => api.get('/cards/raw-flat', { params: flatParams }).then((r) => r.data),
+    fetch: (p) => api.get('/cards/raw-flat', { params: { ...flatParams, page: p } }).then((r) => r.data),
+    mode: viewMode,
+    page,
     enabled: !isSummary,
   });
+  const data = { data: rawQ.data, total: rawQ.total, total_pages: rawQ.totalPages };
+  const isLoading = rawQ.isLoading;
+  const rawSentinelRef = useInfiniteSentinel(rawQ.hasMore, rawQ.isFetchingMore, rawQ.loadMore);
 
   const { data: summaryData, isLoading: summaryLoading } = useQuery<CardGroup[]>({
     queryKey: ['raw-inventory-grouped', debouncedSearch],
@@ -320,6 +329,13 @@ export function RawOverall() {
             onChange={(e) => handleSearchChange(e.target.value)}
             className="w-64 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           />
+          <button
+            onClick={() => { setViewMode(viewMode === 'pagination' ? 'infinite' : 'pagination'); setPage(1); }}
+            title={viewMode === 'pagination' ? 'Switch to infinite scroll' : 'Switch to pagination'}
+            className={`p-2 rounded-lg text-xs font-medium transition-colors ${viewMode === 'infinite' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+          >
+            {viewMode === 'infinite' ? <MoveVertical size={14} /> : <List size={14} />}
+          </button>
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus size={14} /> Add Card
           </Button>
@@ -692,6 +708,15 @@ export function RawOverall() {
             </tbody>
           </table>
         )}
+
+        {!isSummary && viewMode === 'infinite' && rawQ.hasMore && (
+          <div
+            ref={(el) => { rawSentinelRef.current = el; }}
+            className="px-3 py-4 text-center text-zinc-500 text-[11px]"
+          >
+            {rawQ.isFetchingMore ? 'Loading more…' : 'Scroll for more'}
+          </div>
+        )}
       </div>
 
       {selectedRow && (
@@ -714,8 +739,12 @@ export function RawOverall() {
 
       {!isSummary && data && (
         <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
-          <span>{(data.total ?? 0).toLocaleString()} total records</span>
-          {data.total_pages > 1 && (
+          <span>
+            {viewMode === 'infinite' && data.data.length < (data.total ?? 0)
+              ? `${data.data.length.toLocaleString()} of ${(data.total ?? 0).toLocaleString()} loaded`
+              : `${(data.total ?? 0).toLocaleString()} total records`}
+          </span>
+          {viewMode === 'pagination' && data.total_pages > 1 && (
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
               <span>{page} / {data.total_pages}</span>
