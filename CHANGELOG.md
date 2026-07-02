@@ -1,5 +1,41 @@
 # Reactor — Changelog
 
+## July 2, 2026
+
+### Features
+
+**Overall + Raw Overall — toggle between pagination and infinite scroll**
+- Long-form scanning (browsing several hundred slabs or raw cards) is choppy when it takes 5+ Next clicks. Added a per-page persistent toggle so users can flip either page into a smooth-scroll view.
+- New `usePagedOrInfinite` hook bridges the app's existing `PaginatedResult` API with either `useQuery` (pagination) or `useInfiniteQuery` (infinite scroll). The two query caches are keyed separately (`__paginated` vs `__infinite`) so switching modes doesn't discard the other's state — flip back and you're where you were.
+- `useViewMode` persists the preference to localStorage per page (`view-mode:overall`, `view-mode:raw-overall`). Defaults to pagination so first-load UX is unchanged.
+- `useInfiniteSentinel` attaches an `IntersectionObserver` to a sentinel element and calls `fetchNextPage` when it enters the pre-load margin (800px `rootMargin`, so the next batch prefetches ~300ms before the user hits the bottom).
+- Card-show Raw sub-tab on Overall gets the same treatment via a second `usePagedOrInfinite` instance sharing the same viewMode toggle.
+- Pagination footer restructured as `grid-cols-[1fr_auto_1fr]` so Prev / N / Next sits dead-center regardless of the record-count string length; view-mode toggle moved out of the page header (it was crowding the search + Add trio) into the same centered group next to Next.
+- In infinite mode the footer swaps `{N total records}` for `{N of M loaded}` so users can see how far they are into the full set.
+
+### Fixes
+
+**Infinite scroll — smoother "load more" trigger**
+- Two clunkiness bugs stacked. `useInfiniteSentinel`'s effect had `isFetchingMore` in its dep array and bailed early while true, tearing down the observer between page loads. Dropped the guard — React Query already dedupes `fetchNextPage`, so the observer can stay alive and fire freely.
+- Callers passed inline `(el) => { ref.current = el }` as the ref, which creates a new callback every render. React interpreted that as remount and briefly set the ref to null. Hook now returns a state-based callback ref via `useState/setEl` (stable identity across renders); callers pass it directly.
+- Widened `rootMargin` 400 → 800px so prefetch starts a full viewport before the sentinel enters view.
+
+## June 29, 2026
+
+### Features
+
+**Dashboard — 7D revenue window**
+- New "7D" pill between Today and 30D on the Overview revenue tile. Server adds `last_7_days` to both the top-level snap and `by_channel`; client wires the window selector and the tile data.
+
+### Performance
+
+**Agent — prompt caching on system + tools; better DB-side catalog ranking**
+- Motivating signal: API spend was climbing fast on multi-turn conversations. Converted the ~5k-token system prompt and ~3k-token tool definitions to cacheable content blocks using Anthropic's ephemeral cache (5-min TTL). Both are identical across every iteration and every follow-up turn inside the window. Cache writes pay full input price once; subsequent reads pay ~10%. Realistic savings on a typical 3-iteration tool-use turn: 60–70% of input tokens; on follow-up turns within 5 min, 90%+.
+- `lookupCardInfo` now ORDER BYs a relevance CASE so the best DB match comes first instead of arbitrary insertion order. Tiers: 0 exact `card_name` match, 1 exact `card_number` or `sku` match, 2 `card_name` LIKE `'query%'` prefix, 3 any row that has a `card_number`, 4 everything else. Added `sku` to the OR-of-LIKEs so users can paste a part number directly. Better DB ranking → fewer AI-fallback calls → less spend AND better autofill quality.
+
+**Agent image OCR — prompt caching on the vision extractor**
+- `extractCardInfoFromImage` was sending its big schema + ~2.5k tokens of set-code reference inside the user content on every image call, with no chance of cache reuse. Moved the static instructions to a cached `system` block (`cache_control: ephemeral`) and reduced the user content to `image + "Extract per the schema above"`. Per-game system prompt memoised in-process so we don't rebuild the set-code reference on every call either. Inside the 5-min TTL, subsequent images pay ~10% of the input price instead of full.
+
 ## June 27, 2026
 
 ### Features
