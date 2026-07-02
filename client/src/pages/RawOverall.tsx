@@ -329,13 +329,6 @@ export function RawOverall() {
             onChange={(e) => handleSearchChange(e.target.value)}
             className="w-64 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           />
-          <button
-            onClick={() => { setViewMode(viewMode === 'pagination' ? 'infinite' : 'pagination'); setPage(1); }}
-            title={viewMode === 'pagination' ? 'Switch to infinite scroll' : 'Switch to pagination'}
-            className={`p-2 rounded-lg text-xs font-medium transition-colors ${viewMode === 'infinite' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
-          >
-            {viewMode === 'infinite' ? <MoveVertical size={14} /> : <List size={14} />}
-          </button>
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <Plus size={14} /> Add Card
           </Button>
@@ -738,19 +731,29 @@ export function RawOverall() {
       </Modal>
 
       {!isSummary && data && (
-        <div className="flex items-center justify-between px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 px-6 py-3 pr-44 border-t border-zinc-800 text-xs text-zinc-500">
           <span>
             {viewMode === 'infinite' && data.data.length < (data.total ?? 0)
               ? `${data.data.length.toLocaleString()} of ${(data.total ?? 0).toLocaleString()} loaded`
               : `${(data.total ?? 0).toLocaleString()} total records`}
           </span>
-          {viewMode === 'pagination' && data.total_pages > 1 && (
-            <div className="flex items-center gap-2">
-              <Button variant="ghost" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
-              <span>{page} / {data.total_pages}</span>
-              <Button variant="ghost" size="sm" disabled={page >= data.total_pages} onClick={() => setPage((p) => p + 1)}>Next</Button>
-            </div>
-          )}
+          <div className="flex items-center gap-2 justify-self-center">
+            {viewMode === 'pagination' && data.total_pages > 1 && (
+              <>
+                <Button variant="ghost" size="sm" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>Prev</Button>
+                <span>{page} / {data.total_pages}</span>
+                <Button variant="ghost" size="sm" disabled={page >= data.total_pages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+              </>
+            )}
+            <button
+              onClick={() => { setViewMode(viewMode === 'pagination' ? 'infinite' : 'pagination'); setPage(1); }}
+              title={viewMode === 'pagination' ? 'Switch to infinite scroll' : 'Switch to pagination'}
+              className={`ml-1 p-1.5 rounded-md transition-colors ${viewMode === 'infinite' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}
+            >
+              {viewMode === 'infinite' ? <MoveVertical size={13} /> : <List size={13} />}
+            </button>
+          </div>
+          <span />
         </div>
       )}
     </div>
