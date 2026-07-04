@@ -123,8 +123,8 @@ function BreakdownPanel({ heading, agg }: { heading: string; agg: CardShowAggreg
           <div className="flex gap-6">
             {stat('Slab ROI %', pct(slabProfit, slabCost))}
             {stat('Raw ROI %', pct(rawProfit, rawCost))}
-            {stat('Slab % Profit', pct(slabProfit, slabProfit + rawProfit))}
-            {stat('Raw % Profit', pct(rawProfit, slabProfit + rawProfit))}
+            {stat('Slab Margin %', pct(slabProfit, slabRev))}
+            {stat('Raw Margin %', pct(rawProfit, rawRev))}
             {stat('% Slabs', pct(slabCount, totalCount))}
             {stat('% Raw', pct(rawCount, totalCount))}
           </div>

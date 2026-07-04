@@ -15,6 +15,7 @@ const slabsQuerySchema = z.object({
   is_card_show: z.string().optional(),          // 'yes' | 'no'
   personal_collection: z.string().optional(),   // 'yes' | 'no'
   for_sale: z.string().optional(),              // 'yes' — active listing OR card show
+  in_set_listing: z.string().optional(),        // 'yes' — active listing with listing_group_id set
   purchase_years: z.string().optional(),
   listed_years: z.string().optional(),
   sold_years: z.string().optional(),
@@ -50,7 +51,8 @@ export async function listSlabs(req: Request, res: Response, next: NextFunction)
       q.for_sale,
       splitCSV(q.purchase_dates),
       splitCSV(q.listed_dates),
-      splitCSV(q.sold_dates)
+      splitCSV(q.sold_dates),
+      q.in_set_listing
     );
     res.json(result);
   } catch (err) { next(err); }

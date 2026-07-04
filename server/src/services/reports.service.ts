@@ -756,13 +756,18 @@ export async function getRawDashboard(userId: string, view: 'all' | 'sold' | 'un
 export async function getCardShowBreakdown(userId: string, showId: string) {
   const slabCheck = sql<boolean>`EXISTS (SELECT 1 FROM slab_details sd WHERE sd.card_instance_id = ci.id)`;
 
+  // For slabs quantity is always 1, so COUNT and SUM(quantity) match — SUM
+  // is used for symmetry with raw. For raw a single sale row can represent
+  // multiple copies (partial-sale splits keep the split-off row at
+  // ci.quantity), so counting rows undercounted the actual number of cards
+  // sold. Label is "# cards sold", so sum the quantities.
   const aggSelect = [
-    sql<number>`COUNT(*) FILTER (WHERE ${slabCheck})::int`.as('slab_count'),
+    sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_count'),
     sql<number>`COALESCE(SUM(s.sale_price) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_revenue'),
     sql<number>`0::int`.as('slab_fees'),
     sql<number>`COALESCE(SUM(s.net_proceeds) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_net'),
     sql<number>`COALESCE(SUM(COALESCE(s.total_cost_basis, 0)) FILTER (WHERE ${slabCheck}), 0)::int`.as('slab_cost'),
-    sql<number>`COUNT(*) FILTER (WHERE NOT ${slabCheck})::int`.as('raw_count'),
+    sql<number>`COALESCE(SUM(ci.quantity) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_count'),
     sql<number>`COALESCE(SUM(s.sale_price) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_revenue'),
     sql<number>`0::int`.as('raw_fees'),
     sql<number>`COALESCE(SUM(s.net_proceeds) FILTER (WHERE NOT ${slabCheck}), 0)::int`.as('raw_net'),

@@ -32,6 +32,10 @@ export interface CardFilters {
   exclude_legacy_bucket?: boolean;
   is_card_show?: string;  // 'yes' | 'no'
   is_personal_collection?: string;  // 'yes' | 'no'
+  // Restrict to cards whose active listing is part of a listing_group_id —
+  // used by the eBay Set Listing sale flow so the picker only shows cards
+  // that are already grouped as a set.
+  in_set_listing?: string;  // 'yes'
   // Raw cards that have been converted to slabs via grading carry
   // graded_out=true (see migration 057). Default behavior hides them from
   // inventory views; set include_graded_out=true to opt in (lifecycle
@@ -127,6 +131,15 @@ export async function listCards(
   if (filters.is_card_show === 'no') query = query.where('ci.is_card_show', '=', false);
   if (filters.is_personal_collection === 'yes') query = query.where('ci.is_personal_collection', '=', true);
   if (filters.is_personal_collection === 'no') query = query.where('ci.is_personal_collection', '=', false);
+  if (filters.in_set_listing === 'yes') {
+    query = query.where((eb) => eb.exists(
+      eb.selectFrom('listings as l2')
+        .select('l2.id')
+        .whereRef('l2.card_instance_id', '=', 'ci.id')
+        .where('l2.listing_status', '=', 'active')
+        .where('l2.listing_group_id', 'is not', null),
+    ));
+  }
   if (!filters.include_graded_out) query = query.where('ci.graded_out', '=', false);
   if (filters.search) {
     if (filters.exact) {

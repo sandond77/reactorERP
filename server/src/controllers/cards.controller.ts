@@ -22,6 +22,7 @@ const cardFiltersSchema = z.object({
   exclude_legacy_bucket: z.coerce.boolean().optional(),
   is_card_show: z.string().optional(),
   is_personal_collection: z.string().optional(),
+  in_set_listing: z.string().optional(),
   page: z.coerce.number().default(1),
   limit: z.coerce.number().min(1).max(100).default(25),
 });

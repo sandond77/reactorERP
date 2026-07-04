@@ -476,7 +476,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay, bulkExactMatch],
     queryFn: () => api.get('/grading/slabs', {
       params: bulkIsEbay
-        ? { search: debouncedBulkSearch, limit: 50, status: 'unsold', for_sale: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined }
+        // eBay Set Listing: only cards already grouped into a listing_group
+        // (i.e. part of an active Set). Filters out individually-listed cards
+        // that aren't part of any set — those aren't valid inventory for a
+        // set-sale flow.
+        ? { search: debouncedBulkSearch, limit: 50, status: 'unsold', in_set_listing: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined }
         : { search: debouncedBulkSearch, limit: 50, status: 'unsold', is_card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'graded',
@@ -490,7 +494,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay, bulkExactMatch],
     queryFn: () => api.get('/cards', {
       params: bulkIsEbay
-        ? { search: debouncedBulkSearch || undefined, limit: 50, is_listed: 'yes', status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined }
+        // Same rationale as the graded branch: only raw cards already grouped
+        // into an active listing_group_id — the eBay Set Listing sale flow
+        // shouldn't surface individually-listed raw cards.
+        ? { search: debouncedBulkSearch || undefined, limit: 50, in_set_listing: 'yes', status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined }
         : { search: debouncedBulkSearch || undefined, limit: 50, status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'raw',
