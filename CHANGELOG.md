@@ -1,5 +1,20 @@
 # Reactor — Changelog
 
+## July 4, 2026
+
+### Fixes
+
+**Reports — By Card Show `# Cards Sold` was counting line items, not quantities**
+- `getCardShowBreakdown`'s `raw_count` was `COUNT(*) FILTER (...)`, so a single sale row with `ci.quantity=5` counted as 1 card sold. The label reads "# Cards Sold" — users expected the qty. Swapped both `slab_count` and `raw_count` to `SUM(ci.quantity)`. For slabs `quantity=1` always (no change); for raw the number finally matches the label. Applied to the top-level aggregate and the multi-day breakdown.
+
+**Reports — `Slab % Profit` / `Raw % Profit` were share-of-total, not per-category margin**
+- The computation was `pct(slabProfit, slabProfit + rawProfit)` and its raw sibling — i.e. what fraction of total profit came from each bucket. The two summed to 100%, which read like a composition ratio and made the number useless as a per-category performance signal (the `ROI %` columns already answer "profit relative to cost").
+- Renamed to `Slab Margin %` / `Raw Margin %` and switched the denominator to `slabRev` / `rawRev`. Each column now shows that category's own profit margin (profit / revenue) — two independent numbers instead of a redundant ratio.
+
+**Sales — eBay Set Listing search returned any listed card, not only set-grouped ones**
+- The Set Listing sale flow's search modal called `/grading/slabs?for_sale=yes` and `/cards?is_listed=yes`, so users had to eyeball which results were actually part of an active set (`listing_group_id IS NOT NULL`).
+- New `in_set_listing=yes` filter on both endpoints; server checks `EXISTS(SELECT 1 FROM listings WHERE card_instance_id = ci.id AND listing_status = 'active' AND listing_group_id IS NOT NULL)`. Client sends the param on both graded and raw sub-tabs of the bulk-search step when `platform === 'ebay'`.
+
 ## July 2, 2026
 
 ### Features
