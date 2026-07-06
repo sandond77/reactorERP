@@ -174,7 +174,13 @@ function EditPartModal({ row, onClose, onReassign }: EditPartModalProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
     game:        row.game ?? 'pokemon',
-    card_name:   row.card_name ?? '',
+    // Pre-fill from catalog_card_name (raw cc.card_name) when we're
+    // editing an existing catalog entry — row.card_name is coalesced
+    // with ci.card_name_override, which can be a stale copy of a
+    // previous typo and would make a subsequent save just re-write the
+    // typo back onto the catalog. For a "new" entry there's no catalog
+    // yet, so fall back to row.card_name.
+    card_name:   (row.catalog_id ? row.catalog_card_name : null) ?? row.card_name ?? '',
     set_name:    row.set_name ?? '',
     set_code:    row.set_code ?? '',
     card_number: row.card_number ?? '',

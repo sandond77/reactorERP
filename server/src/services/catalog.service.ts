@@ -819,10 +819,33 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
       effectiveSku = generateSku({ language: lang === 'JP' ? 'JP' : 'EN', setCode, cardNumber: fields.card_number });
     }
   }
+  // When card_name is changing, snapshot the OLD value first — any
+  // card_instance whose card_name_override currently equals the old
+  // catalog name is a "shadow override" (a redundant copy that mirrors
+  // the catalog, not an intentional override like a full PSA label).
+  // Null those out after the update so the ci rows inherit the new name
+  // via COALESCE(ci.card_name_override, cc.card_name) — otherwise the
+  // Edit Part modal re-opens showing the stale typo, and any picker
+  // that reads ci.card_name_override renders the typo alongside the
+  // corrected catalog.
+  let oldName: string | null = null;
+  if (fields.card_name !== undefined) {
+    const existing = await db.selectFrom('card_catalog').select('card_name').where('id', '=', id).executeTakeFirst();
+    oldName = existing?.card_name ?? null;
+  }
   await db
     .updateTable('card_catalog')
     .set({ ...fields, ...(effectiveSku ? { sku: effectiveSku } : {}), updated_at: new Date() })
     .where('id', '=', id)
     .where('user_id', '=', userId)
     .execute();
+  if (fields.card_name !== undefined && oldName && oldName !== fields.card_name) {
+    await db
+      .updateTable('card_instances')
+      .set({ card_name_override: null, updated_at: new Date() })
+      .where('user_id', '=', userId)
+      .where('catalog_id', '=', id)
+      .where('card_name_override', '=', oldName)
+      .execute();
+  }
 }
