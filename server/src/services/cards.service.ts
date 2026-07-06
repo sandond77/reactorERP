@@ -491,10 +491,17 @@ export async function createCard(
 
   // Sync is_card_show from location if location_id provided
   let isCardShow = (data as any).is_card_show ?? false;
-  const locationId = (data as any).location_id ?? null;
+  let locationId = (data as any).location_id ?? null;
   if (locationId) {
     const loc = await db.selectFrom('locations').select('is_card_show').where('id', '=', locationId).executeTakeFirst();
     if (loc) isCardShow = loc.is_card_show;
+  }
+  // Personal collection auto-move: if the card is being created with the
+  // PC flag on and the caller didn't specify a location, park it in the
+  // auto-seeded PC root so it groups with other PC stock immediately.
+  if ((data as any).is_personal_collection === true && !locationId) {
+    const { ensurePersonalCollectionLocation } = await import('./locations.service');
+    locationId = await ensurePersonalCollectionLocation(userId);
   }
 
   // Cert-uniqueness guard for Add Slab. (company, cert_number) is globally
@@ -519,7 +526,7 @@ export async function createCard(
 
   const card = await db
     .insertInto('card_instances')
-    .values({ ...data, user_id: userId, status, purchase_type: purchaseType, raw_purchase_id: rawPurchaseId, is_card_show: isCardShow, card_show_added_at: isCardShow ? new Date() : null })
+    .values({ ...data, user_id: userId, status, purchase_type: purchaseType, raw_purchase_id: rawPurchaseId, is_card_show: isCardShow, card_show_added_at: isCardShow ? new Date() : null, location_id: locationId })
     .returningAll()
     .executeTakeFirstOrThrow();
 
@@ -584,6 +591,25 @@ export async function updateCard(
   // (Don't drop back to 'purchased_raw' — it was inspected, just re-routed.)
   if (instanceData.decision === 'grade' && existing.status === 'raw_for_sale' && existing.decision === 'sell_raw') {
     (instanceData as any).status = 'inspected';
+  }
+
+  // Personal collection auto-move: when the flag flips ON, park the card in
+  // the auto-seeded Personal Collection location so the user sees it grouped
+  // with the rest of their PC stock (unless they explicitly picked a
+  // different location_id in the same update — that wins). When the flag
+  // flips OFF and the card is still parked in the PC root, clear the
+  // location so it doesn't stay in a room it no longer belongs to.
+  const pcTurningOn  = instanceData.is_personal_collection === true  && !existing.is_personal_collection;
+  const pcTurningOff = instanceData.is_personal_collection === false && existing.is_personal_collection;
+  if (pcTurningOn && (instanceData as any).location_id === undefined) {
+    const { ensurePersonalCollectionLocation } = await import('./locations.service');
+    (instanceData as any).location_id = await ensurePersonalCollectionLocation(userId);
+  } else if (pcTurningOff && (instanceData as any).location_id === undefined) {
+    const { ensurePersonalCollectionLocation } = await import('./locations.service');
+    const pcLocId = await ensurePersonalCollectionLocation(userId);
+    if (existing.location_id === pcLocId) {
+      (instanceData as any).location_id = null;
+    }
   }
 
   const updated = await db

@@ -104,6 +104,7 @@ export interface LocationsTable {
   name: string;
   card_type: LocationCardType;
   is_card_show: Generated<boolean>;
+  is_personal_collection: Generated<boolean>;
   is_container: Generated<boolean>;
   notes: string | null;
   created_at: Generated<Date>;

@@ -40,8 +40,40 @@ export async function ensureCardShowLocation(userId: string): Promise<string> {
   return created.id;
 }
 
+/**
+ * Ensure the user has a "Personal Collection" root location. Same auto-seed
+ * pattern as Card Show — when a card is flagged is_personal_collection=true,
+ * it's automatically moved here so PC stock lives together instead of
+ * orphaning under an unrelated bin / binder / show.
+ */
+export async function ensurePersonalCollectionLocation(userId: string): Promise<string> {
+  const existing = await db.selectFrom('locations')
+    .select('id')
+    .where('user_id', '=', userId)
+    .where('is_personal_collection', '=', true)
+    .where('parent_id', 'is', null)
+    .executeTakeFirst();
+  if (existing) return existing.id;
+
+  const created = await db.insertInto('locations')
+    .values({
+      user_id: userId,
+      parent_id: null,
+      name: 'Personal Collection',
+      card_type: 'both',
+      is_card_show: false,
+      is_personal_collection: true,
+      is_container: false,
+      notes: null,
+    })
+    .returning('id')
+    .executeTakeFirstOrThrow();
+  return created.id;
+}
+
 export async function listLocations(userId: string) {
   await ensureCardShowLocation(userId);
+  await ensurePersonalCollectionLocation(userId);
   const rows = await sql<{
     id: string;
     parent_id: string | null;
@@ -141,13 +173,16 @@ export async function updateLocation(userId: string, locationId: string, input: 
 
 export async function deleteLocation(userId: string, locationId: string) {
   const loc = await db.selectFrom('locations')
-    .select(['id', 'is_card_show', 'parent_id'])
+    .select(['id', 'is_card_show', 'is_personal_collection', 'parent_id'])
     .where('id', '=', locationId)
     .where('user_id', '=', userId)
     .executeTakeFirst();
   if (!loc) throw new Error('Location not found');
   if (loc.is_card_show && loc.parent_id === null) {
     throw new Error('The Card Show root location cannot be deleted');
+  }
+  if (loc.is_personal_collection && loc.parent_id === null) {
+    throw new Error('The Personal Collection root location cannot be deleted');
   }
 
   // Unassign all cards from this location before deleting (audit each so the
