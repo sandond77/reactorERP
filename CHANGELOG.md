@@ -1,5 +1,26 @@
 # Reactor — Changelog
 
+## July 6, 2026
+
+### Features
+
+**Personal Collection — auto-seed a location and move cards there on flag flip**
+- Personal-collection stock had no shared address, so browsing "all my PC cards" spatially wasn't possible — cards flagged `is_personal_collection=true` stayed wherever they were last stored. Card Show already solved this pattern (auto-seeded root, cards flagged `is_card_show` live there), so mirrored it for PC.
+- Migration 059 adds `locations.is_personal_collection` boolean. Backfill: for every user with at least one card_instance flagged `is_personal_collection=true`, create a "Personal Collection" root and reassign those cards' `location_id`. Applied to prod: 2 users, 56 cards moved.
+- `ensurePersonalCollectionLocation()` mirrors `ensureCardShowLocation()`. `listLocations()` calls both so every request lands with the roots present. `deleteLocation()` now rejects the PC root the same way it does Card Show.
+- `createCard()` sets `location_id` to the PC root when the caller passes `is_personal_collection=true` without an explicit location. `updateCard()` moves the card to the PC root when the flag flips true, and clears `location_id` back to null when the flag flips false and the card is currently sitting in the PC root. Explicit `location_id` in the same PATCH always wins.
+
+### Fixes
+
+**Catalog — renaming a part surfaces the old typo again when re-editing**
+- Two stacked bugs made a rename feel like it didn't stick. The client's Edit Part form was pre-filling `card_name` from `row.card_name`, which the inventory-summary query returns as `COALESCE(ci.card_name_override, cc.card_name)`. When a `card_instance` had `card_name_override` set to the OLD typo (a stale shadow of the pre-rename catalog value), the modal opened showing the typo even though the list — which reads `catalog_card_name` first — correctly displayed the new name. Saving from there re-wrote the typo back onto the catalog.
+- Client: form now uses `row.catalog_card_name` (raw `cc.card_name`) when editing an existing catalog entry, falling back to `row.card_name` only on the isNew path.
+- Server: on rename, snapshot the OLD `cc.card_name`, run the catalog update, then NULL any `ci.card_name_override` on the same `catalog_id` where the override equals the OLD name. This clears "shadow overrides" (redundant mirrors of the catalog) so `ci` rows inherit the new name via COALESCE, while genuine overrides (a full PSA label that doesn't equal the catalog short name) are left alone.
+
+**Sales — Record Sale cert search returned inventory that wasn't for sale**
+- The graded and raw searches on the Record Sale flow were returning any unsold card matching the query, including cards that weren't listed on any platform and weren't on the card show table. Users hit the picker looking for something they'd just sold and had to scroll past a bunch of idle inventory that couldn't plausibly be the sale they were recording.
+- All three searches (graded Phase 1 name search, graded Phase 2 copies fetch, raw search) now send `for_sale=yes`. Server semantics: active listing OR `ci.is_card_show = true`. The graded slabs endpoint already supported this filter; added the same one to `/cards` (`CardFilters.for_sale`, `EXISTS(SELECT 1 FROM listings...)` OR `ci.is_card_show`).
+
 ## July 4, 2026
 
 ### Fixes
