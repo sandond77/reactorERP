@@ -32,6 +32,11 @@ export interface CardFilters {
   exclude_legacy_bucket?: boolean;
   is_card_show?: string;  // 'yes' | 'no'
   is_personal_collection?: string;  // 'yes' | 'no'
+  // Restrict to cards that are for-sale-in-some-form: either they have an
+  // active listing OR they're on the card show table. Used by the Record
+  // Sale flow's search so cards that aren't actually up for sale anywhere
+  // don't show up as pickable options.
+  for_sale?: string;  // 'yes'
   // Restrict to cards whose active listing is part of a listing_group_id —
   // used by the eBay Set Listing sale flow so the picker only shows cards
   // that are already grouped as a set.
@@ -139,6 +144,17 @@ export async function listCards(
         .where('l2.listing_status', '=', 'active')
         .where('l2.listing_group_id', 'is not', null),
     ));
+  }
+  if (filters.for_sale === 'yes') {
+    query = query.where((eb) => eb.or([
+      eb.exists(
+        eb.selectFrom('listings as l3')
+          .select('l3.id')
+          .whereRef('l3.card_instance_id', '=', 'ci.id')
+          .where('l3.listing_status', '=', 'active'),
+      ),
+      eb('ci.is_card_show', '=', true),
+    ]));
   }
   if (!filters.include_graded_out) query = query.where('ci.graded_out', '=', false);
   if (filters.search) {

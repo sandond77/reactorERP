@@ -443,11 +443,15 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(t);
   }, [rawSearch]);
 
-  // Phase 1: search for card names (deduped by name in the dropdown)
+  // Phase 1: search for card names (deduped by name in the dropdown).
+  // for_sale=yes restricts to cards that are actually available to sell
+  // (active listing OR on the card show table) so the picker doesn't
+  // surface cards sitting idle in inventory that the user can't be trying
+  // to record a sale for.
   const { data: searchResults, isFetching: isSearching } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['card-name-search', debouncedSearch],
     queryFn: () => api.get('/grading/slabs', {
-      params: { search: debouncedSearch, limit: 100, status: 'unsold', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
+      params: { search: debouncedSearch, limit: 100, status: 'unsold', for_sale: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
     }).then(r => r.data),
     enabled: debouncedSearch.length >= 2 && (step === 'search' || (step === 'other-lookup' && saleMode === 'graded')),
   });
@@ -456,16 +460,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const { data: copiesResult, isFetching: isLoadingCopies } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['card-copies', selectedCardName],
     queryFn: () => api.get('/grading/slabs', {
-      params: { search: selectedCardName, limit: 200, status: 'unsold', sort_by: 'cert_number', sort_dir: 'asc', personal_collection: 'no' },
+      params: { search: selectedCardName, limit: 200, status: 'unsold', for_sale: 'yes', sort_by: 'cert_number', sort_dir: 'asc', personal_collection: 'no' },
     }).then(r => r.data),
     enabled: !!selectedCardName && step === 'copies',
   });
 
-  // Raw card search
+  // Raw card search — same for_sale scoping as the graded search above.
   const { data: rawResults, isFetching: isRawSearching } = useQuery<PaginatedResult<RawCardResult>>({
     queryKey: ['sale-raw-search', debouncedRawSearch],
     queryFn: () => api.get('/cards', {
-      params: { search: debouncedRawSearch, decision: 'sell_raw', status: 'purchased_raw,inspected,raw_for_sale', limit: 100, sort_by: 'card_name', sort_dir: 'asc', is_personal_collection: 'no' },
+      params: { search: debouncedRawSearch, decision: 'sell_raw', status: 'purchased_raw,inspected,raw_for_sale', for_sale: 'yes', limit: 100, sort_by: 'card_name', sort_dir: 'asc', is_personal_collection: 'no' },
     }).then(r => r.data),
     enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select' || (step === 'other-lookup' && saleMode === 'raw')),
   });
