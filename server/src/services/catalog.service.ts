@@ -819,15 +819,10 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
       effectiveSku = generateSku({ language: lang === 'JP' ? 'JP' : 'EN', setCode, cardNumber: fields.card_number });
     }
   }
-  // When card_name is changing, snapshot the OLD value first — any
-  // card_instance whose card_name_override currently equals the old
-  // catalog name is a "shadow override" (a redundant copy that mirrors
-  // the catalog, not an intentional override like a full PSA label).
-  // Null those out after the update so the ci rows inherit the new name
-  // via COALESCE(ci.card_name_override, cc.card_name) — otherwise the
-  // Edit Part modal re-opens showing the stale typo, and any picker
-  // that reads ci.card_name_override renders the typo alongside the
-  // corrected catalog.
+  // Snapshot the OLD catalog name so we can clear stale "shadow"
+  // card_name_override values on ci rows after the update. Otherwise
+  // the raw-flat query (and Edit Part modal) will keep displaying the
+  // pre-rename value via COALESCE(ci.card_name_override, cc.card_name).
   let oldName: string | null = null;
   if (fields.card_name !== undefined) {
     const existing = await db.selectFrom('card_catalog').select('card_name').where('id', '=', id).executeTakeFirst();
@@ -840,11 +835,28 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
     .where('user_id', '=', userId)
     .execute();
   if (fields.card_name !== undefined && oldName && oldName !== fields.card_name) {
+    // Raw ci rows: null EVERY card_name_override on this catalog.
+    // Raw overrides are always shadows of the catalog name at import
+    // time — the imported value is preserved in the audit log if
+    // needed. This catches drift (whitespace, casing, pre-fix
+    // renames) that a strict `= oldName` match would miss.
     await db
       .updateTable('card_instances')
       .set({ card_name_override: null, updated_at: new Date() })
       .where('user_id', '=', userId)
       .where('catalog_id', '=', id)
+      .where('purchase_type', '!=', 'pre_graded')
+      .execute();
+    // Graded slab rows: card_name_override is the full PSA label by
+    // design (e.g. "2024 Pokemon ... Fan Rotom EX PSA 10") and must
+    // NOT be nuked. Only clear the narrow "override == oldName" case
+    // where the label happens to mirror the catalog exactly.
+    await db
+      .updateTable('card_instances')
+      .set({ card_name_override: null, updated_at: new Date() })
+      .where('user_id', '=', userId)
+      .where('catalog_id', '=', id)
+      .where('purchase_type', '=', 'pre_graded')
       .where('card_name_override', '=', oldName)
       .execute();
   }
