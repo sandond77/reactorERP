@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { ExternalLink, Plus, X, Loader2, Minus, Trash2, ChevronRight } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
@@ -373,6 +373,19 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const fifoIds = new Set(fifoOrdered.slice(0, qty).map(c => c.id));
   const effectiveIds = customSelected.size > 0 ? customSelected : fifoIds;
   const selectedCopies = copiesForGrade.filter(c => effectiveIds.has(c.id));
+
+  // Auto-check multi-qty the moment the user selects 2+ certs on a single-
+  // slab listing — that IS a multi-qty listing on eBay's side. Only fires
+  // on the 1→2 transition so an explicit uncheck in the details step sticks
+  // even if the user later adds a 3rd cert.
+  const prevSelectedCountRef = useRef(0);
+  useEffect(() => {
+    if (listingMode !== 'single') return;
+    if (prevSelectedCountRef.current < 2 && selectedCopies.length >= 2) {
+      setIsMultiQty(true);
+    }
+    prevSelectedCountRef.current = selectedCopies.length;
+  }, [selectedCopies.length, listingMode]);
 
   // Derived set slabs (only slots with a cert picked)
   const setSlabs = setSlotList.map(s => s.slab).filter((s): s is SlabResult => s != null);
