@@ -653,7 +653,15 @@ export function RawOverall() {
                     r.status !== 'graded'
                   );
                   if (visibleRows.length === 0) return [mainRow];
-                  const subRows = visibleRows.map((row) => (
+                  const subRows = visibleRows.map((row) => {
+                    // Grading-submitted / lost-damaged rows aren't in commerce
+                    // — they aren't listed and can't be sold in their current
+                    // state — so any strike / after-fees / net / listing price
+                    // still hanging off the row from a prior listing would
+                    // misrepresent them. Blank those cells and only show them
+                    // for raw_for_sale / sold.
+                    const inCommerce = row.status === 'raw_for_sale' || row.status === 'sold';
+                    return (
                     <tr key={`${g.key}::${row.id}`}
                       onClick={() => setSelectedRow(row)}
                       className="border-b border-zinc-800/30 bg-zinc-950/60 hover:bg-zinc-800/30 transition-colors cursor-pointer">
@@ -676,7 +684,7 @@ export function RawOverall() {
                       <td className="px-3 py-1 text-center text-[11px]">
                         {row.is_listed ? <span className="text-green-400/80">Yes</span> : <span className="text-zinc-700">—</span>}
                       </td>
-                      <td className="px-3 py-1 text-right text-zinc-500 text-[11px]">{fmt(row.listed_price)}</td>
+                      <td className="px-3 py-1 text-right text-zinc-500 text-[11px]">{inCommerce ? fmt(row.listed_price) : <span className="text-zinc-700">—</span>}</td>
                       <td className="px-3 py-1 text-center" onClick={(e) => e.stopPropagation()}>
                         {row.order_details_link ? (
                           <a href={row.order_details_link} target="_blank" rel="noopener noreferrer" className="inline-flex text-indigo-400/80 hover:text-indigo-300 transition-colors" title="Order details"><ExternalLink size={10} /></a>
@@ -685,16 +693,17 @@ export function RawOverall() {
                         ) : ''}
                       </td>
                       <td className="px-3 py-1 text-right text-zinc-500 text-[11px]">{fmt(row.raw_cost)}</td>
-                      <td className="px-3 py-1 text-right text-zinc-400 text-[11px]">{fmt(row.strike_price)}</td>
-                      <td className="px-3 py-1 text-right text-zinc-400 text-[11px]">{fmt(row.after_ebay)}</td>
-                      <td className="px-3 py-1 text-right"><NetCell afterEbay={row.after_ebay} raw={row.raw_cost} /></td>
+                      <td className="px-3 py-1 text-right text-zinc-400 text-[11px]">{inCommerce ? fmt(row.strike_price) : <span className="text-zinc-700">—</span>}</td>
+                      <td className="px-3 py-1 text-right text-zinc-400 text-[11px]">{inCommerce ? fmt(row.after_ebay) : <span className="text-zinc-700">—</span>}</td>
+                      <td className="px-3 py-1 text-right">{inCommerce ? <NetCell afterEbay={row.after_ebay} raw={row.raw_cost} /> : <span className="text-zinc-700">—</span>}</td>
                       <td className="px-3 py-1 text-zinc-600 text-[11px]">{fmtDate(row.raw_purchase_date)}</td>
-                      <td className="px-3 py-1 text-zinc-600 text-[11px]">{fmtDate(row.date_listed)}</td>
+                      <td className="px-3 py-1 text-zinc-600 text-[11px]">{inCommerce ? fmtDate(row.date_listed) : ''}</td>
                       <td className="px-3 py-1 text-zinc-600 text-[11px]">{fmtDate(row.date_sold)}</td>
-                      <td className="px-3 py-1 text-right"><RoiCell roi={row.roi_pct} afterEbay={row.after_ebay} raw={row.raw_cost} /></td>
+                      <td className="px-3 py-1 text-right">{inCommerce ? <RoiCell roi={row.roi_pct} afterEbay={row.after_ebay} raw={row.raw_cost} /> : <span className="text-zinc-700">—</span>}</td>
                       <td className="px-3 py-1 text-zinc-600 text-[10px] truncate" title={row.notes ?? ''}>{row.notes ?? ''}</td>
                     </tr>
-                  ));
+                  );
+                  });
                   return [mainRow, ...subRows];
                 });
               })()}

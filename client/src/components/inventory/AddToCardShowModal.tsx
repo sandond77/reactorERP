@@ -40,7 +40,7 @@ interface SelectedCard {
   _type: 'graded' | 'raw';
 }
 
-const MAX_SELECT = 5;
+const MAX_SELECT = 10;
 
 
 export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
