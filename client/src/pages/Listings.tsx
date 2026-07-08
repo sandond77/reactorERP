@@ -37,7 +37,6 @@ interface CertDetail {
   condition?: string | null;
   raw_purchase_label?: string | null;
   is_multi_qty?: boolean;
-  listing_id?: string;
 }
 
 interface AggregatedListing {
