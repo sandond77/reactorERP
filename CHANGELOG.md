@@ -1,5 +1,30 @@
 # Reactor — Changelog
 
+## July 8, 2026
+
+### Features
+
+**Multi-qty listings — eBay-style listings that carry multiple certs under one URL**
+- Reactor listings were 1:1 with a card_instance so cost basis and sale linkage per cert stayed clean. That's fine for a solo listing but doesn't match how eBay actually works — one URL fronts N identical certs and you bump the qty by editing the listing, not creating a new one. Users listing sub-$100 raw-graded slabs were creating (and closing) N parallel listings for the same card because there was no other option. The new multi-qty model layers eBay's shape on top without breaking per-cert accounting.
+- Migration 060 adds `listings.is_multi_qty boolean NOT NULL DEFAULT false` + a partial index for the group lookups. Existing rows all land as solo — no data migration. Group key is `ebay_listing_id`, falling back to `ebay_listing_url`; solo listings carry `false` even if their URL coincidentally matches something else, so unrelated URLs never accidentally collapse.
+- Create listing modal — new "Multi-qty listing (eBay-style)" opt-in checkbox in the details step (single-slab graded only). Sets and raw already have their own listing_group_id-based mechanism and stay unchanged.
+- New service ops in `listings.service.ts`:
+  - `promoteToMultiQty` — flips the flag on an active listing and every sibling sharing its eBay id/url.
+  - `addCertsToListing` — validates same-catalog / graded / owned / not-personal-collection / not-already-listed, then inserts N new rows cloning the parent's URL / price / dates / platform.
+  - `cancelMultiQtyGroup` — ends every active row on the group, leaving sold rows for the sales receipt trail.
+  - `listCandidateCertsForListing` — feeds the Add-Cert picker with same-catalog unsold slabs the caller doesn't already have on another active listing.
+- Aggregation query exposes `has_multi_qty` at the row level (BOOL_OR over the group) and `is_multi_qty` per cert in `cert_details`. Client renders a dedicated **MULTI-QTY** column with a cyan badge instead of an inline chip that competed for card-name width. Parent row click now opens the group-level Edit modal (chevron still toggles expand) so multi-cert rows are reachable at the group level, not just via sub-row clicks.
+- Edit Listing modal gains **Add cert** (opens the picker) and **Convert to multi-qty** (promotes solo → multi) affordances, gated on eligibility (graded, has eBay URL, not a set, valid parent listing id). Per-cert cancel and Cancel-all already covered the −1-qty and end-group flows.
+- Sale-side FIFO recommendation for multi-qty groups is deferred — needs its own UX pass (pre-select oldest vs. badge oldest as recommended).
+
+### Fixes / Polish
+
+**Card Show — bump cert-selection cap from 5 to 10**
+- The Add-to-Card-Show modal capped selections at 5 per open, but the grading batch add flow was already at 10. Matched them so batching to a card show scales the same way.
+
+**Raw Overall — hide stale commerce columns on grading-submitted / lost-damaged sub-rows**
+- Sub-rows rendered Listed Price / Strike / After Fees / Net / Date Listed / ROI unconditionally, even for statuses that aren't in commerce. A card that had once been listed and was later pulled to grade kept displaying its old strike / after-fees / net values in the grading-submitted sub-row — misleading, since LISTED? already correctly showed "—". Only `raw_for_sale` and `sold` sub-rows show commerce values now; everything else renders `—`.
+
 ## July 6, 2026
 
 ### Features
