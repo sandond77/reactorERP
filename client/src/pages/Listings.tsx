@@ -36,6 +36,8 @@ interface CertDetail {
   company?: string | null;
   condition?: string | null;
   raw_purchase_label?: string | null;
+  is_multi_qty?: boolean;
+  listing_id?: string;
 }
 
 interface AggregatedListing {
@@ -56,6 +58,7 @@ interface AggregatedListing {
   cert_details: CertDetail[] | null;
   listing_group_id?: string | null;
   listing_group_name?: string | null;
+  has_multi_qty?: boolean;
 }
 
 interface ListingFilterOptions {
@@ -306,6 +309,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const [listedAt, setListedAt] = useState('');
   const [ebayUrl, setEbayUrl] = useState('');
   const [setGroupName, setSetGroupName] = useState('');
+  const [isMultiQty, setIsMultiQty] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -427,6 +431,10 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
         ? (parseFloat(price) / instancesToList.length).toFixed(2)
         : price;
       const setGroupId = listingMode === 'set' ? crypto.randomUUID() : undefined;
+      // Multi-qty flag only meaningful for single-slab graded mode with a
+      // shared eBay URL and 2+ certs. Set-mode already groups via
+      // listing_group_id; raw mode collapses under listing_group_id too.
+      const multiQtyFlag = listingMode === 'single' && isMultiQty && instancesToList.length >= 1;
       await Promise.all(instancesToList.map(copy =>
         api.post('/listings', {
           card_instance_id: copy.id,
@@ -437,6 +445,7 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
           ebay_listing_url: ebayUrl || undefined,
           listing_group_id: setGroupId,
           listing_group_name: listingMode === 'set' && setGroupName ? setGroupName : undefined,
+          is_multi_qty: multiQtyFlag || undefined,
         })
       ));
       const n = instancesToList.length;
@@ -907,6 +916,19 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
+      {listingMode === 'single' && (
+        <label className="flex items-start gap-2 rounded-lg bg-zinc-800/40 border border-zinc-700/40 px-3 py-2 cursor-pointer hover:border-zinc-600 transition-colors">
+          <input type="checkbox" checked={isMultiQty} onChange={(e) => setIsMultiQty(e.target.checked)}
+            className="mt-0.5 accent-indigo-500" />
+          <div className="text-[11px] leading-relaxed">
+            <span className="text-zinc-200 font-medium">Multi-qty listing (eBay-style)</span>
+            <p className="text-zinc-500 mt-0.5">
+              One eBay listing carrying multiple certs of the same card. Lets you add more certs to it later (like bumping qty on eBay) without creating a new listing.
+            </p>
+          </div>
+        </label>
+      )}
+
       <div className="flex justify-end gap-2 pt-2">
         <Button type="button" variant="ghost" onClick={() => setStep(detailsBackStep)}>Back</Button>
         <Button type="submit" disabled={submitting || (listingMode === 'raw' ? selectedRawCards.length === 0 : listingMode === 'set' ? setSlabs.length === 0 : selectedCopies.length === 0)}>
@@ -919,6 +941,95 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
 }
 
 // ── Edit Listing Modal ────────────────────────────────────────────────────────
+
+interface CandidateCert {
+  id: string;
+  card_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  company: string | null;
+  purchase_cost: number;
+}
+
+function AddCertsToListingModal({ listingId, listingLabel, onClose, onAdded }: { listingId: string; listingLabel: string; onClose: () => void; onAdded: () => void }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
+
+  const { data, isLoading } = useQuery<{ data: CandidateCert[] }>({
+    queryKey: ['listing-candidate-certs', listingId],
+    queryFn: () => api.get(`/listings/${listingId}/candidate-certs`).then(r => r.data),
+  });
+
+  function toggle(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleSubmit() {
+    if (selected.size === 0) { toast.error('Pick at least one cert'); return; }
+    setSubmitting(true);
+    try {
+      const res = await api.post(`/listings/${listingId}/certs`, { card_instance_ids: Array.from(selected) });
+      toast.success(`${res.data.added} cert${res.data.added !== 1 ? 's' : ''} added`);
+      onAdded();
+      onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to add certs');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const rows = data?.data ?? [];
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-zinc-500 leading-relaxed">
+        Adding to <span className="text-zinc-300 font-medium">{listingLabel}</span>. Only unsold slabs of the same catalog card, not already on another active listing, appear here.
+      </p>
+      <div className="border border-zinc-800 rounded-lg max-h-72 overflow-y-auto divide-y divide-zinc-800/60">
+        {isLoading ? (
+          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">Loading…</p>
+        ) : rows.length === 0 ? (
+          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">No eligible certs. Add or grade more slabs of this card first.</p>
+        ) : (
+          rows.map(c => {
+            const isSel = selected.has(c.id);
+            return (
+              <button key={c.id} type="button" onClick={() => toggle(c.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${isSel ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/40'}`}>
+                <div className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${isSel ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600'}`}>
+                  {isSel && <span className="text-[8px] text-white font-bold">✓</span>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 text-[11px]">
+                    {c.cert_number && <span className="font-mono text-indigo-300/70">{formatCertNumber(c.cert_number)}</span>}
+                    {c.company && <span className="text-zinc-400">{c.company}</span>}
+                    {c.grade_label && <span className="text-zinc-300">{c.grade_label}</span>}
+                    <span className="ml-auto text-zinc-500">Cost {formatCurrency(c.purchase_cost, 'USD')}</span>
+                  </div>
+                </div>
+              </button>
+            );
+          })
+        )}
+      </div>
+      <div className="flex justify-between items-center pt-1">
+        <span className="text-[11px] text-zinc-500">{selected.size} selected</span>
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="button" disabled={submitting || selected.size === 0} onClick={handleSubmit}>
+            {submitting && <Loader2 size={14} className="animate-spin" />}
+            {submitting ? 'Adding…' : `Add ${selected.size || ''} cert${selected.size !== 1 ? 's' : ''}`}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert?: CertDetail; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -939,10 +1050,38 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
   const [saving, setSaving] = useState(false);
   const [deleteStep, setDeleteStep] = useState<null | 'confirm' | 'deleting'>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [addCertOpen, setAddCertOpen] = useState(false);
+  const [promoting, setPromoting] = useState(false);
   // Scoped to the clicked cert when single-listing mode; otherwise full list.
   const [localCerts, setLocalCerts] = useState(
     singleListingId ? [cert!] : (row.cert_details ?? [])
   );
+
+  // Any cert row on this listing group can serve as the parent for multi-qty
+  // ops — the server treats them all as the same group. Prefer the clicked
+  // cert if available.
+  const parentListingId = cert?.listing_id ?? row.cert_details?.[0]?.listing_id ?? null;
+  const isGradedRow = !!row.grading_company;
+  const canAddCerts = isGradedRow && !isSet && !!row.has_multi_qty && !!parentListingId;
+  const canPromote = isGradedRow && !isSet && !row.has_multi_qty && !!parentListingId && !!ebayUrl;
+
+  async function handlePromote() {
+    if (!parentListingId) return;
+    setPromoting(true);
+    try {
+      const res = await api.post(`/listings/${parentListingId}/promote-multi-qty`);
+      toast.success(res.data.promoted > 0
+        ? `Converted to multi-qty (${res.data.promoted} row${res.data.promoted !== 1 ? 's' : ''})`
+        : 'Already multi-qty');
+      queryClient.invalidateQueries({ queryKey: ['listings'] });
+      onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to promote listing');
+    } finally {
+      setPromoting(false);
+    }
+  }
 
   const groupKey = {
     part_number:     row.part_number ?? null,
@@ -1041,9 +1180,15 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
               <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">Set</span>
             </div>
           ) : (
+            <>
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-zinc-100">{row.card_name ?? 'Unknown'}</p>
+                <p className="text-sm font-medium text-zinc-100">
+                  {row.card_name ?? 'Unknown'}
+                  {row.has_multi_qty && (
+                    <span className="ml-2 text-[9px] font-bold uppercase tracking-wide bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded px-1.5 py-0.5 align-middle">Multi-qty</span>
+                  )}
+                </p>
                 <div className="flex items-center gap-2 text-[11px] text-zinc-500 mt-0.5">
                   {row.set_name && <span>{row.set_name}</span>}
                   {row.part_number && <span className="font-mono">{row.part_number}</span>}
@@ -1052,6 +1197,22 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
               </div>
               <span className="text-[11px] text-zinc-600">{localCerts.length} listing{localCerts.length !== 1 ? 's' : ''}</span>
             </div>
+            {(canAddCerts || canPromote) && (
+              <div className="mt-3 flex items-center gap-2">
+                {canAddCerts && (
+                  <Button type="button" size="sm" variant="secondary" onClick={() => setAddCertOpen(true)}>
+                    <Plus size={12} /> Add cert
+                  </Button>
+                )}
+                {canPromote && (
+                  <Button type="button" size="sm" variant="secondary" disabled={promoting} onClick={handlePromote}>
+                    {promoting && <Loader2 size={12} className="animate-spin" />}
+                    {promoting ? 'Converting…' : 'Convert to multi-qty'}
+                  </Button>
+                )}
+              </div>
+            )}
+            </>
           )}
         </div>
         {localCerts.length > 0 && (
@@ -1140,6 +1301,21 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
           </Button>
         </div>
       </div>
+
+      <Modal open={addCertOpen} onClose={() => setAddCertOpen(false)} title="Add cert to listing">
+        {parentListingId && (
+          <AddCertsToListingModal
+            listingId={parentListingId}
+            listingLabel={`${row.card_name ?? 'card'} · ${row.grading_company ?? ''} ${row.grade_label ?? ''}`.trim()}
+            onClose={() => setAddCertOpen(false)}
+            onAdded={() => {
+              queryClient.invalidateQueries({ queryKey: ['listings'] });
+              queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
+              onClose();
+            }}
+          />
+        )}
+      </Modal>
     </form>
   );
 }
@@ -1225,16 +1401,19 @@ export function Listings() {
     platform:    colMinWidth('Platform',     true,  true),   // ~140
     price:       colMinWidth('Price',        true,  true),   // ~110
     link:        colMinWidth('Listing',      false, false),  // ~85
+    multi:       colMinWidth('Multi-Qty',    false, false),  // ~90
     num_listed:  colMinWidth('# Listed',     true,  true),   // ~130
     num_sold:    colMinWidth('# Sold',       true,  true),   // ~115
   };
   const { rz, totalWidth: _totalWidth } = useColWidths({
-    part: Math.max(MINS.part, 190), card: Math.max(MINS.card, 500),
+    part: Math.max(MINS.part, 190), card: Math.max(MINS.card, 620),
     raw_id: Math.max(MINS.raw_id, 150),
     company: Math.max(MINS.company, 90), grade: Math.max(MINS.grade, 175),
     condition: Math.max(MINS.condition, 100),
-    platform: Math.max(MINS.platform, 110), price: Math.max(MINS.price, 100),
-    link: Math.max(MINS.link, 70), num_listed: Math.max(MINS.num_listed, 110),
+    platform: Math.max(MINS.platform, 130), price: Math.max(MINS.price, 120),
+    link: Math.max(MINS.link, 70),
+    multi: Math.max(MINS.multi, 80),
+    num_listed: Math.max(MINS.num_listed, 110),
     num_sold: Math.max(MINS.num_sold, 100),
   });
   // graded/graded_set tab: hide condition + raw_id; raw/raw_set tab: hide company + grade
@@ -1386,6 +1565,7 @@ export function Listings() {
                 <ColHeader label="Price"      col="list_price"  {...sh} {...rz('price')} align="right" minWidth={MINS.price}
                   filterOptions={filterOptions?.prices} filterSelected={fPrice} onFilterChange={(v) => { setFPrice(v); setPage(1); }} />
                 <ColHeader label="Listing"                       {...sh} {...rz('link')} align="center" minWidth={MINS.link} />
+                <ColHeader label="Multi-Qty"                     {...sh} {...rz('multi')} align="center" minWidth={MINS.multi} />
                 <ColHeader label="# Listed"   col="num_listed"  {...sh} {...rz('num_listed')} align="center" minWidth={MINS.num_listed}
                   filterOptions={filterOptions?.num_listed} filterSelected={fNumListed} onFilterChange={(v) => { setFNumListed(v); setPage(1); }} />
                 <ColHeader label="# Sold"     col="num_sold"    {...sh} {...rz('num_sold')} align="center" minWidth={MINS.num_sold}
@@ -1394,7 +1574,7 @@ export function Listings() {
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
               {!data?.data.length ? (
-                <tr><td colSpan={9} className="px-3 py-10 text-center text-zinc-500">No listings found.</td></tr>
+                <tr><td colSpan={10} className="px-3 py-10 text-center text-zinc-500">No listings found.</td></tr>
               ) : data.data.map((row, i) => {
                 const key = rowKey(row);
                 const isExpanded = expandedKeys.has(key);
@@ -1408,7 +1588,7 @@ export function Listings() {
                 return (
                   <React.Fragment key={i}>
                     <tr
-                      onClick={() => hasExpandable ? toggleExpand(key) : setEditRow(row)}
+                      onClick={() => setEditRow(row)}
                       className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
                       <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>
                         {hasExpandable && (
@@ -1428,7 +1608,9 @@ export function Listings() {
                           </p>
                         ) : (
                           <>
-                            <p className="font-medium text-zinc-200 break-words whitespace-normal" title={row.card_name ?? ''}>{row.card_name ?? 'Unknown'}</p>
+                            <p className="font-medium text-zinc-200 break-words whitespace-normal" title={row.card_name ?? ''}>
+                              {row.card_name ?? 'Unknown'}
+                            </p>
                             {row.set_name && <p className="text-[10px] text-zinc-500 truncate">{row.set_name}</p>}
                           </>
                         )}
@@ -1464,6 +1646,11 @@ export function Listings() {
                             </a>
                           )
                         ) : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        {row.has_multi_qty ? (
+                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-cyan-500/15 text-cyan-300 text-[10px] font-bold uppercase tracking-wide border border-cyan-500/30">Multi</span>
+                        ) : <span className="text-zinc-700">—</span>}
                       </td>
                       <td className="px-3 py-2 text-center">
                         <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded bg-indigo-500/15 text-indigo-300 text-[11px] font-semibold tabular-nums">
@@ -1532,7 +1719,7 @@ export function Listings() {
                             )
                           ) : '—'}
                         </td>
-                        <td colSpan={2} />
+                        <td colSpan={3} />
                       </tr>
                     ))}
                     {!isGraded && isExpanded && row.cert_details?.map((cert, ci) => (
@@ -1578,7 +1765,7 @@ export function Listings() {
                             )
                           ) : '—'}
                         </td>
-                        <td colSpan={2} />
+                        <td colSpan={3} />
                       </tr>
                     ))}
                   </React.Fragment>

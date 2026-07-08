@@ -41,6 +41,7 @@ const createListingSchema = z.object({
   ebay_listing_url: z.string().url().optional(),
   listing_group_id: z.string().uuid().optional(),
   listing_group_name: z.string().optional(),
+  is_multi_qty: z.boolean().optional(),
 });
 
 function buildByUrlQuery(userId: string, url: string) {
@@ -207,6 +208,47 @@ listingsRouter.patch('/:listingId', requireAuth, async (req, res, next) => {
 listingsRouter.delete('/:listingId', requireAuth, async (req, res, next) => {
   try {
     const result = await listingsService.cancelSingleListing(req.dataUserId, req.params.listingId as string);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// ── Multi-qty listing operations ────────────────────────────────────────────
+// Certs eligible to be added to the listing (same catalog + graded + unsold
+// + no active listing + not personal collection).
+listingsRouter.get('/:listingId/candidate-certs', requireAuth, async (req, res, next) => {
+  try {
+    const rows = await listingsService.listCandidateCertsForListing(req.dataUserId, req.params.listingId as string);
+    res.json({ data: rows });
+  } catch (err) { next(err); }
+});
+
+
+// Promote an active solo listing (and any siblings sharing its eBay id/url)
+// to multi-qty. From that point the caller can add certs to it.
+listingsRouter.post('/:listingId/promote-multi-qty', requireAuth, async (req, res, next) => {
+  try {
+    const result = await listingsService.promoteToMultiQty(req.dataUserId, req.params.listingId as string);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// Add N certs to an existing multi-qty listing. Certs must be same-catalog
+// graded slabs the caller owns, not already on another active listing.
+const addCertsSchema = z.object({
+  card_instance_ids: z.array(z.string().uuid()).min(1).max(50),
+});
+listingsRouter.post('/:listingId/certs', requireAuth, async (req, res, next) => {
+  try {
+    const body = addCertsSchema.parse(req.body);
+    const result = await listingsService.addCertsToListing(req.dataUserId, req.params.listingId as string, body.card_instance_ids);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// End every active row in the multi-qty group. Sold rows untouched.
+listingsRouter.delete('/:listingId/group-multi-qty', requireAuth, async (req, res, next) => {
+  try {
+    const result = await listingsService.cancelMultiQtyGroup(req.dataUserId, req.params.listingId as string);
     res.json(result);
   } catch (err) { next(err); }
 });

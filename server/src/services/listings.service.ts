@@ -13,6 +13,8 @@ export type CertDetail = {
   ebay_listing_url: string | null;
   listing_group_id?: string | null;
   card_name?: string | null;
+  is_multi_qty?: boolean;
+  listing_id?: string;
 };
 
 export type ListingAggRow = {
@@ -33,6 +35,7 @@ export type ListingAggRow = {
   cert_details: CertDetail[] | null;
   listing_group_id?: string | null;
   listing_group_name?: string | null;
+  has_multi_qty?: boolean;
 };
 
 const LISTINGS_SORT_COLS: Record<string, string> = {
@@ -377,6 +380,7 @@ export async function listListings(
         MIN(l.listed_at)                                                                                    AS listed_at,
         COUNT(DISTINCT l.id)::int                                                                           AS num_listed,
         MAX(COALESCE(sa.num_sold, 0))::int                                                                  AS num_sold,
+        BOOL_OR(l.is_multi_qty)                                                                             AS has_multi_qty,
         (ARRAY_AGG(rp.purchase_id ORDER BY l.listed_at DESC NULLS LAST))[1]                                AS raw_purchase_label,
         JSON_AGG(JSON_BUILD_OBJECT(
           'listing_id',         l.id,
@@ -385,6 +389,7 @@ export async function listListings(
           'list_price',         l.list_price,
           'ebay_listing_url',   l.ebay_listing_url,
           'listing_group_id',   l.listing_group_id,
+          'is_multi_qty',       l.is_multi_qty,
           'condition',          ci.condition,
           'raw_purchase_label', rp.purchase_id
         ) ORDER BY l.listed_at DESC NULLS LAST)                                                             AS cert_details
@@ -795,4 +800,239 @@ export async function cancelListing(userId: string, listingId: string) {
     .where('id', '=', listingId)
     .execute();
   await logAudit(userId, 'listings', listingId, 'status_changed', { listing_status: listing.listing_status }, { listing_status: 'cancelled' });
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Multi-qty listings
+//
+// Model: `listings` stays 1:1 with card_instance so every cert keeps its own
+// cost basis, sale linkage, and audit trail. When multiple rows share the
+// same ebay_listing_id (or ebay_listing_url as a fallback) AND have
+// is_multi_qty=true, they are one eBay listing with qty = # active rows in
+// that group. Views collapse by (user_id, group-key) where is_multi_qty=true.
+// Solo listings are always is_multi_qty=false so unrelated URLs never
+// accidentally group.
+// ────────────────────────────────────────────────────────────────────────────
+
+// Prefer ebay_listing_id; fall back to ebay_listing_url. One of the two must
+// be non-null for a listing to be promotable to multi-qty (there's nothing
+// else to group by).
+function groupKeyColOf(listing: { ebay_listing_id: string | null; ebay_listing_url: string | null }): 'ebay_listing_id' | 'ebay_listing_url' | null {
+  if (listing.ebay_listing_id) return 'ebay_listing_id';
+  if (listing.ebay_listing_url) return 'ebay_listing_url';
+  return null;
+}
+
+async function loadListingOr404(userId: string, listingId: string) {
+  const row = await db
+    .selectFrom('listings')
+    .selectAll()
+    .where('id', '=', listingId)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!row) throw new AppError(404, 'Listing not found');
+  return row;
+}
+
+/**
+ * Flip an existing active listing (and every sibling row already sharing its
+ * ebay_listing_id/url) to is_multi_qty=true. Idempotent; safe to call on
+ * a listing that's already multi-qty.
+ */
+export async function promoteToMultiQty(userId: string, listingId: string) {
+  const listing = await loadListingOr404(userId, listingId);
+  if (listing.listing_status !== 'active') throw new AppError(400, 'Only active listings can be promoted to multi-qty');
+  const keyCol = groupKeyColOf(listing);
+  if (!keyCol) throw new AppError(400, 'Listing needs an eBay listing ID or URL before it can be multi-qty');
+  const keyVal = listing[keyCol] as string;
+
+  const siblings = await db
+    .selectFrom('listings')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .where(keyCol, '=', keyVal)
+    .where('is_multi_qty', '=', false)
+    .execute();
+  if (siblings.length === 0) return { promoted: 0 };
+
+  await db
+    .updateTable('listings')
+    .set({ is_multi_qty: true })
+    .where('user_id', '=', userId)
+    .where(keyCol, '=', keyVal)
+    .where('is_multi_qty', '=', false)
+    .execute();
+  for (const s of siblings) {
+    await logAudit(userId, 'listings', s.id, 'updated', s, { ...s, is_multi_qty: true });
+  }
+  return { promoted: siblings.length };
+}
+
+/**
+ * Add certs to an existing multi-qty listing. Creates one new listings row
+ * per cert, cloning the group's URL / list_price / listed_at / platform /
+ * currency / show info / listing_group_* / is_multi_qty=true. Each cert
+ * must:
+ *   - belong to the caller
+ *   - be a graded slab (pre_graded)
+ *   - share catalog_id with the parent listing's cert
+ *   - not already be on another active listing
+ *   - not be personal-collection
+ */
+export async function addCertsToListing(userId: string, listingId: string, certInstanceIds: string[]) {
+  if (certInstanceIds.length === 0) throw new AppError(400, 'Pick at least one cert');
+  const parent = await loadListingOr404(userId, listingId);
+  if (parent.listing_status !== 'active') throw new AppError(400, 'Parent listing is not active');
+  if (!parent.is_multi_qty) throw new AppError(400, 'Parent listing is not multi-qty — promote it first');
+
+  const parentCert = await db
+    .selectFrom('card_instances')
+    .select(['id', 'catalog_id', 'purchase_type'])
+    .where('id', '=', parent.card_instance_id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!parentCert) throw new AppError(404, 'Parent cert not found');
+  if (parentCert.purchase_type !== 'pre_graded') throw new AppError(400, 'Multi-qty only supported for graded listings today');
+
+  const certs = await db
+    .selectFrom('card_instances')
+    .select(['id', 'catalog_id', 'purchase_type', 'is_personal_collection', 'status'])
+    .where('user_id', '=', userId)
+    .where('id', 'in', certInstanceIds)
+    .execute();
+  if (certs.length !== certInstanceIds.length) throw new AppError(404, 'One or more certs not found');
+
+  for (const c of certs) {
+    if (c.id === parent.card_instance_id) throw new AppError(400, 'Parent cert is already on this listing');
+    if (c.purchase_type !== 'pre_graded') throw new AppError(400, 'Only graded slabs can be added to a graded multi-qty listing');
+    if (c.is_personal_collection) throw new AppError(400, 'Personal collection cards cannot be listed');
+    if (c.catalog_id !== parentCert.catalog_id) throw new AppError(400, 'All certs must share the same catalog entry as the parent listing');
+  }
+
+  const existingActive = await db
+    .selectFrom('listings')
+    .select('card_instance_id')
+    .where('user_id', '=', userId)
+    .where('card_instance_id', 'in', certInstanceIds)
+    .where('listing_status', '=', 'active')
+    .execute();
+  if (existingActive.length > 0) {
+    throw new AppError(409, `${existingActive.length} cert(s) already have an active listing`);
+  }
+
+  const rowsToInsert = certInstanceIds.map((cid) => ({
+    user_id: userId,
+    card_instance_id: cid,
+    platform: parent.platform,
+    listing_status: 'active' as const,
+    ebay_listing_id: parent.ebay_listing_id,
+    ebay_listing_url: parent.ebay_listing_url,
+    show_name: parent.show_name,
+    show_date: parent.show_date,
+    booth_cost: parent.booth_cost,
+    list_price: parent.list_price,
+    asking_price: parent.asking_price,
+    currency: parent.currency,
+    listed_at: parent.listed_at,
+    listing_group_id: parent.listing_group_id,
+    listing_group_name: parent.listing_group_name,
+    is_multi_qty: true,
+  }));
+  const created = await db
+    .insertInto('listings')
+    .values(rowsToInsert)
+    .returningAll()
+    .execute();
+  for (const row of created) {
+    await logAudit(userId, 'listings', row.id, 'created', null, row);
+  }
+  return { added: created.length, listing_ids: created.map((r) => r.id) };
+}
+
+export type MultiQtyCandidate = {
+  id: string;
+  card_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  company: string | null;
+  purchase_cost: number;
+};
+
+/**
+ * Certs eligible to be added to a multi-qty listing: same catalog as the
+ * parent listing's cert, graded, owned, not on another active listing, not
+ * in personal collection. Powers the "Add cert" picker.
+ */
+export async function listCandidateCertsForListing(userId: string, listingId: string): Promise<MultiQtyCandidate[]> {
+  const parent = await loadListingOr404(userId, listingId);
+  const parentCert = await db
+    .selectFrom('card_instances')
+    .select(['id', 'catalog_id'])
+    .where('id', '=', parent.card_instance_id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!parentCert) throw new AppError(404, 'Parent cert not found');
+
+  const rows = await sql<MultiQtyCandidate>`
+    SELECT
+      ci.id,
+      COALESCE(ci.card_name_override, cc.card_name) AS card_name,
+      sd.cert_number,
+      sd.grade_label,
+      sd.company,
+      ci.purchase_cost
+    FROM card_instances ci
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+    WHERE ci.user_id = ${userId}
+      AND ci.catalog_id ${parentCert.catalog_id === null ? sql`IS NULL` : sql`= ${parentCert.catalog_id}`}
+      AND ci.purchase_type = 'pre_graded'
+      AND ci.status != 'sold'
+      AND ci.is_personal_collection = false
+      AND ci.id != ${parent.card_instance_id}
+      AND NOT EXISTS (
+        SELECT 1 FROM listings l2
+        WHERE l2.card_instance_id = ci.id
+          AND l2.listing_status = 'active'
+      )
+    ORDER BY ci.created_at
+  `.execute(db);
+  return rows.rows;
+}
+
+/**
+ * End every active row on the same multi-qty group. Sold rows are left
+ * untouched — their sales rows still point at them for receipt history.
+ * Unsold cert instances aren't demoted here; the same status logic used by
+ * cancelSingleListing already covers "no more active listings → drop back to
+ * raw", but for graded slabs (the only supported type) that transition is a
+ * no-op because slabs stay `graded` regardless of listing state.
+ */
+export async function cancelMultiQtyGroup(userId: string, listingId: string) {
+  const listing = await loadListingOr404(userId, listingId);
+  if (!listing.is_multi_qty) throw new AppError(400, 'Not a multi-qty listing — use the single-listing cancel endpoint');
+  const keyCol = groupKeyColOf(listing);
+  if (!keyCol) throw new AppError(400, 'Multi-qty listing is missing its group key (ebay id/url)');
+  const keyVal = listing[keyCol] as string;
+
+  const active = await db
+    .selectFrom('listings')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .where(keyCol, '=', keyVal)
+    .where('is_multi_qty', '=', true)
+    .where('listing_status', '=', 'active')
+    .execute();
+  if (active.length === 0) return { cancelled: 0 };
+
+  const ids = active.map((r) => r.id);
+  await db
+    .updateTable('listings')
+    .set({ listing_status: 'cancelled' })
+    .where('id', 'in', ids)
+    .execute();
+  for (const row of active) {
+    await logAudit(userId, 'listings', row.id, 'updated', row, { ...row, listing_status: 'cancelled' as const });
+  }
+  return { cancelled: active.length };
 }

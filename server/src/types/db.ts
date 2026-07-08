@@ -223,6 +223,7 @@ export interface ListingsTable {
   sold_at: Date | null;
   listing_group_id: string | null;
   listing_group_name: string | null;
+  is_multi_qty: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
