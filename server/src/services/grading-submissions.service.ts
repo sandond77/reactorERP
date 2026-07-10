@@ -498,6 +498,16 @@ export async function addItem(userId: string, batchId: string, input: AddItemInp
     .executeTakeFirst();
   if (!batch) throw new Error('Batch not found');
 
+  const requestedQty = input.quantity ?? 1;
+
+  const source = await db
+    .selectFrom('card_instances')
+    .selectAll()
+    .where('id', '=', input.card_instance_id)
+    .where('user_id', '=', userId)
+    .executeTakeFirst();
+  if (!source) throw new Error('Card not found');
+
   const maxRow = await db
     .selectFrom('grading_batch_items')
     .select(db.fn.max('line_item_num').as('max_num'))
@@ -505,36 +515,79 @@ export async function addItem(userId: string, batchId: string, input: AddItemInp
     .executeTakeFirst();
   const lineItemNum = (maxRow?.max_num ?? 0) + 1;
 
+  // Split rule: if the source row has strictly more qty than we're submitting,
+  // decrement the source and create a fresh sibling ci row in grading_submitted
+  // for just the batched qty. This mirrors addLegacyItem so the remainder
+  // stays visible in the picker (`inspected` / `grade`) for future line items.
+  // Prior behavior flipped the whole source row wholesale, hiding the leftover
+  // qty from the picker — which stranded 64 cards across 7 lots on prod
+  // before this fix. If source qty == requested, flip in place: no split
+  // needed, and any grading-batch-item that already points at this ci id (via
+  // an earlier repair or agent path) keeps its link.
+  let targetCiId = input.card_instance_id;
+  if (source.status !== 'grading_submitted' && (source.quantity ?? 0) > requestedQty) {
+    const sourceBefore = { ...source };
+    const newQty = (source.quantity ?? 0) - requestedQty;
+    await db
+      .updateTable('card_instances')
+      .set({ quantity: newQty, updated_at: new Date() })
+      .where('id', '=', input.card_instance_id)
+      .where('user_id', '=', userId)
+      .execute();
+    await logAudit(userId, 'card_instances', input.card_instance_id, 'updated', sourceBefore, { ...sourceBefore, quantity: newQty });
+
+    const created = await db
+      .insertInto('card_instances')
+      .values({
+        user_id:                  source.user_id,
+        catalog_id:               source.catalog_id,
+        card_name_override:       source.card_name_override,
+        set_name_override:        source.set_name_override,
+        card_number_override:     source.card_number_override,
+        card_game:                source.card_game,
+        language:                 source.language,
+        variant:                  source.variant,
+        rarity:                   source.rarity,
+        notes:                    source.notes,
+        status:                   'grading_submitted',
+        decision:                 source.decision,
+        purchase_type:            source.purchase_type,
+        quantity:                 requestedQty,
+        purchase_cost:            source.purchase_cost,
+        currency:                 source.currency,
+        raw_purchase_id:          source.raw_purchase_id,
+        condition:                source.condition,
+        legacy_source_catalog_id: source.legacy_source_catalog_id,
+        location_id:              null,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await logAudit(userId, 'card_instances', created.id, 'created', null, created);
+    targetCiId = created.id;
+  } else if (source.status !== 'grading_submitted') {
+    // qty == requested (or 0/undefined): flip source in place.
+    const sourceBefore = { ...source };
+    await db
+      .updateTable('card_instances')
+      .set({ status: 'grading_submitted', location_id: null })
+      .where('id', '=', input.card_instance_id)
+      .where('user_id', '=', userId)
+      .execute();
+    await logAudit(userId, 'card_instances', input.card_instance_id, 'updated', sourceBefore, { ...sourceBefore, status: 'grading_submitted' as const, location_id: null });
+  }
+
   const item = await db
     .insertInto('grading_batch_items')
     .values({
       batch_id:         batchId,
-      card_instance_id: input.card_instance_id,
+      card_instance_id: targetCiId,
       line_item_num:    lineItemNum,
-      quantity:         input.quantity ?? 1,
+      quantity:         requestedQty,
       expected_grade:   input.expected_grade ?? null,
       estimated_value:  input.estimated_value ?? null,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
-
-  // Move card instance to grading_submitted and clear physical location —
-  // the card is at the grader, not in any of our locations.
-  const ciBefore = await db
-    .selectFrom('card_instances')
-    .selectAll()
-    .where('id', '=', input.card_instance_id)
-    .where('user_id', '=', userId)
-    .executeTakeFirst();
-  await db
-    .updateTable('card_instances')
-    .set({ status: 'grading_submitted', location_id: null })
-    .where('id', '=', input.card_instance_id)
-    .where('user_id', '=', userId)
-    .execute();
-  if (ciBefore) {
-    await logAudit(userId, 'card_instances', input.card_instance_id, 'updated', ciBefore, { ...ciBefore, status: 'grading_submitted' as const, location_id: null });
-  }
 
   return item;
 }
