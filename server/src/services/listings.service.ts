@@ -886,19 +886,21 @@ export async function addCertsToListing(userId: string, listingId: string, certI
   if (!parent.is_multi_qty) throw new AppError(400, 'Parent listing is not multi-qty — promote it first');
 
   const parentCert = await db
-    .selectFrom('card_instances')
-    .select(['id', 'catalog_id', 'purchase_type'])
-    .where('id', '=', parent.card_instance_id)
-    .where('user_id', '=', userId)
+    .selectFrom('card_instances as ci')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .select(['ci.id', 'ci.catalog_id', 'ci.purchase_type', 'sd.grade_label', 'sd.company'])
+    .where('ci.id', '=', parent.card_instance_id)
+    .where('ci.user_id', '=', userId)
     .executeTakeFirst();
   if (!parentCert) throw new AppError(404, 'Parent cert not found');
   if (parentCert.purchase_type !== 'pre_graded') throw new AppError(400, 'Multi-qty only supported for graded listings today');
 
   const certs = await db
-    .selectFrom('card_instances')
-    .select(['id', 'catalog_id', 'purchase_type', 'is_personal_collection', 'status'])
-    .where('user_id', '=', userId)
-    .where('id', 'in', certInstanceIds)
+    .selectFrom('card_instances as ci')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .select(['ci.id', 'ci.catalog_id', 'ci.purchase_type', 'ci.is_personal_collection', 'ci.status', 'sd.grade_label', 'sd.company'])
+    .where('ci.user_id', '=', userId)
+    .where('ci.id', 'in', certInstanceIds)
     .execute();
   if (certs.length !== certInstanceIds.length) throw new AppError(404, 'One or more certs not found');
 
@@ -907,6 +909,8 @@ export async function addCertsToListing(userId: string, listingId: string, certI
     if (c.purchase_type !== 'pre_graded') throw new AppError(400, 'Only graded slabs can be added to a graded multi-qty listing');
     if (c.is_personal_collection) throw new AppError(400, 'Personal collection cards cannot be listed');
     if (c.catalog_id !== parentCert.catalog_id) throw new AppError(400, 'All certs must share the same catalog entry as the parent listing');
+    if (c.grade_label !== parentCert.grade_label) throw new AppError(400, 'All certs must share the same grade as the parent listing');
+    if (c.company !== parentCert.company) throw new AppError(400, 'All certs must share the same slab company as the parent listing');
   }
 
   const existingActive = await db
@@ -959,19 +963,23 @@ export type MultiQtyCandidate = {
 };
 
 /**
- * Certs eligible to be added to a multi-qty listing: same catalog as the
- * parent listing's cert, graded, owned, not on another active listing, not
- * in personal collection. Powers the "Add cert" picker.
+ * Certs eligible to be added to a multi-qty listing: same catalog + same
+ * grade + same slab company as the parent listing's cert, graded, owned,
+ * not on another active listing, not in personal collection. Grade + company
+ * are part of the match because a multi-qty eBay listing represents ONE
+ * item — a PSA 10 pool must not absorb a PSA 9 copy of the same card.
+ * Powers the "Add cert" picker.
  */
 export async function listCandidateCertsForListing(userId: string, listingId: string): Promise<MultiQtyCandidate[]> {
   const parent = await loadListingOr404(userId, listingId);
-  const parentCert = await db
-    .selectFrom('card_instances')
-    .select(['id', 'catalog_id'])
-    .where('id', '=', parent.card_instance_id)
-    .where('user_id', '=', userId)
+  const parentInfo = await db
+    .selectFrom('card_instances as ci')
+    .leftJoin('slab_details as sd', 'sd.card_instance_id', 'ci.id')
+    .select(['ci.id', 'ci.catalog_id', 'sd.grade_label', 'sd.company'])
+    .where('ci.id', '=', parent.card_instance_id)
+    .where('ci.user_id', '=', userId)
     .executeTakeFirst();
-  if (!parentCert) throw new AppError(404, 'Parent cert not found');
+  if (!parentInfo) throw new AppError(404, 'Parent cert not found');
 
   const rows = await sql<MultiQtyCandidate>`
     SELECT
@@ -985,7 +993,9 @@ export async function listCandidateCertsForListing(userId: string, listingId: st
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
     WHERE ci.user_id = ${userId}
-      AND ci.catalog_id ${parentCert.catalog_id === null ? sql`IS NULL` : sql`= ${parentCert.catalog_id}`}
+      AND ci.catalog_id ${parentInfo.catalog_id === null ? sql`IS NULL` : sql`= ${parentInfo.catalog_id}`}
+      AND sd.grade_label ${parentInfo.grade_label === null ? sql`IS NULL` : sql`= ${parentInfo.grade_label}`}
+      AND sd.company     ${parentInfo.company     === null ? sql`IS NULL` : sql`= ${parentInfo.company}`}
       AND ci.purchase_type = 'pre_graded'
       AND ci.status != 'sold'
       AND ci.is_personal_collection = false
