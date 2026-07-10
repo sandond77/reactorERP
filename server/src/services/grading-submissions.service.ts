@@ -636,9 +636,20 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
     }
   }
 
-  const created: Awaited<ReturnType<typeof addItem>>[] = [];
+  // Resolve source metadata + (for legacy) anchor identity up-front so the
+  // main loop below is pure "consume one from source X" — no per-iteration
+  // catalog lookup, and each request slot knows how to add one card.
+  type Slot =
+    | { kind: 'raw'; source_ci_id: string; remaining: number }
+    | { kind: 'legacy'; source_ci_id: string; remaining: number; anchor: {
+        cardName: string; setName: string | null; cardNumber: string | null;
+        language: string; condition: string | null;
+        legacy_catalog_id: string; real_catalog_id: string | undefined;
+        purchaseCost: number;
+      } };
+  const slots: Slot[] = [];
+
   for (const req of items) {
-    // Sniff whether the source is a legacy bucket: catalog.set_code = 'LEGACY'.
     const source = await db
       .selectFrom('card_instances as ci')
       .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
@@ -649,7 +660,6 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
     if (!source) throw new AppError(404, 'Source card not found');
 
     const isLegacy = source.set_code === 'LEGACY';
-
     if (isLegacy) {
       if (!req.anchor_batch_item_id) {
         throw new AppError(400, 'Legacy repeat requires the anchor batch item id — the bucket has no card identity of its own');
@@ -659,7 +669,7 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
         .innerJoin('card_instances as ci', 'ci.id', 'gbi.card_instance_id')
         .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
         .select([
-          'ci.id as ci_id', 'ci.catalog_id', 'ci.condition', 'ci.language', 'ci.purchase_cost',
+          'ci.catalog_id', 'ci.condition', 'ci.language', 'ci.purchase_cost',
           'ci.card_name_override', 'ci.set_name_override', 'ci.card_number_override',
           'cc.card_name as cc_card_name', 'cc.set_name as cc_set_name', 'cc.card_number as cc_card_number',
         ])
@@ -668,32 +678,54 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
         .where('ci.user_id', '=', userId)
         .executeTakeFirst();
       if (!anchor) throw new AppError(404, 'Anchor batch item not found in this batch');
+      if (!source.catalog_id) throw new AppError(500, 'Legacy bucket source missing catalog_id');
 
-      const cardName = anchor.card_name_override ?? anchor.cc_card_name ?? 'Unknown';
-      const setName = anchor.cc_set_name ?? anchor.set_name_override ?? null;
-      const cardNumber = anchor.cc_card_number ?? anchor.card_number_override ?? null;
-      const language = anchor.language ?? 'EN';
-      const perCardCost = (anchor.purchase_cost ?? 0);
-
-      for (let i = 0; i < req.count; i++) {
-        const item = await addLegacyItem(userId, batchId, {
-          card_name: cardName,
-          set_name: setName,
-          card_number: cardNumber,
-          language,
+      slots.push({
+        kind: 'legacy',
+        source_ci_id: req.source_ci_id,
+        remaining: req.count,
+        anchor: {
+          cardName: anchor.card_name_override ?? anchor.cc_card_name ?? 'Unknown',
+          setName: anchor.cc_set_name ?? anchor.set_name_override ?? null,
+          cardNumber: anchor.cc_card_number ?? anchor.card_number_override ?? null,
+          language: anchor.language ?? 'EN',
           condition: anchor.condition ?? null,
-          legacy_catalog_id: source.catalog_id ?? undefined,
-          catalog_id: anchor.catalog_id ?? undefined,
-          quantity: 1,
-          purchase_cost: perCardCost,
-        });
-        created.push(item.batch_item);
-      }
+          legacy_catalog_id: source.catalog_id,
+          real_catalog_id: anchor.catalog_id ?? undefined,
+          purchaseCost: anchor.purchase_cost ?? 0,
+        },
+      });
     } else {
-      for (let i = 0; i < req.count; i++) {
-        const item = await addItem(userId, batchId, { card_instance_id: req.source_ci_id, quantity: 1 });
-        created.push(item);
+      slots.push({ kind: 'raw', source_ci_id: req.source_ci_id, remaining: req.count });
+    }
+  }
+
+  // Round-robin: cycle through slots one add at a time until every slot's
+  // remaining count is drained. This interleaves the resulting line items so
+  // duplicates don't bunch consecutively — user's preference for how the sub
+  // gets laid out (they don't want same-cert copies next to each other).
+  const created: Awaited<ReturnType<typeof addItem>>[] = [];
+  while (slots.some(s => s.remaining > 0)) {
+    for (const s of slots) {
+      if (s.remaining <= 0) continue;
+      if (s.kind === 'legacy') {
+        const it = await addLegacyItem(userId, batchId, {
+          card_name: s.anchor.cardName,
+          set_name: s.anchor.setName,
+          card_number: s.anchor.cardNumber,
+          language: s.anchor.language,
+          condition: s.anchor.condition,
+          legacy_catalog_id: s.anchor.legacy_catalog_id,
+          catalog_id: s.anchor.real_catalog_id,
+          quantity: 1,
+          purchase_cost: s.anchor.purchaseCost,
+        });
+        created.push(it.batch_item);
+      } else {
+        const it = await addItem(userId, batchId, { card_instance_id: s.source_ci_id, quantity: 1 });
+        created.push(it);
       }
+      s.remaining--;
     }
   }
   return created;
