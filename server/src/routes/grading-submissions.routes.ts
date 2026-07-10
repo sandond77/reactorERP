@@ -13,6 +13,8 @@ gradingSubsRouter.delete('/:id',                  ctrl.remove);
 gradingSubsRouter.post('/:id/items',              ctrl.addItem);
 gradingSubsRouter.post('/:id/items/bulk',         ctrl.addItemsBulk);
 gradingSubsRouter.post('/:id/items/legacy',       ctrl.addLegacyItem);
+gradingSubsRouter.get('/:id/repeat-sources',      ctrl.listRepeatSources);
+gradingSubsRouter.post('/:id/items/repeat',       ctrl.repeatBatchItems);
 gradingSubsRouter.patch('/:id/items/:itemId',     ctrl.updateItem);
 gradingSubsRouter.post('/:id/items/:itemId/relink',        ctrl.relinkItem);
 gradingSubsRouter.post('/:id/items/:itemId/relink-legacy', ctrl.relinkItemLegacy);

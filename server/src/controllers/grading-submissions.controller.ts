@@ -51,6 +51,21 @@ export async function addItemsBulk(req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 }
 
+export async function repeatBatchItems(req: Request, res: Response, next: NextFunction) {
+  try {
+    const items = (req.body && Array.isArray(req.body.items)) ? req.body.items : [];
+    const created = await svc.repeatBatchItems(req.dataUserId, req.params['id'] as string, items);
+    res.status(201).json({ data: created });
+  } catch (err) { next(err); }
+}
+
+export async function listRepeatSources(req: Request, res: Response, next: NextFunction) {
+  try {
+    const groups = await svc.listRepeatSources(req.dataUserId, req.params['id'] as string);
+    res.json({ data: groups });
+  } catch (err) { next(err); }
+}
+
 export async function addLegacyItem(req: Request, res: Response, next: NextFunction) {
   try {
     res.status(201).json(await svc.addLegacyItem(req.dataUserId, req.params['id'] as string, req.body));

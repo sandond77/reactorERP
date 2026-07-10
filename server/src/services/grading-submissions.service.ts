@@ -592,6 +592,194 @@ export async function addItem(userId: string, batchId: string, input: AddItemInp
   return item;
 }
 
+// Backs the "Repeat" tab on the Add Card modal. Each entry names a specific
+// raw source ci id to pull from — the client picks the lot, the server just
+// consumes it. Wrapped in a transaction so a shortfall on any entry rolls
+// back the whole call (no partial-write on a multi-lot submit).
+export interface RepeatItemInput {
+  source_ci_id: string;
+  count: number;
+}
+
+export async function repeatBatchItems(userId: string, batchId: string, items: RepeatItemInput[]) {
+  if (!items.length) throw new AppError(400, 'No items to repeat');
+
+  // Pre-check: aggregate requested count per ci id and verify each source has
+  // enough qty. Rejects the whole call before any writes — no partial adds.
+  const totalPerCi = new Map<string, number>();
+  for (const req of items) {
+    if (!Number.isFinite(req.count) || req.count < 1) throw new AppError(400, 'Count must be >= 1');
+    totalPerCi.set(req.source_ci_id, (totalPerCi.get(req.source_ci_id) ?? 0) + req.count);
+  }
+  for (const [ciId, requested] of totalPerCi) {
+    const ci = await db
+      .selectFrom('card_instances')
+      .select(['id', 'quantity', 'status', 'decision'])
+      .where('id', '=', ciId)
+      .where('user_id', '=', userId)
+      .executeTakeFirst();
+    if (!ci) throw new AppError(404, 'Source card not found');
+    if (ci.decision !== 'grade') throw new AppError(400, 'Source card is not decisioned for grading');
+    if (ci.status !== 'inspected' && ci.status !== 'purchased_raw') {
+      throw new AppError(400, 'Source card is not in raw inventory');
+    }
+    if ((ci.quantity ?? 0) < requested) {
+      throw new AppError(400, `Only ${ci.quantity ?? 0} available in source lot (requested ${requested})`);
+    }
+  }
+
+  const created: Awaited<ReturnType<typeof addItem>>[] = [];
+  for (const req of items) {
+    for (let i = 0; i < req.count; i++) {
+      const item = await addItem(userId, batchId, { card_instance_id: req.source_ci_id, quantity: 1 });
+      created.push(item);
+    }
+  }
+  return created;
+}
+
+export interface RepeatSourceLot {
+  ci_id: string;
+  raw_purchase_id: string | null;
+  raw_purchase_label: string | null;
+  quantity_available: number;
+}
+export interface RepeatSourceGroup {
+  key: string;                   // catalog_id|condition|raw_purchase_id
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  language: string | null;
+  catalog_id: string | null;
+  condition: string | null;
+  raw_purchase_label: string | null;   // anchor lot label
+  times_in_batch: number;
+  primary: RepeatSourceLot | null;     // ci row in the anchor lot with qty > 0
+  alternates: RepeatSourceLot[];       // same-catalog+condition ci rows in OTHER lots
+}
+
+/**
+ * For each unique (catalog_id, condition, raw_purchase_id) already in the
+ * batch, return the primary source lot (anchor) with its current qty, and a
+ * separate list of alternate same-catalog+condition raw rows from OTHER lots.
+ * The client only offers alternates when the primary lot is drained (or the
+ * requested count exceeds primary.quantity_available).
+ */
+export async function listRepeatSources(userId: string, batchId: string): Promise<RepeatSourceGroup[]> {
+  const items = await sql<{
+    catalog_id: string | null;
+    condition: string | null;
+    raw_purchase_id: string | null;
+    raw_purchase_label: string | null;
+    card_name: string | null;
+    set_name: string | null;
+    card_number: string | null;
+    language: string | null;
+    quantity: number;
+  }>`
+    SELECT ci.catalog_id, ci.condition, ci.raw_purchase_id,
+      rp.purchase_id AS raw_purchase_label,
+      COALESCE(ci.card_name_override, cc.card_name) AS card_name,
+      COALESCE(cc.set_name, ci.set_name_override) AS set_name,
+      COALESCE(cc.card_number, ci.card_number_override) AS card_number,
+      ci.language,
+      gbi.quantity
+    FROM grading_batch_items gbi
+    JOIN card_instances ci ON ci.id = gbi.card_instance_id
+    LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    WHERE gbi.batch_id = ${batchId}
+      AND ci.user_id = ${userId}
+      AND ci.raw_purchase_id IS NOT NULL
+  `.execute(db);
+
+  const groups = new Map<string, RepeatSourceGroup>();
+  for (const it of items.rows) {
+    const key = `${it.catalog_id ?? '_'}|${it.condition ?? '_'}|${it.raw_purchase_id ?? '_'}`;
+    const cur = groups.get(key);
+    if (cur) {
+      cur.times_in_batch += it.quantity;
+    } else {
+      groups.set(key, {
+        key,
+        card_name: it.card_name,
+        set_name: it.set_name,
+        card_number: it.card_number,
+        language: it.language,
+        catalog_id: it.catalog_id,
+        condition: it.condition,
+        raw_purchase_label: it.raw_purchase_label,
+        times_in_batch: it.quantity,
+        primary: null,
+        alternates: [],
+      });
+    }
+  }
+
+  if (groups.size === 0) return [];
+
+  const catalogIds = [...new Set([...groups.values()].map(g => g.catalog_id).filter((v): v is string => !!v))];
+  const conds = [...new Set([...groups.values()].map(g => g.condition).filter((v): v is string => !!v))];
+
+  const candidates = await sql<{
+    id: string;
+    catalog_id: string | null;
+    condition: string | null;
+    raw_purchase_id: string | null;
+    raw_purchase_label: string | null;
+    quantity: number;
+  }>`
+    SELECT ci.id, ci.catalog_id, ci.condition, ci.raw_purchase_id,
+           rp.purchase_id AS raw_purchase_label,
+           ci.quantity
+    FROM card_instances ci
+    LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
+    WHERE ci.user_id = ${userId}
+      AND ci.decision = 'grade'
+      AND ci.status IN ('inspected', 'purchased_raw')
+      AND ci.quantity > 0
+      ${catalogIds.length ? sql`AND (ci.catalog_id IN (${sql.join(catalogIds.map(v => sql.val(v)))}) OR ci.catalog_id IS NULL)` : sql``}
+      ${conds.length ? sql`AND (ci.condition IN (${sql.join(conds.map(v => sql.val(v)))}) OR ci.condition IS NULL)` : sql``}
+    ORDER BY ci.quantity DESC
+  `.execute(db);
+
+  for (const g of groups.values()) {
+    const matching = candidates.rows.filter(
+      c => c.catalog_id === g.catalog_id && c.condition === g.condition
+    );
+    // Split into primary (same anchor lot) vs alternates (other lots).
+    // If the anchor lot has multiple ci rows with qty (e.g. an inspected
+    // remnant + the grading_submitted sibling from the split-fix), roll them
+    // into primary — same lot, same card.
+    for (const c of matching) {
+      const lot: RepeatSourceLot = {
+        ci_id: c.id,
+        raw_purchase_id: c.raw_purchase_id,
+        raw_purchase_label: c.raw_purchase_label,
+        quantity_available: c.quantity,
+      };
+      if (c.raw_purchase_label === g.raw_purchase_label) {
+        if (!g.primary) g.primary = lot;
+        else g.primary.quantity_available += lot.quantity_available;
+      } else {
+        g.alternates.push(lot);
+      }
+    }
+    // Collapse alternates by lot label too — one entry per (lot, card).
+    const altByLabel = new Map<string, RepeatSourceLot>();
+    for (const a of g.alternates) {
+      const label = a.raw_purchase_label ?? '_';
+      const cur = altByLabel.get(label);
+      if (cur) cur.quantity_available += a.quantity_available;
+      else altByLabel.set(label, { ...a });
+    }
+    g.alternates = Array.from(altByLabel.values())
+      .sort((a, b) => b.quantity_available - a.quantity_available);
+  }
+
+  return Array.from(groups.values());
+}
+
 export interface AddLegacyItemInput {
   card_name: string;
   set_name?: string | null;

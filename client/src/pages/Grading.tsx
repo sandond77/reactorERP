@@ -174,19 +174,17 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
 
 // ── Add Card Modal ───────────────────────────────────────────────────────────
 
-function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => void }) {
-  const [mode, setMode] = useState<'inventory' | 'legacy'>('inventory');
+function AddCardModal({ batchId, onClose, existingItems }: { batchId: string; onClose: () => void; existingItems: BatchItem[] }) {
+  const [mode, setMode] = useState<'inventory' | 'legacy' | 'repeat'>('inventory');
   // Tracks how many rows the From Inventory tab has staged. Used to warn
-  // before switching to Legacy, since that swap unmounts the child and
-  // wipes its selection state.
+  // before switching away, since that swap unmounts the child and wipes
+  // its selection state.
   const [pendingInventoryRows, setPendingInventoryRows] = useState(0);
-  // Modal-driven confirm — replaces window.confirm (forbidden by CLAUDE.md
-  // UI rules). Holds the target mode while we wait for user decision.
-  const [confirmSwitchTo, setConfirmSwitchTo] = useState<'inventory' | 'legacy' | null>(null);
+  const [confirmSwitchTo, setConfirmSwitchTo] = useState<'inventory' | 'legacy' | 'repeat' | null>(null);
 
-  function trySwitch(next: 'inventory' | 'legacy') {
+  function trySwitch(next: 'inventory' | 'legacy' | 'repeat') {
     if (next === mode) return;
-    if (next === 'legacy' && pendingInventoryRows > 0) {
+    if (next !== 'inventory' && pendingInventoryRows > 0) {
       setConfirmSwitchTo(next);
       return;
     }
@@ -199,6 +197,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
         {([
           { key: 'inventory', label: 'From Inventory' },
           { key: 'legacy',    label: 'Legacy' },
+          { key: 'repeat',    label: 'Repeat in Sub' },
         ] as const).map(t => (
           <button key={t.key} type="button" onClick={() => trySwitch(t.key)}
             className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${mode === t.key ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
@@ -206,9 +205,13 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
           </button>
         ))}
       </div>
-      {mode === 'inventory'
-        ? <AddCardFromInventory batchId={batchId} onClose={onClose} onPendingCountChange={setPendingInventoryRows} />
-        : <AddCardLegacy        batchId={batchId} onClose={onClose} />}
+      {mode === 'inventory' ? (
+        <AddCardFromInventory batchId={batchId} onClose={onClose} onPendingCountChange={setPendingInventoryRows} />
+      ) : mode === 'legacy' ? (
+        <AddCardLegacy batchId={batchId} onClose={onClose} />
+      ) : (
+        <RepeatInSub batchId={batchId} onClose={onClose} existingItems={existingItems} />
+      )}
 
       <Modal
         open={!!confirmSwitchTo}
@@ -216,8 +219,7 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
         title="Discard staged cards?">
         <div className="space-y-4">
           <p className="text-sm text-zinc-300 leading-relaxed">
-            Switching to <span className="text-zinc-100 font-medium">Legacy</span> will discard
-            the <span className="text-zinc-100 font-medium">{pendingInventoryRows}</span> card
+            Switching tabs will discard the <span className="text-zinc-100 font-medium">{pendingInventoryRows}</span> card
             {pendingInventoryRows === 1 ? '' : 's'} staged on the From Inventory tab.
           </p>
           <div className="flex justify-end gap-2 pt-1">
@@ -237,6 +239,184 @@ function AddCardModal({ batchId, onClose }: { batchId: string; onClose: () => vo
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+// ── Repeat in Sub ────────────────────────────────────────────────────────────
+// Each row = one card already in this batch (grouped by anchor lot). Primary
+// count input is capped at the anchor lot's remaining raw qty. When the user
+// hits that cap and there are alternate lots for the same catalog+condition,
+// an "+ from other lots" section expands with per-lot count inputs.
+interface RepeatSourceLot {
+  ci_id: string;
+  raw_purchase_id: string | null;
+  raw_purchase_label: string | null;
+  quantity_available: number;
+}
+interface RepeatSourceGroup {
+  key: string;
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  raw_purchase_label: string | null;
+  condition: string | null;
+  times_in_batch: number;
+  primary: RepeatSourceLot | null;
+  alternates: RepeatSourceLot[];
+}
+
+function RepeatInSub({ batchId, onClose }: { batchId: string; onClose: () => void; existingItems: BatchItem[] }) {
+  const qc = useQueryClient();
+  const [primaryCounts, setPrimaryCounts] = useState<Record<string, string>>({});
+  const [altCounts, setAltCounts] = useState<Record<string, string>>({}); // key = groupKey|ci_id
+  const [expandedAlt, setExpandedAlt] = useState<Record<string, boolean>>({});
+  const [submitting, setSubmitting] = useState(false);
+
+  const { data, isLoading } = useQuery<{ data: RepeatSourceGroup[] }>({
+    queryKey: ['grading-repeat-sources', batchId],
+    queryFn: () => api.get(`/grading-subs/${batchId}/repeat-sources`).then(r => r.data),
+  });
+  const groups = data?.data ?? [];
+
+  const primaryTotal = Object.values(primaryCounts).reduce((s, v) => s + (parseInt(v) || 0), 0);
+  const altTotal = Object.values(altCounts).reduce((s, v) => s + (parseInt(v) || 0), 0);
+  const totalToAdd = primaryTotal + altTotal;
+
+  async function handleSubmit() {
+    // Build request rows: one entry per (ci_id, count) — server validates each.
+    const items: { source_ci_id: string; count: number }[] = [];
+    for (const g of groups) {
+      const p = parseInt(primaryCounts[g.key] ?? '0') || 0;
+      if (p > 0 && g.primary) items.push({ source_ci_id: g.primary.ci_id, count: p });
+      for (const alt of g.alternates) {
+        const c = parseInt(altCounts[`${g.key}|${alt.ci_id}`] ?? '0') || 0;
+        if (c > 0) items.push({ source_ci_id: alt.ci_id, count: c });
+      }
+    }
+    if (items.length === 0) { toast.error('Enter a count on at least one row'); return; }
+    setSubmitting(true);
+    try {
+      const res = await api.post(`/grading-subs/${batchId}/items/repeat`, { items });
+      const n = res.data?.data?.length ?? 0;
+      toast.success(`${n} line item${n !== 1 ? 's' : ''} added`);
+      qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
+      onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to repeat items');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-zinc-500 leading-relaxed">
+        Add more copies of cards already in this batch. Primary count draws from the same lot; if the lot's out, open "+ from other lots" for alternates.
+      </p>
+      <div className="border border-zinc-800 rounded-lg max-h-[26rem] overflow-y-auto divide-y divide-zinc-800/60">
+        {isLoading ? (
+          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">Loading…</p>
+        ) : groups.length === 0 ? (
+          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">
+            No lot-attached cards in this batch yet. Add some from the From Inventory tab first, then come back.
+          </p>
+        ) : (
+          groups.map(g => {
+            const primaryMax = g.primary?.quantity_available ?? 0;
+            const primaryVal = primaryCounts[g.key] ?? '';
+            const primaryN = parseInt(primaryVal) || 0;
+            const primaryDrained = primaryMax === 0;
+            const atCap = primaryMax > 0 && primaryN >= primaryMax;
+            const altExpanded = !!expandedAlt[g.key];
+            const canOfferAlts = g.alternates.length > 0 && (primaryDrained || atCap || altExpanded);
+            return (
+              <div key={g.key} className="px-3 py-2">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-zinc-200 font-medium truncate">{g.card_name ?? '—'}</span>
+                      {g.raw_purchase_label && <span className="font-mono text-[10px] text-indigo-300/70">{g.raw_purchase_label}</span>}
+                      {g.condition && <span className="text-zinc-400">{g.condition}</span>}
+                    </div>
+                    <div className="text-[10px] text-zinc-500 mt-0.5">
+                      {g.set_name && <span>{g.set_name}</span>}
+                      {g.card_number && <span> · #{g.card_number}</span>}
+                      <span className="ml-2 text-indigo-400/80">{g.times_in_batch} in batch</span>
+                      <span className="ml-2 text-zinc-500">· {primaryMax} avail in {g.raw_purchase_label}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] text-zinc-500">+</span>
+                    <input
+                      type="number" min={0} max={primaryMax || undefined} inputMode="numeric"
+                      value={primaryVal}
+                      disabled={primaryDrained}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value) || 0;
+                        const clamped = primaryMax > 0 ? Math.min(n, primaryMax) : 0;
+                        setPrimaryCounts(prev => ({ ...prev, [g.key]: e.target.value === '' ? '' : String(clamped) }));
+                      }}
+                      placeholder={primaryDrained ? '—' : '0'}
+                      className="w-16 text-right rounded-md bg-zinc-900 border border-zinc-700 px-2 py-1 text-xs text-zinc-100 focus:outline-none focus:border-indigo-500 disabled:opacity-40 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                  </div>
+                </div>
+                {canOfferAlts && (
+                  <div className="mt-1.5 pl-3 border-l border-zinc-800">
+                    <button type="button"
+                      onClick={() => setExpandedAlt(prev => ({ ...prev, [g.key]: !altExpanded }))}
+                      className="text-[10px] text-indigo-400 hover:text-indigo-300 transition-colors">
+                      {altExpanded ? '− hide other lots' : `+ from other lots (${g.alternates.length})`}
+                    </button>
+                    {altExpanded && (
+                      <div className="mt-1 space-y-1">
+                        {g.alternates.map(alt => {
+                          const akey = `${g.key}|${alt.ci_id}`;
+                          const aval = altCounts[akey] ?? '';
+                          return (
+                            <div key={akey} className="flex items-center gap-2 text-[11px]">
+                              <span className="font-mono text-[10px] text-indigo-300/70">{alt.raw_purchase_label}</span>
+                              <span className="text-zinc-500 text-[10px]">{alt.quantity_available} avail</span>
+                              <div className="ml-auto flex items-center gap-1.5">
+                                <span className="text-[10px] text-zinc-500">+</span>
+                                <input
+                                  type="number" min={0} max={alt.quantity_available} inputMode="numeric"
+                                  value={aval}
+                                  onChange={(e) => {
+                                    const n = parseInt(e.target.value) || 0;
+                                    const clamped = Math.min(n, alt.quantity_available);
+                                    setAltCounts(prev => ({ ...prev, [akey]: e.target.value === '' ? '' : String(clamped) }));
+                                  }}
+                                  placeholder="0"
+                                  className="w-14 text-right rounded-md bg-zinc-900 border border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+      <div className="flex justify-between items-center pt-1">
+        <span className="text-[11px] text-zinc-500">
+          {totalToAdd > 0 ? `+${totalToAdd} line item${totalToAdd !== 1 ? 's' : ''}` : ' '}
+        </span>
+        <div className="flex gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="button" disabled={submitting || totalToAdd === 0} onClick={handleSubmit}>
+            {submitting && <Loader2 size={14} className="animate-spin" />}
+            {submitting ? 'Adding…' : `Add ${totalToAdd || ''} to batch`}
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1689,7 +1869,7 @@ function BatchDetailPanel({ batchId, onBack }: { batchId: string; onBack: () => 
       </Modal>
 
       <Modal open={showAddCard} onClose={() => setShowAddCard(false)} title="Add Card to Batch" className="max-w-4xl">
-        <AddCardModal batchId={batchId} onClose={() => setShowAddCard(false)} />
+        <AddCardModal batchId={batchId} onClose={() => setShowAddCard(false)} existingItems={data.items} />
       </Modal>
 
       <Modal open={showEdit} onClose={() => setShowEdit(false)} title="Edit Submission Details">
