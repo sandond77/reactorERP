@@ -594,17 +594,25 @@ export async function addItem(userId: string, batchId: string, input: AddItemInp
 
 // Backs the "Repeat" tab on the Add Card modal. Each entry names a specific
 // raw source ci id to pull from — the client picks the lot, the server just
-// consumes it. Wrapped in a transaction so a shortfall on any entry rolls
-// back the whole call (no partial-write on a multi-lot submit).
+// consumes it. Two paths:
+//   - Regular raw source (any inspected/purchased_raw ci with decision=grade):
+//     uses addItem (splits the source into a grading_submitted sibling).
+//   - Legacy bucket (source's catalog has set_code='LEGACY'): uses
+//     addLegacyItem, which decrements the bucket stash and creates a fresh
+//     ci row stamped with the anchor's real card identity (card_name,
+//     set_name, card_number, language, catalog_id). The anchor's identity
+//     is required for legacy repeats — the bucket doesn't know what card
+//     you're pulling out. Client supplies it via anchor_batch_item_id.
 export interface RepeatItemInput {
   source_ci_id: string;
   count: number;
+  anchor_batch_item_id?: string;
 }
 
 export async function repeatBatchItems(userId: string, batchId: string, items: RepeatItemInput[]) {
   if (!items.length) throw new AppError(400, 'No items to repeat');
 
-  // Pre-check: aggregate requested count per ci id and verify each source has
+  // Pre-check: aggregate requested count per source ci and verify each has
   // enough qty. Rejects the whole call before any writes — no partial adds.
   const totalPerCi = new Map<string, number>();
   for (const req of items) {
@@ -624,15 +632,68 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
       throw new AppError(400, 'Source card is not in raw inventory');
     }
     if ((ci.quantity ?? 0) < requested) {
-      throw new AppError(400, `Only ${ci.quantity ?? 0} available in source lot (requested ${requested})`);
+      throw new AppError(400, `Only ${ci.quantity ?? 0} available in source (requested ${requested})`);
     }
   }
 
   const created: Awaited<ReturnType<typeof addItem>>[] = [];
   for (const req of items) {
-    for (let i = 0; i < req.count; i++) {
-      const item = await addItem(userId, batchId, { card_instance_id: req.source_ci_id, quantity: 1 });
-      created.push(item);
+    // Sniff whether the source is a legacy bucket: catalog.set_code = 'LEGACY'.
+    const source = await db
+      .selectFrom('card_instances as ci')
+      .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+      .select(['ci.id', 'ci.catalog_id', 'cc.set_code'])
+      .where('ci.id', '=', req.source_ci_id)
+      .where('ci.user_id', '=', userId)
+      .executeTakeFirst();
+    if (!source) throw new AppError(404, 'Source card not found');
+
+    const isLegacy = source.set_code === 'LEGACY';
+
+    if (isLegacy) {
+      if (!req.anchor_batch_item_id) {
+        throw new AppError(400, 'Legacy repeat requires the anchor batch item id — the bucket has no card identity of its own');
+      }
+      const anchor = await db
+        .selectFrom('grading_batch_items as gbi')
+        .innerJoin('card_instances as ci', 'ci.id', 'gbi.card_instance_id')
+        .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
+        .select([
+          'ci.id as ci_id', 'ci.catalog_id', 'ci.condition', 'ci.language', 'ci.purchase_cost',
+          'ci.card_name_override', 'ci.set_name_override', 'ci.card_number_override',
+          'cc.card_name as cc_card_name', 'cc.set_name as cc_set_name', 'cc.card_number as cc_card_number',
+        ])
+        .where('gbi.id', '=', req.anchor_batch_item_id)
+        .where('gbi.batch_id', '=', batchId)
+        .where('ci.user_id', '=', userId)
+        .executeTakeFirst();
+      if (!anchor) throw new AppError(404, 'Anchor batch item not found in this batch');
+
+      const cardName = anchor.card_name_override ?? anchor.cc_card_name ?? 'Unknown';
+      const setName = anchor.cc_set_name ?? anchor.set_name_override ?? null;
+      const cardNumber = anchor.cc_card_number ?? anchor.card_number_override ?? null;
+      const language = anchor.language ?? 'EN';
+      const perCardCost = (anchor.purchase_cost ?? 0);
+
+      for (let i = 0; i < req.count; i++) {
+        const item = await addLegacyItem(userId, batchId, {
+          card_name: cardName,
+          set_name: setName,
+          card_number: cardNumber,
+          language,
+          condition: anchor.condition ?? null,
+          legacy_catalog_id: source.catalog_id ?? undefined,
+          catalog_id: anchor.catalog_id ?? undefined,
+          quantity: 1,
+          purchase_cost: perCardCost,
+        });
+        created.push(item.batch_item);
+      }
+    } else {
+      for (let i = 0; i < req.count; i++) {
+        const item = await addItem(userId, batchId, { card_instance_id: req.source_ci_id, quantity: 1 });
+        created.push(item);
+      }
     }
   }
   return created;
@@ -643,6 +704,9 @@ export interface RepeatSourceLot {
   raw_purchase_id: string | null;
   raw_purchase_label: string | null;
   quantity_available: number;
+  is_legacy_bucket?: boolean;     // when true, source is a LEGACY-bucket ci and
+                                  // repeats must go through addLegacyItem with
+                                  // the anchor's card identity
 }
 export interface RepeatSourceGroup {
   key: string;                   // catalog_id|condition|raw_purchase_id
@@ -654,7 +718,10 @@ export interface RepeatSourceGroup {
   condition: string | null;
   raw_purchase_label: string | null;   // anchor lot label
   times_in_batch: number;
-  primary: RepeatSourceLot | null;     // ci row in the anchor lot with qty > 0
+  anchor_batch_item_id: string;        // any batch item id in the group — server uses it
+                                       // to look up the card identity for legacy repeats
+  primary: RepeatSourceLot | null;     // ci row in the anchor lot with qty > 0, OR the
+                                       // matching legacy bucket ci when the anchor is legacy
   alternates: RepeatSourceLot[];       // same-catalog+condition ci rows in OTHER lots
 }
 
@@ -667,6 +734,7 @@ export interface RepeatSourceGroup {
  */
 export async function listRepeatSources(userId: string, batchId: string): Promise<RepeatSourceGroup[]> {
   const items = await sql<{
+    bi_id: string;
     catalog_id: string | null;
     condition: string | null;
     raw_purchase_id: string | null;
@@ -676,14 +744,17 @@ export async function listRepeatSources(userId: string, batchId: string): Promis
     card_number: string | null;
     language: string | null;
     quantity: number;
+    legacy_source_catalog_id: string | null;
   }>`
-    SELECT ci.catalog_id, ci.condition, ci.raw_purchase_id,
+    SELECT gbi.id AS bi_id,
+      ci.catalog_id, ci.condition, ci.raw_purchase_id,
       rp.purchase_id AS raw_purchase_label,
       COALESCE(ci.card_name_override, cc.card_name) AS card_name,
       COALESCE(cc.set_name, ci.set_name_override) AS set_name,
       COALESCE(cc.card_number, ci.card_number_override) AS card_number,
       ci.language,
-      gbi.quantity
+      gbi.quantity,
+      ci.legacy_source_catalog_id
     FROM grading_batch_items gbi
     JOIN card_instances ci ON ci.id = gbi.card_instance_id
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
@@ -693,7 +764,8 @@ export async function listRepeatSources(userId: string, batchId: string): Promis
       AND ci.raw_purchase_id IS NOT NULL
   `.execute(db);
 
-  const groups = new Map<string, RepeatSourceGroup>();
+  type GroupPrivate = RepeatSourceGroup & { legacy_source_catalog_id: string | null };
+  const groups = new Map<string, GroupPrivate>();
   for (const it of items.rows) {
     const key = `${it.catalog_id ?? '_'}|${it.condition ?? '_'}|${it.raw_purchase_id ?? '_'}`;
     const cur = groups.get(key);
@@ -710,14 +782,17 @@ export async function listRepeatSources(userId: string, batchId: string): Promis
         condition: it.condition,
         raw_purchase_label: it.raw_purchase_label,
         times_in_batch: it.quantity,
+        anchor_batch_item_id: it.bi_id,
         primary: null,
         alternates: [],
+        legacy_source_catalog_id: it.legacy_source_catalog_id,
       });
     }
   }
 
   if (groups.size === 0) return [];
 
+  // Regular raw-source candidates (non-legacy path).
   const catalogIds = [...new Set([...groups.values()].map(g => g.catalog_id).filter((v): v is string => !!v))];
   const conds = [...new Set([...groups.values()].map(g => g.condition).filter((v): v is string => !!v))];
 
@@ -743,14 +818,40 @@ export async function listRepeatSources(userId: string, batchId: string): Promis
     ORDER BY ci.quantity DESC
   `.execute(db);
 
+  // Legacy-bucket candidates: for any anchor with legacy_source_catalog_id set,
+  // find the bucket's own stash ci rows (catalog_id = the LEGACY bucket,
+  // decision='grade', status inspected/purchased_raw, qty > 0) so the client
+  // can present the bucket as a repeat source too.
+  const legacyBucketIds = [...new Set(
+    [...groups.values()]
+      .map(g => g.legacy_source_catalog_id)
+      .filter((v): v is string => !!v)
+  )];
+  const legacyBucketRows = legacyBucketIds.length ? await sql<{
+    id: string;
+    catalog_id: string;
+    condition: string | null;
+    raw_purchase_id: string | null;
+    raw_purchase_label: string | null;
+    quantity: number;
+  }>`
+    SELECT ci.id, ci.catalog_id, ci.condition, ci.raw_purchase_id,
+           rp.purchase_id AS raw_purchase_label,
+           ci.quantity
+    FROM card_instances ci
+    LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
+    WHERE ci.user_id = ${userId}
+      AND ci.catalog_id IN (${sql.join(legacyBucketIds.map(v => sql.val(v)))})
+      AND ci.decision = 'grade'
+      AND ci.status IN ('inspected', 'purchased_raw')
+      AND ci.quantity > 0
+    ORDER BY ci.quantity DESC
+  `.execute(db) : { rows: [] as any[] };
+
   for (const g of groups.values()) {
     const matching = candidates.rows.filter(
       c => c.catalog_id === g.catalog_id && c.condition === g.condition
     );
-    // Split into primary (same anchor lot) vs alternates (other lots).
-    // If the anchor lot has multiple ci rows with qty (e.g. an inspected
-    // remnant + the grading_submitted sibling from the split-fix), roll them
-    // into primary — same lot, same card.
     for (const c of matching) {
       const lot: RepeatSourceLot = {
         ci_id: c.id,
@@ -765,19 +866,43 @@ export async function listRepeatSources(userId: string, batchId: string): Promis
         g.alternates.push(lot);
       }
     }
-    // Collapse alternates by lot label too — one entry per (lot, card).
-    const altByLabel = new Map<string, RepeatSourceLot>();
-    for (const a of g.alternates) {
-      const label = a.raw_purchase_label ?? '_';
-      const cur = altByLabel.get(label);
-      if (cur) cur.quantity_available += a.quantity_available;
-      else altByLabel.set(label, { ...a });
+
+    // Legacy anchors: fold bucket into primary if the anchor lot has no raw
+    // sibling for this real catalog. This is the common case — the specific
+    // card is drained, but the bucket has plenty. Bucket sources use
+    // addLegacyItem instead of addItem, so mark is_legacy_bucket.
+    if (g.legacy_source_catalog_id) {
+      const bucket = legacyBucketRows.rows.find(
+        (r: { catalog_id: string }) => r.catalog_id === g.legacy_source_catalog_id
+      );
+      if (bucket) {
+        const bucketLot: RepeatSourceLot = {
+          ci_id: bucket.id,
+          raw_purchase_id: bucket.raw_purchase_id,
+          raw_purchase_label: bucket.raw_purchase_label,
+          quantity_available: bucket.quantity,
+          is_legacy_bucket: true,
+        };
+        if (!g.primary) g.primary = bucketLot;
+        else g.alternates.unshift(bucketLot);
+      }
     }
-    g.alternates = Array.from(altByLabel.values())
+
+    // Collapse alternates by lot label + legacy-ness (bucket stays distinct
+    // from raw same-label rows since they consume via different code paths).
+    const altByKey = new Map<string, RepeatSourceLot>();
+    for (const a of g.alternates) {
+      const label = `${a.raw_purchase_label ?? '_'}|${a.is_legacy_bucket ? 'L' : 'R'}`;
+      const cur = altByKey.get(label);
+      if (cur) cur.quantity_available += a.quantity_available;
+      else altByKey.set(label, { ...a });
+    }
+    g.alternates = Array.from(altByKey.values())
       .sort((a, b) => b.quantity_available - a.quantity_available);
   }
 
-  return Array.from(groups.values());
+  // Strip private field before returning.
+  return Array.from(groups.values()).map(({ legacy_source_catalog_id: _l, ...rest }) => rest);
 }
 
 export interface AddLegacyItemInput {

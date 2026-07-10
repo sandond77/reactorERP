@@ -253,6 +253,7 @@ interface RepeatSourceLot {
   raw_purchase_id: string | null;
   raw_purchase_label: string | null;
   quantity_available: number;
+  is_legacy_bucket?: boolean;
 }
 interface RepeatSourceGroup {
   key: string;
@@ -262,6 +263,7 @@ interface RepeatSourceGroup {
   raw_purchase_label: string | null;
   condition: string | null;
   times_in_batch: number;
+  anchor_batch_item_id: string;
   primary: RepeatSourceLot | null;
   alternates: RepeatSourceLot[];
 }
@@ -284,14 +286,26 @@ function RepeatInSub({ batchId, onClose }: { batchId: string; onClose: () => voi
   const totalToAdd = primaryTotal + altTotal;
 
   async function handleSubmit() {
-    // Build request rows: one entry per (ci_id, count) — server validates each.
-    const items: { source_ci_id: string; count: number }[] = [];
+    // Build request rows: one entry per (ci_id, count). Legacy-bucket sources
+    // ride with the anchor_batch_item_id so the server can reconstruct the
+    // card identity for addLegacyItem.
+    const items: { source_ci_id: string; count: number; anchor_batch_item_id?: string }[] = [];
     for (const g of groups) {
       const p = parseInt(primaryCounts[g.key] ?? '0') || 0;
-      if (p > 0 && g.primary) items.push({ source_ci_id: g.primary.ci_id, count: p });
+      if (p > 0 && g.primary) {
+        items.push({
+          source_ci_id: g.primary.ci_id,
+          count: p,
+          ...(g.primary.is_legacy_bucket ? { anchor_batch_item_id: g.anchor_batch_item_id } : {}),
+        });
+      }
       for (const alt of g.alternates) {
         const c = parseInt(altCounts[`${g.key}|${alt.ci_id}`] ?? '0') || 0;
-        if (c > 0) items.push({ source_ci_id: alt.ci_id, count: c });
+        if (c > 0) items.push({
+          source_ci_id: alt.ci_id,
+          count: c,
+          ...(alt.is_legacy_bucket ? { anchor_batch_item_id: g.anchor_batch_item_id } : {}),
+        });
       }
     }
     if (items.length === 0) { toast.error('Enter a count on at least one row'); return; }
@@ -344,7 +358,9 @@ function RepeatInSub({ batchId, onClose }: { batchId: string; onClose: () => voi
                       {g.set_name && <span>{g.set_name}</span>}
                       {g.card_number && <span> · #{g.card_number}</span>}
                       <span className="ml-2 text-indigo-400/80">{g.times_in_batch} in batch</span>
-                      <span className="ml-2 text-zinc-500">· {primaryMax} avail in {g.raw_purchase_label}</span>
+                      <span className="ml-2 text-zinc-500">
+                        · {primaryMax} avail in {g.primary?.is_legacy_bucket ? 'legacy bucket' : g.raw_purchase_label}
+                      </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -377,7 +393,9 @@ function RepeatInSub({ batchId, onClose }: { batchId: string; onClose: () => voi
                           const aval = altCounts[akey] ?? '';
                           return (
                             <div key={akey} className="flex items-center gap-2 text-[11px]">
-                              <span className="font-mono text-[10px] text-indigo-300/70">{alt.raw_purchase_label}</span>
+                              <span className="font-mono text-[10px] text-indigo-300/70">
+                                {alt.is_legacy_bucket ? 'Legacy bucket' : alt.raw_purchase_label}
+                              </span>
                               <span className="text-zinc-500 text-[10px]">{alt.quantity_available} avail</span>
                               <div className="ml-auto flex items-center gap-1.5">
                                 <span className="text-[10px] text-zinc-500">+</span>
