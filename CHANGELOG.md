@@ -1,5 +1,32 @@
 # Reactor — Changelog
 
+## July 10, 2026
+
+### Features
+
+**Grading — "Repeat in Sub" tab on the Add Card modal**
+- Users building a PSA Value Bulk submission were adding duplicates one at a time — a fresh search + pick + submit cycle per copy. Long batches with N copies of a handful of base cards cost hundreds of clicks. The new tab shows every unique lot-attached card already in the batch as a row, so you can bump the count directly.
+- Each row shows: card name, anchor lot ID (e.g. `2026B72`), condition, "N in batch" + "M avail in <lot>". The count input is capped at the primary lot's remaining raw qty so you can't over-sub by accident.
+- If the primary lot is drained (or your count hits the cap) AND same-catalog + condition raw sources exist in other lots, a `+ from other lots (N)` toggle appears below the row. Expanding it reveals a per-lot count input for each alternate lot, each capped at that lot's qty. Every copy retains its own lot traceability through `raw_purchase_id` — no aggregation across lots.
+- Server:
+  - `GET /grading-subs/:id/repeat-sources` returns per-anchor groups with primary lot + alternates.
+  - `POST /grading-subs/:id/items/repeat` takes `{ source_ci_id, count }[]` directly. Pre-checks aggregate requested count per ci and rejects the whole call on any shortfall — no partial writes across rows. Each addItem then splits its source ci the same way the From Inventory flow does.
+- Legacy sub items (no `raw_purchase_id`) are excluded from the Repeat list entirely; server also rejects any direct call against a source that isn't `inspected/purchased_raw` + `decision='grade'`.
+
+### Fixes
+
+**Grading — `addItem` now splits the source card_instance row instead of flipping it wholesale**
+- Reported by user: "2026B72 unable to add more of this card to a sub. only added 3 but there's 5 available originally." Investigation found 7 lots on prod, 64 cards total, stranded in `grading_submitted` limbo because the source row's `status` flipped without decrementing quantity or splitting off the batched portion. The picker's status filter (`purchased_raw / inspected`) then hid the row from any subsequent add.
+- Data patch (transactional on prod): for each of the 7 stranded rows, decremented the source `quantity` to what was actually batched and inserted a fresh sibling row with the stranded qty in `status=inspected` / `decision=grade` so the picker surfaces them again. Affected: Helioptile 2025B28 (+16), Togedemaru 2025B29 (+17), Ampharos 2026B26 (+22), Froakie 2026B56 (+3), Froakie 2026B66 (+2), Fennekin 2026B67 (+2), Chespin 2026B72 (+2).
+- Code fix: `addItem` now mirrors `addLegacyItem` — when `source.quantity > requested`, decrement the source and create a fresh sibling ci row in `grading_submitted` for just the batched qty. When `source.quantity == requested`, flip in place (original behavior) so no orphan `qty=0` row is created. Sources already in `grading_submitted` (from the old bug pattern) are left as-is; the pre-check on `card.quantity` still enforces the cap. Prevents stranding on new adds.
+
+**Listings (multi-qty) — Add-cert picker and validator now match grade + company, not just catalog_id**
+- The Add-cert picker on a PSA GEM MINT 10 multi-qty listing surfaced a PSA MINT 9 slab of the same card, because `listCandidateCertsForListing` only filtered by `catalog_id`. A multi-qty eBay listing represents ONE item — grade + company have to match, otherwise a buyer of the qty=N pool could receive a mismatched slab. Widened the filter to include `sd.grade_label` + `sd.company` matching the parent cert.
+- `addCertsToListing` gained the same grade + company checks so a hand-crafted API call can't slip in an off-grade cert either.
+
+**Listings (multi-qty) — auto-check the flag the moment a 2nd cert is selected**
+- Picking 2+ certs in the single-slab listing flow already IS a multi-qty listing on eBay's side — the checkbox was extra friction. Now selecting a 2nd cert flips `is_multi_qty` true automatically. Only fires on the 1→2 transition so an explicit uncheck in the details step sticks (adding a 3rd cert after doesn't override the user's choice). Dropping back to <2 and up again does re-fire.
+
 ## July 8, 2026
 
 ### Features
