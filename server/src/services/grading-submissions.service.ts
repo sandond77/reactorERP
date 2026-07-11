@@ -1612,11 +1612,21 @@ export async function processReturn(userId: string, batchId: string, input: Proc
 
     const totalConsumed = normalized.length; // every entry in payload consumes one from source
 
-    // Build new raw card_instances rows for not_graded and not_submitted entries
-    // (returned-raw cards land back in inventory under their original part with
-    // an inspected status so the user can route them to sell_raw or re-submit).
+    // Build new raw card_instances rows for not_graded and not_submitted entries.
+    //   * not_graded: PSA returned ungraded (altered / not eligible). Decision
+    //     is 'sell_raw' — cost basis rolls the grading fee in since it's a
+    //     sunk cost we'll recoup on the raw sale. Status lands as 'raw_for_sale'
+    //     to match the rest of the app: every "For Sale" view filters
+    //     status='raw_for_sale', and the normal sell_raw path (createCard /
+    //     updateCard when decision='sell_raw') already promotes to that
+    //     status. Landing at 'inspected' hid these cards from every for-sale
+    //     view even though they were conceptually ready to list.
+    //   * not_submitted: card never actually shipped. No fee added, no
+    //     decision assigned — user routes it fresh from the intake / inspection
+    //     flow, so keeping status='inspected' is correct.
     for (const item of normalized.filter((e) => e.disposition === 'not_graded' || e.disposition === 'not_submitted')) {
-      const costAddend = item.disposition === 'not_graded' ? batch.grading_cost : 0;
+      const isNotGraded = item.disposition === 'not_graded';
+      const costAddend = isNotGraded ? batch.grading_cost : 0;
       const newRaw = await db
         .insertInto('card_instances')
         .values({
@@ -1630,8 +1640,8 @@ export async function processReturn(userId: string, batchId: string, input: Proc
           variant:              original.variant,
           rarity:               original.rarity,
           notes:                original.notes,
-          status:               'inspected',
-          decision:             item.disposition === 'not_graded' ? 'sell_raw' : null,
+          status:               isNotGraded ? 'raw_for_sale' : 'inspected',
+          decision:             isNotGraded ? 'sell_raw' : null,
           purchase_type:        original.purchase_type,
           quantity:             1,
           purchase_cost:        original.purchase_cost + costAddend,
