@@ -209,7 +209,9 @@ function InspectionLineForm({
               <input type="number" min="1" max={maxQuantity} value={form.quantity}
                 onChange={(e) => { set('quantity', e.target.value); setQtyError(''); }}
                 className={`${inp} ${qtyError ? 'border-red-500/60' : ''}`} />
-              <p className="text-[10px] text-zinc-600 mt-0.5">{maxQuantity} remaining in lot</p>
+              <p className="text-[10px] text-zinc-600 mt-0.5">
+                {initial?.quantity ? `Max ${maxQuantity} (includes this line)` : `${maxQuantity} remaining in lot`}
+              </p>
             </div>
             <div className="self-end">
               <p className={`text-xs ${pickedSlabs.length === (parseInt(form.quantity) || 0) ? 'text-green-400' : 'text-yellow-400'}`}>
@@ -282,7 +284,9 @@ function InspectionLineForm({
             <input type="number" min="1" max={maxQuantity} value={form.quantity}
               onChange={(e) => { set('quantity', e.target.value); setQtyError(''); }}
               className={`${inp} ${qtyError ? 'border-red-500/60' : ''}`} />
-            <p className="text-[10px] text-zinc-600 mt-0.5">{maxQuantity} remaining</p>
+            <p className="text-[10px] text-zinc-600 mt-0.5">
+              {initial?.quantity ? `Max ${maxQuantity} (includes this line)` : `${maxQuantity} remaining`}
+            </p>
           </div>
           <div>
             <label className={label}>Cost / Card (USD)</label>
