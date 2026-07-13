@@ -252,3 +252,13 @@ listingsRouter.delete('/:listingId/group-multi-qty', requireAuth, async (req, re
     res.json(result);
   } catch (err) { next(err); }
 });
+
+// End (close) a persistent multi-qty listing — flips is_ended=true on every
+// row in the group so it stops appearing in Listings. Sold rows keep their
+// sales trail; any still-active certs get cancelled as part of the close.
+listingsRouter.post('/:listingId/end-multi-qty', requireAuth, async (req, res, next) => {
+  try {
+    const result = await listingsService.endMultiQtyListing(req.dataUserId, req.params.listingId as string);
+    res.json(result);
+  } catch (err) { next(err); }
+});

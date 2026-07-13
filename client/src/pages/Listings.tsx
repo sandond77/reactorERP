@@ -58,6 +58,8 @@ interface AggregatedListing {
   listing_group_id?: string | null;
   listing_group_name?: string | null;
   has_multi_qty?: boolean;
+  is_drained_multi_qty?: boolean;
+  any_listing_id?: string | null;
 }
 
 interface ListingFilterOptions {
@@ -1072,10 +1074,32 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
   // Any cert row on this listing group can serve as the parent for multi-qty
   // ops — the server treats them all as the same group. Prefer the clicked
   // cert if available.
-  const parentListingId = cert?.listing_id ?? row.cert_details?.[0]?.listing_id ?? null;
+  // Drained multi-qty rows have no active cert_details, so fall back to
+  // any_listing_id from the aggregation to keep Add-cert / End working.
+  const parentListingId = cert?.listing_id ?? row.cert_details?.[0]?.listing_id ?? row.any_listing_id ?? null;
   const isGradedRow = !!row.grading_company;
   const canAddCerts = isGradedRow && !isSet && !!row.has_multi_qty && !!parentListingId;
   const canPromote = isGradedRow && !isSet && !row.has_multi_qty && !!parentListingId && !!ebayUrl;
+  const canEnd = isGradedRow && !isSet && !!row.has_multi_qty && !!parentListingId;
+  const [ending, setEnding] = useState(false);
+  const [endStep, setEndStep] = useState<null | 'confirm'>(null);
+
+  async function handleEnd() {
+    if (!parentListingId) return;
+    setEnding(true);
+    try {
+      const res = await api.post(`/listings/${parentListingId}/end-multi-qty`);
+      toast.success(`Listing ended (${res.data.ended} row${res.data.ended !== 1 ? 's' : ''} closed)`);
+      queryClient.invalidateQueries({ queryKey: ['listings'] });
+      queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
+      onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to end listing');
+    } finally {
+      setEnding(false);
+    }
+  }
 
   async function handlePromote() {
     if (!parentListingId) return;
@@ -1209,8 +1233,8 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
               </div>
               <span className="text-[11px] text-zinc-600">{localCerts.length} listing{localCerts.length !== 1 ? 's' : ''}</span>
             </div>
-            {(canAddCerts || canPromote) && (
-              <div className="mt-3 flex items-center gap-2">
+            {(canAddCerts || canPromote || canEnd) && (
+              <div className="mt-3 flex items-center gap-2 flex-wrap">
                 {canAddCerts && (
                   <Button type="button" size="sm" variant="secondary" onClick={() => setAddCertOpen(true)}>
                     <Plus size={12} /> Add cert
@@ -1221,6 +1245,22 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                     {promoting && <Loader2 size={12} className="animate-spin" />}
                     {promoting ? 'Converting…' : 'Convert to multi-qty'}
                   </Button>
+                )}
+                {canEnd && (
+                  endStep === 'confirm' ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-amber-300">End this listing?</span>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setEndStep(null)}>No</Button>
+                      <Button type="button" size="sm" className="bg-amber-600 hover:bg-amber-500 text-white border-0" disabled={ending} onClick={handleEnd}>
+                        {ending && <Loader2 size={12} className="animate-spin" />}
+                        {ending ? 'Ending…' : 'Yes, end'}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button type="button" size="sm" variant="ghost" className="text-amber-400 hover:text-amber-300" onClick={() => setEndStep('confirm')}>
+                      End listing
+                    </Button>
+                  )
                 )}
               </div>
             )}
@@ -1660,7 +1700,9 @@ export function Listings() {
                         ) : '—'}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        {row.has_multi_qty ? (
+                        {row.is_drained_multi_qty ? (
+                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-bold uppercase tracking-wide border border-amber-500/30" title="Drained multi-qty listing — Add cert to re-populate, or End Listing to close it">Drained</span>
+                        ) : row.has_multi_qty ? (
                           <span className="inline-flex items-center h-5 px-1.5 rounded bg-cyan-500/15 text-cyan-300 text-[10px] font-bold uppercase tracking-wide border border-cyan-500/30">Multi</span>
                         ) : <span className="text-zinc-700">—</span>}
                       </td>

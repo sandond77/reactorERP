@@ -224,6 +224,7 @@ export interface ListingsTable {
   listing_group_id: string | null;
   listing_group_name: string | null;
   is_multi_qty: Generated<boolean>;
+  is_ended: Generated<boolean>;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }

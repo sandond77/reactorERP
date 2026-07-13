@@ -36,6 +36,8 @@ export type ListingAggRow = {
   listing_group_id?: string | null;
   listing_group_name?: string | null;
   has_multi_qty?: boolean;
+  is_drained_multi_qty?: boolean;
+  any_listing_id?: string | null;
 };
 
 const LISTINGS_SORT_COLS: Record<string, string> = {
@@ -378,9 +380,16 @@ export async function listListings(
         l.currency,
         (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST))[1]                            AS ebay_listing_url,
         MIN(l.listed_at)                                                                                    AS listed_at,
-        COUNT(DISTINCT l.id)::int                                                                           AS num_listed,
+        COUNT(DISTINCT l.id) FILTER (WHERE l.listing_status = 'active')::int                              AS num_listed,
         MAX(COALESCE(sa.num_sold, 0))::int                                                                  AS num_sold,
         BOOL_OR(l.is_multi_qty)                                                                             AS has_multi_qty,
+        -- Drained multi-qty groups have no active rows but still show up in
+        -- the aggregation. Flag them so the client can badge / gate actions.
+        BOOL_OR(l.is_multi_qty AND l.listing_status != 'active') AND NOT BOOL_OR(l.listing_status = 'active') AS is_drained_multi_qty,
+        -- Any listing_id in the group — needed as a fallback for drained
+        -- multi-qty rows whose cert_details is empty (FILTER strips sold
+        -- rows). Powers Add-cert / End on drained groups.
+        (ARRAY_AGG(l.id ORDER BY l.listed_at DESC NULLS LAST))[1]                                          AS any_listing_id,
         (ARRAY_AGG(rp.purchase_id ORDER BY l.listed_at DESC NULLS LAST))[1]                                AS raw_purchase_label,
         JSON_AGG(JSON_BUILD_OBJECT(
           'listing_id',         l.id,
@@ -392,7 +401,7 @@ export async function listListings(
           'is_multi_qty',       l.is_multi_qty,
           'condition',          ci.condition,
           'raw_purchase_label', rp.purchase_id
-        ) ORDER BY l.listed_at DESC NULLS LAST)                                                             AS cert_details
+        ) ORDER BY l.listed_at DESC NULLS LAST) FILTER (WHERE l.listing_status = 'active')                 AS cert_details
       FROM listings l
       JOIN card_instances ci ON ci.id = l.card_instance_id
       LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
@@ -407,7 +416,22 @@ export async function listListings(
         AND sa.grade_label IS NOT DISTINCT FROM sd.grade_label
         AND sa.platform = l.platform
       WHERE l.user_id = ${userId}
-      AND l.listing_status = 'active'
+      AND (
+        l.listing_status = 'active'
+        OR (
+          -- Drained multi-qty listings persist so the user can add certs back to
+          -- the same eBay URL. is_ended is the explicit "close it" flag.
+          l.is_multi_qty = true
+          AND l.is_ended = false
+          AND NOT EXISTS (
+            SELECT 1 FROM listings l3
+            WHERE l3.user_id = ${userId}
+              AND l3.ebay_listing_id IS NOT DISTINCT FROM l.ebay_listing_id
+              AND l3.ebay_listing_url IS NOT DISTINCT FROM l.ebay_listing_url
+              AND l3.listing_status = 'active'
+          )
+        )
+      )
       AND l.platform != 'card_show'
       ${platformCond}
       ${searchCond}
@@ -882,8 +906,12 @@ export async function promoteToMultiQty(userId: string, listingId: string) {
 export async function addCertsToListing(userId: string, listingId: string, certInstanceIds: string[]) {
   if (certInstanceIds.length === 0) throw new AppError(400, 'Pick at least one cert');
   const parent = await loadListingOr404(userId, listingId);
-  if (parent.listing_status !== 'active') throw new AppError(400, 'Parent listing is not active');
   if (!parent.is_multi_qty) throw new AppError(400, 'Parent listing is not multi-qty — promote it first');
+  // Drained multi-qty parents (all rows sold/cancelled) are valid targets so
+  // the user can re-add certs to the same eBay URL without spinning up a
+  // fresh listing. Only `is_ended` groups are rejected — that's the explicit
+  // user-initiated close.
+  if (parent.is_ended) throw new AppError(400, 'This listing has been ended — start a new one to add certs');
 
   const parentCert = await db
     .selectFrom('card_instances as ci')
@@ -1045,4 +1073,62 @@ export async function cancelMultiQtyGroup(userId: string, listingId: string) {
     await logAudit(userId, 'listings', row.id, 'updated', row, { ...row, listing_status: 'cancelled' as const });
   }
   return { cancelled: active.length };
+}
+
+/**
+ * User-initiated close of a persistent multi-qty listing. Flips
+ * `is_ended=true` on every row sharing the group's ebay id/url — sold rows
+ * stay sold (sales trail preserved), the group stops appearing in the
+ * Listings aggregation, and addCertsToListing rejects further adds. This is
+ * a group-level intent flag, not a cert-level state; cert rows keep their
+ * own listing_status. Idempotent — calling on an already-ended group is a
+ * no-op.
+ */
+export async function endMultiQtyListing(userId: string, listingId: string) {
+  const listing = await loadListingOr404(userId, listingId);
+  if (!listing.is_multi_qty) throw new AppError(400, 'Not a multi-qty listing');
+  const keyCol = groupKeyColOf(listing);
+  if (!keyCol) throw new AppError(400, 'Multi-qty listing is missing its group key (ebay id/url)');
+  const keyVal = listing[keyCol] as string;
+
+  const rows = await db
+    .selectFrom('listings')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .where(keyCol, '=', keyVal)
+    .where('is_multi_qty', '=', true)
+    .where('is_ended', '=', false)
+    .execute();
+  if (rows.length === 0) return { ended: 0 };
+
+  // Also cancel any lingering active rows so the sales trail is consistent:
+  // we're closing the URL, so any still-active cert should go cancelled
+  // rather than staying floating.
+  const ids = rows.map(r => r.id);
+  await db
+    .updateTable('listings')
+    .set({
+      is_ended: true,
+      // Only touch listing_status for rows still active — sold/cancelled rows
+      // keep their historical state.
+    })
+    .where('id', 'in', ids)
+    .execute();
+  const activeIds = rows.filter(r => r.listing_status === 'active').map(r => r.id);
+  if (activeIds.length > 0) {
+    await db
+      .updateTable('listings')
+      .set({ listing_status: 'cancelled' })
+      .where('id', 'in', activeIds)
+      .execute();
+  }
+  for (const row of rows) {
+    const after = {
+      ...row,
+      is_ended: true,
+      ...(row.listing_status === 'active' ? { listing_status: 'cancelled' as const } : {}),
+    };
+    await logAudit(userId, 'listings', row.id, 'updated', row, after);
+  }
+  return { ended: rows.length };
 }
