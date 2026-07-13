@@ -1233,7 +1233,7 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
               </div>
               <span className="text-[11px] text-zinc-600">{localCerts.length} listing{localCerts.length !== 1 ? 's' : ''}</span>
             </div>
-            {(canAddCerts || canPromote || canEnd) && (
+            {(canAddCerts || canPromote) && (
               <div className="mt-3 flex items-center gap-2 flex-wrap">
                 {canAddCerts && (
                   <Button type="button" size="sm" variant="secondary" onClick={() => setAddCertOpen(true)}>
@@ -1245,22 +1245,6 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                     {promoting && <Loader2 size={12} className="animate-spin" />}
                     {promoting ? 'Converting…' : 'Convert to multi-qty'}
                   </Button>
-                )}
-                {canEnd && (
-                  endStep === 'confirm' ? (
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-amber-300">End this listing?</span>
-                      <Button type="button" size="sm" variant="ghost" onClick={() => setEndStep(null)}>No</Button>
-                      <Button type="button" size="sm" className="bg-amber-600 hover:bg-amber-500 text-white border-0" disabled={ending} onClick={handleEnd}>
-                        {ending && <Loader2 size={12} className="animate-spin" />}
-                        {ending ? 'Ending…' : 'Yes, end'}
-                      </Button>
-                    </div>
-                  ) : (
-                    <Button type="button" size="sm" variant="ghost" className="text-amber-400 hover:text-amber-300" onClick={() => setEndStep('confirm')}>
-                      End listing
-                    </Button>
-                  )
                 )}
               </div>
             )}
@@ -1318,7 +1302,7 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
         value={price} onChange={(e) => setPrice(e.target.value)} />
 
       <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
-        <div>
+        <div className="flex items-center gap-4">
           {deleteStep === 'confirm' ? (
             <div className="flex items-center gap-2">
               <span className="text-sm text-red-300">
@@ -1343,6 +1327,26 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                 ? 'Cancel this listing'
                 : `Cancel all ${localCerts.length > 1 ? `(${localCerts.length})` : ''}`}
             </button>
+          )}
+          {canEnd && (
+            endStep === 'confirm' ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-amber-300">End this listing?</span>
+                <Button type="button" size="sm" variant="ghost" onClick={() => setEndStep(null)}>No</Button>
+                <Button type="button" size="sm"
+                  className="bg-amber-600 hover:bg-amber-500 text-white border-0"
+                  disabled={ending}
+                  onClick={handleEnd}>
+                  {ending && <Loader2 size={12} className="animate-spin" />}
+                  {ending ? 'Ending…' : 'Yes, end'}
+                </Button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => setEndStep('confirm')}
+                className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-amber-400 transition-colors">
+                End listing
+              </button>
+            )
           )}
         </div>
         <div className="flex items-center gap-2">

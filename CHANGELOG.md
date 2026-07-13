@@ -1,5 +1,23 @@
 # Reactor — Changelog
 
+## July 13, 2026
+
+### Features
+
+**Listings — persistent drained multi-qty listings + explicit End action**
+- Multi-qty listings vanished from the Listings view the moment their last active cert sold/cancelled. Users who wanted to add more certs to the same eBay URL had to create a fresh listing from scratch — losing the URL association and forcing a duplicate on their side of an eBay listing that already existed.
+- Migration 061 adds `listings.is_ended boolean NOT NULL DEFAULT false` (with a partial index on non-ended multi-qty groups for aggregation speed). Applied both local + prod at deploy time.
+- Aggregation query now includes rows where `is_multi_qty = true`, `is_ended = false`, AND no row shares the group's `ebay_listing_id/url` in an active state. `num_listed` uses `FILTER (WHERE listing_status = 'active')` so drained groups show 0 listed / N sold; `cert_details` is filtered similarly so sold certs don't leak into active views. A new `any_listing_id` field surfaces a stable parent listing id from the group so the client can target Add-cert / End on drained rows whose `cert_details` is empty after the FILTER.
+- `addCertsToListing` no longer requires the parent to be active — only rejects if `is_ended=true`. New rows spawn active/multi-qty and share the same eBay URL/id/list_price as the parent.
+- New service `endMultiQtyListing` + route `POST /listings/:id/end-multi-qty`: flips `is_ended=true` on every row sharing the group key, cancels any lingering active certs so the sales trail stays consistent, and leaves sold rows with their historical status intact. Group stops appearing in Listings.
+- Client: Multi-Qty column shows an amber **DRAINED** badge on drained groups (replacing the cyan **MULTI** for those rows). Edit Listing modal grows an "End listing" action at the bottom-left next to Cancel all, with the same red/amber double-confirm pattern (`End this listing? [No] [Yes, end]`) — separates the group-level intent to close from the cert-level cancel flows.
+
+### Fixes
+
+**Raw Inspection — Edit modal qty hint now labels itself "Max N", not "N remaining"**
+- The Edit Inspection Line modal passed `maxQuantity = remaining + editLine.quantity` so the user could keep or reduce the current qty, but the hint text said "N remaining in lot". On a fully allocated lot (e.g. 2026B68: 10/10, 5 sell_raw + 5 grade), editing the grade line rendered "5 remaining" — reading as "5 unallocated cards" when the true unallocated count is 0.
+- Now the hint splits by mode: Add still says "N remaining in lot" (accurate — it's the truly unallocated count), Edit says "Max N (includes this line)" so the user knows the ceiling includes the current allocation and going above N means shrinking another line first.
+
 ## July 10, 2026
 
 ### Features
