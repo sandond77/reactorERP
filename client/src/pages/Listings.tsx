@@ -1393,7 +1393,7 @@ const LISTINGS_FILTER_DEFAULTS = {
   search: '',
 };
 
-const MULTI_QTY_FILTER_OPTIONS = ['Multi-Qty', 'Sold Out', 'Solo'];
+const MULTI_QTY_FILTER_OPTIONS = ['Multi-Qty', 'Sold Out', 'Single'];
 
 export function Listings() {
   const saved = loadFilters('listings', LISTINGS_FILTER_DEFAULTS);
@@ -1461,7 +1461,7 @@ export function Listings() {
     platform:    colMinWidth('Platform',     true,  true),   // ~140
     price:       colMinWidth('Price',        true,  true),   // ~110
     link:        colMinWidth('Listing',      false, false),  // ~85
-    multi:       colMinWidth('Multi-Qty',    false, false),  // ~90
+    multi:       colMinWidth('Status',       false, false),  // ~90
     num_listed:  colMinWidth('# Listed',     true,  true),   // ~130
     num_sold:    colMinWidth('# Sold',       true,  true),   // ~115
   };
@@ -1627,7 +1627,7 @@ export function Listings() {
                 <ColHeader label="Price"      col="list_price"  {...sh} {...rz('price')} align="right" minWidth={MINS.price}
                   filterOptions={filterOptions?.prices} filterSelected={fPrice} onFilterChange={(v) => { setFPrice(v); setPage(1); }} />
                 <ColHeader label="Listing"                       {...sh} {...rz('link')} align="center" minWidth={MINS.link} />
-                <ColHeader label="Multi-Qty"                     {...sh} {...rz('multi')} align="center" minWidth={MINS.multi}
+                <ColHeader label="Status"                        {...sh} {...rz('multi')} align="center" minWidth={MINS.multi}
                   filterOptions={MULTI_QTY_FILTER_OPTIONS} filterSelected={fMultiQty} onFilterChange={(v) => { setFMultiQty(v); setPage(1); }} />
                 <ColHeader label="# Listed"   col="num_listed"  {...sh} {...rz('num_listed')} align="center" minWidth={MINS.num_listed}
                   filterOptions={filterOptions?.num_listed} filterSelected={fNumListed} onFilterChange={(v) => { setFNumListed(v); setPage(1); }} />
@@ -1715,7 +1715,9 @@ export function Listings() {
                           <span className="inline-flex items-center h-5 px-1.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-bold uppercase tracking-wide border border-amber-500/30" title="Multi-qty listing is sold out — Add cert to re-populate, or End Listing to close it">Sold Out</span>
                         ) : row.has_multi_qty ? (
                           <span className="inline-flex items-center h-5 px-1.5 rounded bg-cyan-500/15 text-cyan-300 text-[10px] font-bold uppercase tracking-wide border border-cyan-500/30">Multi</span>
-                        ) : <span className="text-zinc-700">—</span>}
+                        ) : (
+                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-zinc-700/40 text-zinc-400 text-[10px] font-bold uppercase tracking-wide border border-zinc-700" title="Single-cert listing (not multi-qty)">Single</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-center">
                         <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded bg-indigo-500/15 text-indigo-300 text-[11px] font-semibold tabular-nums">
@@ -1956,7 +1958,7 @@ export function Listings() {
               <ColumnFilter options={filterOptions?.num_sold ?? []} selected={fNumSold} onChange={(v) => { setFNumSold(v); setPage(1); }} align="right" />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-zinc-400">Multi-Qty</span>
+              <span className="text-xs text-zinc-400">Status</span>
               <ColumnFilter options={MULTI_QTY_FILTER_OPTIONS} selected={fMultiQty} onChange={(v) => { setFMultiQty(v); setPage(1); }} align="right" />
             </div>
           </FilterDrawer>

@@ -251,7 +251,7 @@ export async function listListings(
     const parts: ReturnType<typeof sql>[] = [];
     if (filters.multi_qty.includes('Multi-Qty')) parts.push(sql`(has_multi_qty AND NOT is_drained_multi_qty)`);
     if (filters.multi_qty.includes('Sold Out'))  parts.push(sql`is_drained_multi_qty`);
-    if (filters.multi_qty.includes('Solo'))      parts.push(sql`NOT has_multi_qty`);
+    if (filters.multi_qty.includes('Single') || filters.multi_qty.includes('Solo')) parts.push(sql`NOT has_multi_qty`);
     if (parts.length === 0) return sql`AND 1=0`;
     return sql`AND (${sql.join(parts, sql` OR `)})`;
   })();
