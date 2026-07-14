@@ -1389,8 +1389,11 @@ const LISTINGS_FILTER_DEFAULTS = {
   fNumSold: null as string[] | null,
   fCardName: null as string[] | null,
   fPrice: null as string[] | null,
+  fMultiQty: null as string[] | null,
   search: '',
 };
+
+const MULTI_QTY_FILTER_OPTIONS = ['Multi-Qty', 'Sold Out', 'Solo'];
 
 export function Listings() {
   const saved = loadFilters('listings', LISTINGS_FILTER_DEFAULTS);
@@ -1405,6 +1408,7 @@ export function Listings() {
   const [fNumSold, setFNumSold] = useState<string[] | null>(saved.fNumSold);
   const [fCardName, setFCardName] = useState<string[] | null>(saved.fCardName);
   const [fPrice, setFPrice] = useState<string[] | null>(saved.fPrice);
+  const [fMultiQty, setFMultiQty] = useState<string[] | null>(saved.fMultiQty);
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
@@ -1444,8 +1448,8 @@ export function Listings() {
   }
 
   useEffect(() => {
-    saveFilters('listings', { sortCol, sortDir, fPlatform, fGrade, fCompany, fPartNumber, fNumListed, fNumSold, fCardName, fPrice, search });
-  }, [sortCol, sortDir, fPlatform, fGrade, fCompany, fPartNumber, fNumListed, fNumSold, fCardName, fPrice, search]);
+    saveFilters('listings', { sortCol, sortDir, fPlatform, fGrade, fCompany, fPartNumber, fNumListed, fNumSold, fCardName, fPrice, fMultiQty, search });
+  }, [sortCol, sortDir, fPlatform, fGrade, fCompany, fPartNumber, fNumListed, fNumSold, fCardName, fPrice, fMultiQty, search]);
 
   const MINS = {
     part:        colMinWidth('Part #',       false, true),   // ~100
@@ -1517,6 +1521,7 @@ export function Listings() {
     num_sold: activeFilter(fNumSold, filterOptions?.num_sold)?.join(','),
     card_names: activeFilter(fCardName, filterOptions?.card_names)?.join(','),
     prices: activeFilter(fPrice, filterOptions?.prices)?.join(','),
+    multi_qty: activeFilter(fMultiQty, MULTI_QTY_FILTER_OPTIONS)?.join(','),
     search: debouncedSearch || undefined,
     listing_type: listingTab,
   };
@@ -1528,7 +1533,7 @@ export function Listings() {
 
   const hasActiveFilters = fPlatform !== null || fGrade !== null || fCompany !== null ||
     fPartNumber !== null || fNumListed !== null || fNumSold !== null ||
-    fCardName !== null || fPrice !== null || !!debouncedSearch;
+    fCardName !== null || fPrice !== null || fMultiQty !== null || !!debouncedSearch;
 
   const sh = { sortCol, sortDir, onSort: handleSort };
 
@@ -1538,7 +1543,7 @@ export function Listings() {
         <h1 className="text-xl font-bold text-zinc-100">Listings</h1>
         <div className="flex items-center flex-wrap gap-3 w-full lg:w-auto justify-end">
           {hasActiveFilters && (
-            <button onClick={() => { setFPlatform(null); setFGrade(null); setFCompany(null); setFPartNumber(null); setFNumListed(null); setFNumSold(null); setFCardName(null); setFPrice(null); setSearch(''); }}
+            <button onClick={() => { setFPlatform(null); setFGrade(null); setFCompany(null); setFPartNumber(null); setFNumListed(null); setFNumSold(null); setFCardName(null); setFPrice(null); setFMultiQty(null); setSearch(''); }}
               className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300">
               <X size={12} /> Clear filters
             </button>
@@ -1568,7 +1573,8 @@ export function Listings() {
               (fPlatform ? 1 : 0) +
               (fPrice ? 1 : 0) +
               (fNumListed ? 1 : 0) +
-              (fNumSold ? 1 : 0)
+              (fNumSold ? 1 : 0) +
+              (fMultiQty ? 1 : 0)
             }
           />
           <Button size="sm" onClick={() => setShowAddModal(true)}>
@@ -1621,7 +1627,8 @@ export function Listings() {
                 <ColHeader label="Price"      col="list_price"  {...sh} {...rz('price')} align="right" minWidth={MINS.price}
                   filterOptions={filterOptions?.prices} filterSelected={fPrice} onFilterChange={(v) => { setFPrice(v); setPage(1); }} />
                 <ColHeader label="Listing"                       {...sh} {...rz('link')} align="center" minWidth={MINS.link} />
-                <ColHeader label="Multi-Qty"                     {...sh} {...rz('multi')} align="center" minWidth={MINS.multi} />
+                <ColHeader label="Multi-Qty"                     {...sh} {...rz('multi')} align="center" minWidth={MINS.multi}
+                  filterOptions={MULTI_QTY_FILTER_OPTIONS} filterSelected={fMultiQty} onFilterChange={(v) => { setFMultiQty(v); setPage(1); }} />
                 <ColHeader label="# Listed"   col="num_listed"  {...sh} {...rz('num_listed')} align="center" minWidth={MINS.num_listed}
                   filterOptions={filterOptions?.num_listed} filterSelected={fNumListed} onFilterChange={(v) => { setFNumListed(v); setPage(1); }} />
                 <ColHeader label="# Sold"     col="num_sold"    {...sh} {...rz('num_sold')} align="center" minWidth={MINS.num_sold}
@@ -1705,7 +1712,7 @@ export function Listings() {
                       </td>
                       <td className="px-3 py-2 text-center">
                         {row.is_drained_multi_qty ? (
-                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-bold uppercase tracking-wide border border-amber-500/30" title="Drained multi-qty listing — Add cert to re-populate, or End Listing to close it">Drained</span>
+                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-bold uppercase tracking-wide border border-amber-500/30" title="Multi-qty listing is sold out — Add cert to re-populate, or End Listing to close it">Sold Out</span>
                         ) : row.has_multi_qty ? (
                           <span className="inline-flex items-center h-5 px-1.5 rounded bg-cyan-500/15 text-cyan-300 text-[10px] font-bold uppercase tracking-wide border border-cyan-500/30">Multi</span>
                         ) : <span className="text-zinc-700">—</span>}
@@ -1947,6 +1954,10 @@ export function Listings() {
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-zinc-400"># Sold</span>
               <ColumnFilter options={filterOptions?.num_sold ?? []} selected={fNumSold} onChange={(v) => { setFNumSold(v); setPage(1); }} align="right" />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-zinc-400">Multi-Qty</span>
+              <ColumnFilter options={MULTI_QTY_FILTER_OPTIONS} selected={fMultiQty} onChange={(v) => { setFMultiQty(v); setPage(1); }} align="right" />
             </div>
           </FilterDrawer>
         );

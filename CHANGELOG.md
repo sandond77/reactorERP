@@ -1,5 +1,18 @@
 # Reactor — Changelog
 
+## July 14, 2026
+
+### Features
+
+**Listings — Multi-Qty column now filterable + "Drained" renamed to "Sold Out"**
+- The Multi-Qty column had a badge but no way to filter by it — hard to isolate persistent sold-out groups (the ones waiting for Add cert or End) from active multi-qty and solo listings when the table gets big.
+- Added a header-dropdown filter on the Multi-Qty column with three options: **Multi-Qty** (active multi-qty groups with at least one live cert), **Sold Out** (persistent drained groups from the July 13 feature), **Solo** (single-cert listings). Selection persists via `saveFilters`, counts into the Filters-drawer badge, and clears with "Clear filters". Also mirrored in the Filters drawer alongside `# Listed` / `# Sold`.
+- Server accepts `multi_qty` CSV param; the aggregation adds a HAVING-style condition that maps display labels → row-level `has_multi_qty` / `is_drained_multi_qty` flags:
+  - `Multi-Qty` → `has_multi_qty AND NOT is_drained_multi_qty`
+  - `Sold Out` → `is_drained_multi_qty`
+  - `Solo` → `NOT has_multi_qty`
+- Renamed the badge label from **DRAINED** to **SOLD OUT** (still amber, same tooltip). "Sold out" reads more naturally for the user's mental model — the underlying `is_drained_multi_qty` field name is internal and stays.
+
 ## July 13, 2026
 
 ### Features

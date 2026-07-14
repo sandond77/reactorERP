@@ -164,7 +164,7 @@ export async function getListingFilterOptions(userId: string) {
 
 export async function listListings(
   userId: string,
-  filters: { platforms?: string[]; search?: string; grades?: string[]; companies?: string[]; part_numbers?: string[]; num_listed?: string[]; num_sold?: string[]; card_names?: string[]; prices?: string[]; listing_type?: 'graded' | 'raw' | 'graded_set' | 'raw_set' },
+  filters: { platforms?: string[]; search?: string; grades?: string[]; companies?: string[]; part_numbers?: string[]; num_listed?: string[]; num_sold?: string[]; card_names?: string[]; prices?: string[]; multi_qty?: string[]; listing_type?: 'graded' | 'raw' | 'graded_set' | 'raw_set' },
   pagination: PaginationParams,
   sortBy?: string,
   sortDir?: 'asc' | 'desc'
@@ -240,6 +240,21 @@ export async function listListings(
         ? sql`AND 1=0`
         : sql`AND num_sold IN (${sql.join(filters.num_sold.map((n) => sql.val(Number(n))))})`
       : sql``;
+
+  // Multi-qty filter maps display labels → grouped-row flags:
+  //   'Multi-Qty' → has_multi_qty AND NOT is_drained_multi_qty (active multi-qty)
+  //   'Sold Out'  → is_drained_multi_qty (persistent drained group)
+  //   'Solo'      → NOT has_multi_qty (single-cert listings)
+  const multiQtyCond = (() => {
+    if (filters.multi_qty === undefined) return sql``;
+    if (filters.multi_qty.length === 0) return sql`AND 1=0`;
+    const parts: ReturnType<typeof sql>[] = [];
+    if (filters.multi_qty.includes('Multi-Qty')) parts.push(sql`(has_multi_qty AND NOT is_drained_multi_qty)`);
+    if (filters.multi_qty.includes('Sold Out'))  parts.push(sql`is_drained_multi_qty`);
+    if (filters.multi_qty.includes('Solo'))      parts.push(sql`NOT has_multi_qty`);
+    if (parts.length === 0) return sql`AND 1=0`;
+    return sql`AND (${sql.join(parts, sql` OR `)})`;
+  })();
 
   const listingTypeCond =
     filters.listing_type === 'raw'        ? sql`AND sd.id IS NULL AND l.listing_group_id IS NULL` :
@@ -452,7 +467,7 @@ export async function listListings(
     )
     SELECT *, COUNT(*) OVER ()::int AS total_count
     FROM grouped
-    WHERE 1=1 ${numListedCond} ${numSoldCond}
+    WHERE 1=1 ${numListedCond} ${numSoldCond} ${multiQtyCond}
     ORDER BY ${sql.raw(sortCol)} ${sortDirSafe}
     LIMIT ${pagination.limit}
     OFFSET ${getPaginationOffset(pagination.page, pagination.limit)}
