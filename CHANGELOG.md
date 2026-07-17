@@ -1,5 +1,19 @@
 # Reactor — Changelog
 
+## July 17, 2026
+
+### Features
+
+**Grading picker (shared) — paste a list of cert numbers, they get parsed and matched exactly**
+- Users had to type or paste cert numbers one at a time. Pasting `159722711 159722712 159722714 ...` into the picker returned "No unsold graded cards available" because `fuzzyNameClause` was doing an AND-of-substrings — every token had to appear in the same card's name or cert, which no real card ever satisfies for a multi-cert list.
+- `fuzzyNameClause` now detects paste-list mode: if the caller gave 2+ tokens AND every token is pure digits (≥3 chars), it switches to `sd.cert_number = 't1' OR sd.cert_number = 't2' OR ...` — exact equality, no wildcards. Card-name searches with numeric tokens (like "Base Set 4") stay on the fuzzy AND path since not every token is pure digits.
+- Split delimiter widened to accept whitespace, comma, and semicolon so pasted lists from spreadsheets or plain text all work regardless of format.
+- Because `fuzzyNameClause` is a shared helper, the paste behavior automatically lights up on every picker that uses it (Add to Card Show slabs picker, Grading batch add-cert search, etc.). Placeholder on the Add to Card Show search input updated to hint at the new behavior.
+- Two safeguards preserved: nothing is auto-selected — user still has to check each cert individually before Set Prices unlocks. And the paste path uses EXACT equality, not fuzzy match, so a typo cert number just doesn't return a row (no false-positive collisions).
+
+**Card Show — cert-selection cap raised from 10 to 25**
+- Bulk pastes of 10–20 certs at a time were hitting the cap before the user finished selecting from the returned matches. Bumped to 25 to accommodate typical show-prep batch sizes. Header text (`"N of 25 selected"` / `"Select up to 25 cards"`) picks up the change automatically since it references the same constant.
+
 ## July 14, 2026
 
 ### Features

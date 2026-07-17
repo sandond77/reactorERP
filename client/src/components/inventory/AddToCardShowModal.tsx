@@ -40,7 +40,7 @@ interface SelectedCard {
   _type: 'graded' | 'raw';
 }
 
-const MAX_SELECT = 10;
+const MAX_SELECT = 25;
 
 
 export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
@@ -237,7 +237,7 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
           type="text"
           value={search}
           onChange={(e) => handleSearch(e.target.value)}
-          placeholder={tab === 'graded' ? 'Search by card name or cert…' : 'Search by card name…'}
+          placeholder={tab === 'graded' ? 'Search card name or paste certs (space / comma / newline separated)' : 'Search by card name…'}
           className="w-full pl-10 pr-4 py-2.5 text-sm bg-zinc-800 border border-zinc-700 rounded-xl text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           autoFocus
         />

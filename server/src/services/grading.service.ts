@@ -3,11 +3,27 @@ import { db } from '../config/database';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
 
-// Build a word-split fuzzy search clause: each word must appear in the name (AND logic)
+// Build a word-split fuzzy search clause.
+//
+// Default: each token must appear in the name (AND logic) — good for
+// card-name searches like "Charizard EX Base Set".
+//
+// Special-case: if the caller pasted 2+ tokens AND every token looks
+// like a pure cert number (>=3 digits, digits only), switch to an
+// OR match against certExpr with EXACT equality. Otherwise the AND
+// joins reduce to zero for any real pasted cert list. Split delimiter
+// widens to whitespace / comma / semicolon so a pasted "1,2,3" or
+// "1; 2; 3" or "1 2 3" all work.
 function fuzzyNameClause(search: string | undefined, nameExpr: string, certExpr?: string) {
   if (!search) return sql``;
-  const words = search.trim().split(/\s+/).filter(Boolean);
+  const words = search.trim().split(/[\s,;]+/).filter(Boolean);
   if (words.length === 0) return sql``;
+
+  if (certExpr && words.length >= 2 && words.every(w => /^\d{3,}$/.test(w))) {
+    const or = words.map(w => sql`${sql.raw(certExpr)} = ${w}`);
+    return sql`AND (${sql.join(or, sql` OR `)})`;
+  }
+
   const parts = words.map((w) => {
     const term = `%${w}%`;
     if (certExpr) {
