@@ -1126,6 +1126,19 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       } catch { /* enrichment failure is non-fatal */ }
     }
 
+    // Hard guard: an unlinked card (no catalog_id) MUST have a card_name_override,
+    // otherwise the inventory summary collapses every catalog-less row into a
+    // single "null|null|null|EN" bucket (grouping key in cards.service.ts).
+    // Rejecting here forces the agent to supply per-card identity even when
+    // catalog lookup fails, which is exactly the case that triggered the
+    // 4-cards-under-1-part-number bug in the July 20 mobile agent report.
+    if (!resolvedCatalogId && !resolvedCardName) {
+      return {
+        success: false,
+        error: 'add_card_to_purchase requires card_name_override when catalog_id is not provided. Set card_name_override to the exact card name the user gave you so each unlinked card gets its own inventory row instead of collapsing into a single "unnamed" bucket.',
+      };
+    }
+
     const card = await createCard(userId, {
       raw_purchase_id: raw_purchase_id as string,
       catalog_id: resolvedCatalogId,
@@ -2038,8 +2051,11 @@ Trade:
 add_graded_card: grading company, grade (number), cert number, purchase_cost (in CENTS e.g. 50000=$500), currency, purchased_at (date).
   Card name: if lookup_catalog returned an established_name for this card, use that exactly as card_name_override. Only build a PSA-format name when there is NO catalog match — format: ALL CAPS "YEAR POKEMON LANGUAGE SET_NAME CARD_NUMBER CARD_NAME EDITION". Example: "2009 POKEMON JAPANESE SOULSILVER COLLECTION 029 LUGIA LEGEND-HOLO 1ST EDITION". No "#", spell out "1ST EDITION", no abbreviations. Never ask user for format.
 
-add_card_to_purchase: card name, purchase_cost (cents), condition, decision.
-  Card name: if lookup_catalog returned an established_name for this card, use that exactly as card_name_override. If catalog match exists but no established_name, leave card_name_override empty (catalog name will be used). Only set card_name_override when there is no catalog match.
+add_card_to_purchase: card name, purchase_cost (cents), condition, decision. **Call ONCE per unique card** — do not batch multiple distinct cards into a single call with a higher quantity. Quantity > 1 means N COPIES of THE SAME CARD, not N different cards.
+  Card name rules:
+    - If lookup_catalog returned an established_name, use that exactly as card_name_override.
+    - If catalog match exists but no established_name, leave card_name_override empty (catalog name will be used).
+    - **If NO catalog match, card_name_override is REQUIRED — set it to the exact card name the user gave you.** Server will reject the call otherwise. Without this, every unlinked card collapses into a single "unnamed" bucket in the inventory summary — 4 distinct cards look like 1 row with qty 4.
 
 record_sale: card_instance_id (from list_inventory), platform, sale_price (dollars e.g. 150.00).
 
