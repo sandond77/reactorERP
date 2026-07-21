@@ -2499,7 +2499,7 @@ export function Sales() {
 
   useEffect(() => {
     saveFilters('sales', { sortCol, sortDir, fPlatform, fSoldDates, cardType, search });
-  }, [sortCol, sortDir, fPlatform, cardType, search]);
+  }, [sortCol, sortDir, fPlatform, fSoldDates, cardType, search]);
 
   const handleSort = useCallback((col: string) => {
     setSortCol((prev) => {

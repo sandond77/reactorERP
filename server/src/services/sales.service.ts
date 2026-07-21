@@ -324,7 +324,10 @@ export async function listSales(
 
   const total = Number(
     (await baseQuery()
-      .select((eb) => eb.fn.count<number>('s.id').as('count'))
+      // DISTINCT s.id defends against join fanout — inner join on ci is 1:1
+      // today, but slab_details / raw_purchases and future joins could each
+      // introduce N-per-sale rows and silently inflate the count.
+      .select((eb) => eb.fn.count<number>('s.id').distinct().as('count'))
       .executeTakeFirst())?.count ?? 0
   );
 
