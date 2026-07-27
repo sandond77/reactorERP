@@ -2602,14 +2602,6 @@ function PasteOrderList({
     }
   }
 
-  async function handleImagePaste(e: React.ClipboardEvent<HTMLDivElement>) {
-    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
-    if (!item) return;
-    e.preventDefault();
-    const file = item.getAsFile();
-    if (!file) return;
-    await loadImage(file);
-  }
   async function handleImageDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     const file = e.dataTransfer.files[0];
@@ -2620,10 +2612,44 @@ function PasteOrderList({
     const media_type = (file.type === 'image/png' ? 'image/png'
       : file.type === 'image/webp' ? 'image/webp'
       : 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp';
-    const buf = await file.arrayBuffer();
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    // FileReader → base64. Handles large images correctly;
+    // `btoa(String.fromCharCode(...buf))` throws RangeError past ~100KB
+    // because of the argument-spread stack limit.
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    const b64 = dataUrl.split(',')[1] ?? '';
     setPasteImage({ data: b64, media_type });
   }
+
+  // Document-level paste listener while the Paste tab is mounted — a bare
+  // `<div>` isn't focusable, so a paste event never fires on it unless the
+  // user first clicks in the textarea. Listening at document level lets
+  // Ctrl+V land anywhere in the modal and still route the image in.
+  useEffect(() => {
+    async function onPaste(e: ClipboardEvent) {
+      // If the paste target is a text input (textarea, contenteditable),
+      // don't hijack — the user is typing / pasting text, let it flow.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT' || target.isContentEditable)) {
+        // But still hijack for image payloads even from a textarea —
+        // pasting an image into text-only fields is meaningless.
+        const hasImage = Array.from(e.clipboardData?.items ?? []).some(i => i.type.startsWith('image/'));
+        if (!hasImage) return;
+      }
+      const item = Array.from(e.clipboardData?.items ?? []).find(i => i.type.startsWith('image/'));
+      if (!item) return;
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (!file) return;
+      await loadImage(file);
+    }
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, []);
 
   const matchedCount = pasteResults.filter(r => r.matched).length;
   const needsReview = pasteResults
@@ -2643,10 +2669,9 @@ function PasteOrderList({
         className="w-full text-sm bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 font-mono"
       />
       <div
-        onPaste={handleImagePaste}
         onDrop={handleImageDrop}
         onDragOver={(e) => e.preventDefault()}
-        className={cn('border-2 border-dashed rounded-lg px-3 py-4 text-center text-xs transition-colors',
+        className={cn('border-2 border-dashed rounded-lg px-3 py-4 text-center text-xs transition-colors space-y-2',
           pasteImage ? 'border-indigo-500/60 bg-indigo-500/5 text-indigo-300' : 'border-zinc-700 text-zinc-500 hover:border-zinc-600')}
       >
         {pasteImage ? (
@@ -2658,7 +2683,18 @@ function PasteOrderList({
             </button>
           </div>
         ) : (
-          <>Drop or paste a screenshot here</>
+          <>
+            <div>Ctrl+V to paste a screenshot, or drop an image here</div>
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-indigo-400 hover:text-indigo-300 cursor-pointer">
+              or upload a file
+              <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (file) await loadImage(file);
+                  e.target.value = '';
+                }} />
+            </label>
+          </>
         )}
       </div>
       <div className="flex justify-end">
