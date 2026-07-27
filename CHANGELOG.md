@@ -1,5 +1,19 @@
 # Reactor — Changelog
 
+## July 21, 2026
+
+### Features
+
+**Sales — "Combined Order" bulk sale flow for eBay multi-listing purchases**
+- Multiple eBay listings bought by one buyer with combined shipping had no first-class flow — users were recording each listing as its own single sale (10 clicks per order) or bending the "Set Listing" flow (which forces the total to split evenly across certs). Combined Order is a proper 3rd bulk mode alongside Card Show Bulk Sale and eBay Set Listing.
+- New **Combined Order** tile appears in the type-picker when platform = eBay, next to "Set Listing". Enters the same bulk cart, but with different semantics — user picks 2+ individual live listings by name (or paste an eBay URL), each cert keeps its own list_price as the sale price, and one order-wide net total drives the proportional fee split.
+- Review page shows the card-show-style line-by-line grid but with **Card | Listed | Strike** columns. Strike = `listed × (order_net / total_listed)`. Top box: Sum of Listed (auto), Order Net Total (input), net ratio %. Plus Order # + Order Details Link (same shared fields as Set Listing).
+- Confirm page swaps the summary card ("Total Strike" → "Total Listed", adds Net Total + Fees rows) and switches the per-cert grid to **Card | Listed | Fees | Net** — a proper pick list for shipping.
+- Submit computes each cert's `sale_price = listed_price` and `platform_fees = listed_price / total_listed × total_fees`. Remainder cents from `Math.floor` park on the first row so `Σ(fees) === total_fees` exactly. Server hit is the existing `POST /sales/batch`; no new endpoint.
+- Per-cert override for order details when eBay splits a combined-shipping order into multiple order-detail URLs (rare but happens): a "eBay split this order" checkbox in the Combined Order review exposes inline `Order # override` + `Order details URL override` inputs on each cart row. Blank rows fall back to the shared values at the top. Server extended: `recordBulkSale` items schema accepts optional `unique_id` and `order_details_link` per item, and `recordSale` receives `item.unique_id ?? shared.unique_id` / `item.order_details_link ?? shared.order_details_link`.
+- Cart-entry prefill: when Combined Order is active, the sticker cell of a newly-added cart entry seeds from the cert's `listed_price` instead of `card_show_price` (Set Listing / Card Show flows are untouched).
+- Validation on the Review button: rejects with named cart items if any row lacks a `listed_price` (i.e. the underlying listing has no active price); rejects if `Order Net Total` is empty. Prevents zero-cent divide edge cases and partial-write hazards before hitting the server.
+
 ## July 17, 2026
 
 ### Features

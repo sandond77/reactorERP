@@ -84,6 +84,11 @@ export async function recordBulkSale(req: Request, res: Response, next: NextFunc
         sale_price: z.number().int().nonnegative(),
         platform_fees: z.number().int().nonnegative().default(0),
         quantity: z.coerce.number().int().positive().optional(),
+        // Per-item override for order metadata — Combined Order flow uses
+        // this when eBay splits a buyer's combined-shipping order into
+        // multiple order-detail URLs. Empty falls back to the shared value.
+        order_details_link: z.string().optional(),
+        unique_id: z.string().optional(),
       })).min(1),
       platform: z.enum(['ebay', 'card_show', 'tcgplayer', 'facebook', 'instagram', 'local', 'other']),
       card_show_id: z.string().uuid().optional(),

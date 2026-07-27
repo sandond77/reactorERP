@@ -199,7 +199,18 @@ export async function recordSale(userId: string, input: RecordSaleInput) {
 
 export async function recordBulkSale(
   userId: string,
-  items: Array<{ card_instance_id: string; listing_id?: string; sale_price: number; platform_fees?: number; quantity?: number }>,
+  items: Array<{
+    card_instance_id: string;
+    listing_id?: string;
+    sale_price: number;
+    platform_fees?: number;
+    quantity?: number;
+    // Optional per-item overrides for order metadata. Used by the Combined
+    // Order flow when eBay splits a buyer's combined-shipping order into
+    // multiple order-detail URLs. When omitted the shared value applies.
+    order_details_link?: string;
+    unique_id?: string;
+  }>,
   shared: {
     platform: ListingPlatform;
     card_show_id?: string;
@@ -250,8 +261,8 @@ export async function recordBulkSale(
       platform_fees: item.platform_fees ?? 0,
       platform: shared.platform,
       card_show_id: shared.card_show_id,
-      unique_id: shared.unique_id,
-      order_details_link: shared.order_details_link,
+      unique_id: item.unique_id ?? shared.unique_id,
+      order_details_link: item.order_details_link ?? shared.order_details_link,
       currency: shared.currency,
       sold_at: shared.sold_at,
       unique_id_2: shared.unique_id_2,

@@ -292,6 +292,22 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   }, [selectedRawCard?.id, selectedCard?.id, saleMode]);
   const [orderEarnings, setOrderEarnings] = useState('');
   const [ebayLink, setEbayLink] = useState('');
+  // Bulk pricing mode drives the eBay bulk flow shape:
+  //   'split' → Set Listing: user enters total strike + total after fees,
+  //             price split evenly across N cards on one listing group.
+  //   'per_item' → Combined Order: N independent listings bought by one
+  //                buyer with combined shipping. Sale price for each cert
+  //                is its own list_price; user enters ONE net total for
+  //                the whole order and fees are auto-distributed
+  //                proportionally to each cert's list_price share.
+  const [bulkPricingMode, setBulkPricingMode] = useState<'split' | 'per_item'>('split');
+  // Combined Order: when eBay splits a buyer's combined-shipping order into
+  // multiple order-detail URLs, the user needs a per-cert override for
+  // order # + order details link. Toggle exposes an inline column in the
+  // review page; when a row's override is blank the shared value at the
+  // top of the form applies.
+  const [splitOrderDetails, setSplitOrderDetails] = useState(false);
+  const [orderDetailsOverrides, setOrderDetailsOverrides] = useState<Record<string, { unique_id?: string; order_details_link?: string }>>({});
   const [notes, setNotes] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [soldAt, setSoldAt] = useState('');
@@ -748,10 +764,18 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         )}
         {platform === 'ebay' && (
           <button type="button"
-            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkUrl(''); setBulkSearchMode('search'); setStep('bulk-search'); }}
+            onClick={() => { setBulkPricingMode('split'); setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkUrl(''); setBulkSearchMode('search'); setStep('bulk-search'); }}
             className="rounded-xl border-2 border-teal-600/60 bg-teal-500/10 px-4 py-5 text-left hover:bg-teal-500/20 transition-colors">
             <p className="text-sm font-semibold text-teal-300">Set Listing</p>
             <p className="text-xs text-zinc-500 mt-0.5">Multiple cards, total split evenly</p>
+          </button>
+        )}
+        {platform === 'ebay' && (
+          <button type="button"
+            onClick={() => { setBulkPricingMode('per_item'); setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkUrl(''); setBulkSearchMode('search'); setOrderEarnings(''); setStrikePrice(''); setSplitOrderDetails(false); setOrderDetailsOverrides({}); setStep('bulk-search'); }}
+            className="rounded-xl border-2 border-sky-600/60 bg-sky-500/10 px-4 py-5 text-left hover:bg-sky-500/20 transition-colors">
+            <p className="text-sm font-semibold text-sky-300">Combined Order</p>
+            <p className="text-xs text-zinc-500 mt-0.5">Multiple listings, one buyer</p>
           </button>
         )}
       </div>
@@ -1537,7 +1561,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-3">
         <div className="flex items-center gap-2 mb-1">
           <button type="button" onClick={() => setStep('type')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
-          <span className="text-xs text-zinc-600">{platform === 'ebay' ? 'eBay · Set Listing' : 'Card Show · Bulk Sale'}</span>
+          <span className="text-xs text-zinc-600">{
+            platform === 'ebay'
+              ? (bulkPricingMode === 'per_item' ? 'eBay · Combined Order' : 'eBay · Set Listing')
+              : 'Card Show · Bulk Sale'
+          }</span>
         </div>
 
         {bulkIsEbay && (
@@ -1595,7 +1623,13 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   onClick={async () => {
                     if (added) return;
                     const buildEntry = (row: SlabResult) => {
-                      const stickerStr = row.card_show_price ? (row.card_show_price / 100).toFixed(2) : '';
+                      // Combined Order: sticker prefill comes from the eBay
+                      // list_price of the row's active listing (each cert has
+                      // its own). Card show + Set Listing keep the existing
+                      // card_show_price prefill.
+                      const isCombined = platform === 'ebay' && bulkPricingMode === 'per_item';
+                      const stickerSrc = isCombined ? (row.listed_price ?? row.card_show_price) : row.card_show_price;
+                      const stickerStr = stickerSrc ? (stickerSrc / 100).toFixed(2) : '';
                       const discPct = parseDollars(bulkDiscount);
                       const finalStr = stickerStr && discPct > 0
                         ? (parseDollars(stickerStr) * (1 - discPct / 100)).toFixed(2)
@@ -1859,7 +1893,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // ── Step: bulk-review ────────────────────────────────────────────────────────
 
   if (step === 'bulk-review') {
-    const isEbaySet = platform === 'ebay';
+    const isEbaySet = platform === 'ebay' && bulkPricingMode === 'split';
+    const isEbayCombined = platform === 'ebay' && bulkPricingMode === 'per_item';
     const n = bulkCart.length;
 
     // For eBay set listings: total inputs that divide evenly per card
@@ -1871,6 +1906,14 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
     // Card show total (manual per-card pricing)
     const total = bulkCart.reduce((s, item) => s + toCents(item.final_price_input), 0);
+
+    // Combined Order: sum of listed prices = total strike; user-entered
+    // orderEarnings (net after fees) drives the proportional split. Each
+    // cert's strike sale_price = listed × (net / totalListed).
+    const combinedTotalListed = bulkCart.reduce((s, item) => s + (item.listed_price ?? 0), 0);
+    const combinedNetCents = orderEarnings ? toCents(orderEarnings) : combinedTotalListed;
+    const combinedRatio = combinedTotalListed > 0 ? combinedNetCents / combinedTotalListed : 1;
+    const combinedTotalFeesCents = Math.max(0, combinedTotalListed - combinedNetCents);
 
     function updateReviewField(entryId: string, field: 'sticker_price_input' | 'final_price_input', val: string) {
       setBulkCart(prev => prev.map(c => {
@@ -1888,11 +1931,15 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       }));
     }
 
+    const bulkHeaderLabel = isEbaySet ? 'eBay · Set Listing · Review'
+      : isEbayCombined ? 'eBay · Combined Order · Review'
+      : 'Card Show · Bulk Sale · Review';
+
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2 mb-1">
           <button type="button" onClick={() => setStep('bulk-search')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
-          <span className="text-xs text-zinc-600">{isEbaySet ? 'eBay · Set Listing · Review' : 'Card Show · Bulk Sale · Review'}</span>
+          <span className="text-xs text-zinc-600">{bulkHeaderLabel}</span>
         </div>
 
         {isEbaySet ? (
@@ -1926,6 +1973,55 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             <Input label="Order #" placeholder="e.g. eBay order number"
               value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
           </div>
+        ) : isEbayCombined ? (
+          /* ── eBay Combined Order: one net total, proportional per-cert split ── */
+          <div className="space-y-3">
+            <div className="p-3 bg-zinc-800/50 border border-zinc-700 rounded-lg">
+              <p className="text-xs font-medium text-zinc-400 mb-2">
+                Combined Order — {n} listing{n !== 1 ? 's' : ''} on one order. Each cert's Strike is auto-derived from its Listed price, proportional to the order Net Total.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sum of Listed</label>
+                  <p className="mt-1 h-[38px] flex items-center px-3 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300 tabular-nums">
+                    ${(combinedTotalListed / 100).toFixed(2)}
+                  </p>
+                </div>
+                <Input label="Order Net Total (after fees)" type="text" inputMode="decimal" placeholder="0.00"
+                  value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
+              </div>
+              {orderEarnings && combinedTotalListed > 0 && (
+                <p className="text-xs text-zinc-500 mt-2">
+                  Total fees: <span className="text-amber-400">${(combinedTotalFeesCents / 100).toFixed(2)}</span>
+                  {' · '}
+                  Net ratio: <span className="text-zinc-300">{(combinedRatio * 100).toFixed(1)}%</span>
+                </p>
+              )}
+            </div>
+            <Input label="eBay Order Details Link" type="url" placeholder="https://www.ebay.com/…"
+              value={ebayLink}
+              onChange={(e) => {
+                const val = e.target.value;
+                setEbayLink(val);
+                if (val && !orderNumber) {
+                  const parsed = parseEbayOrderId(val);
+                  if (parsed) setOrderNumber(parsed);
+                }
+              }} />
+            <Input label="Order #" placeholder="e.g. eBay order number"
+              value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
+            <label className="flex items-start gap-2 rounded-lg bg-zinc-800/40 border border-zinc-700/40 px-3 py-2 cursor-pointer hover:border-zinc-600 transition-colors">
+              <input type="checkbox" checked={splitOrderDetails}
+                onChange={(e) => setSplitOrderDetails(e.target.checked)}
+                className="mt-0.5 accent-indigo-500" />
+              <div className="text-[11px] leading-relaxed">
+                <span className="text-zinc-200 font-medium">eBay split this order</span>
+                <p className="text-zinc-500 mt-0.5">
+                  Applies different order # / URL per cert. Blank rows fall back to the shared values above.
+                </p>
+              </div>
+            </label>
+          </div>
         ) : (
           /* ── Card Show: per-card manual pricing ── */
           <div className="flex items-end gap-3">
@@ -1951,16 +2047,24 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
         <div className="rounded-lg border border-zinc-700 overflow-hidden">
           <div className={cn('grid gap-x-2 px-3 py-2 bg-zinc-900 border-b border-zinc-700',
-            isEbaySet ? 'grid-cols-[1fr_auto]' : 'grid-cols-[1fr_6rem_6rem_4rem]')}>
+            isEbaySet ? 'grid-cols-[1fr_auto]'
+            : isEbayCombined ? 'grid-cols-[1fr_6rem_6rem]'
+            : 'grid-cols-[1fr_6rem_6rem_4rem]')}>
             <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Card</span>
-            {isEbaySet
-              ? <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Per-Card</span>
-              : <>
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Sticker</span>
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Final</span>
-                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Disc.</span>
-                </>
-            }
+            {isEbaySet ? (
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Per-Card</span>
+            ) : isEbayCombined ? (
+              <>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Listed</span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Strike</span>
+              </>
+            ) : (
+              <>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Sticker</span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Final</span>
+                <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Disc.</span>
+              </>
+            )}
           </div>
           <div className="max-h-[280px] overflow-y-auto">
           {bulkCart.map((item) => {
@@ -1969,7 +2073,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             const discountPct = sticker > 0 ? Math.round((1 - final / sticker) * 100) : 0;
             return (
               <div key={item.cart_entry_id} className={cn('gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0 items-start',
-                isEbaySet ? 'flex items-center justify-between' : 'grid grid-cols-[1fr_6rem_6rem_4rem]')}>
+                isEbaySet ? 'flex items-center justify-between'
+                : isEbayCombined ? 'grid grid-cols-[1fr_6rem_6rem] items-center'
+                : 'grid grid-cols-[1fr_6rem_6rem_4rem]')}>
                 <div className="min-w-0">
                   <p className="text-sm text-zinc-200 leading-snug">
                     {item.card_name ?? '—'}
@@ -1990,6 +2096,35 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   <p className="text-sm tabular-nums text-zinc-400 shrink-0">
                     {strikePrice ? `$${perCardStrike}` : '—'}
                   </p>
+                ) : isEbayCombined ? (
+                  <>
+                    <p className="text-sm tabular-nums text-zinc-400 text-right">
+                      {item.listed_price != null ? `$${(item.listed_price / 100).toFixed(2)}` : '—'}
+                    </p>
+                    <p className="text-sm tabular-nums text-zinc-100 text-right">
+                      {item.listed_price != null
+                        ? `$${((item.listed_price * combinedRatio) / 100).toFixed(2)}`
+                        : '—'}
+                    </p>
+                    {splitOrderDetails && (
+                      <div className="col-span-3 mt-1.5 grid grid-cols-2 gap-2">
+                        <input type="text" placeholder="Order # override (optional)"
+                          value={orderDetailsOverrides[item.cart_entry_id]?.unique_id ?? ''}
+                          onChange={(e) => setOrderDetailsOverrides(prev => ({
+                            ...prev,
+                            [item.cart_entry_id]: { ...prev[item.cart_entry_id], unique_id: e.target.value },
+                          }))}
+                          className="text-[11px] bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono" />
+                        <input type="url" placeholder="Order details URL override (optional)"
+                          value={orderDetailsOverrides[item.cart_entry_id]?.order_details_link ?? ''}
+                          onChange={(e) => setOrderDetailsOverrides(prev => ({
+                            ...prev,
+                            [item.cart_entry_id]: { ...prev[item.cart_entry_id], order_details_link: e.target.value },
+                          }))}
+                          className="text-[11px] bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-100 focus:outline-none focus:border-indigo-500" />
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <>
                     <div className="flex items-center justify-end gap-0.5">
@@ -2019,19 +2154,31 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           })}
           </div>
           <div className={cn('gap-x-2 px-3 py-2.5 bg-zinc-900/50 border-t border-zinc-700',
-            isEbaySet ? 'flex items-center justify-between' : 'grid grid-cols-[1fr_6rem_6rem_4rem]')}>
+            isEbaySet ? 'flex items-center justify-between'
+            : isEbayCombined ? 'grid grid-cols-[1fr_6rem_6rem] items-center'
+            : 'grid grid-cols-[1fr_6rem_6rem_4rem]')}>
             <p className="text-xs font-semibold text-zinc-400">{n} card{n !== 1 ? 's' : ''}</p>
-            {isEbaySet
-              ? <p className="text-sm font-bold text-zinc-100 tabular-nums">
-                  {strikePrice ? `$${strikePrice} total` : '—'}
+            {isEbaySet ? (
+              <p className="text-sm font-bold text-zinc-100 tabular-nums">
+                {strikePrice ? `$${strikePrice} total` : '—'}
+              </p>
+            ) : isEbayCombined ? (
+              <>
+                <p className="text-sm font-bold text-zinc-400 text-right tabular-nums">
+                  ${(combinedTotalListed / 100).toFixed(2)}
                 </p>
-              : <><span /><span /><p className="text-sm font-bold text-zinc-100 text-right tabular-nums col-start-3">${(total / 100).toFixed(2)}</p></>
-            }
+                <p className="text-sm font-bold text-zinc-100 text-right tabular-nums">
+                  ${(combinedNetCents / 100).toFixed(2)}
+                </p>
+              </>
+            ) : (
+              <><span /><span /><p className="text-sm font-bold text-zinc-100 text-right tabular-nums col-start-3">${(total / 100).toFixed(2)}</p></>
+            )}
           </div>
         </div>
 
-        {/* Card show fields (non-eBay only) */}
-        {!isEbaySet && (
+        {/* Card show fields (card-show mode only) */}
+        {!isEbaySet && !isEbayCombined && (
           <>
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Card Show</label>
@@ -2086,6 +2233,19 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     toast.error('Enter a total strike price (0 is OK for giveaways)');
                     return;
                   }
+                } else if (isEbayCombined) {
+                  // Combined Order: only Order Net Total is required.
+                  // Per-cert prices are auto-derived from list_price × ratio.
+                  if (!orderEarnings.trim() || !/\d/.test(orderEarnings) || parseDollars(orderEarnings) < 0) {
+                    toast.error('Enter the Order Net Total (0 is OK for giveaways)');
+                    return;
+                  }
+                  const missingListed = bulkCart.filter(i => i.listed_price == null);
+                  if (missingListed.length > 0) {
+                    const names = missingListed.slice(0, 3).map(b => b.card_name ?? '(unnamed)').join(', ');
+                    toast.error(`Missing listed price: ${names}${missingListed.length > 3 ? ` +${missingListed.length - 3} more` : ''}. Combined Order needs each cert to have a live listing.`);
+                    return;
+                  }
                 } else {
                   // 0 is valid (giveaway). Flag only empty / no digits / negative.
                   const blocked = bulkCart.filter(i => { const raw = i.final_price_input; return !raw.trim() || !/\d/.test(raw) || parseDollars(raw) < 0; });
@@ -2108,7 +2268,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // ── Step: bulk-confirm ───────────────────────────────────────────────────────
 
   if (step === 'bulk-confirm') {
-    const isEbaySet = platform === 'ebay';
+    const isEbaySet = platform === 'ebay' && bulkPricingMode === 'split';
+    const isEbayCombined = platform === 'ebay' && bulkPricingMode === 'per_item';
+    const isAnyEbay = platform === 'ebay';
     const n = bulkCart.length;
 
     // eBay set: split total evenly per card
@@ -2121,10 +2283,29 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const strikeRemainder = totalStrikeCents - basePerCard * n;
     const feesRemainder = totalFeesCents - baseFeesPerCard * n;
 
+    // Combined Order: sale_price stays at each cert's listed_price, and
+    // fees are the strike−net gap distributed proportionally to each
+    // cert's listed_price share. Remainder cents from Math.floor are
+    // parked on the first row so the sum reconciles exactly.
+    const combinedTotalListed = bulkCart.reduce((s, item) => s + (item.listed_price ?? 0), 0);
+    const combinedNetCents = orderEarnings ? toCents(orderEarnings) : combinedTotalListed;
+    const combinedTotalFeesCents = Math.max(0, combinedTotalListed - combinedNetCents);
+    const combinedRawFees = bulkCart.map(item => {
+      if (!item.listed_price || combinedTotalListed === 0) return 0;
+      return Math.floor((item.listed_price / combinedTotalListed) * combinedTotalFeesCents);
+    });
+    const combinedFeesSum = combinedRawFees.reduce((s, f) => s + f, 0);
+    const combinedFeesRemainder = combinedTotalFeesCents - combinedFeesSum;
+
     const itemsWithFinal = bulkCart.map((item, idx) => {
       if (isEbaySet) {
         const sale_price = basePerCard + (idx === 0 ? strikeRemainder : 0);
         const platform_fees = baseFeesPerCard + (idx === 0 ? feesRemainder : 0);
+        return { ...item, final_price: sale_price, platform_fees };
+      }
+      if (isEbayCombined) {
+        const sale_price = item.listed_price ?? 0;
+        const platform_fees = combinedRawFees[idx] + (idx === 0 ? combinedFeesRemainder : 0);
         return { ...item, final_price: sale_price, platform_fees };
       }
       return { ...item, final_price: toCents(item.final_price_input), platform_fees: 0 };
@@ -2136,24 +2317,33 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       setSubmitting(true);
       try {
         await api.post('/sales/batch', {
-          items: itemsWithFinal.map(item => ({
-            card_instance_id: item.id,
-            // Coerce null → undefined so it's omitted from the JSON. The
-            // server's zod schema accepts string|undefined, not null —
-            // raw cart rows with no active listing now hold null here.
-            listing_id: item.listing_id ?? undefined,
-            sale_price: item.final_price,
-            platform_fees: item.platform_fees,
-            // Always send the cart qty — never undefined. Server's recordSale
-            // defaults undefined to card.quantity (the source lot's full count),
-            // which silently flips a whole multi-card lot sold when the user
-            // really only meant to sell 1 from it.
-            quantity: item.quantity,
-          })),
-          platform: isEbaySet ? 'ebay' : 'card_show',
-          card_show_id: isEbaySet ? undefined : (cardShowId || undefined),
-          unique_id: isEbaySet ? (orderNumber || undefined) : undefined,
-          order_details_link: isEbaySet ? (ebayLink || undefined) : undefined,
+          items: itemsWithFinal.map(item => {
+            const override = isEbayCombined && splitOrderDetails
+              ? orderDetailsOverrides[item.cart_entry_id]
+              : undefined;
+            return {
+              card_instance_id: item.id,
+              // Coerce null → undefined so it's omitted from the JSON. The
+              // server's zod schema accepts string|undefined, not null —
+              // raw cart rows with no active listing now hold null here.
+              listing_id: item.listing_id ?? undefined,
+              sale_price: item.final_price,
+              platform_fees: item.platform_fees,
+              // Always send the cart qty — never undefined. Server's recordSale
+              // defaults undefined to card.quantity (the source lot's full count),
+              // which silently flips a whole multi-card lot sold when the user
+              // really only meant to sell 1 from it.
+              quantity: item.quantity,
+              // Per-cert order metadata override (Combined Order only). Empty
+              // strings drop back to the shared value on the server side.
+              unique_id: override?.unique_id?.trim() || undefined,
+              order_details_link: override?.order_details_link?.trim() || undefined,
+            };
+          }),
+          platform: isAnyEbay ? 'ebay' : 'card_show',
+          card_show_id: isAnyEbay ? undefined : (cardShowId || undefined),
+          unique_id: isAnyEbay ? (orderNumber || undefined) : undefined,
+          order_details_link: isAnyEbay ? (ebayLink || undefined) : undefined,
           currency,
           sold_at: soldAt || undefined,
           unique_id_2: notes || undefined,
@@ -2173,7 +2363,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       <div className="space-y-4">
         <div className="flex items-center gap-2 mb-1">
           <button type="button" onClick={() => setStep('bulk-review')} className="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
-          <span className="text-xs text-zinc-600">{isEbaySet ? 'eBay · Set Listing · Confirm' : 'Card Show · Bulk Sale · Confirm'}</span>
+          <span className="text-xs text-zinc-600">{
+            isEbaySet ? 'eBay · Set Listing · Confirm'
+            : isEbayCombined ? 'eBay · Combined Order · Confirm'
+            : 'Card Show · Bulk Sale · Confirm'
+          }</span>
         </div>
 
         <div className="rounded-lg border border-zinc-700 bg-zinc-900/40 p-4 space-y-2">
@@ -2181,8 +2375,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm">
             <span className="text-zinc-500">Cards</span>
             <span className="text-zinc-200 font-medium">{bulkCart.length}</span>
-            <span className="text-zinc-500">{isEbaySet ? 'Total Strike' : 'Total'}</span>
-            <span className="text-zinc-100 font-bold">${(total / 100).toFixed(2)}</span>
+            <span className="text-zinc-500">{isEbaySet ? 'Total Strike' : isEbayCombined ? 'Total Listed' : 'Total'}</span>
+            <span className="text-zinc-100 font-bold">${((isEbayCombined ? combinedTotalListed : total) / 100).toFixed(2)}</span>
             {isEbaySet && totalFeesCents > 0 && <>
               <span className="text-zinc-500">After Fees</span>
               <span className="text-zinc-100">${(totalEarningsCents / 100).toFixed(2)}</span>
@@ -2191,11 +2385,19 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <span className="text-zinc-500">Per Card</span>
               <span className="text-zinc-400 text-xs">${(basePerCard / 100).toFixed(2)} strike · ${((basePerCard - baseFeesPerCard) / 100).toFixed(2)} after fees</span>
             </>}
-            {isEbaySet && orderNumber && <>
+            {isEbayCombined && <>
+              <span className="text-zinc-500">Net Total</span>
+              <span className="text-zinc-100">${(combinedNetCents / 100).toFixed(2)}</span>
+              {combinedTotalFeesCents > 0 && <>
+                <span className="text-zinc-500">Fees</span>
+                <span className="text-amber-400">${(combinedTotalFeesCents / 100).toFixed(2)}</span>
+              </>}
+            </>}
+            {isAnyEbay && orderNumber && <>
               <span className="text-zinc-500">Order #</span>
               <span className="text-zinc-200 font-mono text-xs">{orderNumber}</span>
             </>}
-            {!isEbaySet && selectedShow && <>
+            {!isAnyEbay && selectedShow && <>
               <span className="text-zinc-500">Card Show</span>
               <span className="text-zinc-200 truncate">{selectedShow.name}</span>
             </>}
@@ -2211,8 +2413,21 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-[360px] overflow-y-auto">
+          {isEbayCombined && (
+            <div className="grid grid-cols-[1fr_5rem_5rem_5rem] gap-x-2 px-3 py-2 bg-zinc-900 border-b border-zinc-700">
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest">Card</span>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Listed</span>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Fees</span>
+              <span className="text-[10px] text-zinc-500 uppercase tracking-widest text-right">Net</span>
+            </div>
+          )}
           {itemsWithFinal.map((item) => (
-            <div key={item.cart_entry_id} className="flex items-start justify-between gap-3 px-3 py-2.5 border-b border-zinc-700/40 last:border-0">
+            <div key={item.cart_entry_id} className={cn(
+              'gap-x-2 px-3 py-2.5 border-b border-zinc-700/40 last:border-0',
+              isEbayCombined
+                ? 'grid grid-cols-[1fr_5rem_5rem_5rem] items-center'
+                : 'flex items-start justify-between'
+            )}>
               <div className="min-w-0">
                 <p className="text-sm text-zinc-200 leading-snug">{item.card_name ?? '—'}</p>
                 <p className="text-xs text-zinc-500 mt-0.5">
@@ -2221,12 +2436,24 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     : `${item.company ?? ''} ${item.grade_label ?? ''}${item.cert_number ? ` · #${item.cert_number}` : ''}`}
                 </p>
               </div>
-              <div className="text-right shrink-0">
-                <p className="text-sm font-medium text-zinc-100 tabular-nums">${(item.final_price / 100).toFixed(2)}</p>
-                {isEbaySet && item.platform_fees > 0 && (
-                  <p className="text-xs text-zinc-500 tabular-nums">${((item.final_price - item.platform_fees) / 100).toFixed(2)} after fees</p>
-                )}
-              </div>
+              {isEbayCombined ? (
+                <>
+                  <p className="text-sm text-zinc-400 text-right tabular-nums">${(item.final_price / 100).toFixed(2)}</p>
+                  <p className={cn('text-sm text-right tabular-nums', item.platform_fees > 0 ? 'text-amber-400' : 'text-zinc-600')}>
+                    {item.platform_fees > 0 ? `$${(item.platform_fees / 100).toFixed(2)}` : '—'}
+                  </p>
+                  <p className="text-sm font-medium text-zinc-100 text-right tabular-nums">
+                    ${((item.final_price - item.platform_fees) / 100).toFixed(2)}
+                  </p>
+                </>
+              ) : (
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-medium text-zinc-100 tabular-nums">${(item.final_price / 100).toFixed(2)}</p>
+                  {isEbaySet && item.platform_fees > 0 && (
+                    <p className="text-xs text-zinc-500 tabular-nums">${((item.final_price - item.platform_fees) / 100).toFixed(2)} after fees</p>
+                  )}
+                </div>
+              )}
             </div>
           ))}
         </div>
