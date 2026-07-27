@@ -1599,7 +1599,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             ).map((m) => (
               <button key={m} type="button" onClick={() => { setBulkSearchMode(m); setBulkSearch(''); setBulkUrl(''); }}
                 className={`px-3 py-1 text-xs rounded-md font-medium capitalize transition-colors ${bulkSearchMode === m ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-                {m === 'url' ? 'Listing URL' : m === 'paste' ? 'Paste List' : 'Search'}
+                {m === 'url' ? 'Listing URL' : m === 'paste' ? 'Paste List or Image' : 'Search'}
               </button>
             ))}
           </div>
