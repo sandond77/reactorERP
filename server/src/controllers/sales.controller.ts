@@ -73,6 +73,20 @@ export async function recordSale(req: Request, res: Response, next: NextFunction
   } catch (err) { next(err); }
 }
 
+export async function parseOrderItems(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = z.object({
+      text: z.string().optional(),
+      image: z.object({
+        data: z.string().min(1),
+        media_type: z.enum(['image/jpeg', 'image/png', 'image/webp']),
+      }).optional(),
+    }).parse(req.body);
+    const results = await salesService.parseOrderItems(req.dataUserId, body);
+    res.json({ data: results });
+  } catch (err) { next(err); }
+}
+
 export async function recordBulkSale(req: Request, res: Response, next: NextFunction) {
   try {
     const { items, platform, card_show_id, unique_id, order_details_link, currency, sold_at, unique_id_2 } = z.object({

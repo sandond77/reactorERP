@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import Anthropic from '@anthropic-ai/sdk';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { computeCostBasis } from './cards.service';
@@ -6,6 +7,7 @@ import { logAudit } from '../utils/audit';
 import type { ListingPlatform } from '../types/db';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
+import { env } from '../config/env';
 
 export interface RecordSaleInput {
   card_instance_id: string;
@@ -556,4 +558,211 @@ export async function getSaleById(userId: string, saleId: string) {
 
   if (!sale) throw new AppError(404, 'Sale not found');
   return sale;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Combined Order — paste a text dump or screenshot of eBay's order page and
+// have the AI extract each listing entry, then fuzzy-match against the
+// user's active graded listings.
+// ────────────────────────────────────────────────────────────────────────────
+
+const anthropicClient = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 2 });
+
+export interface ParsedOrderEntry {
+  title: string;
+  cert_number: string | null;
+}
+
+export interface ParsedOrderMatch {
+  card_instance_id: string;
+  listing_id: string | null;
+  card_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  company: string | null;
+  listed_price: number | null;
+  raw_purchase_label: string | null;
+}
+
+export interface ParsedOrderResult {
+  extracted: ParsedOrderEntry;
+  matched: ParsedOrderMatch | null;   // single high-confidence match
+  candidates: ParsedOrderMatch[];      // multiple matches — client picks
+}
+
+const PARSE_ORDER_SCHEMA = `Return ONLY a JSON array (no prose) of extracted card listings.
+Each entry is { "title": "<full listing title>", "cert_number": "<PSA/BGS/CGC cert number as digits only, or null>" }.
+Skip anything that isn't a card listing (headers, ship-to addresses, tracking numbers, totals).
+Title should preserve the exact listing name as written. Cert number appears only if visible in the entry.`;
+
+async function extractOrderEntriesFromText(text: string): Promise<ParsedOrderEntry[]> {
+  const res = await anthropicClient.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 4000,
+    messages: [{
+      role: 'user',
+      content: `${PARSE_ORDER_SCHEMA}\n\nText to parse:\n\n${text}`,
+    }],
+  });
+  const raw = res.content.find((b) => b.type === 'text')?.text ?? '[]';
+  return safeParseEntries(raw);
+}
+
+async function extractOrderEntriesFromImage(imageBase64: string, mediaType: 'image/jpeg' | 'image/png' | 'image/webp'): Promise<ParsedOrderEntry[]> {
+  const res = await anthropicClient.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 4000,
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
+        { type: 'text', text: PARSE_ORDER_SCHEMA },
+      ],
+    }],
+  });
+  const raw = res.content.find((b) => b.type === 'text')?.text ?? '[]';
+  return safeParseEntries(raw);
+}
+
+function safeParseEntries(raw: string): ParsedOrderEntry[] {
+  try {
+    const start = raw.indexOf('[');
+    const end = raw.lastIndexOf(']');
+    const json = start !== -1 && end !== -1 ? raw.slice(start, end + 1) : raw.trim();
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((x): x is { title: unknown; cert_number?: unknown } => x && typeof x === 'object')
+      .map((x) => ({
+        title: typeof x.title === 'string' ? x.title.trim() : '',
+        cert_number: typeof x.cert_number === 'string' && /^\d+$/.test(x.cert_number.trim())
+          ? x.cert_number.trim()
+          : null,
+      }))
+      .filter((e) => e.title.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+// Given an extracted title, return active-listing matches ranked by
+// how many title tokens overlap with the listing's card_name /
+// grade_label / company. Cert-number match short-circuits to an exact hit.
+async function matchExtractedEntry(userId: string, entry: ParsedOrderEntry): Promise<{ matched: ParsedOrderMatch | null; candidates: ParsedOrderMatch[] }> {
+  // Exact cert match: unambiguous, one row max.
+  if (entry.cert_number) {
+    const exact = await sql<ParsedOrderMatch>`
+      SELECT ci.id AS card_instance_id, l.id AS listing_id,
+        COALESCE(ci.card_name_override, cc.card_name) AS card_name,
+        sd.cert_number, sd.grade_label, sd.company,
+        l.list_price AS listed_price,
+        rp.purchase_id AS raw_purchase_label
+      FROM card_instances ci
+      INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+      INNER JOIN listings l ON l.card_instance_id = ci.id AND l.listing_status = 'active'
+      LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+      LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
+      WHERE ci.user_id = ${userId}
+        AND sd.cert_number::text = ${entry.cert_number}
+      LIMIT 1
+    `.execute(db);
+    if (exact.rows[0]) return { matched: exact.rows[0], candidates: [] };
+  }
+
+  // Fuzzy title match: split into words and AND them across the concat of
+  // card_name + grade_label + company for the listing's cert. Word-level AND
+  // keeps precision high; if the user's listing title includes card name +
+  // "PSA 10" this will find it. Skip stopwords + trivial tokens.
+  const STOP = new Set(['pokemon', 'psa', 'bgs', 'cgc', 'sgc', '2024', '2025', '2026', 'mint', 'gem', 'a', 'the', 'and', 'ex', 'v']);
+  const words = entry.title
+    .toLowerCase()
+    .replace(/[^\w\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !STOP.has(w));
+  if (words.length === 0) return { matched: null, candidates: [] };
+
+  const gradeMatch = /\b(PSA|BGS|CGC|SGC)\s*(\d{1,2}(?:\.\d)?)\b/i.exec(entry.title);
+  const gradeCompany = gradeMatch?.[1]?.toUpperCase();
+  const gradeValue = gradeMatch?.[2];
+
+  const rows = await sql<ParsedOrderMatch & { match_score: number }>`
+    SELECT ci.id AS card_instance_id, l.id AS listing_id,
+      COALESCE(ci.card_name_override, cc.card_name) AS card_name,
+      sd.cert_number, sd.grade_label, sd.company,
+      l.list_price AS listed_price,
+      rp.purchase_id AS raw_purchase_label,
+      (
+        ${sql.join(
+          words.map((w) => sql`(CASE WHEN LOWER(COALESCE(ci.card_name_override, cc.card_name, '')) LIKE ${'%' + w + '%'} THEN 1 ELSE 0 END)`),
+          sql` + `
+        )}
+      )::int AS match_score
+    FROM card_instances ci
+    INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+    INNER JOIN listings l ON l.card_instance_id = ci.id AND l.listing_status = 'active'
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
+    WHERE ci.user_id = ${userId}
+      AND ci.purchase_type = 'pre_graded'
+      ${gradeCompany ? sql`AND sd.company = ${gradeCompany}` : sql``}
+      ${gradeValue ? sql`AND sd.grade = ${Number(gradeValue)}` : sql``}
+      AND (
+        ${sql.join(
+          words.map((w) => sql`LOWER(COALESCE(ci.card_name_override, cc.card_name, '')) LIKE ${'%' + w + '%'}`),
+          sql` OR `
+        )}
+      )
+    ORDER BY match_score DESC
+    LIMIT 8
+  `.execute(db);
+
+  if (rows.rows.length === 0) return { matched: null, candidates: [] };
+  const top = rows.rows[0];
+  // Auto-match only when there is one row OR the top score strictly beats
+  // the runner-up. Otherwise leave it to the user to pick.
+  const isSole = rows.rows.length === 1;
+  const isClearWinner = rows.rows.length > 1 && top.match_score > rows.rows[1].match_score;
+  if (isSole || isClearWinner) {
+    return { matched: strip(top), candidates: [] };
+  }
+  return { matched: null, candidates: rows.rows.map(strip) };
+}
+
+function strip(row: ParsedOrderMatch & { match_score?: number }): ParsedOrderMatch {
+  const { card_instance_id, listing_id, card_name, cert_number, grade_label, company, listed_price, raw_purchase_label } = row;
+  return { card_instance_id, listing_id, card_name, cert_number, grade_label, company, listed_price, raw_purchase_label };
+}
+
+export async function parseOrderItems(
+  userId: string,
+  input: { text?: string; image?: { data: string; media_type: 'image/jpeg' | 'image/png' | 'image/webp' } },
+): Promise<ParsedOrderResult[]> {
+  if (!input.text?.trim() && !input.image?.data) {
+    throw new AppError(400, 'Provide text or an image to parse');
+  }
+
+  const entries: ParsedOrderEntry[] = [];
+  if (input.text?.trim()) {
+    entries.push(...(await extractOrderEntriesFromText(input.text)));
+  }
+  if (input.image?.data) {
+    entries.push(...(await extractOrderEntriesFromImage(input.image.data, input.image.media_type)));
+  }
+
+  // Dedupe by title so pasting text + image of the same order doesn't
+  // double-add.
+  const seen = new Set<string>();
+  const unique = entries.filter((e) => {
+    const key = (e.cert_number ?? '') + '|' + e.title.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const results: ParsedOrderResult[] = [];
+  for (const entry of unique) {
+    const { matched, candidates } = await matchExtractedEntry(userId, entry);
+    results.push({ extracted: entry, matched, candidates });
+  }
+  return results;
 }

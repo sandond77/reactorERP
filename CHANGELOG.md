@@ -14,6 +14,17 @@
 - Cart-entry prefill: when Combined Order is active, the sticker cell of a newly-added cart entry seeds from the cert's `listed_price` instead of `card_show_price` (Set Listing / Card Show flows are untouched).
 - Validation on the Review button: rejects with named cart items if any row lacks a `listed_price` (i.e. the underlying listing has no active price); rejects if `Order Net Total` is empty. Prevents zero-cent divide edge cases and partial-write hazards before hitting the server.
 
+**Sales — Combined Order gets a "Paste List" tab (AI-parsed text + image)**
+- Even with Combined Order in place, filling a 10-item cart still meant 10 search+click cycles. The Paste List tab lets you paste an eBay order-details text dump OR drop/paste a screenshot of the same page; the server extracts each listing entry and auto-adds the ones it can match unambiguously.
+- Third tab in the bulk-search step, shown only when the Combined Order flow is active. UI: textarea for text + a drop/paste zone for a screenshot (Ctrl+V a clipboard image or drag a file in). Either input alone works; providing both dedupes by title.
+- New endpoint `POST /sales/parse-order-items` accepts `{ text?, image? { data, media_type } }`. Text goes to Haiku; image goes to Sonnet Vision. Both return the same JSON schema — `[{ title, cert_number? }]`. Extractor is instructed to skip non-card entries (shipping addresses, totals, tracking numbers, headers).
+- Matcher for each extracted entry: cert-number exact lookup first (short-circuits to a single row); otherwise a word-AND fuzzy match against the user's **active graded** listings, scored by card_name token overlap and gated by any grade/company the extractor found in the title (e.g. "PSA 10" in the listing name). Ranking picks the sole result or a strict-winner result as `matched`; ties surface as `candidates` for the user to disambiguate.
+- Client auto-adds every `matched` result to the cart (skips duplicates already in the cart). A `Needs review` section renders each ambiguous or unmatched entry inline: for ambiguous, a clickable candidate list with card / cert / grade / listed-price per row — one click resolves it into the cart. For zero matches, an "search this manually" note.
+- Toast summarizes the parse: `Parsed N. Added X, Y to review, Z unmatched.` Once the cart is populated, the rest of the Combined Order flow (Review, Confirm, Submit) is unchanged — same proportional fee split, same optional per-cert order override, same `POST /sales/batch` at the end.
+
+**UI — Record Sale type step now fits all 4 tiles on one row for eBay**
+- eBay's type-picker was `grid-cols-3` and wrapped the 4th tile (Combined Order) to its own row after the July 21 addition. Bumped to `grid-cols-4` for eBay specifically; Card Show stays at `grid-cols-3` (3 tiles), Other stays at `grid-cols-2` (2 tiles).
+
 ## July 17, 2026
 
 ### Features

@@ -221,7 +221,27 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [bulkExactMatch, setBulkExactMatch] = useState(false);
   const [bulkDiscount, setBulkDiscount] = useState('');
   const [bulkTab, setBulkTab] = useState<'graded' | 'raw'>('graded');
-  const [bulkSearchMode, setBulkSearchMode] = useState<'search' | 'url'>('search');
+  const [bulkSearchMode, setBulkSearchMode] = useState<'search' | 'url' | 'paste'>('search');
+  const [pasteText, setPasteText] = useState('');
+  const [pasteImage, setPasteImage] = useState<{ data: string; media_type: 'image/jpeg' | 'image/png' | 'image/webp' } | null>(null);
+  const [pasteLoading, setPasteLoading] = useState(false);
+  interface ParsedOrderMatch {
+    card_instance_id: string;
+    listing_id: string | null;
+    card_name: string | null;
+    cert_number: string | null;
+    grade_label: string | null;
+    company: string | null;
+    listed_price: number | null;
+    raw_purchase_label: string | null;
+  }
+  interface ParsedOrderResult {
+    extracted: { title: string; cert_number: string | null };
+    matched: ParsedOrderMatch | null;
+    candidates: ParsedOrderMatch[];
+  }
+  const [pasteResults, setPasteResults] = useState<ParsedOrderResult[]>([]);
+  const [pasteResolved, setPasteResolved] = useState<Set<number>>(new Set());
   const [bulkUrl, setBulkUrl] = useState('');
   const [bulkUrlLoading, setBulkUrlLoading] = useState(false);
   // Re-add confirmation for the bulk raw cart — replaces window.confirm so the
@@ -741,7 +761,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         <span className="text-xs text-zinc-600">{platform === 'ebay' ? 'eBay' : 'Other'}</span>
       </div>
       <p className="text-xs text-zinc-500">What type of card are you selling?</p>
-      <div className={cn('grid gap-3', (platform === 'card_show' || platform === 'ebay') ? 'grid-cols-3' : 'grid-cols-2')}>
+      <div className={cn('grid gap-3',
+        platform === 'ebay' ? 'grid-cols-4'
+        : platform === 'card_show' ? 'grid-cols-3'
+        : 'grid-cols-2')}>
         <button type="button"
           onClick={() => { setSaleMode('graded'); setStep(platform === 'ebay' ? 'search' : 'other-lookup'); }}
           className="rounded-xl border-2 border-indigo-500 bg-indigo-500/10 px-4 py-5 text-left hover:bg-indigo-500/20 transition-colors">
@@ -1570,16 +1593,28 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
         {bulkIsEbay && (
           <div className="flex gap-1">
-            {(['search', 'url'] as const).map((m) => (
+            {(bulkPricingMode === 'per_item'
+              ? (['search', 'url', 'paste'] as const)
+              : (['search', 'url'] as const)
+            ).map((m) => (
               <button key={m} type="button" onClick={() => { setBulkSearchMode(m); setBulkSearch(''); setBulkUrl(''); }}
                 className={`px-3 py-1 text-xs rounded-md font-medium capitalize transition-colors ${bulkSearchMode === m ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-                {m === 'url' ? 'Listing URL' : 'Search'}
+                {m === 'url' ? 'Listing URL' : m === 'paste' ? 'Paste List' : 'Search'}
               </button>
             ))}
           </div>
         )}
 
-        {bulkIsEbay && bulkSearchMode === 'url' ? (
+        {bulkIsEbay && bulkSearchMode === 'paste' ? (
+          <PasteOrderList
+            bulkCart={bulkCart} setBulkCart={setBulkCart}
+            pasteText={pasteText} setPasteText={setPasteText}
+            pasteImage={pasteImage} setPasteImage={setPasteImage}
+            pasteLoading={pasteLoading} setPasteLoading={setPasteLoading}
+            pasteResults={pasteResults} setPasteResults={setPasteResults}
+            pasteResolved={pasteResolved} setPasteResolved={setPasteResolved}
+          />
+        ) : bulkIsEbay && bulkSearchMode === 'url' ? (
           <div className="space-y-2">
             <Input label="eBay Listing URL" placeholder="https://www.ebay.com/itm/…"
               value={bulkUrl} onChange={(e) => setBulkUrl(e.target.value)}
@@ -2469,6 +2504,229 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     );
   }
 }
+// ── Combined Order · Paste List ────────────────────────────────────────────
+// Paste an eBay order-details text dump or screenshot and have the AI
+// extract each listing entry, then fuzzy-match against the user's active
+// graded listings and auto-add unambiguous matches to the bulk cart.
+interface PasteMatch {
+  card_instance_id: string;
+  listing_id: string | null;
+  card_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  company: string | null;
+  listed_price: number | null;
+  raw_purchase_label: string | null;
+}
+interface PasteResult {
+  extracted: { title: string; cert_number: string | null };
+  matched: PasteMatch | null;
+  candidates: PasteMatch[];
+}
+
+function PasteOrderList({
+  bulkCart, setBulkCart,
+  pasteText, setPasteText,
+  pasteImage, setPasteImage,
+  pasteLoading, setPasteLoading,
+  pasteResults, setPasteResults,
+  pasteResolved, setPasteResolved,
+}: {
+  bulkCart: BulkCartItem[];
+  setBulkCart: React.Dispatch<React.SetStateAction<BulkCartItem[]>>;
+  pasteText: string;
+  setPasteText: React.Dispatch<React.SetStateAction<string>>;
+  pasteImage: { data: string; media_type: 'image/jpeg' | 'image/png' | 'image/webp' } | null;
+  setPasteImage: React.Dispatch<React.SetStateAction<{ data: string; media_type: 'image/jpeg' | 'image/png' | 'image/webp' } | null>>;
+  pasteLoading: boolean;
+  setPasteLoading: React.Dispatch<React.SetStateAction<boolean>>;
+  pasteResults: PasteResult[];
+  setPasteResults: React.Dispatch<React.SetStateAction<PasteResult[]>>;
+  pasteResolved: Set<number>;
+  setPasteResolved: React.Dispatch<React.SetStateAction<Set<number>>>;
+}) {
+  const alreadyAdded = new Set(bulkCart.map(c => c.id));
+
+  function addMatchToCart(m: PasteMatch): boolean {
+    if (alreadyAdded.has(m.card_instance_id)) return false;
+    const stickerStr = m.listed_price != null ? (m.listed_price / 100).toFixed(2) : '';
+    setBulkCart(prev => [...prev, {
+      cart_entry_id: crypto.randomUUID(),
+      id: m.card_instance_id,
+      listing_id: m.listing_id,
+      card_name: m.card_name,
+      set_name: null,
+      cert_number: m.cert_number,
+      grade_label: m.grade_label,
+      company: m.company,
+      raw_purchase_label: m.raw_purchase_label,
+      sticker_price_input: stickerStr,
+      final_price_input: stickerStr,
+      card_type: 'graded',
+      quantity: 1,
+      lot_quantity: 1,
+      card_show_price: null,
+      listed_price: m.listed_price,
+      is_listed: true,
+    }]);
+    return true;
+  }
+
+  async function handleParse() {
+    if (!pasteText.trim() && !pasteImage) {
+      toast.error('Paste text or drop an image first');
+      return;
+    }
+    setPasteLoading(true);
+    setPasteResolved(new Set());
+    try {
+      const res = await api.post('/sales/parse-order-items', {
+        text: pasteText.trim() || undefined,
+        image: pasteImage ?? undefined,
+      });
+      const results: PasteResult[] = res.data.data ?? [];
+      setPasteResults(results);
+      // Auto-add every unambiguous match.
+      let added = 0;
+      for (const r of results) {
+        if (r.matched && addMatchToCart(r.matched)) added += 1;
+      }
+      const ambiguous = results.filter(r => !r.matched && r.candidates.length > 0).length;
+      const unmatched = results.filter(r => !r.matched && r.candidates.length === 0).length;
+      toast.success(`Parsed ${results.length}. Added ${added}${ambiguous ? `, ${ambiguous} to review` : ''}${unmatched ? `, ${unmatched} unmatched` : ''}.`);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to parse pasted content');
+    } finally {
+      setPasteLoading(false);
+    }
+  }
+
+  async function handleImagePaste(e: React.ClipboardEvent<HTMLDivElement>) {
+    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    const file = item.getAsFile();
+    if (!file) return;
+    await loadImage(file);
+  }
+  async function handleImageDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (!file || !file.type.startsWith('image/')) return;
+    await loadImage(file);
+  }
+  async function loadImage(file: File) {
+    const media_type = (file.type === 'image/png' ? 'image/png'
+      : file.type === 'image/webp' ? 'image/webp'
+      : 'image/jpeg') as 'image/jpeg' | 'image/png' | 'image/webp';
+    const buf = await file.arrayBuffer();
+    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    setPasteImage({ data: b64, media_type });
+  }
+
+  const matchedCount = pasteResults.filter(r => r.matched).length;
+  const needsReview = pasteResults
+    .map((r, idx) => ({ r, idx }))
+    .filter(x => !x.r.matched);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-zinc-500 leading-relaxed">
+        Paste an eBay order text dump OR drop/paste a screenshot. AI extracts each listing and matches against your active graded inventory. Unambiguous matches auto-add to the cart. Ambiguous or unmatched items appear below for manual pick.
+      </p>
+      <textarea
+        value={pasteText}
+        onChange={(e) => setPasteText(e.target.value)}
+        placeholder="Paste eBay order details here (listing titles, cert numbers, etc.)"
+        rows={6}
+        className="w-full text-sm bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 font-mono"
+      />
+      <div
+        onPaste={handleImagePaste}
+        onDrop={handleImageDrop}
+        onDragOver={(e) => e.preventDefault()}
+        className={cn('border-2 border-dashed rounded-lg px-3 py-4 text-center text-xs transition-colors',
+          pasteImage ? 'border-indigo-500/60 bg-indigo-500/5 text-indigo-300' : 'border-zinc-700 text-zinc-500 hover:border-zinc-600')}
+      >
+        {pasteImage ? (
+          <div className="flex items-center justify-center gap-2">
+            <span>Image attached ({pasteImage.media_type})</span>
+            <button type="button" onClick={() => setPasteImage(null)}
+              className="text-zinc-500 hover:text-red-400 transition-colors">
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <>Drop or paste a screenshot here</>
+        )}
+      </div>
+      <div className="flex justify-end">
+        <Button type="button" onClick={handleParse}
+          disabled={pasteLoading || (!pasteText.trim() && !pasteImage)}>
+          {pasteLoading && <Loader2 size={14} className="animate-spin" />}
+          {pasteLoading ? 'Parsing…' : 'Parse & Add'}
+        </Button>
+      </div>
+
+      {pasteResults.length > 0 && (
+        <div className="space-y-3 pt-2 border-t border-zinc-800">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-zinc-400">
+              {matchedCount} added · {needsReview.length} to review
+            </span>
+            <button type="button"
+              onClick={() => { setPasteResults([]); setPasteResolved(new Set()); }}
+              className="text-indigo-400 hover:text-indigo-300">Clear</button>
+          </div>
+          {needsReview.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Needs review</p>
+              {needsReview.map(({ r, idx }) => (
+                <div key={idx} className="rounded-lg border border-zinc-700 bg-zinc-900/40 px-3 py-2 space-y-1.5">
+                  <p className="text-xs text-zinc-300 truncate" title={r.extracted.title}>
+                    {r.extracted.title}
+                    {r.extracted.cert_number && <span className="ml-2 font-mono text-indigo-300/70">#{r.extracted.cert_number}</span>}
+                  </p>
+                  {pasteResolved.has(idx) ? (
+                    <p className="text-[11px] text-emerald-400">Added to cart</p>
+                  ) : r.candidates.length > 0 ? (
+                    <div className="space-y-1">
+                      <p className="text-[10px] text-zinc-500">{r.candidates.length} possible match{r.candidates.length !== 1 ? 'es' : ''} — pick one:</p>
+                      {r.candidates.map(c => (
+                        <button key={c.card_instance_id} type="button"
+                          disabled={alreadyAdded.has(c.card_instance_id)}
+                          onClick={() => {
+                            if (addMatchToCart(c)) {
+                              setPasteResolved(prev => { const next = new Set(prev); next.add(idx); return next; });
+                            }
+                          }}
+                          className={cn('w-full text-left rounded border px-2 py-1.5 text-[11px] transition-colors',
+                            alreadyAdded.has(c.card_instance_id)
+                              ? 'border-zinc-800 bg-zinc-900/40 text-zinc-600 cursor-not-allowed'
+                              : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-indigo-500/60 hover:bg-indigo-500/10')}>
+                          <div className="flex items-center gap-2">
+                            <span className="truncate flex-1">{c.card_name ?? '—'}</span>
+                            {c.cert_number && <span className="font-mono text-indigo-300/70 shrink-0">#{c.cert_number}</span>}
+                            {c.grade_label && <span className="text-zinc-500 shrink-0">{c.company} {c.grade_label}</span>}
+                            {c.listed_price != null && <span className="text-zinc-400 shrink-0">${(c.listed_price / 100).toFixed(2)}</span>}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-amber-400">No match in active inventory — search this manually.</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Sale Action Modal (Edit / Delete) ─────────────────────────────────────────
 
 function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void }) {
