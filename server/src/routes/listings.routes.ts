@@ -183,6 +183,46 @@ listingsRouter.delete('/set-group/:groupId', requireAuth, async (req, res, next)
   } catch (err) { next(err); }
 });
 
+// Set listing — Add Copy reuses the same client modal as multi-qty Add Cert.
+// Client hits these two endpoints under `/set-group/:groupId/`; the shapes
+// match `/listings/:listingId/candidate-certs` and `/listings/:id/certs` so
+// the modal component is base-URL agnostic. Server flattens slot candidates
+// into a single CandidateCert-style list here and unpacks + slot-maps ids
+// on submit via addSetCopy.
+listingsRouter.get('/set-group/:groupId/candidate-certs', requireAuth, async (req, res, next) => {
+  try {
+    const ctx = await listingsService.listSetCopySlots(req.dataUserId, req.params.groupId as string);
+    const seen = new Set<string>();
+    const data = ctx.slots.flatMap(s =>
+      s.candidates
+        .filter(c => {
+          if (seen.has(c.card_instance_id)) return false;
+          seen.add(c.card_instance_id);
+          return true;
+        })
+        .map(c => ({
+          id: c.card_instance_id,
+          card_name: s.card_name,
+          cert_number: c.cert_number,
+          grade_label: c.grade_label,
+          company: c.company,
+          purchase_cost: c.purchase_cost,
+        }))
+    );
+    res.json({ data });
+  } catch (err) { next(err); }
+});
+const addSetCopySchema = z.object({
+  card_instance_ids: z.array(z.string().uuid()).min(1).max(50),
+});
+listingsRouter.post('/set-group/:groupId/certs', requireAuth, async (req, res, next) => {
+  try {
+    const body = addSetCopySchema.parse(req.body);
+    const result = await listingsService.addSetCopy(req.dataUserId, req.params.groupId as string, body.card_instance_ids);
+    res.json({ added: result.added, new_group_id: result.new_group_id });
+  } catch (err) { next(err); }
+});
+
 listingsRouter.delete('/group', requireAuth, async (req, res, next) => {
   try {
     const key = groupKeySchema.parse(req.body);

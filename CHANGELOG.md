@@ -1,5 +1,34 @@
 # Reactor — Changelog
 
+## July 27, 2026
+
+### Features
+
+**Listings — Add Cert (Add Copy) for set listings, reusing the multi-qty modal**
+- Sellers who list the same graded set repeatedly wanted a way to add another copy to an existing set listing on eBay instead of standing up a fresh listing. This layers the multi-qty pattern on top of set listings: the same "Add cert" button, the same modal shell, the same UX — just a different endpoint base under the hood.
+- **Edit Set Listing modal** now shows an "Add cert" button (next to the SET badge) when the set has an eBay URL. Clicking it opens the same `AddCertsToListingModal` used for multi-qty listings. No new component to learn.
+- **Client refactor:** `AddCertsToListingModal` no longer takes a `listingId` — it takes an endpoint `base` string and calls `${base}/candidate-certs` and `${base}/certs`. Multi-qty single listings pass `/listings/{listingId}`; set listings pass `/listings/set-group/{groupId}`. The modal is now endpoint-agnostic.
+- **Server endpoints** under `/listings/set-group/:groupId/` mirror the multi-qty shapes:
+  - `GET /candidate-certs` flattens the set's slot candidates into a `CandidateCert[]` (same shape the modal already consumes). Each row's `card_name` reflects which slot member card it fills, so users see the composition inline.
+  - `POST /certs` accepts unordered `card_instance_ids`. Server auto-maps each cert to a slot by `(catalog_id, grade_label, company)` identity and rejects on any unmatched slot or duplicate assignment.
+- **Composition validation is enforced end-to-end.** Slot candidates are pre-filtered to matching identity + unsold + not personal collection + not already on another active listing. On submit, `addSetCopy`:
+  1. Loads the parent set (rows sharing the `listing_group_id`).
+  2. Validates every picked cert matches its assigned slot's `(catalog_id, grade_label, company)`.
+  3. Spawns a new `listing_group_id` with N rows copying the parent's `ebay_listing_id / url / list_price` per row (same price default — editable later via the standard set-group price edit if you want to reprice the copy).
+  4. Promotes every row on the parent's `ebay_listing_id / url` to `is_multi_qty=true` so the aggregation layer can eventually collapse copies under one URL.
+
+**Listings — Status column now shows Set / Multi-Set badges**
+- Set listings were rendering the fallback SINGLE badge because the Status column only checked `is_drained_multi_qty` and `has_multi_qty`. Added two violet badges:
+  - **SET** — `listing_group_id` is set and multi-qty is off (a group of different cards on one URL, one copy).
+  - **MULTI-SET** — set listing with `is_multi_qty=true` (multiple copies of the same set on one URL, produced by the new Add Cert flow above).
+- MULTI, SOLD OUT, and SINGLE are unchanged.
+
+### Fixes
+
+**Sales — Combined Order review "Sum of Listed" now aligns with the Order Net Total input**
+- The Sum of Listed display was a plain `<div>` with `mt-1` spacing and `border-zinc-800`; the adjacent `Order Net Total` input used the shared `<Input>` component with `flex flex-col gap-1` + `border-zinc-700`. Different label spacing + border shade made the two fields sit slightly off-baseline and read as visually mismatched.
+- Reworked the display to use the same wrapper (`flex flex-col gap-1`) and border color (`border-zinc-700`) as `<Input>`. Both fields now share a baseline and border weight on the review page.
+
 ## July 21, 2026
 
 ### Features

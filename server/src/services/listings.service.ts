@@ -1147,3 +1147,301 @@ export async function endMultiQtyListing(userId: string, listingId: string) {
   }
   return { ended: rows.length };
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// Set listings — Add Copy
+//
+// Users want to sell the same set N times without maintaining N parallel
+// eBay listings. The flow: pick a parent set (existing listing_group_id),
+// walk each of its member cards as a "slot" with a strict identity
+// (catalog_id + grade_label + company), and let the user fill each slot
+// with another matching unsold slab. The new copy spawns its own
+// listing_group_id but shares the parent's ebay_listing_id/url + per-cert
+// list_price, and both the parent's rows and the new rows flip to
+// is_multi_qty=true so aggregation can collapse them under one URL later.
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface SetCopySlot {
+  slot_index: number;
+  catalog_id: string | null;
+  grade_label: string | null;
+  company: string | null;
+  card_name: string | null;
+  set_name: string | null;
+  card_number: string | null;
+  candidates: {
+    card_instance_id: string;
+    cert_number: string | null;
+    grade_label: string | null;
+    company: string | null;
+    raw_purchase_label: string | null;
+    purchase_cost: number;
+  }[];
+}
+export interface SetCopyContext {
+  listing_group_id: string;
+  listing_group_name: string | null;
+  ebay_listing_id: string | null;
+  ebay_listing_url: string | null;
+  parent_total_list_price: number;   // sum of per-cert list_prices on the parent
+  slots: SetCopySlot[];
+}
+
+/**
+ * Load the parent set's composition + a candidate list per slot. Candidates
+ * are the caller's own unsold, unlisted, non-personal-collection slabs that
+ * match the slot's (catalog_id, grade_label, company).
+ */
+export async function listSetCopySlots(userId: string, groupId: string): Promise<SetCopyContext> {
+  const parentRows = await sql<{
+    ci_id: string;
+    catalog_id: string | null;
+    grade_label: string | null;
+    company: string | null;
+    card_name: string | null;
+    set_name: string | null;
+    card_number: string | null;
+    listing_group_name: string | null;
+    ebay_listing_id: string | null;
+    ebay_listing_url: string | null;
+    list_price: number;
+    listed_at: Date | null;
+  }>`
+    SELECT ci.id AS ci_id, ci.catalog_id, sd.grade_label, sd.company,
+      COALESCE(ci.card_name_override, cc.card_name) AS card_name,
+      COALESCE(cc.set_name, ci.set_name_override) AS set_name,
+      COALESCE(cc.card_number, ci.card_number_override) AS card_number,
+      l.listing_group_name, l.ebay_listing_id, l.ebay_listing_url, l.list_price,
+      l.listed_at
+    FROM listings l
+    JOIN card_instances ci ON ci.id = l.card_instance_id
+    LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+    LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+    WHERE l.user_id = ${userId}
+      AND l.listing_group_id = ${groupId}
+      AND sd.id IS NOT NULL
+    ORDER BY l.listed_at ASC NULLS LAST, l.id ASC
+  `.execute(db);
+  if (parentRows.rows.length === 0) throw new AppError(404, 'Set listing not found');
+
+  const parentTotalListPrice = parentRows.rows.reduce((s, r) => s + r.list_price, 0);
+
+  // Build slots + candidate lookups. Query candidates once per slot with an
+  // OR-fanout keyed by (catalog_id, grade_label, company). Filter to only
+  // slabs not already on any active listing.
+  const slots: SetCopySlot[] = [];
+  for (let i = 0; i < parentRows.rows.length; i++) {
+    const row = parentRows.rows[i];
+    const candidates = await sql<{
+      card_instance_id: string;
+      cert_number: string | null;
+      grade_label: string | null;
+      company: string | null;
+      raw_purchase_label: string | null;
+      purchase_cost: number;
+    }>`
+      SELECT ci.id AS card_instance_id, sd.cert_number, sd.grade_label, sd.company,
+        rp.purchase_id AS raw_purchase_label, ci.purchase_cost
+      FROM card_instances ci
+      INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+      LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
+      WHERE ci.user_id = ${userId}
+        AND ci.purchase_type = 'pre_graded'
+        AND ci.status != 'sold'
+        AND ci.is_personal_collection = false
+        AND ci.catalog_id ${row.catalog_id === null ? sql`IS NULL` : sql`= ${row.catalog_id}`}
+        AND sd.grade_label ${row.grade_label === null ? sql`IS NULL` : sql`= ${row.grade_label}`}
+        AND sd.company     ${row.company === null ? sql`IS NULL` : sql`= ${row.company}`}
+        AND NOT EXISTS (
+          SELECT 1 FROM listings l2
+          WHERE l2.card_instance_id = ci.id
+            AND l2.listing_status = 'active'
+        )
+      ORDER BY sd.cert_number ASC
+    `.execute(db);
+    slots.push({
+      slot_index: i,
+      catalog_id: row.catalog_id,
+      grade_label: row.grade_label,
+      company: row.company,
+      card_name: row.card_name,
+      set_name: row.set_name,
+      card_number: row.card_number,
+      candidates: candidates.rows,
+    });
+  }
+
+  const first = parentRows.rows[0];
+  return {
+    listing_group_id: groupId,
+    listing_group_name: first.listing_group_name,
+    ebay_listing_id: first.ebay_listing_id,
+    ebay_listing_url: first.ebay_listing_url,
+    parent_total_list_price: parentTotalListPrice,
+    slots,
+  };
+}
+
+/**
+ * Create a new copy of the set: N new listings rows sharing a fresh
+ * listing_group_id but the parent's ebay_listing_id/url + per-cert
+ * list_price. Slot order matches the parent set's slot order — callers pass
+ * an array of card_instance_ids in that same order. Server validates each
+ * slot's (catalog_id, grade_label, company) matches its picked slab and no
+ * slab is already on an active listing. On success, every row sharing the
+ * parent's ebay id/url is promoted to is_multi_qty=true so the aggregation
+ * layer knows to collapse them.
+ */
+export async function addSetCopy(userId: string, groupId: string, cardInstanceIdsRaw: string[]) {
+  const ctx = await listSetCopySlots(userId, groupId);
+  if (cardInstanceIdsRaw.length !== ctx.slots.length) {
+    throw new AppError(400, `Set has ${ctx.slots.length} slots — got ${cardInstanceIdsRaw.length} certs`);
+  }
+
+  // Auto-map the picked certs to slot order by identity so callers can send
+  // ids in any order. Reject on any slot with no matching cert (unmatched
+  // identity) or on duplicate assignments to the same slot.
+  const chosenIdentities = await sql<{
+    id: string;
+    catalog_id: string | null;
+    grade_label: string | null;
+    company: string | null;
+  }>`
+    SELECT ci.id, ci.catalog_id, sd.grade_label, sd.company
+    FROM card_instances ci
+    LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+    WHERE ci.user_id = ${userId}
+      AND ci.id IN (${sql.join(cardInstanceIdsRaw.map(id => sql.val(id)))})
+  `.execute(db);
+  if (chosenIdentities.rows.length !== cardInstanceIdsRaw.length) {
+    throw new AppError(404, 'One or more certs not found');
+  }
+  const used = new Set<string>();
+  const cardInstanceIds: string[] = [];
+  for (const slot of ctx.slots) {
+    const match = chosenIdentities.rows.find(c =>
+      c.catalog_id === slot.catalog_id &&
+      c.grade_label === slot.grade_label &&
+      c.company === slot.company &&
+      !used.has(c.id)
+    );
+    if (!match) throw new AppError(400, `No matching cert for slot ${slot.slot_index + 1} (${slot.card_name ?? 'unknown'} · ${slot.company ?? ''} ${slot.grade_label ?? ''})`);
+    used.add(match.id);
+    cardInstanceIds.push(match.id);
+  }
+
+  // Load parent rows to copy per-cert list_price + platform/currency/listed_at.
+  const parentRows = await db
+    .selectFrom('listings')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .where('listing_group_id', '=', groupId)
+    .orderBy('listed_at', 'asc')
+    .orderBy('id', 'asc')
+    .execute();
+  if (parentRows.length !== ctx.slots.length) {
+    throw new AppError(500, 'Parent set row count drifted from slot count — refresh and retry');
+  }
+
+  // Fetch chosen certs + slab_details in one shot, then validate.
+  const chosen = await sql<{
+    id: string;
+    catalog_id: string | null;
+    status: string;
+    is_personal_collection: boolean;
+    purchase_type: string;
+    grade_label: string | null;
+    company: string | null;
+  }>`
+    SELECT ci.id, ci.catalog_id, ci.status, ci.is_personal_collection, ci.purchase_type,
+      sd.grade_label, sd.company
+    FROM card_instances ci
+    LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+    WHERE ci.user_id = ${userId}
+      AND ci.id IN (${sql.join(cardInstanceIds.map(id => sql.val(id)))})
+  `.execute(db);
+  const chosenById = new Map(chosen.rows.map(r => [r.id, r]));
+
+  for (let i = 0; i < cardInstanceIds.length; i++) {
+    const id = cardInstanceIds[i];
+    const slot = ctx.slots[i];
+    const c = chosenById.get(id);
+    if (!c) throw new AppError(404, `Slot ${i + 1}: cert not found`);
+    if (c.purchase_type !== 'pre_graded') throw new AppError(400, `Slot ${i + 1}: cert is not a graded slab`);
+    if (c.status === 'sold') throw new AppError(400, `Slot ${i + 1}: cert is already sold`);
+    if (c.is_personal_collection) throw new AppError(400, `Slot ${i + 1}: cert is in personal collection`);
+    if (c.catalog_id !== slot.catalog_id) throw new AppError(400, `Slot ${i + 1}: cert catalog doesn't match slot`);
+    if (c.grade_label !== slot.grade_label) throw new AppError(400, `Slot ${i + 1}: cert grade doesn't match slot`);
+    if (c.company !== slot.company) throw new AppError(400, `Slot ${i + 1}: cert company doesn't match slot`);
+  }
+
+  // No slab may already be on an active listing.
+  const conflicting = await db
+    .selectFrom('listings')
+    .select('card_instance_id')
+    .where('user_id', '=', userId)
+    .where('card_instance_id', 'in', cardInstanceIds)
+    .where('listing_status', '=', 'active')
+    .execute();
+  if (conflicting.length > 0) throw new AppError(409, `${conflicting.length} cert(s) already have an active listing`);
+
+  // Create the new copy: fresh listing_group_id, same ebay id/url + per-cert
+  // list_price copied from the parent's row at the same slot index.
+  const newGroupId = crypto.randomUUID();
+  const rowsToInsert = cardInstanceIds.map((cid, i) => ({
+    user_id: userId,
+    card_instance_id: cid,
+    platform: parentRows[i].platform,
+    listing_status: 'active' as const,
+    ebay_listing_id: parentRows[i].ebay_listing_id,
+    ebay_listing_url: parentRows[i].ebay_listing_url,
+    show_name: parentRows[i].show_name,
+    show_date: parentRows[i].show_date,
+    booth_cost: parentRows[i].booth_cost,
+    list_price: parentRows[i].list_price,
+    asking_price: parentRows[i].asking_price,
+    currency: parentRows[i].currency,
+    listed_at: parentRows[i].listed_at,
+    listing_group_id: newGroupId,
+    listing_group_name: parentRows[i].listing_group_name,
+    is_multi_qty: true,
+  }));
+  const created = await db.insertInto('listings').values(rowsToInsert).returningAll().execute();
+  for (const row of created) {
+    await logAudit(userId, 'listings', row.id, 'created', null, row);
+  }
+
+  // Promote every row sharing the parent's ebay id/url to multi-qty so the
+  // aggregation layer collapses copies. Skip if there's no eBay identifier
+  // (rare — a set without an eBay URL still gets multi-qty on the group's
+  // own rows, matched via listing_group_id).
+  const promoteKeyCol = parentRows[0].ebay_listing_id
+    ? 'ebay_listing_id' as const
+    : parentRows[0].ebay_listing_url
+      ? 'ebay_listing_url' as const
+      : null;
+  if (promoteKeyCol) {
+    const keyVal = parentRows[0][promoteKeyCol]!;
+    const siblings = await db
+      .selectFrom('listings')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .where(promoteKeyCol, '=', keyVal)
+      .where('is_multi_qty', '=', false)
+      .execute();
+    if (siblings.length > 0) {
+      await db
+        .updateTable('listings')
+        .set({ is_multi_qty: true })
+        .where('user_id', '=', userId)
+        .where(promoteKeyCol, '=', keyVal)
+        .where('is_multi_qty', '=', false)
+        .execute();
+      for (const s of siblings) {
+        await logAudit(userId, 'listings', s.id, 'updated', s, { ...s, is_multi_qty: true });
+      }
+    }
+  }
+
+  return { new_group_id: newGroupId, added: created.length };
+}

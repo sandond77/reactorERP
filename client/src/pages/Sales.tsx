@@ -2016,11 +2016,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 Combined Order — {n} listing{n !== 1 ? 's' : ''} on one order. Each cert's Strike is auto-derived from its Listed price, proportional to the order Net Total.
               </p>
               <div className="grid grid-cols-2 gap-3">
-                <div>
+                <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Sum of Listed</label>
-                  <p className="mt-1 h-[38px] flex items-center px-3 rounded-lg bg-zinc-900 border border-zinc-800 text-sm text-zinc-300 tabular-nums">
+                  <div className="w-full h-[38px] flex items-center px-3 rounded-lg bg-zinc-900 border border-zinc-700 text-sm text-zinc-300 tabular-nums">
                     ${(combinedTotalListed / 100).toFixed(2)}
-                  </p>
+                  </div>
                 </div>
                 <Input label="Order Net Total (after fees)" type="text" inputMode="decimal" placeholder="0.00"
                   value={orderEarnings} onChange={(e) => setOrderEarnings(e.target.value)} />
