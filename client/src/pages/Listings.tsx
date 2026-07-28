@@ -1713,6 +1713,10 @@ export function Listings() {
                       <td className="px-3 py-2 text-center">
                         {row.is_drained_multi_qty ? (
                           <span className="inline-flex items-center h-5 px-1.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-bold uppercase tracking-wide border border-amber-500/30" title="Multi-qty listing is sold out — Add cert to re-populate, or End Listing to close it">Sold Out</span>
+                        ) : row.listing_group_id && row.has_multi_qty ? (
+                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-violet-500/15 text-violet-300 text-[10px] font-bold uppercase tracking-wide border border-violet-500/30" title="Set listing with multiple copies (multi-qty)">Multi-Set</span>
+                        ) : row.listing_group_id ? (
+                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-violet-500/15 text-violet-300 text-[10px] font-bold uppercase tracking-wide border border-violet-500/30" title="Set listing — multiple different cards on one eBay URL">Set</span>
                         ) : row.has_multi_qty ? (
                           <span className="inline-flex items-center h-5 px-1.5 rounded bg-cyan-500/15 text-cyan-300 text-[10px] font-bold uppercase tracking-wide border border-cyan-500/30">Multi</span>
                         ) : (
