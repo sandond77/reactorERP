@@ -1083,13 +1083,13 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
   const canPromote = isGradedRow && !isSet && !row.has_multi_qty && !!parentListingId && !!ebayUrl;
   const canEnd = isGradedRow && !isSet && !!row.has_multi_qty && !!parentListingId;
   // Set listings get their own "Add cert" path — clicking spawns the
-  // slot-based picker that enforces the set's composition. Button copy is
-  // the same so users learn one affordance for both flavors.
-  const canAddSetCopy = isSet && !!row.listing_group_id && !!ebayUrl;
-  // Sets can independently be promoted to multi-qty (adds persistence after
-  // sale) or ended. Add Cert already auto-promotes as a side effect, but
-  // exposing a standalone Promote lets users mark a set as multi-qty
-  // without adding a copy right now.
+  // slot-based picker that enforces the set's composition. Only offered
+  // once the set is multi-qty (mirrors singles, where Add cert only shows
+  // on multi-qty listings). User has to Convert first.
+  const canAddSetCopy = isSet && !!row.listing_group_id && !!ebayUrl && !!row.has_multi_qty;
+  // Sets can be promoted to multi-qty (adds persistence after sale) or
+  // ended. Convert to multi-qty is the gateway: shown only when set isn't
+  // yet multi-qty, hidden once it is.
   const canPromoteSet = isSet && !!row.listing_group_id && !row.has_multi_qty && !!ebayUrl;
   const canEndSet = isSet && !!row.listing_group_id && !!row.has_multi_qty;
   const [ending, setEnding] = useState(false);
@@ -1262,11 +1262,13 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                 <p className="text-sm font-medium text-zinc-100 min-w-0 break-words">{row.listing_group_name ?? 'Unnamed Set'}</p>
                 <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">Set</span>
               </div>
-              {canAddSetCopy && (
+              {(canAddSetCopy || canPromoteSet) && (
                 <div className="mt-3 flex items-center gap-2 flex-wrap">
-                  <Button type="button" size="sm" variant="secondary" onClick={() => setAddCertOpen(true)}>
-                    <Plus size={12} /> Add cert
-                  </Button>
+                  {canAddSetCopy && (
+                    <Button type="button" size="sm" variant="secondary" onClick={() => setAddCertOpen(true)}>
+                      <Plus size={12} /> Add cert
+                    </Button>
+                  )}
                   {canPromoteSet && (
                     <Button type="button" size="sm" variant="secondary" disabled={promoting} onClick={handlePromoteSet}>
                       {promoting && <Loader2 size={12} className="animate-spin" />}
