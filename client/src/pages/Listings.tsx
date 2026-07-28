@@ -965,136 +965,6 @@ interface CandidateCert {
   purchase_cost: number;
 }
 
-/*
-function AddSetCopyModal_REMOVED_KEPT_FOR_REFERENCE_ONLY({ listingGroupId, listingLabel, onClose, onAdded }: { listingGroupId: string; listingLabel: string; onClose: () => void; onAdded: () => void }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [submitting, setSubmitting] = useState(false);
-
-  const { data, isLoading } = useQuery<SetCopyContext>({
-    queryKey: ['set-copy-slots', listingGroupId],
-    queryFn: () => api.get(`/listings/set-group/${listingGroupId}/copy-slots`).then(r => r.data),
-  });
-
-  const slots = data?.slots ?? [];
-  const N = slots.length;
-
-  // Flatten candidates across slots, tagging each with which slot it satisfies
-  // so the client can preview slot coverage and disable over-selection.
-  interface FlatCandidate {
-    card_instance_id: string;
-    cert_number: string | null;
-    slot_index: number;
-    slot_label: string;
-    purchase_cost: number;
-    raw_purchase_label: string | null;
-    grade_label: string | null;
-    company: string | null;
-  }
-  const rows: FlatCandidate[] = slots.flatMap(s =>
-    s.candidates.map(c => ({
-      card_instance_id: c.card_instance_id,
-      cert_number: c.cert_number,
-      slot_index: s.slot_index,
-      slot_label: s.card_name ?? `Slot ${s.slot_index + 1}`,
-      purchase_cost: c.purchase_cost,
-      raw_purchase_label: c.raw_purchase_label,
-      grade_label: c.grade_label,
-      company: c.company,
-    }))
-  );
-
-  // Slot coverage: for each slot, which selected cert (if any) fills it. Only
-  // one cert per slot is valid — server rejects duplicates, and we grey the
-  // conflicting rows to prevent it up front.
-  const coverageBySlot: Map<number, string> = new Map();
-  for (const r of rows) {
-    if (selected.has(r.card_instance_id) && !coverageBySlot.has(r.slot_index)) {
-      coverageBySlot.set(r.slot_index, r.card_instance_id);
-    }
-  }
-
-  function toggle(id: string, slotIndex: number) {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-        return next;
-      }
-      // If some other cert already fills this slot, swap it out.
-      const existing = coverageBySlot.get(slotIndex);
-      if (existing && existing !== id) next.delete(existing);
-      next.add(id);
-      return next;
-    });
-  }
-
-  const filledSlots = coverageBySlot.size;
-  const complete = N > 0 && filledSlots === N;
-
-  async function handleSubmit() {
-    if (!complete) { toast.error(`Pick ${N} cert${N !== 1 ? 's' : ''} — one per slot`); return; }
-    setSubmitting(true);
-    try {
-      const card_instance_ids = slots.map(s => coverageBySlot.get(s.slot_index)!);
-      const res = await api.post(`/listings/set-group/${listingGroupId}/copies`, { card_instance_ids });
-      toast.success(`Copy added (${res.data.added} cert${res.data.added !== 1 ? 's' : ''})`);
-      onAdded();
-      onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to add copy');
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <div className="space-y-3">
-      <p className="text-[11px] text-zinc-500 leading-relaxed">
-        Adding a copy of <span className="text-zinc-300 font-medium">{listingLabel}</span>. Pick exactly <span className="text-zinc-300 font-medium">{N}</span> cert{N !== 1 ? 's' : ''} — one per set member. The copy uses the parent's eBay URL and per-cert list price.
-      </p>
-      <div className="border border-zinc-800 rounded-lg max-h-[26rem] overflow-y-auto divide-y divide-zinc-800/60">
-        {isLoading ? (
-          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">Loading…</p>
-        ) : rows.length === 0 ? (
-          <p className="px-3 py-4 text-[11px] text-zinc-600 text-center">No eligible slabs match this set's composition.</p>
-        ) : (
-          rows.map(c => {
-            const isSel = selected.has(c.card_instance_id);
-            return (
-              <button key={c.card_instance_id} type="button" onClick={() => toggle(c.card_instance_id, c.slot_index)}
-                className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${isSel ? 'bg-indigo-500/10' : 'hover:bg-zinc-800/40'}`}>
-                <div className={`w-3.5 h-3.5 rounded border shrink-0 flex items-center justify-center ${isSel ? 'bg-indigo-500 border-indigo-500' : 'border-zinc-600'}`}>
-                  {isSel && <span className="text-[8px] text-white font-bold">✓</span>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 text-[11px]">
-                    <span className="text-zinc-200 font-medium truncate">{c.slot_label}</span>
-                    {c.cert_number && <span className="font-mono text-indigo-300/70">{formatCertNumber(c.cert_number)}</span>}
-                    {c.company && <span className="text-zinc-400">{c.company}</span>}
-                    {c.grade_label && <span className="text-zinc-300">{c.grade_label}</span>}
-                    <span className="ml-auto text-zinc-500">Cost {formatCurrency(c.purchase_cost, 'USD')}</span>
-                  </div>
-                </div>
-              </button>
-            );
-          })
-        )}
-      </div>
-      <div className="flex justify-between items-center pt-1">
-        <span className="text-[11px] text-zinc-500">{filledSlots} / {N} selected</span>
-        <div className="flex gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="button" disabled={submitting || !complete} onClick={handleSubmit}>
-            {submitting && <Loader2 size={14} className="animate-spin" />}
-            {submitting ? 'Adding…' : `Add ${N || ''} cert${N !== 1 ? 's' : ''}`}
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-*/
 
 function AddCertsToListingModal({ base, listingLabel, onClose, onAdded }: { base: string; listingLabel: string; onClose: () => void; onAdded: () => void }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1216,6 +1086,12 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
   // slot-based picker that enforces the set's composition. Button copy is
   // the same so users learn one affordance for both flavors.
   const canAddSetCopy = isSet && !!row.listing_group_id && !!ebayUrl;
+  // Sets can independently be promoted to multi-qty (adds persistence after
+  // sale) or ended. Add Cert already auto-promotes as a side effect, but
+  // exposing a standalone Promote lets users mark a set as multi-qty
+  // without adding a copy right now.
+  const canPromoteSet = isSet && !!row.listing_group_id && !row.has_multi_qty && !!ebayUrl;
+  const canEndSet = isSet && !!row.listing_group_id && !!row.has_multi_qty;
   const [ending, setEnding] = useState(false);
   const [endStep, setEndStep] = useState<null | 'confirm'>(null);
 
@@ -1251,6 +1127,41 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
       toast.error(err?.response?.data?.error ?? 'Failed to promote listing');
     } finally {
       setPromoting(false);
+    }
+  }
+
+  async function handlePromoteSet() {
+    if (!row.listing_group_id) return;
+    setPromoting(true);
+    try {
+      const res = await api.post(`/listings/set-group/${row.listing_group_id}/promote-multi-qty`);
+      toast.success(res.data.promoted > 0
+        ? `Set converted to multi-qty (${res.data.promoted} row${res.data.promoted !== 1 ? 's' : ''})`
+        : 'Already multi-qty');
+      queryClient.invalidateQueries({ queryKey: ['listings'] });
+      onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to promote set');
+    } finally {
+      setPromoting(false);
+    }
+  }
+
+  async function handleEndSet() {
+    if (!row.listing_group_id) return;
+    setEnding(true);
+    try {
+      const res = await api.post(`/listings/set-group/${row.listing_group_id}/end-multi-qty`);
+      toast.success(`Set listing ended (${res.data.ended} row${res.data.ended !== 1 ? 's' : ''} closed)`);
+      queryClient.invalidateQueries({ queryKey: ['listings'] });
+      queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
+      onClose();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (err: any) {
+      toast.error(err?.response?.data?.error ?? 'Failed to end set');
+    } finally {
+      setEnding(false);
     }
   }
 
@@ -1352,10 +1263,16 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                 <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">Set</span>
               </div>
               {canAddSetCopy && (
-                <div className="mt-3">
+                <div className="mt-3 flex items-center gap-2 flex-wrap">
                   <Button type="button" size="sm" variant="secondary" onClick={() => setAddCertOpen(true)}>
                     <Plus size={12} /> Add cert
                   </Button>
+                  {canPromoteSet && (
+                    <Button type="button" size="sm" variant="secondary" disabled={promoting} onClick={handlePromoteSet}>
+                      {promoting && <Loader2 size={12} className="animate-spin" />}
+                      {promoting ? 'Converting…' : 'Convert to multi-qty'}
+                    </Button>
+                  )}
                 </div>
               )}
             </>
@@ -1472,7 +1389,7 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                 : `Cancel all ${localCerts.length > 1 ? `(${localCerts.length})` : ''}`}
             </button>
           )}
-          {canEnd && (
+          {(canEnd || canEndSet) && (
             endStep === 'confirm' ? (
               <div className="flex items-center gap-2">
                 <span className="text-sm text-amber-300">End this listing?</span>
@@ -1480,7 +1397,7 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                 <Button type="button" size="sm"
                   className="bg-amber-600 hover:bg-amber-500 text-white border-0"
                   disabled={ending}
-                  onClick={handleEnd}>
+                  onClick={canEndSet ? handleEndSet : handleEnd}>
                   {ending && <Loader2 size={12} className="animate-spin" />}
                   {ending ? 'Ending…' : 'Yes, end'}
                 </Button>
@@ -1868,7 +1785,9 @@ export function Listings() {
                       </td>
                       <td className="px-3 py-2 text-center">
                         {row.is_drained_multi_qty ? (
-                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-bold uppercase tracking-wide border border-amber-500/30" title="Multi-qty listing is sold out — Add cert to re-populate, or End Listing to close it">Sold Out</span>
+                          <span className="inline-flex items-center h-5 px-1.5 rounded bg-amber-500/15 text-amber-300 text-[10px] font-bold uppercase tracking-wide border border-amber-500/30" title={row.listing_group_id ? "Multi-qty set is sold out — Add cert to add another copy, or End Listing to close it" : "Multi-qty listing is sold out — Add cert to re-populate, or End Listing to close it"}>
+                            Sold Out
+                          </span>
                         ) : row.listing_group_id && row.has_multi_qty ? (
                           <span className="inline-flex items-center h-5 px-1.5 rounded bg-violet-500/15 text-violet-300 text-[10px] font-bold uppercase tracking-wide border border-violet-500/30" title="Set listing with multiple copies (multi-qty)">Multi-Set</span>
                         ) : row.listing_group_id ? (

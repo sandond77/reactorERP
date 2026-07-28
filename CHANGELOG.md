@@ -17,6 +17,18 @@
   3. Spawns a new `listing_group_id` with N rows copying the parent's `ebay_listing_id / url / list_price` per row (same price default — editable later via the standard set-group price edit if you want to reprice the copy).
   4. Promotes every row on the parent's `ebay_listing_id / url` to `is_multi_qty=true` so the aggregation layer can eventually collapse copies under one URL.
 
+**Listings — multi-set persistence + explicit Convert / End actions**
+- Right after shipping Add Cert for sets, hit the same gap multi-qty singles had: once every cert on a multi-set copy sold, the row dropped out of the Graded Set tab entirely (the query filtered `WHERE has_active = true`), so users lost the ability to add another copy to a URL that was still open on eBay. Extended the drained-persistence pattern (previously singles-only) to sets.
+- **`graded_set` aggregation extended:** the `per_group` CTE now exposes `is_multi_qty`, `is_ended`, `any_ebay_listing_id`, `any_listing_id`. Price / URL / listed_at fall back from FILTER-ed-to-active values to any-row values so drained groups still render meaningful data. The `grouped` CTE now includes rows where `is_multi_qty = true AND is_ended = false AND NOT EXISTS(any active sibling on the same eBay URL)`. A computed `is_drained_multi_qty` flag rides along on every row so the client can badge / gate actions the same way it does for singles.
+- **New endpoints (mirror the single-listing shapes):**
+  - `POST /listings/set-group/:groupId/promote-multi-qty` — flips `is_multi_qty=true` on every row in the set group and every sibling on the parent's eBay id/url. Idempotent — safe to call on an already-multi set.
+  - `POST /listings/set-group/:groupId/end-multi-qty` — flips `is_ended=true` on every row sharing the eBay id/url, cancels any still-active certs so the sales trail stays consistent, leaves sold rows alone.
+- **Client (Graded Set tab + Edit modal):**
+  - Status column renders amber **SOLD OUT** on drained multi-set rows (tooltip distinguishes single vs set flavor so users know Add Cert will spawn another copy, not a lone cert).
+  - Edit Set Listing modal grows a **Convert to multi-qty** button next to Add cert when eligible (set has an eBay URL, isn't already multi-qty). Add Cert continues to auto-promote as a side effect, but the standalone button lets users pre-mark a set as multi-qty before selling anything.
+  - Bottom-bar End Listing action now handles multi-sets too — routes through `end-multi-qty` on the set-group endpoint instead of the single-listing one when the row is a set.
+  - Add Cert on a drained multi-set works because `listSetCopySlots` never had a `listing_status='active'` filter — slot composition rebuilds from historical rows, so a new copy can spawn against a fully-sold URL.
+
 **Listings — Status column now shows Set / Multi-Set badges**
 - Set listings were rendering the fallback SINGLE badge because the Status column only checked `is_drained_multi_qty` and `has_multi_qty`. Added two violet badges:
   - **SET** — `listing_group_id` is set and multi-qty is off (a group of different cards on one URL, one copy).

@@ -279,6 +279,13 @@ export async function listListings(
           l.currency,
           BOOL_OR(l.listing_status = 'active')                                          AS has_active,
           BOOL_AND(l.listing_status = 'sold')                                            AS all_sold,
+          BOOL_OR(l.is_multi_qty)                                                        AS is_multi_qty,
+          BOOL_OR(l.is_ended)                                                            AS is_ended,
+          -- Any ebay identifier from the group (active or not) — needed so
+          -- drained multi-set groups can still resolve their URL / collapse
+          -- against sibling copies.
+          (ARRAY_AGG(l.ebay_listing_id ORDER BY l.listed_at DESC NULLS LAST))[1]         AS any_ebay_listing_id,
+          (ARRAY_AGG(l.id ORDER BY l.listed_at DESC NULLS LAST))[1]                      AS any_listing_id,
           JSONB_AGG(JSONB_BUILD_OBJECT(
             'n', LOWER(COALESCE(ci.card_name_override, cc.card_name, '')),
             'g', sd.grade_label,
@@ -287,10 +294,21 @@ export async function listListings(
           STRING_AGG(LOWER(COALESCE(ci.card_name_override, cc.card_name, '')), ' | ')   AS names_concat,
           STRING_AGG(COALESCE(sd.cert_number::text, ''), ' | ')                         AS certs_concat,
           (ARRAY_AGG(l.listing_group_name ORDER BY l.listed_at DESC NULLS LAST))[1]    AS listing_group_name,
-          SUM(l.list_price) FILTER (WHERE l.listing_status = 'active')::int             AS list_price,
-          MIN(l.listed_at)  FILTER (WHERE l.listing_status = 'active')                  AS listed_at,
-          (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST)
-            FILTER (WHERE l.listing_status = 'active'))[1]                              AS ebay_listing_url,
+          -- Prices / URL prefer active rows but fall back to any row for
+          -- drained groups so the row still has something to render.
+          COALESCE(
+            SUM(l.list_price) FILTER (WHERE l.listing_status = 'active'),
+            SUM(l.list_price)
+          )::int                                                                        AS list_price,
+          COALESCE(
+            MIN(l.listed_at)  FILTER (WHERE l.listing_status = 'active'),
+            MIN(l.listed_at)
+          )                                                                             AS listed_at,
+          COALESCE(
+            (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST)
+              FILTER (WHERE l.listing_status = 'active'))[1],
+            (ARRAY_AGG(l.ebay_listing_url ORDER BY l.listed_at DESC NULLS LAST))[1]
+          )                                                                             AS ebay_listing_url,
           JSON_AGG(JSON_BUILD_OBJECT(
             'listing_id',       l.id,
             'cert_number',      sd.cert_number,
@@ -302,7 +320,7 @@ export async function listListings(
             'part_number',      cc.sku,
             'company',          sd.company
           ) ORDER BY l.listed_at DESC NULLS LAST)
-          FILTER (WHERE sd.id IS NOT NULL AND l.listing_status = 'active')              AS cert_details
+          FILTER (WHERE sd.id IS NOT NULL)                                              AS cert_details
         FROM listings l
         JOIN card_instances ci ON ci.id = l.card_instance_id
         LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
@@ -339,13 +357,40 @@ export async function listListings(
           cc.num_sold,
           NULL::text                  AS raw_purchase_label,
           pg.cert_details,
-          pg.names_concat
+          pg.names_concat,
+          pg.is_multi_qty                                                        AS has_multi_qty,
+          -- A row is "drained multi-set" when the whole group is inactive AND
+          -- no sibling copy on the same eBay URL is active either — same
+          -- concept the graded (non-set) query already exposes.
+          (
+            pg.is_multi_qty
+            AND NOT pg.has_active
+            AND NOT EXISTS (
+              SELECT 1 FROM per_group pg2
+              WHERE pg2.any_ebay_listing_id IS NOT DISTINCT FROM pg.any_ebay_listing_id
+                AND pg2.has_active = true
+            )
+          )                                                                      AS is_drained_multi_qty,
+          pg.any_listing_id
         FROM per_group pg
         JOIN comp_counts cc
           ON cc.composition = pg.composition
          AND cc.platform = pg.platform
          AND cc.currency = pg.currency
-        WHERE pg.has_active = true
+        WHERE (
+          pg.has_active = true
+          OR (
+            -- Drained multi-set copies persist so users can Add Cert (spawn
+            -- another copy) or End Listing to close the URL explicitly.
+            pg.is_multi_qty = true
+            AND pg.is_ended = false
+            AND NOT EXISTS (
+              SELECT 1 FROM per_group pg2
+              WHERE pg2.any_ebay_listing_id IS NOT DISTINCT FROM pg.any_ebay_listing_id
+                AND pg2.has_active = true
+            )
+          )
+        )
           ${filters.platforms !== undefined
             ? filters.platforms.length === 0 ? sql`AND 1=0`
               : sql`AND pg.platform IN (${sql.join(filters.platforms.map((p) => sql.val(p)))})`
@@ -356,6 +401,7 @@ export async function listListings(
         listing_group_id, listing_group_name, card_name, set_name, part_number,
         grade_label, grading_company, condition, platform, list_price, currency,
         ebay_listing_url, listed_at, num_listed, num_sold, raw_purchase_label, cert_details,
+        has_multi_qty, is_drained_multi_qty, any_listing_id,
         COUNT(*) OVER ()::int AS total_count
       FROM grouped
       ORDER BY ${sql.raw(sortCol)} ${sortDirSafe}
@@ -1160,6 +1206,112 @@ export async function endMultiQtyListing(userId: string, listingId: string) {
 // list_price, and both the parent's rows and the new rows flip to
 // is_multi_qty=true so aggregation can collapse them under one URL later.
 // ────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Flip is_multi_qty=true on every row in a set group AND every sibling on
+ * the same eBay id/url. Mirrors promoteToMultiQty for single listings so
+ * user can pre-mark a set as multi-qty before adding copies (and, once
+ * flipped, the group persists as SOLD OUT after all copies sell). Safe to
+ * call on an already-multi-qty set (returns { promoted: 0 }).
+ */
+export async function promoteSetToMultiQty(userId: string, groupId: string) {
+  const rows = await db
+    .selectFrom('listings')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .where('listing_group_id', '=', groupId)
+    .execute();
+  if (rows.length === 0) throw new AppError(404, 'Set listing not found');
+
+  const promoted: typeof rows = [];
+  const seenKeys = new Set<string>();
+  for (const r of rows) {
+    const keyCol = r.ebay_listing_id ? 'ebay_listing_id' as const
+      : r.ebay_listing_url ? 'ebay_listing_url' as const
+      : null;
+    if (!keyCol) continue;
+    const keyVal = r[keyCol] as string;
+    const keyKey = `${keyCol}:${keyVal}`;
+    if (seenKeys.has(keyKey)) continue;
+    seenKeys.add(keyKey);
+    const siblings = await db
+      .selectFrom('listings')
+      .selectAll()
+      .where('user_id', '=', userId)
+      .where(keyCol, '=', keyVal)
+      .where('is_multi_qty', '=', false)
+      .execute();
+    if (siblings.length === 0) continue;
+    await db
+      .updateTable('listings')
+      .set({ is_multi_qty: true })
+      .where('user_id', '=', userId)
+      .where(keyCol, '=', keyVal)
+      .where('is_multi_qty', '=', false)
+      .execute();
+    for (const s of siblings) {
+      await logAudit(userId, 'listings', s.id, 'updated', s, { ...s, is_multi_qty: true });
+    }
+    promoted.push(...siblings);
+  }
+  return { promoted: promoted.length };
+}
+
+/**
+ * User-initiated close of a persistent multi-qty set listing — flip
+ * is_ended=true on every row sharing the eBay id/url. Sold rows keep their
+ * historical status; any still-active gets cancelled as part of the close.
+ */
+export async function endMultiQtySet(userId: string, groupId: string) {
+  const anyRow = await db
+    .selectFrom('listings')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .where('listing_group_id', '=', groupId)
+    .executeTakeFirst();
+  if (!anyRow) throw new AppError(404, 'Set listing not found');
+  if (!anyRow.is_multi_qty) throw new AppError(400, 'Not a multi-qty set — promote it first');
+
+  const keyCol = anyRow.ebay_listing_id ? 'ebay_listing_id' as const
+    : anyRow.ebay_listing_url ? 'ebay_listing_url' as const
+    : null;
+  if (!keyCol) throw new AppError(400, 'Multi-qty set is missing its group key (ebay id/url)');
+  const keyVal = anyRow[keyCol] as string;
+
+  const rows = await db
+    .selectFrom('listings')
+    .selectAll()
+    .where('user_id', '=', userId)
+    .where(keyCol, '=', keyVal)
+    .where('is_multi_qty', '=', true)
+    .where('is_ended', '=', false)
+    .execute();
+  if (rows.length === 0) return { ended: 0 };
+
+  const ids = rows.map(r => r.id);
+  await db
+    .updateTable('listings')
+    .set({ is_ended: true })
+    .where('id', 'in', ids)
+    .execute();
+  const activeIds = rows.filter(r => r.listing_status === 'active').map(r => r.id);
+  if (activeIds.length > 0) {
+    await db
+      .updateTable('listings')
+      .set({ listing_status: 'cancelled' })
+      .where('id', 'in', activeIds)
+      .execute();
+  }
+  for (const row of rows) {
+    const after = {
+      ...row,
+      is_ended: true,
+      ...(row.listing_status === 'active' ? { listing_status: 'cancelled' as const } : {}),
+    };
+    await logAudit(userId, 'listings', row.id, 'updated', row, after);
+  }
+  return { ended: rows.length };
+}
 
 export interface SetCopySlot {
   slot_index: number;

@@ -183,6 +183,22 @@ listingsRouter.delete('/set-group/:groupId', requireAuth, async (req, res, next)
   } catch (err) { next(err); }
 });
 
+// Set listing — promote to multi-qty (flip is_multi_qty on every row sharing
+// the parent's eBay id/url) OR explicitly end a multi-qty set (mark ended
+// on every row so the persistent SOLD OUT row drops from the aggregation).
+listingsRouter.post('/set-group/:groupId/promote-multi-qty', requireAuth, async (req, res, next) => {
+  try {
+    const result = await listingsService.promoteSetToMultiQty(req.dataUserId, req.params.groupId as string);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+listingsRouter.post('/set-group/:groupId/end-multi-qty', requireAuth, async (req, res, next) => {
+  try {
+    const result = await listingsService.endMultiQtySet(req.dataUserId, req.params.groupId as string);
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
 // Set listing — Add Copy reuses the same client modal as multi-qty Add Cert.
 // Client hits these two endpoints under `/set-group/:groupId/`; the shapes
 // match `/listings/:listingId/candidate-certs` and `/listings/:id/certs` so
