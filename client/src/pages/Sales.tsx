@@ -200,6 +200,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Step 1b — copy selection (graded)
   const [selectedCard, setSelectedCard] = useState<SlabResult | null>(null);
   const [listedOnly, setListedOnly] = useState(true);
+  // Grade filter mirrors the Record Listing pattern — when a card has copies
+  // at multiple grades (say PSA 9 + PSA 10), tabs at the top let the user
+  // narrow the picker. null = first grade, otherwise the picked grade key.
+  const [saleGradeFilter, setSaleGradeFilter] = useState<string | null>(null);
   // When the user clicks a SET cert, or hits Continue with one selected, we
   // park the candidate here and render a Modal-based confirm (no window.confirm).
   // confirmContext distinguishes the two paths so OK does the right thing.
@@ -570,8 +574,24 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   // Filter copies to exact name match, then optionally to listed-only (eBay only)
   const allCopies = copiesResult?.data.filter(c => c.card_name === selectedCardName && !c.is_personal_collection) ?? [];
-  const copies = (platform === 'ebay' && listedOnly) ? allCopies.filter(c => c.is_listed) : allCopies;
+  const copiesBeforeGrade = (platform === 'ebay' && listedOnly) ? allCopies.filter(c => c.is_listed) : allCopies;
   const listedCount = allCopies.filter(c => c.is_listed).length;
+
+  // Grade breakdown for the filter tabs. Formatted as "COMPANY LABEL" to
+  // distinguish PSA MINT 9 vs BGS MINT 9 when both exist on the same card.
+  const saleGradeBreakdown = copiesBeforeGrade.reduce((map, c) => {
+    const key = [c.company, c.grade_label].filter(Boolean).join(' ') || 'Ungraded';
+    map.set(key, (map.get(key) ?? 0) + 1);
+    return map;
+  }, new Map<string, number>());
+  const saleGradeKeys = Array.from(saleGradeBreakdown.keys());
+  const activeSaleGrade = saleGradeFilter ?? saleGradeKeys[0] ?? null;
+  const copies = saleGradeKeys.length > 1 && activeSaleGrade
+    ? copiesBeforeGrade.filter(c => {
+        const key = [c.company, c.grade_label].filter(Boolean).join(' ') || 'Ungraded';
+        return key === activeSaleGrade;
+      })
+    : copiesBeforeGrade;
 
   // Set-listing detection comes from the server (is_set_listing): true when
   // the slab's ebay_listing_url has at least one sibling active listing for
@@ -843,7 +863,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 {uniqueCardNames.map(([name, count]) => (
                   <button key={name} type="button"
                     className="w-full text-left px-4 py-3 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors"
-                    onClick={() => { setSelectedCardName(name); setCardSearch(name); setSelectedCard(null); setStep('copies'); }}>
+                    onClick={() => { setSelectedCardName(name); setCardSearch(name); setSelectedCard(null); setSaleGradeFilter(null); setStep('copies'); }}>
                     <span className="text-sm text-zinc-200 truncate">{name}</span>
                     <span className="shrink-0 text-[10px] text-zinc-500 tabular-nums">{count} unsold</span>
                   </button>
@@ -890,7 +910,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 min-w-0">
-          <button type="button" onClick={() => { setStep('search'); setSelectedCard(null); setSelectedCardName(null); }}
+          <button type="button" onClick={() => { setStep('search'); setSelectedCard(null); setSelectedCardName(null); setSaleGradeFilter(null); }}
             className="text-xs text-zinc-500 hover:text-zinc-300 shrink-0">← Back</button>
           <p className="text-xs font-medium text-zinc-300 truncate">{selectedCardName}</p>
         </div>
@@ -906,6 +926,26 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           {listedOnly ? `Listed (${listedCount})` : `All (${allCopies.length})`}
         </button>
       </div>
+
+      {/* Grade filter tabs — only shown when there's more than one grade */}
+      {saleGradeKeys.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {saleGradeKeys.map(grade => (
+            <button key={grade} type="button"
+              onClick={() => { setSaleGradeFilter(grade); setSelectedCard(null); }}
+              className={`px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                activeSaleGrade === grade
+                  ? 'border-indigo-500 bg-indigo-500/15 text-indigo-300'
+                  : 'border-zinc-700 bg-zinc-800/40 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600'
+              }`}>
+              {grade}
+              <span className={`ml-1.5 tabular-nums ${activeSaleGrade === grade ? 'text-indigo-400' : 'text-zinc-600'}`}>
+                {saleGradeBreakdown.get(grade)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {isLoadingCopies ? (
         <div className="flex items-center justify-center py-8 text-zinc-600 text-sm">
