@@ -21,7 +21,9 @@ import * as locationsService from './locations.service';
 
 const THINKING: Anthropic.ThinkingConfigParam = { type: 'adaptive' };
 
-const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 3 });
+// Shared Anthropic client — same instance every AI subagent uses so HTTP
+// connections and retry budgets are process-scoped. See ai/client.ts.
+import { anthropic as client } from './ai/client';
 
 // ── TCGdex API ───────────────────────────────────────────────
 
@@ -396,96 +398,16 @@ export async function autoFillCardData(userId: string, input: {
   return results;
 }
 
-interface ImageExtractionResult extends Omit<CardInfoResult, 'source'> {
-  grading_company?: string;
-  grade?: number;
-  grade_label?: string;
-  cert_number?: string;
-  psa_label?: string;
-}
+// Card OCR and its type moved into ai/vision.service.ts so the vision
+// subagent owns every image-extraction pathway. Re-exported here to keep
+// the public surface backwards-compatible for any file still importing
+// from agent.service.
+export type { ImageCardExtractionResult as ImageExtractionResult } from './ai/vision.service';
+import { extractCardInfoFromImage as visionExtractCardInfoFromImage } from './ai/vision.service';
 
-function buildSetCodeReference(): string {
-  const enLines = EN_SETS.map((s) => `${s.code}: ${s.names[0]}`).join(', ');
-  const jpLines = JP_SETS.map((s) => `${s.code}: ${s.names[0]}`).join(', ');
-  return `EN set codes — ${enLines}\nJP set codes — ${jpLines}`;
-}
-
-// Module-scoped: build once at process start, reuse for every image OCR call.
-// The set code reference is ~2.5k tokens of static text — moving it into a
-// cached system prompt means it costs ~10% of the input price on hit (instead
-// of full price on every image).
-function buildImageExtractionSystemPrompt(game: string): string {
-  const setCodeRef = buildSetCodeReference();
-  return `This image may be a graded trading card slab (PSA, BGS, CGC, etc.) or a raw card.
-
-Extract all visible information. Return ONLY this JSON (no markdown):
-{
-  "psa_label": "normalized card identifier in format: '{YEAR} POKEMON {LANGUAGE} {SET_CODE}-{SET_NAME} {NUMBER} {CARD NAME} {RARITY}' — e.g. '2024 POKEMON JAPANESE SV8a-TERASTAL FEST ex 093 UMBREON EX' or '1996 POKEMON JAPANESE BS1-BASIC 006 CHARIZARD HOLO'. Use POKEMON (not P.M.), spell out JAPANESE/ENGLISH, zero-pad card numbers to 3 digits. Exclude grade and cert.",
-  "card_name": "OFFICIAL ENGLISH card name only — e.g. 'Charizard', 'Luxray ex', 'Mew'. Always translate from Japanese/Korean/etc. to the official English Pokemon name. Never return non-Latin script.",
-  "set_name": "ENGLISH set name. For JP-exclusive sets use the established English transliteration (e.g. 'コロコロコミック' → 'Corocoro Comics', 'スカーレット&バイオレット ex スターターセット' → 'Scarlet & Violet ex Starter Set', '黒炎の支配者' → 'Ruler of the Black Flame'). Match the canonical English name from the set reference below when possible. Never return non-Latin script.",
-  "set_code": "internal set code — match the set abbreviation or symbol visible on the card to the reference list below and return the exact code, e.g. 'SV8a' or 'SM1' or 'XY4' or null",
-  "card_number": "card number only, e.g. '006' or '034/087'",
-  "rarity": "rarity if visible in English, e.g. 'Holo' or '1st Edition'",
-  "language": "EN | JP | KR — the language printed on the card itself, NOT the language of the returned card_name/set_name",
-  "game": "${game}",
-  "grading_company": "PSA | BGS | CGC | SGC | HGA | ACE | ARS | null",
-  "grade": 10,
-  "grade_label": "grade label text, e.g. 'GEM MT' or 'EXCELLENT-MINT'",
-  "cert_number": "cert number if visible, e.g. '26354848'"
-}
-
-CRITICAL: card_name and set_name MUST be in English even when the card is Japanese, Korean, etc. The "language" field captures what's printed on the card; the names you return must always be Latin script for catalog matching.
-
-Set code reference (canonical English names — match these exactly when the card's set is in the list):
-${setCodeRef}
-
-If not a card image, return null.`;
-}
-
-// Cached per game so we don't rebuild the set-code reference on every call.
-const imageSystemPromptCache = new Map<string, string>();
-
-async function extractCardInfoFromImage(
-  imageBase64: string,
-  mediaType: 'image/jpeg' | 'image/png' | 'image/webp',
-  game: string
-): Promise<ImageExtractionResult | null> {
-  let systemPrompt = imageSystemPromptCache.get(game);
-  if (!systemPrompt) {
-    systemPrompt = buildImageExtractionSystemPrompt(game);
-    imageSystemPromptCache.set(game, systemPrompt);
-  }
-  const response = await client.messages.create({
-    model: 'claude-opus-4-7',
-    max_tokens: 768,
-    system: [
-      { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
-    ],
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: imageBase64 },
-          },
-          { type: 'text', text: 'Extract per the schema above. Return null if not a card.' },
-        ],
-      },
-    ],
-  });
-
-  const text = response.content.find((b) => b.type === 'text')?.text ?? 'null';
-  try {
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    const json = start !== -1 && end !== -1 ? text.slice(start, end + 1) : text.trim();
-    if (json === 'null') return null;
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+// The real implementation lives in ai/vision.service.ts. Local alias keeps
+// call-site names unchanged so existing agent tool handlers keep working.
+const extractCardInfoFromImage = visionExtractCardInfoFromImage;
 
 function stripGradeFromLabel(label: string, gradeLabel?: string, grade?: number, cert?: string): string {
   let s = label.trim();

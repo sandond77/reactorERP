@@ -1,5 +1,4 @@
 import { sql } from 'kysely';
-import Anthropic from '@anthropic-ai/sdk';
 import { db } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
 import { computeCostBasis } from './cards.service';
@@ -7,7 +6,11 @@ import { logAudit } from '../utils/audit';
 import type { ListingPlatform } from '../types/db';
 import { getPaginationOffset, buildPaginatedResult } from '../utils/pagination';
 import type { PaginationParams } from '../utils/pagination';
-import { env } from '../config/env';
+import {
+  extractOrderEntriesFromText,
+  extractOrderEntriesFromImage,
+  type ParsedOrderEntry,
+} from './ai/vision.service';
 
 export interface RecordSaleInput {
   card_instance_id: string;
@@ -566,12 +569,8 @@ export async function getSaleById(userId: string, saleId: string) {
 // user's active graded listings.
 // ────────────────────────────────────────────────────────────────────────────
 
-const anthropicClient = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, maxRetries: 2 });
-
-export interface ParsedOrderEntry {
-  title: string;
-  cert_number: string | null;
-}
+// ParsedOrderEntry is imported from ai/vision.service.ts.
+export type { ParsedOrderEntry } from './ai/vision.service';
 
 export interface ParsedOrderMatch {
   card_instance_id: string;
@@ -590,61 +589,8 @@ export interface ParsedOrderResult {
   candidates: ParsedOrderMatch[];      // multiple matches — client picks
 }
 
-const PARSE_ORDER_SCHEMA = `Return ONLY a JSON array (no prose) of extracted card listings.
-Each entry is { "title": "<full listing title>", "cert_number": "<PSA/BGS/CGC cert number as digits only, or null>" }.
-Skip anything that isn't a card listing (headers, ship-to addresses, tracking numbers, totals).
-Title should preserve the exact listing name as written. Cert number appears only if visible in the entry.`;
-
-async function extractOrderEntriesFromText(text: string): Promise<ParsedOrderEntry[]> {
-  const res = await anthropicClient.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 4000,
-    messages: [{
-      role: 'user',
-      content: `${PARSE_ORDER_SCHEMA}\n\nText to parse:\n\n${text}`,
-    }],
-  });
-  const raw = res.content.find((b) => b.type === 'text')?.text ?? '[]';
-  return safeParseEntries(raw);
-}
-
-async function extractOrderEntriesFromImage(imageBase64: string, mediaType: 'image/jpeg' | 'image/png' | 'image/webp'): Promise<ParsedOrderEntry[]> {
-  const res = await anthropicClient.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 4000,
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-        { type: 'text', text: PARSE_ORDER_SCHEMA },
-      ],
-    }],
-  });
-  const raw = res.content.find((b) => b.type === 'text')?.text ?? '[]';
-  return safeParseEntries(raw);
-}
-
-function safeParseEntries(raw: string): ParsedOrderEntry[] {
-  try {
-    const start = raw.indexOf('[');
-    const end = raw.lastIndexOf(']');
-    const json = start !== -1 && end !== -1 ? raw.slice(start, end + 1) : raw.trim();
-    const parsed = JSON.parse(json);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((x): x is { title: unknown; cert_number?: unknown } => x && typeof x === 'object')
-      .map((x) => ({
-        title: typeof x.title === 'string' ? x.title.trim() : '',
-        cert_number: typeof x.cert_number === 'string' && /^\d+$/.test(x.cert_number.trim())
-          ? x.cert_number.trim()
-          : null,
-      }))
-      .filter((e) => e.title.length > 0);
-  } catch {
-    return [];
-  }
-}
-
+// Order extraction (text + image) moved into ai/vision.service.ts. Matcher
+// stays here since it's DB-scoped, not AI.
 // Given an extracted title, return active-listing matches ranked by
 // how many title tokens overlap with the listing's card_name /
 // grade_label / company. Cert-number match short-circuits to an exact hit.
