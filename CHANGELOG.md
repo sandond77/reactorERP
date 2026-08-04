@@ -1,5 +1,30 @@
 # Reactor — Changelog
 
+## August 4, 2026
+
+### Refactor
+
+**AI — vision subagent split into `ai/vision.service.ts` + first-ever test suite**
+- Card OCR (`extractCardInfoFromImage`) and eBay order parsing (`parseOrderItems`) both lived inline in `agent.service.ts` and `sales.service.ts`. Neither was cache-friendly: each callsite reallocated its system prompt inside a closure, and the shared `Anthropic` client was duplicated across files. Split them into a dedicated vision subagent so each subagent can iterate independently, model tiers are visible in one place, and prompt-cache hit rate can actually claw back tokens.
+- **New module tree** under `server/src/services/ai/`:
+  - `client.ts` — one shared `Anthropic` singleton (retries = 3, process-scoped).
+  - `vision.service.ts` — every image / text extraction call. `extractCardInfoFromImage` (Opus 4.7), `extractOrderEntriesFromText` (Haiku 4.5), `extractOrderEntriesFromImage` (Sonnet 4.6). Every outbound call now attaches `cache_control: { type: 'ephemeral' }` to its system block, and each system prompt is a top-level constant so the cache key is stable across calls.
+  - `vision.service.test.ts` — 26-test suite (see below).
+- `agent.service.ts` and `sales.service.ts` now import from `ai/vision.service`. Old inline implementations deleted; re-exports (`ImageExtractionResult` alias, `ParsedOrderEntry` type) keep the public surface backwards-compatible so no other callers had to change.
+- **Callers unchanged.** `agent.service.ts` keeps a local `extractCardInfoFromImage = visionExtractCardInfoFromImage` alias so agent tool handlers keep working verbatim. Same for the shared `client` — now `import { anthropic as client } from './ai/client'`.
+- Follow-up subagent candidates parked in memory (`project_subagent_candidates.md`): expense receipts, sale-by-text, grade prediction, batch inspection OCR, anomaly review, eBay description gen, sub-return matching. User plans to revisit.
+
+**Testing — first Vitest suite lands, covering the vision subagent (26 tests, 164ms)**
+- Reactor has never had automated tests. The vision split was a good excuse to introduce one — it's a small, well-boundaried module with pure functions and a mockable outbound API. `server/package.json` gains `"test": "vitest run"` and `"test:watch": "vitest"`; `server/vitest.config.ts` scopes discovery to `src/**/*.test.ts`.
+- **Tier 1 (pure functions, no mocks) — 17 tests:**
+  - `parseOrderEntries` × 8: well-formed / prose-wrapped / malformed JSON, non-digit `cert_number` normalized to `null`, empty-title filtering, non-object filtering, non-array root, whitespace trim on titles.
+  - `buildCardExtractionSystemPrompt` × 4: EN + JP set-code blocks present, `game` interpolation, byte-identical output for identical inputs (the property the whole cache refactor depends on), null-fallback terminator.
+- **Tier 2 (mocked Anthropic client) — 9 tests:**
+  - `extractCardInfoFromImage` × 6: model = `claude-opus-4-7`, `cache_control: ephemeral` on the system block, base64 image + correct `media_type` passthrough, JSON extraction from prose-wrapped output, `null` handling, unparseable-output handling, per-game prompt cache stability across calls.
+  - `extractOrderEntriesFromText` × 4: model = `claude-haiku-4-5-20251001`, cache_control, **schema stays in system not user turn** (regression test — moving it back into the user turn would silently kill 90% of cache hits), correct parsing, empty-response handling.
+  - `extractOrderEntriesFromImage` × 3: model = `claude-sonnet-4-6`, cache_control, correct media_type passthrough.
+- Mock pattern uses `vi.hoisted()` to move the spy definition into the same hoisted scope as `vi.mock()` — vitest hoists mock factories to the top of the file at compile time, so a top-level `const messagesCreate = vi.fn()` referenced from the factory becomes `undefined`. This is captured in a comment in the test file so the next test author doesn't hit the same wall.
+
 ## July 27, 2026
 
 ### Features

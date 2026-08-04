@@ -40,7 +40,9 @@ export interface ImageCardExtractionResult {
 
 // ── Card OCR ────────────────────────────────────────────────────────────────
 
-function buildCardExtractionSystemPrompt(game: string): string {
+// Exported for tests — internal helper, prefer extractCardInfoFromImage from
+// production code.
+export function buildCardExtractionSystemPrompt(game: string): string {
   const enLines = EN_SETS.map((s) => `${s.code}: ${s.names[0]}`).join(', ');
   const jpLines = JP_SETS.map((s) => `${s.code}: ${s.names[0]}`).join(', ');
   return `This image may be a graded trading card slab (PSA, BGS, CGC, etc.) or a raw card.
@@ -128,7 +130,9 @@ Each entry is { "title": "<full listing title>", "cert_number": "<PSA/BGS/CGC ce
 Skip anything that isn't a card listing (headers, ship-to addresses, tracking numbers, totals).
 Title should preserve the exact listing name as written. Cert number appears only if visible in the entry.`;
 
-function parseOrderEntries(raw: string): ParsedOrderEntry[] {
+// Exported for tests — internal helper, prefer extractOrderEntriesFromText /
+// FromImage from production code.
+export function parseOrderEntries(raw: string): ParsedOrderEntry[] {
   try {
     const start = raw.indexOf('[');
     const end = raw.lastIndexOf(']');
