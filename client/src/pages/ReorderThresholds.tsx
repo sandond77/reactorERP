@@ -220,7 +220,7 @@ function ReorderTab() {
           <Plus size={13} /> Add Card
         </button>
       </div>
-      <div className="rounded-lg border border-zinc-800">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950/85 backdrop-blur-sm">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-zinc-800 bg-zinc-900">
@@ -381,7 +381,7 @@ function EbayListingsTab() {
           ))}
         </div>
       </div>
-      <div className="rounded-lg border border-zinc-800">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950/85 backdrop-blur-sm">
         <table className="w-full text-sm table-fixed">
           <colgroup>
             <col className="w-[25%]" />
@@ -499,7 +499,7 @@ function CardShowTab() {
           ))}
         </div>
       </div>
-      <div className="rounded-lg border border-zinc-800">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-950/85 backdrop-blur-sm">
         <table className="w-full text-sm table-fixed">
           <colgroup>
             <col className="w-[23%]" />

@@ -1013,6 +1013,11 @@ export async function addCertsToListing(userId: string, listingId: string, certI
     throw new AppError(409, `${existingActive.length} cert(s) already have an active listing`);
   }
 
+  // Fresh listed_at for each new sibling — restocking a drained multi-qty
+  // URL should show up as newly listed, not inherit the parent's original
+  // 1018-days-old timestamp (which was flagging restocked certs as stale on
+  // the eBay Listings Review alerts).
+  const now = new Date();
   const rowsToInsert = certInstanceIds.map((cid) => ({
     user_id: userId,
     card_instance_id: cid,
@@ -1026,7 +1031,7 @@ export async function addCertsToListing(userId: string, listingId: string, certI
     list_price: parent.list_price,
     asking_price: parent.asking_price,
     currency: parent.currency,
-    listed_at: parent.listed_at,
+    listed_at: now,
     listing_group_id: parent.listing_group_id,
     listing_group_name: parent.listing_group_name,
     is_multi_qty: true,
@@ -1538,8 +1543,11 @@ export async function addSetCopy(userId: string, groupId: string, cardInstanceId
   if (conflicting.length > 0) throw new AppError(409, `${conflicting.length} cert(s) already have an active listing`);
 
   // Create the new copy: fresh listing_group_id, same ebay id/url + per-cert
-  // list_price copied from the parent's row at the same slot index.
+  // list_price copied from the parent's row at the same slot index. Fresh
+  // listed_at so a restocked set copy shows up as newly listed instead of
+  // inheriting the parent's original date on stale-listings alerts.
   const newGroupId = crypto.randomUUID();
+  const now = new Date();
   const rowsToInsert = cardInstanceIds.map((cid, i) => ({
     user_id: userId,
     card_instance_id: cid,
@@ -1553,7 +1561,7 @@ export async function addSetCopy(userId: string, groupId: string, cardInstanceId
     list_price: parentRows[i].list_price,
     asking_price: parentRows[i].asking_price,
     currency: parentRows[i].currency,
-    listed_at: parentRows[i].listed_at,
+    listed_at: now,
     listing_group_id: newGroupId,
     listing_group_name: parentRows[i].listing_group_name,
     is_multi_qty: true,
