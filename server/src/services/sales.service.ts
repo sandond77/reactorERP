@@ -581,6 +581,26 @@ export interface ParsedOrderMatch {
   company: string | null;
   listed_price: number | null;
   raw_purchase_label: string | null;
+  // When the row belongs to a set listing, surface the group so the client
+  // can badge it as SET and (when a set is picked as a match) know to bulk-
+  // add every member card instead of just this one row.
+  listing_group_id: string | null;
+  listing_group_name: string | null;
+  set_member_ids?: string[];        // populated only on set-group candidates:
+                                    // every card_instance_id in the set so
+                                    // Add Match can bulk-add all of them.
+  set_members?: SetMemberRow[];     // full per-member detail for cart entries
+                                    // so client can splat N rows in one shot.
+}
+
+export interface SetMemberRow {
+  card_instance_id: string;
+  listing_id: string;
+  card_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  company: string | null;
+  listed_price: number | null;
 }
 
 export interface ParsedOrderResult {
@@ -602,7 +622,8 @@ async function matchExtractedEntry(userId: string, entry: ParsedOrderEntry): Pro
         COALESCE(ci.card_name_override, cc.card_name) AS card_name,
         sd.cert_number, sd.grade_label, sd.company,
         l.list_price AS listed_price,
-        rp.purchase_id AS raw_purchase_label
+        rp.purchase_id AS raw_purchase_label,
+        l.listing_group_id, l.listing_group_name
       FROM card_instances ci
       INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
       INNER JOIN listings l ON l.card_instance_id = ci.id AND l.listing_status = 'active'
@@ -631,12 +652,85 @@ async function matchExtractedEntry(userId: string, entry: ParsedOrderEntry): Pro
   const gradeCompany = gradeMatch?.[1]?.toUpperCase();
   const gradeValue = gradeMatch?.[2];
 
+  // ── Set-listing candidates ─────────────────────────────────────────────
+  // eBay titles like "PSA10 Sequential Set Pikachu Round 1&2 Medals ..."
+  // never match individual member card_names — they match the LISTING
+  // GROUP name. This branch scores set groups by how many title tokens
+  // overlap with the group name, so a set title finds its set instead of
+  // individually-scored member slabs.
+  const isSetTitle = /\bset\b/i.test(entry.title);
+  const setCandidates = isSetTitle
+    ? await sql<{
+        listing_group_id: string;
+        listing_group_name: string | null;
+        total_list_price: number;
+        match_score: number;
+        members: SetMemberRow[];
+      }>`
+        WITH group_rows AS (
+          SELECT l.listing_group_id,
+                 (ARRAY_AGG(l.listing_group_name) FILTER (WHERE l.listing_group_name IS NOT NULL))[1] AS listing_group_name,
+                 SUM(l.list_price)::int                                                              AS total_list_price,
+                 (
+                   ${sql.join(
+                     words.map((w) => sql`(CASE WHEN LOWER(COALESCE((ARRAY_AGG(l.listing_group_name) FILTER (WHERE l.listing_group_name IS NOT NULL))[1], '')) LIKE ${'%' + w + '%'} THEN 1 ELSE 0 END)`),
+                     sql` + `,
+                   )}
+                 )::int AS match_score,
+                 JSON_AGG(JSON_BUILD_OBJECT(
+                   'card_instance_id', ci.id,
+                   'listing_id',       l.id,
+                   'card_name',        COALESCE(ci.card_name_override, cc.card_name),
+                   'cert_number',      sd.cert_number,
+                   'grade_label',      sd.grade_label,
+                   'company',          sd.company,
+                   'listed_price',     l.list_price
+                 ) ORDER BY l.listed_at) AS members
+          FROM listings l
+          INNER JOIN card_instances ci ON ci.id = l.card_instance_id
+          LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+          LEFT JOIN slab_details sd ON sd.card_instance_id = ci.id
+          WHERE l.user_id = ${userId}
+            AND l.listing_status = 'active'
+            AND l.listing_group_id IS NOT NULL
+          GROUP BY l.listing_group_id
+        )
+        SELECT * FROM group_rows
+        WHERE match_score > 0
+        ORDER BY match_score DESC
+        LIMIT 4
+      `.execute(db)
+    : { rows: [] };
+
+  const setMatches: ParsedOrderMatch[] = setCandidates.rows.map((r) => {
+    const first = r.members[0];
+    return {
+      // Represent the whole set as one candidate. card_instance_id is the
+      // first cert in the set so client wiring stays uniform; set_member_ids
+      // + set_members carry the rest so Add Match can bulk-add everything
+      // without another round trip.
+      card_instance_id: first.card_instance_id,
+      listing_id: first.listing_id,
+      card_name: r.listing_group_name ?? first.card_name,
+      cert_number: first.cert_number,
+      grade_label: first.grade_label,
+      company: first.company,
+      listed_price: r.total_list_price,
+      raw_purchase_label: null,
+      listing_group_id: r.listing_group_id,
+      listing_group_name: r.listing_group_name,
+      set_member_ids: r.members.map((m) => m.card_instance_id),
+      set_members: r.members,
+    };
+  });
+
   const rows = await sql<ParsedOrderMatch & { match_score: number }>`
     SELECT ci.id AS card_instance_id, l.id AS listing_id,
       COALESCE(ci.card_name_override, cc.card_name) AS card_name,
       sd.cert_number, sd.grade_label, sd.company,
       l.list_price AS listed_price,
       rp.purchase_id AS raw_purchase_label,
+      l.listing_group_id, l.listing_group_name,
       (
         ${sql.join(
           words.map((w) => sql`(CASE WHEN LOWER(COALESCE(ci.card_name_override, cc.card_name, '')) LIKE ${'%' + w + '%'} THEN 1 ELSE 0 END)`),
@@ -650,6 +744,9 @@ async function matchExtractedEntry(userId: string, entry: ParsedOrderEntry): Pro
     LEFT JOIN raw_purchases rp ON rp.id = ci.raw_purchase_id
     WHERE ci.user_id = ${userId}
       AND ci.purchase_type = 'pre_graded'
+      AND l.listing_group_id IS NULL       -- exclude set members here; set
+                                           -- listings already surfaced via
+                                           -- setCandidates above.
       ${gradeCompany ? sql`AND sd.company = ${gradeCompany}` : sql``}
       ${gradeValue ? sql`AND sd.grade = ${Number(gradeValue)}` : sql``}
       AND (
@@ -662,21 +759,34 @@ async function matchExtractedEntry(userId: string, entry: ParsedOrderEntry): Pro
     LIMIT 8
   `.execute(db);
 
-  if (rows.rows.length === 0) return { matched: null, candidates: [] };
-  const top = rows.rows[0];
+  // Combine: sets first (they're more specific when the title contains
+  // "set"), then individual candidates.
+  const combined = [...setMatches, ...rows.rows.map(strip)];
+  if (combined.length === 0) return { matched: null, candidates: [] };
+  const top = combined[0];
   // Auto-match only when there is one row OR the top score strictly beats
-  // the runner-up. Otherwise leave it to the user to pick.
-  const isSole = rows.rows.length === 1;
-  const isClearWinner = rows.rows.length > 1 && top.match_score > rows.rows[1].match_score;
-  if (isSole || isClearWinner) {
-    return { matched: strip(top), candidates: [] };
+  // the runner-up. Set matches don't share a scale with individual matches,
+  // so we only auto-match on a set when it's the ONLY candidate.
+  const setDominates = setMatches.length === 1 && rows.rows.length === 0;
+  const isSole = combined.length === 1;
+  if (isSole || setDominates) {
+    return { matched: top, candidates: [] };
   }
-  return { matched: null, candidates: rows.rows.map(strip) };
+  return { matched: null, candidates: combined };
 }
 
-function strip(row: ParsedOrderMatch & { match_score?: number }): ParsedOrderMatch {
-  const { card_instance_id, listing_id, card_name, cert_number, grade_label, company, listed_price, raw_purchase_label } = row;
-  return { card_instance_id, listing_id, card_name, cert_number, grade_label, company, listed_price, raw_purchase_label };
+function strip(row: (ParsedOrderMatch & { match_score?: number })): ParsedOrderMatch {
+  const {
+    card_instance_id, listing_id, card_name, cert_number, grade_label, company,
+    listed_price, raw_purchase_label, listing_group_id, listing_group_name,
+    set_member_ids, set_members,
+  } = row;
+  return {
+    card_instance_id, listing_id, card_name, cert_number, grade_label, company,
+    listed_price, raw_purchase_label, listing_group_id, listing_group_name,
+    ...(set_member_ids ? { set_member_ids } : {}),
+    ...(set_members ? { set_members } : {}),
+  };
 }
 
 export async function parseOrderItems(

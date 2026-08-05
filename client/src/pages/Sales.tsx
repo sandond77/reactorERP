@@ -2557,6 +2557,21 @@ interface PasteMatch {
   company: string | null;
   listed_price: number | null;
   raw_purchase_label: string | null;
+  listing_group_id?: string | null;
+  listing_group_name?: string | null;
+  // Populated only when the match represents an entire set listing. Add
+  // Match then bulk-adds every member; the outer card_instance_id / listing_id
+  // point at the first cert so client wiring stays uniform.
+  set_member_ids?: string[];
+  set_members?: {
+    card_instance_id: string;
+    listing_id: string;
+    card_name: string | null;
+    cert_number: string | null;
+    grade_label: string | null;
+    company: string | null;
+    listed_price: number | null;
+  }[];
 }
 interface PasteResult {
   extracted: { title: string; cert_number: string | null };
@@ -2588,6 +2603,39 @@ function PasteOrderList({
   const alreadyAdded = new Set(bulkCart.map(c => c.id));
 
   function addMatchToCart(m: PasteMatch): boolean {
+    // Set-listing match: bulk-add every member with its own list_price so the
+    // cart mirrors what actually sold.
+    if (m.set_members && m.set_members.length > 0) {
+      const newEntries: BulkCartItem[] = [];
+      for (const mem of m.set_members) {
+        if (alreadyAdded.has(mem.card_instance_id)) continue;
+        const stickerStr = mem.listed_price != null ? (mem.listed_price / 100).toFixed(2) : '';
+        newEntries.push({
+          cart_entry_id: crypto.randomUUID(),
+          id: mem.card_instance_id,
+          listing_id: mem.listing_id,
+          card_name: mem.card_name,
+          set_name: null,
+          cert_number: mem.cert_number,
+          grade_label: mem.grade_label,
+          company: mem.company,
+          raw_purchase_label: null,
+          sticker_price_input: stickerStr,
+          final_price_input: stickerStr,
+          card_type: 'graded',
+          quantity: 1,
+          lot_quantity: 1,
+          card_show_price: null,
+          listed_price: mem.listed_price,
+          is_listed: true,
+        });
+      }
+      if (newEntries.length === 0) return false;
+      setBulkCart(prev => [...prev, ...newEntries]);
+      return true;
+    }
+
+    // Individual cert match: single row.
     if (alreadyAdded.has(m.card_instance_id)) return false;
     const stickerStr = m.listed_price != null ? (m.listed_price / 100).toFixed(2) : '';
     setBulkCart(prev => [...prev, {
@@ -2759,45 +2807,160 @@ function PasteOrderList({
             <div className="space-y-2">
               <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Needs review</p>
               {needsReview.map(({ r, idx }) => (
-                <div key={idx} className="rounded-lg border border-zinc-700 bg-zinc-900/40 px-3 py-2 space-y-1.5">
-                  <p className="text-xs text-zinc-300 truncate" title={r.extracted.title}>
-                    {r.extracted.title}
-                    {r.extracted.cert_number && <span className="ml-2 font-mono text-indigo-300/70">#{r.extracted.cert_number}</span>}
-                  </p>
-                  {pasteResolved.has(idx) ? (
-                    <p className="text-[11px] text-emerald-400">Added to cart</p>
-                  ) : r.candidates.length > 0 ? (
-                    <div className="space-y-1">
-                      <p className="text-[10px] text-zinc-500">{r.candidates.length} possible match{r.candidates.length !== 1 ? 'es' : ''} — pick one:</p>
-                      {r.candidates.map(c => (
-                        <button key={c.card_instance_id} type="button"
-                          disabled={alreadyAdded.has(c.card_instance_id)}
-                          onClick={() => {
-                            if (addMatchToCart(c)) {
-                              setPasteResolved(prev => { const next = new Set(prev); next.add(idx); return next; });
-                            }
-                          }}
-                          className={cn('w-full text-left rounded border px-2 py-1.5 text-[11px] transition-colors',
-                            alreadyAdded.has(c.card_instance_id)
-                              ? 'border-zinc-800 bg-zinc-900/40 text-zinc-600 cursor-not-allowed'
-                              : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-indigo-500/60 hover:bg-indigo-500/10')}>
-                          <div className="flex items-center gap-2">
-                            <span className="truncate flex-1">{c.card_name ?? '—'}</span>
-                            {c.cert_number && <span className="font-mono text-indigo-300/70 shrink-0">#{c.cert_number}</span>}
-                            {c.grade_label && <span className="text-zinc-500 shrink-0">{c.company} {c.grade_label}</span>}
-                            {c.listed_price != null && <span className="text-zinc-400 shrink-0">${(c.listed_price / 100).toFixed(2)}</span>}
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-[11px] text-amber-400">No match in active inventory — search this manually.</p>
-                  )}
-                </div>
+                <NeedsReviewCard key={idx}
+                  result={r}
+                  index={idx}
+                  resolved={pasteResolved.has(idx)}
+                  alreadyAdded={alreadyAdded}
+                  onAdd={(m) => {
+                    if (addMatchToCart(m)) {
+                      setPasteResolved(prev => { const next = new Set(prev); next.add(idx); return next; });
+                    }
+                  }}
+                />
               ))}
             </div>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Paste List — per-row "Needs review" card with fallback search ─────────
+// AI matcher's candidates are auto-attached to each result. If none match
+// the actual listing (common for set listings, name variants, or restocked
+// certs with new listing_ids), the user needs to search live inventory to
+// find the right cert. This card renders the AI's candidates first, then a
+// free-text search below that queries the graded slabs endpoint.
+interface SlabSearchRow {
+  id: string;
+  card_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  company: string | null;
+  listed_price: number | null;
+  raw_purchase_label: string | null;
+  listing_id: string | null;
+}
+function NeedsReviewCard({
+  result, index, resolved, alreadyAdded, onAdd,
+}: {
+  result: PasteResult;
+  index: number;
+  resolved: boolean;
+  alreadyAdded: Set<string>;
+  onAdd: (m: PasteMatch) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [debounced, setDebounced] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data: searchData, isLoading: isSearching } = useQuery<PaginatedResult<SlabSearchRow>>({
+    queryKey: ['needs-review-search', debounced],
+    queryFn: () => api.get('/grading/slabs', {
+      params: { search: debounced, limit: 15, status: 'unsold', for_sale: 'yes', personal_collection: 'no', sort_by: 'card_name', sort_dir: 'asc' },
+    }).then(r => r.data),
+    enabled: debounced.length >= 2,
+  });
+  const searchRows = searchData?.data ?? [];
+
+  function rowToMatch(row: SlabSearchRow): PasteMatch {
+    return {
+      card_instance_id: row.id,
+      listing_id: row.listing_id,
+      card_name: row.card_name,
+      cert_number: row.cert_number,
+      grade_label: row.grade_label,
+      company: row.company,
+      listed_price: row.listed_price,
+      raw_purchase_label: row.raw_purchase_label,
+    };
+  }
+
+  return (
+    <div key={index} className="rounded-lg border border-zinc-700 bg-zinc-900/40 px-3 py-2 space-y-1.5">
+      <p className="text-xs text-zinc-300 truncate" title={result.extracted.title}>
+        {result.extracted.title}
+        {result.extracted.cert_number && <span className="ml-2 font-mono text-indigo-300/70">#{result.extracted.cert_number}</span>}
+      </p>
+
+      {resolved ? (
+        <p className="text-[11px] text-emerald-400">Added to cart</p>
+      ) : (
+        <>
+          {result.candidates.length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-[10px] text-zinc-500">{result.candidates.length} possible match{result.candidates.length !== 1 ? 'es' : ''} — pick one:</p>
+              {result.candidates.map(c => {
+                const isSet = !!c.set_member_ids && c.set_member_ids.length > 0;
+                const memberCount = c.set_member_ids?.length ?? 0;
+                return (
+                  <button key={c.card_instance_id} type="button"
+                    disabled={alreadyAdded.has(c.card_instance_id)}
+                    onClick={() => onAdd(c)}
+                    className={cn('w-full text-left rounded border px-2 py-1.5 text-[11px] transition-colors',
+                      alreadyAdded.has(c.card_instance_id)
+                        ? 'border-zinc-800 bg-zinc-900/40 text-zinc-600 cursor-not-allowed'
+                        : 'border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-indigo-500/60 hover:bg-indigo-500/10')}>
+                    <div className="flex items-center gap-2">
+                      {isSet && (
+                        <span className="shrink-0 text-[9px] font-bold uppercase tracking-wide bg-violet-500/20 text-violet-400 border border-violet-500/30 rounded px-1.5 py-0.5">
+                          Set · {memberCount}
+                        </span>
+                      )}
+                      <span className="truncate flex-1">{c.card_name ?? '—'}</span>
+                      {!isSet && c.cert_number && <span className="font-mono text-indigo-300/70 shrink-0">#{c.cert_number}</span>}
+                      {c.grade_label && <span className="text-zinc-500 shrink-0">{c.company} {c.grade_label}</span>}
+                      {c.listed_price != null && <span className="text-zinc-400 shrink-0">${(c.listed_price / 100).toFixed(2)}</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-[11px] text-amber-400">No suggested match — search your inventory below.</p>
+          )}
+
+          {/* Fallback search — always available so users can override the AI */}
+          <div className="pt-1 space-y-1">
+            <input type="text"
+              placeholder="Search inventory (card name, cert #, part #)…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full text-[11px] bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+            />
+            {debounced.length >= 2 && (
+              <div className="rounded border border-zinc-800 max-h-40 overflow-y-auto divide-y divide-zinc-800/60">
+                {isSearching ? (
+                  <p className="px-2 py-1.5 text-[10px] text-zinc-600 text-center">Searching…</p>
+                ) : searchRows.length === 0 ? (
+                  <p className="px-2 py-1.5 text-[10px] text-zinc-600 text-center">No matches.</p>
+                ) : (
+                  searchRows.map(row => (
+                    <button key={row.id} type="button"
+                      disabled={alreadyAdded.has(row.id)}
+                      onClick={() => onAdd(rowToMatch(row))}
+                      className={cn('w-full text-left px-2 py-1 text-[11px] transition-colors',
+                        alreadyAdded.has(row.id)
+                          ? 'bg-zinc-900/40 text-zinc-600 cursor-not-allowed'
+                          : 'text-zinc-300 hover:bg-indigo-500/10')}>
+                      <div className="flex items-center gap-2">
+                        <span className="truncate flex-1">{row.card_name ?? '—'}</span>
+                        {row.cert_number && <span className="font-mono text-indigo-300/70 shrink-0">#{row.cert_number}</span>}
+                        {row.grade_label && <span className="text-zinc-500 shrink-0">{row.company} {row.grade_label}</span>}
+                        {row.listed_price != null && <span className="text-zinc-400 shrink-0">${(row.listed_price / 100).toFixed(2)}</span>}
+                      </div>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

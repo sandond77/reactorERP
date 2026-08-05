@@ -1,5 +1,16 @@
 # Reactor — Changelog
 
+## August 5, 2026
+
+### Fixes
+
+**Combined Order — Paste List: set listings now match + Needs Review gets a fallback search**
+- Two bugs surfaced on the same screen. First: the AI matcher on the Combined Order Paste List couldn't find set listings — extracted titles like "PSA10 Sequential Set Pikachu Round 1&2 Medals ..." never scored against individual member card names, so set-heavy orders showed 8 unrelated Pikachu certs as candidates. Second: even for individual-cert entries, if the AI's top-8 candidates were all wrong, users had no way to search their own inventory for the actual match — the Needs Review card was strictly pick-from-candidates.
+- **Set-listing matcher branch** in `matchExtractedEntry` (`sales.service.ts`) fires when the extracted title contains "set". Runs a group-scoped CTE over `listings` grouped by `listing_group_id` that scores each set by how many title tokens overlap with `listing_group_name`, then returns the whole set as a single candidate with `set_member_ids` + `set_members[]` (full per-member detail: card_instance_id, listing_id, card_name, cert_number, grade, company, list_price). Individual-cert candidates now explicitly filter `listing_group_id IS NULL` so set members don't leak in as noisy individual matches.
+- **Auto-match semantics for sets:** because set scores don't share a scale with individual cert scores, sets only auto-match when they're the ONLY candidate for the entry. Otherwise both surface as picker options.
+- **Client — set candidates render with a violet SET · N badge** showing member count. `addMatchToCart` detects `set_members` and bulk-adds every member with its own list price so the cart mirrors the actual sold composition (each member becomes its own cart entry, individually priced from the parent's per-cert list_price).
+- **Client — Needs Review card factored out into `NeedsReviewCard` component** with a per-row fallback search input. Type 2+ chars, hits `/grading/slabs?search=X&for_sale=yes` (same endpoint as bulk-search), results render below the AI's candidates and are click-to-add. Unblocks users when the AI misses (rename drift, restocked certs whose listing_id changed, name variants). Debounced 300ms; disabled state for anything already in the cart.
+
 ## August 4, 2026
 
 ### Refactor
