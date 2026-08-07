@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import * as reportsService from '../services/reports.service';
 import { z } from 'zod';
-import { localMidnightUtc, localYearStartUtc, safeTz } from '../utils/tz';
+import { localDayStartAsUtc, localYearStartAsUtc, safeTz } from '../utils/tz';
 
 const dateRangeSchema = z.object({
   from: z.string().default(() => {
@@ -136,14 +136,16 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       return (q as any).groupBy('platform').execute();
     };
 
-    // "Today" and "This Year" boundaries need to resolve to midnight in the
-    // caller's local timezone, not the server's (Railway runs UTC). The
-    // client passes tz via the `?tz=` query param; helper safely defaults
-    // to UTC if the value is missing or invalid so a bad client never
-    // explodes the request.
+    // "Today" and "This Year" boundaries resolve to UTC midnight of the
+    // caller's local calendar date. This matches how the client renders
+    // date columns (`formatDate` uses timeZone: 'UTC') and how date-input
+    // sales are stored (`<input type="date">` → `new Date("YYYY-MM-DD")`
+    // = UTC midnight). Filtering by exact local midnight would silently
+    // drop those UTC-anchored rows for west-of-UTC users. Client passes
+    // tz via `?tz=`; helper safely defaults to UTC.
     const tz = safeTz(typeof req.query.tz === 'string' ? req.query.tz : undefined);
-    const todayStart = localMidnightUtc(tz);
-    const yearStart = localYearStartUtc(tz);
+    const todayStart = localDayStartAsUtc(tz);
+    const yearStart = localYearStartAsUtc(tz);
 
     const queryToday = () => db
       .selectFrom('sales')

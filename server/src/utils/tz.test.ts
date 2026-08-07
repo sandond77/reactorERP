@@ -6,6 +6,8 @@ import {
   safeTz,
   localYear,
   localYmd,
+  localDayStartAsUtc,
+  localYearStartAsUtc,
 } from './tz';
 
 describe('safeTz', () => {
@@ -152,5 +154,50 @@ describe('localYmd', () => {
   it('handles Tokyo rollover', () => {
     // Aug 6 15:30 UTC = Aug 7 00:30 JST.
     expect(localYmd('Asia/Tokyo', new Date('2026-08-06T15:30:00Z'))).toBe('2026-08-07');
+  });
+});
+
+describe('localDayStartAsUtc', () => {
+  it('anchors PST evening to UTC midnight of the wall-clock date', () => {
+    // Aug 6 19:00 PDT = Aug 7 02:00 UTC. User's wall clock says Aug 6,
+    // so "today" = Aug 6 00:00 UTC (matches how the client renders
+    // date-input sales stored at UTC midnight).
+    const now = new Date('2026-08-07T02:00:00Z');
+    expect(localDayStartAsUtc('America/Los_Angeles', now).toISOString()).toBe('2026-08-06T00:00:00.000Z');
+  });
+
+  it('anchors PST early morning to UTC midnight of the wall-clock date', () => {
+    // Jan 1 08:30 UTC = Jan 1 00:30 PST → wall clock is Jan 1.
+    const now = new Date('2026-01-01T08:30:00Z');
+    expect(localDayStartAsUtc('America/Los_Angeles', now).toISOString()).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('handles Tokyo rollover — user already on next day locally', () => {
+    // Aug 6 16:00 UTC = Aug 7 01:00 JST.
+    const now = new Date('2026-08-06T16:00:00Z');
+    expect(localDayStartAsUtc('Asia/Tokyo', now).toISOString()).toBe('2026-08-07T00:00:00.000Z');
+  });
+
+  it('is a plain UTC midnight for UTC caller', () => {
+    const now = new Date('2026-08-06T14:30:00Z');
+    expect(localDayStartAsUtc('UTC', now).toISOString()).toBe('2026-08-06T00:00:00.000Z');
+  });
+});
+
+describe('localYearStartAsUtc', () => {
+  it('returns previous year Jan 1 UTC when PST is still Dec 31', () => {
+    // Jan 1 07:30 UTC 2027 = Dec 31 23:30 PST 2026. Local year is 2026.
+    const now = new Date('2027-01-01T07:30:00Z');
+    expect(localYearStartAsUtc('America/Los_Angeles', now).toISOString()).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('returns local year Jan 1 UTC for mid-year Tokyo', () => {
+    const now = new Date('2026-06-15T12:00:00Z');
+    expect(localYearStartAsUtc('Asia/Tokyo', now).toISOString()).toBe('2026-01-01T00:00:00.000Z');
+  });
+
+  it('returns Jan 1 UTC for UTC caller', () => {
+    const now = new Date('2026-08-06T14:30:00Z');
+    expect(localYearStartAsUtc('UTC', now).toISOString()).toBe('2026-01-01T00:00:00.000Z');
   });
 });

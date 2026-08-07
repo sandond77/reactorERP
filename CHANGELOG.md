@@ -19,6 +19,12 @@
 **Tests — 24 new tests cover the tz helpers**
 - `server/src/utils/tz.test.ts` (24 tests) exercises `safeTz` (valid IANA, undefined, empty, garbage), `getTimezoneOffsetMinutes` (UTC / PDT / PST / Tokyo year-round), `localMidnightUtc` (PDT and PST evenings, Tokyo rollover, UTC no-op, year-boundary edge), `localYearStartUtc` (Feb in LA, Dec 31 evening PST still 2026, UTC direct, Tokyo Jan 15 → previous-year Dec 31 UTC), `localYear` (PST evening year rollback, Tokyo year advance), `localYmd` (LA, UTC, Tokyo). Purely functional — no mocks. Reactor now has 50 automated tests (26 vision + 24 tz) running through Vitest.
 
+**Time (follow-up) — Dashboard "Today" now anchors to UTC calendar date, matching how the client renders dates**
+- The first tz patch fixed the server-UTC boundary bug but introduced a subtler one: date-input sales (`<input type="date">` → `new Date("2026-08-06")`) get stored at Aug 6 00:00 UTC. A PST user's `localMidnightUtc = Aug 6 08:00 UTC` would still filter those out ("0 sales today" persisted for the same user after the first fix). The client displays date columns with `formatDate` at `timeZone: 'UTC'`, so a sale stored at Aug 6 00:00 UTC renders as "Aug 6" — meaning the app's semantic date is UTC-anchored end-to-end.
+- **New helpers** `localDayStartAsUtc(tz, now)` and `localYearStartAsUtc(tz, now)` in `server/src/utils/tz.ts`. Both return UTC midnight of the caller's local calendar date/year: PST at 7pm Aug 6 (UTC Aug 7 02:00) → `localDayStartAsUtc = Aug 6 00:00 UTC`, matching the "Aug 6" label the client displays. Old `localMidnightUtc` / `localYearStartUtc` are kept for cases where the exact local instant is what you want.
+- `reports.controller.ts` switched to the new helpers for both "Today" and "This Year" summary windows.
+- **Tests +7** covering PST evening, PST early-morning, Tokyo rollover, UTC caller, year-boundary rollback. Suite is now 57 passing (26 vision + 31 tz).
+
 ## August 5, 2026
 
 ### Fixes

@@ -90,3 +90,28 @@ export function localYmd(tz: string, now: Date = new Date()): string {
     year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(now);
 }
+
+/**
+ * UTC midnight of the caller's local calendar date. Different from
+ * `localMidnightUtc`: this anchors the *date label* to UTC instead of
+ * the exact local instant. Used when filtering a column whose values
+ * were themselves stored as UTC-anchored date-only timestamps (the
+ * client's `<input type="date">` → `new Date("YYYY-MM-DD")` pipeline
+ * produces `YYYY-MM-DD 00:00:00 UTC`), which is also how the client
+ * later displays them via `formatDate` (timeZone: 'UTC'). Filtering by
+ * this makes "today" mean "the UTC date the user sees on their sales
+ * list" — internally consistent with the app's UTC-first date semantics
+ * even for a PST user still on their wall-clock Aug 6 at 8pm.
+ */
+export function localDayStartAsUtc(tz: string, now: Date = new Date()): Date {
+  return new Date(`${localYmd(tz, now)}T00:00:00Z`);
+}
+
+/**
+ * UTC midnight of Jan 1 of the caller's local year. Companion to
+ * `localDayStartAsUtc` for year-window "this year" buckets. Also
+ * matches the client's UTC-based date display.
+ */
+export function localYearStartAsUtc(tz: string, now: Date = new Date()): Date {
+  return new Date(`${localYear(tz, now)}-01-01T00:00:00Z`);
+}
