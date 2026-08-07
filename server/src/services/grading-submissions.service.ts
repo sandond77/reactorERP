@@ -205,10 +205,14 @@ export async function getReturnedSlabs(userId: string, batchId: string) {
   return { batch, slabs };
 }
 
-export async function createBatch(userId: string, input: CreateBatchInput) {
+export async function createBatch(userId: string, input: CreateBatchInput, tz?: string) {
+  // Year suffix for batch_id — fall back to caller-local year, not
+  // server-local (Railway UTC), so a Dec 31 11pm PST batch doesn't land
+  // in next year's numbering.
+  const { localYear, safeTz } = await import('../utils/tz');
   const year = input.submitted_at
     ? new Date(input.submitted_at).getFullYear()
-    : new Date().getFullYear();
+    : localYear(safeTz(tz));
   const batchId = await nextBatchId(userId, year);
 
   const batch = await db

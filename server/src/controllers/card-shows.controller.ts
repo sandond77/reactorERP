@@ -15,7 +15,8 @@ const createSchema = z.object({
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const rows = await service.listCardShows(req.dataUserId);
+    const tz = typeof req.query.tz === 'string' ? req.query.tz : undefined;
+    const rows = await service.listCardShows(req.dataUserId, tz);
     res.json({ data: rows });
   } catch (err) { next(err); }
 }

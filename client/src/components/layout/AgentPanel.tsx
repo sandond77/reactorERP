@@ -123,7 +123,8 @@ export function AgentPanel({ hideLauncher = false }: { hideLauncher?: boolean })
     setMessages(newMessages);
     setLoading(true);
     try {
-      const { data } = await api.post('/agent/chat', { messages: newMessages.map(({ role, content }) => ({ role, content })) });
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const { data } = await api.post('/agent/chat', { messages: newMessages.map(({ role, content }) => ({ role, content })), tz });
       setMessages(prev => [...prev, { role: 'assistant', content: data.data.reply, timestamp: new Date().toISOString() }]);
       if (data.data.mutated?.length) invalidateMutated(data.data.mutated);
     } catch (err) {
@@ -153,6 +154,7 @@ export function AgentPanel({ hideLauncher = false }: { hideLauncher?: boolean })
     try {
       const form = new FormData();
       form.append('messages', JSON.stringify(newMessages.map(({ role, content }) => ({ role, content }))));
+      form.append('tz', Intl.DateTimeFormat().resolvedOptions().timeZone);
       attachments.forEach(f => {
         if (f.type.startsWith('image/')) form.append('images', f);
         else form.append('files', f);

@@ -1015,10 +1015,10 @@ async function assertQuantitySpecifiedForMultiQty(
   }
 }
 
-async function executeAgentTool(userId: string, toolName: string, toolInput: Record<string, unknown>): Promise<unknown> {
+async function executeAgentTool(userId: string, toolName: string, toolInput: Record<string, unknown>, tz?: string): Promise<unknown> {
   if (toolName === 'create_raw_purchase') {
     const input = toolInput as unknown as Parameters<typeof createRawPurchase>[1];
-    const result = await createRawPurchase(userId, input);
+    const result = await createRawPurchase(userId, input, tz);
     return { success: true, id: result.id, purchase_id: result.purchase_id };
   }
 
@@ -1462,7 +1462,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         company,
         tier,
         grading_cost: grading_cost ? Math.round(grading_cost * 100) : 0,
-      });
+      }, tz);
       resolvedBatchId = batch.id;
     }
     await gradingService.addItem(userId, resolvedBatchId, { card_instance_id });
@@ -1673,7 +1673,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       cash_to_customer_cents: cash_to_customer ? Math.round(cash_to_customer * 100) : 0,
       trade_percent: trade_percent ?? 80,
       notes,
-    });
+    }, tz);
     return { success: true, trade_id: trade.id };
   }
 
@@ -1790,6 +1790,7 @@ export async function chatWithAgent(
   images?: AgentImage[],
   spreadsheetText?: string,
   actorName?: string,
+  tz?: string,
 ): Promise<{ reply: string; mutated: string[] }> {
   const hasFreshImages = !!(images?.length);
   // Detect a fresh conversation (user cleared chat) — drop any stale
@@ -1830,9 +1831,20 @@ export async function chatWithAgent(
   messages = trimmed.messages;
   const earlierContextSummary = trimmed.summary;
 
+  // Resolve "today" in the caller's timezone. Railway is UTC, so without
+  // this the system prompt tells the model "TODAY = Aug 7" when a west-coast
+  // user still sees Aug 6 on their wall clock — leading to relative-date
+  // tool calls landing on the wrong day.
+  const { safeTz: _safeTz } = await import('../utils/tz');
+  const effectiveTz = _safeTz(tz);
   const now = new Date();
-  const currentDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  const currentYear = now.getFullYear();
+  const currentDate = now.toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    timeZone: effectiveTz,
+  });
+  const currentYear = Number(new Intl.DateTimeFormat('en-CA', {
+    timeZone: effectiveTz, year: 'numeric',
+  }).format(now));
 
   const systemPrompt = `You are Reactor AI, a trading card inventory management assistant built into Reactor — a full ERP for Pokemon card dealers. You have complete knowledge of every workflow and can perform anything a user can do manually. You have access to real-time inventory, sales history, and catalog data.
 
@@ -2105,7 +2117,7 @@ ${JSON.stringify(summary, null, 2)}${earlierContextSummary ? `\n\n=== EARLIER IN
         if (block.type !== 'tool_use') continue;
         try {
           const reason = `agent:${block.name} | user: ${userExcerpt}`;
-          const result = await auditContext.run({ actor: 'agent', actor_name: actorName ?? 'AI Agent', reason }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>));
+          const result = await auditContext.run({ actor: 'agent', actor_name: actorName ?? 'AI Agent', reason }, () => executeAgentTool(userId, block.name, block.input as Record<string, unknown>, effectiveTz));
           // Track any card instance IDs created
           if ((block.name === 'add_card_to_purchase' || block.name === 'add_graded_card') && typeof result === 'object' && result !== null && 'id' in result) {
             createdCardIds.push(result.id as string);

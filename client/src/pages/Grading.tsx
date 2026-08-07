@@ -125,6 +125,7 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
         submitted_at:  submittedAt || undefined,
         grading_cost:  costPerCard ? toCents(costPerCard) : undefined,
         notes:         notes || undefined,
+        tz:            Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
       toast.success('Batch created');
       qc.invalidateQueries({ queryKey: ['grading-batches'] });

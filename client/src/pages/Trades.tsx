@@ -467,6 +467,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
         cash_to_customer: cashToCustomer ? (parseFloat(cashToCustomer) || 0).toFixed(2) : undefined,
         trade_percent: parseFloat(tradePercent) || 80,
         notes: tradeNotes || undefined,
+        tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
       toast.success('Trade recorded!');
       queryClient.invalidateQueries({ queryKey: ['trades'] });

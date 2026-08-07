@@ -1,6 +1,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import * as reportsService from '../services/reports.service';
 import { z } from 'zod';
+import { localMidnightUtc, localYearStartUtc, safeTz } from '../utils/tz';
 
 const dateRangeSchema = z.object({
   from: z.string().default(() => {
@@ -135,11 +136,14 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       return (q as any).groupBy('platform').execute();
     };
 
-    const yearStart = new Date(new Date().getFullYear(), 0, 1);
-    // Calendar-day "today" boundary (server local time). Matches how a card
-    // show / point-of-sale day is read by the user — sales reset at midnight,
-    // not 24 hours after the last visit.
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    // "Today" and "This Year" boundaries need to resolve to midnight in the
+    // caller's local timezone, not the server's (Railway runs UTC). The
+    // client passes tz via the `?tz=` query param; helper safely defaults
+    // to UTC if the value is missing or invalid so a bad client never
+    // explodes the request.
+    const tz = safeTz(typeof req.query.tz === 'string' ? req.query.tz : undefined);
+    const todayStart = localMidnightUtc(tz);
+    const yearStart = localYearStartUtc(tz);
 
     const queryToday = () => db
       .selectFrom('sales')

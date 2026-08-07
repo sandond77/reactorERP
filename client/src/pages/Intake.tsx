@@ -1019,9 +1019,10 @@ export function Intake() {
   const createMut = useMutation({
     mutationFn: async ({ body, receiptFile }: { body: Record<string, unknown> | Record<string, unknown>[]; receiptFile?: File }) => {
       const bodies = Array.isArray(body) ? body : [body];
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const created: { id: string; type: string }[] = [];
       for (const b of bodies) {
-        const res = await api.post('/raw-purchases', b);
+        const res = await api.post('/raw-purchases', { ...b, tz });
         created.push({ id: res.data.id, type: (b.type as string) ?? 'raw' });
       }
       // Receipt image is used for parsing only — never persisted to purchase records.
@@ -1034,7 +1035,8 @@ export function Intake() {
 
   const updateMut = useMutation({
     mutationFn: async ({ id, body, receiptFile }: { id: string; body: Record<string, unknown>; receiptFile?: File }) => {
-      const res = await api.patch(`/raw-purchases/${id}`, body);
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await api.patch(`/raw-purchases/${id}`, { ...body, tz });
       if (receiptFile) {
         const fd = new FormData();
         fd.append('image', receiptFile);

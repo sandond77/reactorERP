@@ -42,6 +42,7 @@ const createTradeSchema = z.object({
   cash_to_customer: z.union([z.string(), z.number()]).optional().transform((v) => (v != null ? toCents(v) : 0)),
   trade_percent: z.coerce.number().default(80),
   notes: z.string().optional(),
+  tz: z.string().optional(),
 });
 
 const listQuerySchema = z.object({
@@ -83,7 +84,7 @@ tradesRouter.post('/', async (req, res, next) => {
       cash_to_customer_cents: body.cash_to_customer,
       trade_percent: body.trade_percent,
       notes: body.notes,
-    });
+    }, body.tz);
     res.status(201).json({ data: trade });
   } catch (err) {
     next(err);

@@ -17,7 +17,8 @@ export async function getOne(req: Request, res: Response, next: NextFunction) {
 
 export async function create(req: Request, res: Response, next: NextFunction) {
   try {
-    res.status(201).json(await svc.createBatch(req.dataUserId, req.body));
+    const tz = typeof req.body?.tz === 'string' ? req.body.tz : undefined;
+    res.status(201).json(await svc.createBatch(req.dataUserId, req.body, tz));
   } catch (err) { next(err); }
 }
 

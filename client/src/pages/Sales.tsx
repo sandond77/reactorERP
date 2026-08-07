@@ -464,8 +464,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   }
 
   const { data: cardShowsData } = useQuery<{ data: Array<{ id: string; name: string; show_date: string; end_date: string | null; num_days: number; location: string | null }> }>({
-    queryKey: ['card-shows'],
-    queryFn: () => api.get('/card-shows').then((r) => r.data),
+    queryKey: ['card-shows', Intl.DateTimeFormat().resolvedOptions().timeZone],
+    queryFn: () => api.get('/card-shows', { params: { tz: Intl.DateTimeFormat().resolvedOptions().timeZone } }).then((r) => r.data),
     enabled: platform === 'card_show',
   });
 
@@ -2984,8 +2984,8 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
   const [submitting, setSubmitting] = useState(false);
 
   const { data: cardShowsData } = useQuery<{ data: Array<{ id: string; name: string; show_date: string; end_date: string | null; num_days: number; location: string | null }> }>({
-    queryKey: ['card-shows'],
-    queryFn: () => api.get('/card-shows').then((r) => r.data),
+    queryKey: ['card-shows', Intl.DateTimeFormat().resolvedOptions().timeZone],
+    queryFn: () => api.get('/card-shows', { params: { tz: Intl.DateTimeFormat().resolvedOptions().timeZone } }).then((r) => r.data),
     enabled: platform === 'card_show',
   });
 

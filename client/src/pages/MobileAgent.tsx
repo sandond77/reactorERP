@@ -152,6 +152,7 @@ export function MobileAgent() {
       );
       const form = new FormData();
       form.append('messages', JSON.stringify(newMessages.map(({ role, content }) => ({ role, content }))));
+      form.append('tz', Intl.DateTimeFormat().resolvedOptions().timeZone);
       resized.forEach(f => form.append('images', f));
 
       const { data } = await api.post('/agent/chat', form);

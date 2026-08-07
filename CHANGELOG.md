@@ -1,5 +1,24 @@
 # Reactor — Changelog
 
+## August 6, 2026
+
+### Fixes
+
+**Time — every "today" and year-suffix path now resolves in the caller's local tz, not the server's**
+- Railway runs the server in UTC. `new Date().setHours(0,0,0,0)` there = midnight UTC, which is up to 8 hours behind west-coast wall-clock time. Symptom the user hit: at 7pm PST on Aug 6, the Dashboard reported "0 sales today" while the Sales page correctly listed four Aug-6 sales — the summary window started at Aug 6 00:00 UTC (Aug 5 17:00 PST) and stopped at "now", so the whole afternoon of PST sales fell into "yesterday" for the summary but not for the list. Same class of bug in every other spot where `new Date()` was used to derive a date/year boundary for filtering, sorting, or ID generation.
+- **New `server/src/utils/tz.ts`** with the boundary helpers this needs: `safeTz(tz)` (IANA validator with UTC fallback), `localMidnightUtc(tz, now)`, `localYearStartUtc(tz, now)`, `localYear(tz, now)`, `localYmd(tz, now)`, `getTimezoneOffsetMinutes(tz, date)`. DST-safe because the offset is computed for `now`, not for the tz in the abstract.
+- **Fixed sites:**
+  - `reports.controller.ts` — `/reports/summary` reads `?tz=` and builds today/this-year windows from `localMidnightUtc` / `localYearStartUtc`. Dashboard passes `Intl.DateTimeFormat().resolvedOptions().timeZone` on its query and includes it in the React Query key so users travelling across zones re-fetch.
+  - `agent.service.ts` — the "TODAY IS ..." block in the agent system prompt used `toLocaleDateString('en-US')` with no tz, so on Railway the agent thought it was already tomorrow. Now takes the user's tz through `chatWithAgent(...tz)` and formats the year + date accordingly. Wired through the agent controller (`req.body.tz`) and the two client callers that build the request (`AgentPanel.tsx`, `MobileAgent.tsx`).
+  - `raw-purchases.service.ts` — `createRawPurchase` + `updateRawPurchase` fell back to `new Date().getFullYear()` for the purchase_id year suffix ("2026R117") when no `purchased_at` was provided. A Dec 31 11pm PST create on Railway would stamp `2027R…`. Both now take `tz?` and use `localYear(safeTz(tz))`. Intake.tsx sends `tz` on both create and patch.
+  - `grading-submissions.service.ts` — same year-suffix pattern for `createBatch`. `Grading.tsx` sends `tz`.
+  - `trades.service.ts` — same for `generateTradeLabel` (used by `createTrade`). `trades.routes.ts` accepts `tz` in the body schema. `Trades.tsx` sends `tz`.
+  - `card-shows.service.ts` — `listCardShows` ordered by `ABS(cs.show_date - CURRENT_DATE)` which is evaluated in the DB's UTC session tz, so a PST user near midnight would sometimes see tomorrow's show ranked ahead of today's. Now `(now() AT TIME ZONE ${tz})::date`. Both `ShowSchedule.tsx` and `Sales.tsx` (two call sites) pass `tz` on the query and include it in the React Query key.
+  - Agent tool handlers (`create_raw_purchase`, `submit_to_grading`, `record_trade`) receive `tz` through `executeAgentTool(userId, name, input, tz)` so the same server-tz bug can't slip in when the agent creates these records instead of the user.
+
+**Tests — 24 new tests cover the tz helpers**
+- `server/src/utils/tz.test.ts` (24 tests) exercises `safeTz` (valid IANA, undefined, empty, garbage), `getTimezoneOffsetMinutes` (UTC / PDT / PST / Tokyo year-round), `localMidnightUtc` (PDT and PST evenings, Tokyo rollover, UTC no-op, year-boundary edge), `localYearStartUtc` (Feb in LA, Dec 31 evening PST still 2026, UTC direct, Tokyo Jan 15 → previous-year Dec 31 UTC), `localYear` (PST evening year rollback, Tokyo year advance), `localYmd` (LA, UTC, Tokyo). Purely functional — no mocks. Reactor now has 50 automated tests (26 vision + 24 tz) running through Vitest.
+
 ## August 5, 2026
 
 ### Fixes

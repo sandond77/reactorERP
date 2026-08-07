@@ -45,8 +45,11 @@ export interface CreateTradeInput {
   notes?: string;
 }
 
-async function generateTradeLabel(userId: string, tradeDate?: string): Promise<string> {
-  const year = tradeDate ? new Date(tradeDate).getFullYear() : new Date().getFullYear();
+async function generateTradeLabel(userId: string, tradeDate?: string, tz?: string): Promise<string> {
+  // Year suffix for trade label — fall back to caller-local year rather
+  // than server-local (Railway UTC).
+  const { localYear, safeTz } = await import('../utils/tz');
+  const year = tradeDate ? new Date(tradeDate).getFullYear() : localYear(safeTz(tz));
   const result = await sql<{ next_seq: number }>`
     INSERT INTO trade_sequences (user_id, year, next_seq)
     VALUES (${userId}, ${year}, 2)
@@ -57,8 +60,8 @@ async function generateTradeLabel(userId: string, tradeDate?: string): Promise<s
   return `${year}T${seq}`;
 }
 
-export async function createTrade(userId: string, input: CreateTradeInput) {
-  const tradeLabel = await generateTradeLabel(userId, input.trade_date);
+export async function createTrade(userId: string, input: CreateTradeInput, tz?: string) {
+  const tradeLabel = await generateTradeLabel(userId, input.trade_date, tz);
 
   const trade = await db
     .insertInto('trades')

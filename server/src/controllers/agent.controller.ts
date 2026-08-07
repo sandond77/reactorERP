@@ -165,12 +165,14 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
     }
 
     const actorName = req.user!.display_name ?? req.user!.email;
+    const tz = typeof req.body.tz === 'string' ? req.body.tz : undefined;
     const { reply, mutated } = await agentService.chatWithAgent(
       req.dataUserId,
       messages,
       images.length > 0 ? images : undefined,
       spreadsheetText,
       actorName,
+      tz,
     );
     res.json({ data: { reply, mutated } });
   } catch (err: any) {

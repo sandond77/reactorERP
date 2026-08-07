@@ -162,9 +162,10 @@ export function ShowSchedule() {
   const [archiveOpen, setArchiveOpen] = useState(false);
   const archiveRef = useRef<HTMLDivElement>(null);
 
+  const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const { data, isLoading } = useQuery<{ data: CardShow[] }>({
-    queryKey: ['card-shows'],
-    queryFn: () => api.get('/card-shows').then((r) => r.data),
+    queryKey: ['card-shows', userTz],
+    queryFn: () => api.get('/card-shows', { params: { tz: userTz } }).then((r) => r.data),
   });
 
   const shows = data?.data ?? [];

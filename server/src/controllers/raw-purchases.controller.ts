@@ -40,7 +40,8 @@ export async function getOne(req: Request, res: Response) {
 
 export async function create(req: Request, res: Response) {
   try {
-    const purchase = await svc.createRawPurchase(req.dataUserId, req.body);
+    const tz = typeof req.body?.tz === 'string' ? req.body.tz : undefined;
+    const purchase = await svc.createRawPurchase(req.dataUserId, req.body, tz);
     res.status(201).json(purchase);
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -49,7 +50,8 @@ export async function create(req: Request, res: Response) {
 
 export async function update(req: Request, res: Response) {
   try {
-    const purchase = await svc.updateRawPurchase(req.dataUserId, req.params['id'] as string, req.body);
+    const tz = typeof req.body?.tz === 'string' ? req.body.tz : undefined;
+    const purchase = await svc.updateRawPurchase(req.dataUserId, req.params['id'] as string, req.body, tz);
     if (!purchase) return res.status(404).json({ error: 'Not found' });
     res.json(purchase);
   } catch (err) {

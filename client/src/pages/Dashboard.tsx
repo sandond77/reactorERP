@@ -599,9 +599,13 @@ function OverviewTab() {
     queryKey: ['inventory-value'],
     queryFn: () => api.get('/reports/inventory-value').then((r) => r.data),
   });
+  // Pass the user's local IANA timezone so the server can compute the
+  // "today" and "this year" bucket boundaries at local midnight (Railway
+  // is UTC otherwise, cutting off up to 8 hours of a west-coast day).
+  const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const { data: summary } = useQuery<SalesSummary>({
-    queryKey: ['sales-summary'],
-    queryFn: () => api.get('/reports/summary').then((r) => r.data),
+    queryKey: ['sales-summary', userTz],
+    queryFn: () => api.get('/reports/summary', { params: { tz: userTz } }).then((r) => r.data),
   });
 
   const [salesWindow, setSalesWindow] = useState<SalesWindow>('today');

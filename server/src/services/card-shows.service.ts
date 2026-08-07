@@ -30,22 +30,24 @@ export async function backfillCardShowLinks(userId: string, opts?: { showId?: st
   return Number(result.numAffectedRows ?? 0);
 }
 
-export async function listCardShows(userId: string) {
+export async function listCardShows(userId: string, tz?: string) {
   // Order by proximity to today so the Record Sale dropdown surfaces the
   // show the user is most likely working on (currently attending, just
   // wrapped, or about to attend). Previously ORDER BY show_date DESC
   // pushed shows scheduled months out to the top, burying the show the
-  // user actually needs. ABS(show_date - CURRENT_DATE) gives days-from-
-  // today; tiebreak with show_date DESC so upcoming beats past when both
-  // are equidistant. ShowSchedule.tsx re-partitions into current /
-  // upcoming / past client-side, so this change is safe there too.
+  // user actually needs. Proximity is computed against the caller's local
+  // date (not CURRENT_DATE, which resolves in the DB's UTC session tz — an
+  // evening PST user near midnight would otherwise get "tomorrow's" show
+  // sorted ahead of today's).
+  const { safeTz } = await import('../utils/tz');
+  const effectiveTz = safeTz(tz);
   return db
     .selectFrom('card_shows as cs')
     .select([
       'cs.id', 'cs.name', 'cs.location', 'cs.show_date', 'cs.end_date', 'cs.num_days', 'cs.num_tables', 'cs.notes', 'cs.created_at',
     ])
     .where('cs.user_id', '=', userId)
-    .orderBy(sql`ABS(cs.show_date - CURRENT_DATE)`, 'asc')
+    .orderBy(sql`ABS(cs.show_date - (now() AT TIME ZONE ${effectiveTz})::date)`, 'asc')
     .orderBy('cs.show_date', 'desc')
     .execute();
 }

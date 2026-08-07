@@ -424,10 +424,15 @@ export async function getRawPurchase(userId: string, id: string) {
   return { ...purchase, cards };
 }
 
-export async function createRawPurchase(userId: string, input: CreateRawPurchaseInput) {
+export async function createRawPurchase(userId: string, input: CreateRawPurchaseInput, tz?: string) {
+  // Year suffix for purchase_id ("2026R117"). When the client provides
+  // purchased_at explicitly (YYYY-MM-DD from a local date picker), use it.
+  // Otherwise fall back to "now" in the caller's tz — Railway is UTC so a
+  // Dec 31 11pm PST create would otherwise stamp 2027 instead of 2026.
+  const { localYear, safeTz } = await import('../utils/tz');
   const year = input.purchased_at
     ? new Date(input.purchased_at).getFullYear()
-    : new Date().getFullYear();
+    : localYear(safeTz(tz));
 
   const purchaseId = await nextPurchaseId(userId, input.type, year);
 
@@ -463,7 +468,8 @@ export async function createRawPurchase(userId: string, input: CreateRawPurchase
 export async function updateRawPurchase(
   userId: string,
   id: string,
-  input: UpdateRawPurchaseInput
+  input: UpdateRawPurchaseInput,
+  tz?: string,
 ) {
   const existing = await db.selectFrom('raw_purchases').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
 
@@ -471,9 +477,10 @@ export async function updateRawPurchase(
 
   // If type is changing, regenerate the purchase_id for the new type
   if (input.type !== undefined && existing && input.type !== existing.type) {
+    const { localYear, safeTz } = await import('../utils/tz');
     const year = existing.purchased_at
       ? new Date(existing.purchased_at).getFullYear()
-      : new Date().getFullYear();
+      : localYear(safeTz(tz));
     update.purchase_id = await nextPurchaseId(userId, input.type as RawPurchaseType, year);
   }
 
