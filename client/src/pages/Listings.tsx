@@ -1079,9 +1079,20 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
   // any_listing_id from the aggregation to keep Add-cert / End working.
   const parentListingId = cert?.listing_id ?? row.cert_details?.[0]?.listing_id ?? row.any_listing_id ?? null;
   const isGradedRow = !!row.grading_company;
-  const canAddCerts = isGradedRow && !isSet && !!row.has_multi_qty && !!parentListingId;
-  const canPromote = isGradedRow && !isSet && !row.has_multi_qty && !!parentListingId && !!ebayUrl;
-  const canEnd = isGradedRow && !isSet && !!row.has_multi_qty && !!parentListingId;
+  // Multi-qty status is per-eBay-URL, but `row.has_multi_qty` is BOOL_OR
+  // across every listing in the (card + grade + company) aggregation — which
+  // includes drained multi-qty siblings on completely different URLs. When
+  // the modal is scoped to a single cert (user clicked one row), that
+  // aggregate-level flag misrepresents this listing's state: a solo cert
+  // shows the Multi-Qty badge just because SOME other listing of the same
+  // card+grade was previously multi-qty. Prefer the per-cert flag in that
+  // scope; fall back to the aggregate only when editing the whole group.
+  const effectiveMultiQty = singleListingId
+    ? !!cert?.is_multi_qty
+    : !!row.has_multi_qty;
+  const canAddCerts = isGradedRow && !isSet && effectiveMultiQty && !!parentListingId;
+  const canPromote = isGradedRow && !isSet && !effectiveMultiQty && !!parentListingId && !!ebayUrl;
+  const canEnd = isGradedRow && !isSet && effectiveMultiQty && !!parentListingId;
   // Set listings get their own "Add cert" path — clicking spawns the
   // slot-based picker that enforces the set's composition. Only offered
   // once the set is multi-qty (mirrors singles, where Add cert only shows
@@ -1284,7 +1295,7 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
               <div>
                 <p className="text-sm font-medium text-zinc-100">
                   {row.card_name ?? 'Unknown'}
-                  {row.has_multi_qty && (
+                  {effectiveMultiQty && (
                     <span className="ml-2 text-[9px] font-bold uppercase tracking-wide bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded px-1.5 py-0.5 align-middle">Multi-qty</span>
                   )}
                 </p>

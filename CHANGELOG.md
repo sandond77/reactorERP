@@ -1,5 +1,15 @@
 # Reactor — Changelog
 
+## August 14, 2026
+
+### Fixes
+
+**Listings — solo cert on the same card+grade as a legacy multi-qty listing no longer badges "Multi-Qty"**
+- User hit this in the Edit Listing modal on cert #158136193 (a solo PSA 10 Pikachu Gym Event Campaign promo). Modal showed the cyan **MULTI-QTY** badge next to the card name AND rendered the **Add cert** button — even though the cert has a distinct eBay URL and is genuinely a single-quantity listing. Nothing about that specific listing was multi-qty, so both affordances were misleading.
+- Root cause is in the aggregation shape, not per-listing state. `row.has_multi_qty` on the aggregated listing is `BOOL_OR(l.is_multi_qty)` computed across the whole `(card + grade + company)` group (see [server/src/services/listings.service.ts:446](server/src/services/listings.service.ts#L446)). That group can legally contain drained multi-qty siblings on completely different URLs — the WHERE clause keeps them around so the user can restock the original URL. So a solo cert bucketed into the same aggregation as a legacy drained multi-qty listing inherits `has_multi_qty=true` even though nothing about the solo cert is multi-qty.
+- Fix in [client/src/pages/Listings.tsx](client/src/pages/Listings.tsx#L1082-L1094): when the modal is scoped to a single cert (`singleListingId != null` — user clicked a specific sub-row), derive an `effectiveMultiQty` from `cert.is_multi_qty` (per-listing ground truth from `cert_details`) instead of the aggregate. When editing the whole group (no specific cert clicked), fall back to the aggregate flag — that path stays intentional. Same `effectiveMultiQty` variable drives the badge, `canAddCerts`, `canPromote`, and `canEnd` so they can't disagree.
+- Net effect: a solo cert on any (card + grade + company) group — even one that also has a legacy drained multi-qty sibling — now correctly hides the Multi-Qty badge, hides Add cert, and offers Convert to multi-qty instead. Genuine multi-qty listings unchanged.
+
 ## August 6, 2026 (evening)
 
 ### Features
