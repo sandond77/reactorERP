@@ -643,13 +643,23 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
   // Resolve source metadata + (for legacy) anchor identity up-front so the
   // main loop below is pure "consume one from source X" — no per-iteration
   // catalog lookup, and each request slot knows how to add one card.
+  //
+  // For BOTH raw and legacy sources we also copy expected_grade + estimated_value
+  // from an existing batch item so the repeated copies inherit the same grade
+  // estimate the user already dialed in for this card. Without this, repeated
+  // rows come back with — / — for grade/value on the batch summary. For legacy
+  // we use the explicit anchor_batch_item_id; for raw we look up any batch
+  // item in this batch pointing at the same source_ci_id (all such rows
+  // should share the same values in practice, so first-match is fine).
   type Slot =
-    | { kind: 'raw'; source_ci_id: string; remaining: number }
+    | { kind: 'raw'; source_ci_id: string; remaining: number;
+        expected_grade: number | null; estimated_value: number | null }
     | { kind: 'legacy'; source_ci_id: string; remaining: number; anchor: {
         cardName: string; setName: string | null; cardNumber: string | null;
         language: string; condition: string | null;
         legacy_catalog_id: string; real_catalog_id: string | undefined;
         purchaseCost: number;
+        expected_grade: number | null; estimated_value: number | null;
       } };
   const slots: Slot[] = [];
 
@@ -676,6 +686,7 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
           'ci.catalog_id', 'ci.condition', 'ci.language', 'ci.purchase_cost',
           'ci.card_name_override', 'ci.set_name_override', 'ci.card_number_override',
           'cc.card_name as cc_card_name', 'cc.set_name as cc_set_name', 'cc.card_number as cc_card_number',
+          'gbi.expected_grade', 'gbi.estimated_value',
         ])
         .where('gbi.id', '=', req.anchor_batch_item_id)
         .where('gbi.batch_id', '=', batchId)
@@ -697,10 +708,29 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
           legacy_catalog_id: source.catalog_id,
           real_catalog_id: anchor.catalog_id ?? undefined,
           purchaseCost: anchor.purchase_cost ?? 0,
+          expected_grade: anchor.expected_grade != null ? Number(anchor.expected_grade) : null,
+          estimated_value: anchor.estimated_value ?? null,
         },
       });
     } else {
-      slots.push({ kind: 'raw', source_ci_id: req.source_ci_id, remaining: req.count });
+      // Prefer the caller's explicit anchor when provided; otherwise fall back
+      // to the first batch item in this batch pointing at the same source.
+      const anchor = await db
+        .selectFrom('grading_batch_items')
+        .select(['expected_grade', 'estimated_value'])
+        .where('batch_id', '=', batchId)
+        .$if(!!req.anchor_batch_item_id, (q) => q.where('id', '=', req.anchor_batch_item_id!))
+        .$if(!req.anchor_batch_item_id, (q) => q.where('card_instance_id', '=', req.source_ci_id))
+        .orderBy('line_item_num', 'asc')
+        .executeTakeFirst();
+
+      slots.push({
+        kind: 'raw',
+        source_ci_id: req.source_ci_id,
+        remaining: req.count,
+        expected_grade: anchor?.expected_grade != null ? Number(anchor.expected_grade) : null,
+        estimated_value: anchor?.estimated_value ?? null,
+      });
     }
   }
 
@@ -723,10 +753,17 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
           catalog_id: s.anchor.real_catalog_id,
           quantity: 1,
           purchase_cost: s.anchor.purchaseCost,
+          expected_grade: s.anchor.expected_grade ?? undefined,
+          estimated_value: s.anchor.estimated_value ?? undefined,
         });
         created.push(it.batch_item);
       } else {
-        const it = await addItem(userId, batchId, { card_instance_id: s.source_ci_id, quantity: 1 });
+        const it = await addItem(userId, batchId, {
+          card_instance_id: s.source_ci_id,
+          quantity: 1,
+          expected_grade: s.expected_grade ?? undefined,
+          estimated_value: s.estimated_value ?? undefined,
+        });
         created.push(it);
       }
       s.remaining--;
