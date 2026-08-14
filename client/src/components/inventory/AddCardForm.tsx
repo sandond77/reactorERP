@@ -76,7 +76,12 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
     if (!name.trim()) return;
     setAutoFilling(true);
     try {
-      const res = await api.post('/agent/auto-fill', { partial_name: name, game: 'pokemon' });
+      // Pass the form's current card_game so the server-side catalog lookup
+      // is scoped to the user's active game context. Server falls back to a
+      // cross-game search if the scoped query returns 0, so a Pokémon-default
+      // form still resolves a One Piece paste.
+      const currentGame = watch('card_game') ?? 'pokemon';
+      const res = await api.post('/agent/auto-fill', { partial_name: name, game: currentGame });
       const s = res.data.data?.suggestions?.[0];
       if (s) {
         // Always fill card name: prefer established catalog name, fall back to AI suggestion
@@ -85,6 +90,11 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
         if (s.card_number) setValue('card_number_override', s.card_number);
         if (s.rarity) setValue('rarity', s.rarity);
         if (s.language) setValue('language', s.language === 'JP' ? 'JP' : 'EN');
+        // Apply the detected game — server returns the catalog row's game
+        // when a fuzzy match crossed game boundaries (e.g. Pokémon-default
+        // form resolving a One Piece paste). Only overwrite when the value
+        // actually changed to avoid a redundant form dirty.
+        if (s.game && s.game !== currentGame) setValue('card_game', s.game);
         if (s.catalog_exists && s.catalog_id) {
           setCatalogId(s.catalog_id);
           setCatalogMatch({
@@ -108,7 +118,7 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
     } finally {
       setAutoFilling(false);
     }
-  }, [setValue]);
+  }, [setValue, watch]);
 
   function pickImage(side: 'front' | 'back', file: File) {
     const url = URL.createObjectURL(file);

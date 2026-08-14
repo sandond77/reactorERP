@@ -157,33 +157,44 @@ export async function lookupCardInfo(
   query: string,
   game: string = 'pokemon'
 ): Promise<CardInfoResult[]> {
-  // 1. Check the user's catalog first — word-split fuzzy: each word must match at least one field
+  // 1. Check the user's catalog first — word-split fuzzy: each word must match at least one field.
+  //
+  // Historically we scoped by `game = <caller's game>` which silently drops
+  // cross-game matches. For Add Card flow the client's default is 'pokemon',
+  // but a paste like "2025 One Piece Japanese EB03-…" clearly isn't Pokémon.
+  // Try the caller's game first; if that returns nothing, retry across all
+  // games so the picker doesn't fail-open to AI just because the user hasn't
+  // pre-selected the right dropdown value.
   const words = query.trim().split(/\s+/).filter(Boolean);
   const trimmed = query.trim();
-  let catalogQuery = db
-    .selectFrom('card_catalog')
-    .selectAll()
-    .where('user_id', '=', userId)
-    .where('game', '=', game);
 
-  for (const word of words) {
-    const term = `%${word}%`;
-    catalogQuery = catalogQuery.where((eb) =>
-      eb.or([
-        eb('card_name', 'ilike', term),
-        eb('set_name', 'ilike', term),
-        eb('card_number', 'ilike', term),
-        eb('sku', 'ilike', term),
-      ])
-    );
-  }
-
+  const buildQuery = (scopeToGame: boolean) => {
+    let q = db
+      .selectFrom('card_catalog')
+      .selectAll()
+      .where('user_id', '=', userId);
+    if (scopeToGame) q = q.where('game', '=', game);
+    for (const word of words) {
+      const term = `%${word}%`;
+      q = q.where((eb) =>
+        eb.or([
+          eb('card_name', 'ilike', term),
+          eb('set_name', 'ilike', term),
+          eb('card_number', 'ilike', term),
+          eb('sku', 'ilike', term),
+        ])
+      );
+    }
+    return q;
+  };
   // Relevance ranking — exact card-name match beats card-number-only beats
   // partial. Cuts the number of cases where AI fallback fires (and burns
   // an extra ~$0.001 per autofill) by putting the best DB match first.
   // Also penalises catalog rows missing card_number so a fully-specified
-  // hit wins over a name-only stub.
-  catalogQuery = catalogQuery
+  // hit wins over a name-only stub. Applied to BOTH the scoped and
+  // fallback queries so the retry doesn't randomise the top match.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const applyRank = (q: any) => q
     .orderBy(sql<number>`
       CASE
         WHEN LOWER(card_name) = LOWER(${trimmed})       THEN 0
@@ -196,7 +207,13 @@ export async function lookupCardInfo(
     ` as any, 'asc')
     .orderBy('card_name', 'asc');
 
-  const catalogResults = await catalogQuery.limit(10).execute();
+  type CatalogRow = Awaited<ReturnType<ReturnType<typeof buildQuery>['execute']>>[number];
+  let catalogResults: CatalogRow[] = await applyRank(buildQuery(true)).limit(10).execute();
+  if (catalogResults.length === 0) {
+    // Retry without game scope so a paste that names a different game still
+    // hits the catalog before falling back to AI.
+    catalogResults = await applyRank(buildQuery(false)).limit(10).execute();
+  }
 
   if (catalogResults.length > 0) {
     return catalogResults.map((c) => ({
@@ -270,12 +287,14 @@ async function enrichWithSku(userId: string, suggestions: CardInfoResult[]): Pro
     if (!rawCode) return { ...s, catalog_exists: false };
     const setCode = lookupSetCode(lang, rawCode) ?? lookupSetCode(lang, s.set_name ?? '') ?? rawCode;
     const sku = generatePartNumber(lang, setCode, s.card_number);
-    let row = await db.selectFrom('card_catalog').select(['id', 'card_name', 'sku']).where('user_id', '=', userId).where('sku', '=', sku).executeTakeFirst();
+    // Selecting `game` too so a cross-game fallback match can correct the
+    // AI's hardcoded `game: 'pokemon'` before returning to the client.
+    let row = await db.selectFrom('card_catalog').select(['id', 'card_name', 'sku', 'game']).where('user_id', '=', userId).where('sku', '=', sku).executeTakeFirst();
     // Fallback 1: fuzzy match by card_name + card_number (AI may return wrong set code)
     if (!row && s.card_name && s.card_number) {
       const cardNum = s.card_number.replace(/\/.*$/, '').replace(/^0+/, '');
       row = await db.selectFrom('card_catalog')
-        .select(['id', 'card_name', 'sku'])
+        .select(['id', 'card_name', 'sku', 'game'])
         .where('user_id', '=', userId)
         .where('card_name', 'ilike', `%${s.card_name}%`)
         .where('card_number', 'ilike', `%${cardNum}%`)
@@ -287,7 +306,7 @@ async function enrichWithSku(userId: string, suggestions: CardInfoResult[]): Pro
     if (!row && s.card_name && s.set_name) {
       const setWords = s.set_name.split(/\s+/).filter(w => w.length > 3);
       let q = db.selectFrom('card_catalog')
-        .select(['id', 'card_name', 'sku'])
+        .select(['id', 'card_name', 'sku', 'game'])
         .where('user_id', '=', userId)
         .where('card_name', 'ilike', `%${s.card_name}%`)
         .where('language', '=', lang);
@@ -311,6 +330,11 @@ async function enrichWithSku(userId: string, suggestions: CardInfoResult[]): Pro
       ...s,
       set_code: setCode,
       set_name: canonicalSetName,
+      // If any catalog fallback matched a row whose game differs from the
+      // suggestion (typical when the AI defaulted to 'pokemon' but the paste
+      // is actually One Piece / Digimon / etc), prefer the catalog's game —
+      // it's ground truth for the sku the user is about to inherit.
+      game: row?.game ?? s.game,
     };
     if (!row) return { ...enriched, sku, catalog_exists: false };
     // Use the established card name from an existing inventory entry for this SKU
@@ -1033,6 +1057,11 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     let resolvedCardNumber: string | null = (card_number_override as string) ?? null;
 
     const userProvidedName = resolvedCardName; // preserve what the user explicitly chose
+    // Capture the enriched suggestion's game so the persisted card_game
+    // reflects the catalog row we actually matched — otherwise a One Piece
+    // (or Digimon, or MTG) catalog match would still get filed under
+    // card_game='pokemon' below.
+    let resolvedGame: string | null = null;
     if (!resolvedCatalogId && resolvedCardName) {
       try {
         const searchTerm = [resolvedCardName, resolvedSetName, resolvedCardNumber].filter(Boolean).join(' ');
@@ -1044,8 +1073,18 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
           resolvedCardName = userProvidedName; // may be null if user accepted catalog name
           resolvedSetName = null;
           resolvedCardNumber = null;
+          if (best.game) resolvedGame = best.game;
         }
       } catch { /* enrichment failure is non-fatal */ }
+    }
+    // If the agent supplied catalog_id directly (no enrichment ran), fetch
+    // its game so the card_game field still reflects the catalog row.
+    if (!resolvedGame && resolvedCatalogId) {
+      try {
+        const cc = await db.selectFrom('card_catalog').select('game')
+          .where('id', '=', resolvedCatalogId).where('user_id', '=', userId).executeTakeFirst();
+        if (cc?.game) resolvedGame = cc.game;
+      } catch { /* non-fatal */ }
     }
 
     // Hard guard: an unlinked card (no catalog_id) MUST have a card_name_override,
@@ -1076,7 +1115,10 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       notes: (notes as string) ?? null,
       status: 'purchased_raw',
       purchase_type: 'raw',
-      card_game: 'pokemon',
+      // Derive from the enriched catalog match when the auto-lookup hit a
+      // non-Pokémon row; fall back to 'pokemon' when nothing matched. Prior
+      // hardcode filed every agent-created card as Pokémon.
+      card_game: resolvedGame ?? 'pokemon',
     });
     return { success: true, id: card.id, catalog_matched: !!resolvedCatalogId };
   }
@@ -1089,6 +1131,10 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     // Try catalog enrichment if no catalog_id provided
     let resolvedCatalogId = (catalog_id as string) ?? null;
     let resolvedCardName = (card_name_override as string) ?? null;
+    // Same game-preservation dance as add_card_to_purchase — the enriched
+    // catalog match knows the row's actual game, so we can persist a slab
+    // correctly under (say) One Piece instead of defaulting to Pokémon.
+    let resolvedGame: string | null = null;
     if (!resolvedCatalogId && resolvedCardName) {
       try {
         const enriched = await autoFillCardData(userId, { partial_name: resolvedCardName, game: 'pokemon' });
@@ -1096,7 +1142,17 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
         if (best?.catalog_id) {
           resolvedCatalogId = best.catalog_id;
           if (best?.catalog_card_name) resolvedCardName = best.catalog_card_name;
+          if (best.game) resolvedGame = best.game;
         }
+      } catch { /* non-fatal */ }
+    }
+    // If we did have a catalog_id up front (agent supplied it directly),
+    // fetch its game so the card_game field still reflects the catalog row.
+    if (!resolvedGame && resolvedCatalogId) {
+      try {
+        const cc = await db.selectFrom('card_catalog').select('game')
+          .where('id', '=', resolvedCatalogId).where('user_id', '=', userId).executeTakeFirst();
+        if (cc?.game) resolvedGame = cc.game;
       } catch { /* non-fatal */ }
     }
 
@@ -1133,7 +1189,7 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
       currency: ((currency as string) ?? 'USD') as 'USD' | 'JPY',
       quantity: 1,
       purchase_type: 'pre_graded',
-      card_game: 'pokemon',
+      card_game: resolvedGame ?? 'pokemon',
       notes: (notes as string) ?? null,
       purchased_at: (purchased_at as string) ?? null,
     } as any, {

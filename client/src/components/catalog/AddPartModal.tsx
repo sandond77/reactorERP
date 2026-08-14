@@ -392,7 +392,9 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
               />
             </div>
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">
+              {/* min-h keeps the input aligned with Rarity's on the same row
+                  even when the helper hint wraps to two lines at narrow widths. */}
+              <label className="block text-xs text-zinc-400 mb-1 min-h-[2.25rem]">
                 Card # <span className="text-zinc-600 text-[10px] font-normal">(numerator only — e.g. 215, not 215/172)</span>
               </label>
               <input
@@ -419,7 +421,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
               </label>
             </div>
             <div>
-              <label className="block text-xs text-zinc-400 mb-1">Rarity</label>
+              <label className="block text-xs text-zinc-400 mb-1 min-h-[2.25rem]">Rarity</label>
               <input className={inputCls} value={form.rarity} onChange={field('rarity')} placeholder="e.g. Special Illustration Rare" />
             </div>
             <div className="col-span-2">

@@ -499,8 +499,12 @@ export async function createCatalogCard(userId: string, params: {
   const lang = params.language.toUpperCase() === 'JP' || params.language.toUpperCase() === 'JPN' ? 'JP' : 'EN';
   // Canonicalize "215/172" → "215" before SKU autogen and storage.
   const normalizedNumber = normalizeCardNumber(params.card_number);
+  // Resolve the game's SKU prefix (e.g. Pokémon→PKMN, One Piece→OP) so
+  // non-Pokémon catalog rows don't inherit the default 'PKMN' prefix
+  // silently. Falls back to PKMN when the game is unknown or missing.
+  const gamePrefix = await getGamePrefix(params.game);
   const autoSku = (!params.sku && params.set_code && normalizedNumber)
-    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber })
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber, gamePrefix })
     : null;
 
   const result = await db
@@ -591,11 +595,16 @@ export async function searchCatalog(userId: string, params: {
   const setTokens = (set_name ?? '').trim().split(/\s+/).filter(Boolean);
   const setClauses = setTokens.map(t => sql`AND (set_name ILIKE ${'%' + t + '%'} OR set_code ILIKE ${'%' + t + '%'})`);
 
+  // Historically this query hardcoded `AND game = 'pokemon'`, which silently
+  // hid every non-Pokémon catalog row (One Piece, Digimon, Weiss, etc) from
+  // the Part # picker. Any card the user has in a non-Pokémon catalog
+  // returned "no matches for that query" no matter how exact the input.
+  // Removed — the picker is used across all games and lets the user's own
+  // catalog contents scope the results.
   const rows = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string }>`
     SELECT id, sku, card_name, set_name, set_code, card_number, language
     FROM card_catalog
     WHERE user_id = ${userId}
-      AND game = 'pokemon'
       ${qPattern ? sql`AND (card_name ILIKE ${qPattern} OR sku ILIKE ${qPattern})` : sql``}
       ${card_name ? sql`AND card_name ILIKE ${'%' + card_name + '%'}` : sql``}
       ${setClauses.length ? sql.join(setClauses, sql` `) : sql``}
@@ -615,7 +624,6 @@ export async function searchCatalog(userId: string, params: {
       SELECT id, sku, card_name, set_name, set_code, card_number, language
       FROM card_catalog
       WHERE user_id = ${userId}
-        AND game = 'pokemon'
         AND card_name ILIKE ${'%' + card_name + '%'}
         AND LTRIM(card_number, '0') = LTRIM(${card_number.split('/')[0].trim()}, '0')
         ${language ? sql`AND language = ${language.toUpperCase()}` : sql``}
@@ -733,8 +741,11 @@ export async function linkUnlinkedByCardName(userId: string, params: {
   const lang = params.language.toUpperCase() === 'JP' ? 'JP' : params.language.toUpperCase();
   // Canonicalize "215/172" → "215" so SKU autogen and stored value match catalog form.
   const normalizedNumber = normalizeCardNumber(params.card_number);
+  // Resolve the game's SKU prefix so non-Pokémon links don't collapse
+  // onto a stray PKMN-prefixed row (which could match a real Pokémon card).
+  const gamePrefix = await getGamePrefix(params.game);
   const autoSku = (!params.sku && params.set_code && normalizedNumber)
-    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber })
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber, gamePrefix })
     : null;
 
   // Look up an existing entry: first by SKU (if we can compute one), then by card_name+set_code
@@ -806,17 +817,31 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
     fields.card_number = normalized ?? undefined;
   }
 
-  // Auto-generate SKU when card_number is being set but no explicit sku is provided
+  // Auto-generate SKU when either `card_number` OR `game` is being changed
+  // and no explicit sku is provided. The previous version only regen'd on
+  // card_number change — reassigning a row's game (e.g. Pokémon → One Piece)
+  // left the stored sku on its old prefix, so cards kept displaying
+  // "PKMN-JP-OP07-500" even after being switched to one_piece. Now we pull
+  // the target game's abbreviation from card_games (via getGamePrefix) and
+  // rebuild the sku accordingly.
   let effectiveSku = fields.sku;
-  if (!effectiveSku && fields.card_number) {
+  if (!effectiveSku && (fields.card_number || fields.game)) {
     const existing = await db.selectFrom('card_catalog')
-      .select(['set_code', 'language'])
+      .select(['set_code', 'language', 'card_number', 'game'])
       .where('id', '=', id)
       .executeTakeFirst();
     const setCode = fields.set_code ?? existing?.set_code;
     const lang = (fields.language ?? existing?.language ?? 'EN').toUpperCase();
-    if (setCode) {
-      effectiveSku = generateSku({ language: lang === 'JP' ? 'JP' : 'EN', setCode, cardNumber: fields.card_number });
+    const cardNumber = fields.card_number ?? existing?.card_number ?? null;
+    const game = fields.game ?? existing?.game ?? null;
+    if (setCode && cardNumber) {
+      const gamePrefix = await getGamePrefix(game);
+      effectiveSku = generateSku({
+        language: lang === 'JP' ? 'JP' : 'EN',
+        setCode,
+        cardNumber,
+        gamePrefix,
+      });
     }
   }
   // Snapshot the OLD catalog name so we can clear stale "shadow"
