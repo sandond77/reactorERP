@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen } from 'lucide-react';
+import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen, Sparkles } from 'lucide-react';
 import { api } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -73,6 +73,11 @@ type Slot = {
   match_score?: number;
   match_confidence?: 'strong' | 'good' | 'weak' | 'none';
   matched_csv_index?: number;
+  // AI-assist provenance. When the deterministic scorer punts and the user
+  // clicks "AI assist", the fill for these slots comes from the return-matching
+  // subagent instead. Rendered with a Sparkles badge + AI reasoning tooltip.
+  ai_matched?: boolean;
+  ai_reasoning?: string;
   // CSV-import lock state. cert# and grade come from PSA's CSV as the
   // authoritative values; until override=true, those inputs are read-only
   // so a user can't accidentally (or intentionally) retype them.
@@ -548,6 +553,10 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
     )
   );
   const [reviewing, setReviewing] = useState(false);
+  // Kept in state after CSV upload so the "AI assist" button can send unused
+  // candidates back to the server for the return-matching subagent to
+  // reconsider. Empty until a CSV is uploaded.
+  const [csvCandidates, setCsvCandidates] = useState<CsvCandidate[]>([]);
 
   // Lookup helpers
   const itemById = new Map(batch.items.map((it) => [it.id, it]));
@@ -598,6 +607,11 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
         };
       });
 
+      // Stash the parsed candidates for the AI-assist follow-up. They're
+      // discarded from the deterministic scorer once it's done, but the AI
+      // needs both sides of the pool to reconsider unmatched slots.
+      setCsvCandidates(candidates);
+
       // Score every (slot, candidate) pair, then greedily assign by score desc.
       const pairs: Array<{ slotIdx: number; candIdx: number; score: number }> = [];
       slots.forEach((slot, slotIdx) => {
@@ -630,6 +644,8 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
               match_score: undefined,
               match_confidence: undefined,
               matched_csv_index: undefined,
+              ai_matched: false,
+              ai_reasoning: undefined,
               from_csv: false,
               override: false,
             };
@@ -644,6 +660,8 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
             match_score:        a.score,
             match_confidence:   confidenceFor(a.score),
             matched_csv_index:  c.csv_index,
+            ai_matched:         false,
+            ai_reasoning:       undefined,
             // CSV is now the authoritative source for cert # and grade.
             // Override resets to false — user must opt in to edit again.
             from_csv: true,
@@ -657,6 +675,99 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
     };
     reader.readAsText(file);
   }
+
+  const aiSuggestMatches = useMutation({
+    mutationFn: async () => {
+      // Send only slots the deterministic scorer left unresolved (weak or
+      // none) and CSV rows nothing is pointing at. Keeps model tokens
+      // scoped to what needs help.
+      const takenCsvIndices = new Set(
+        slots.filter((s) => s.matched_csv_index != null && s.match_confidence !== 'weak')
+             .map((s) => s.matched_csv_index),
+      );
+      const unmatchedSlots = slots
+        .map((s, idx) => ({ s, idx }))
+        .filter(({ s }) => !s.match_confidence || s.match_confidence === 'weak' || s.match_confidence === 'none');
+      const unmatchedBatchItems = unmatchedSlots.map(({ s }) => {
+        const it = itemById.get(s.batch_item_id)!;
+        return {
+          batch_item_id: it.id,
+          card_name: it.card_name,
+          set_name: it.set_name,
+          card_number: it.card_number,
+          language: it.language,
+          expected_grade: it.expected_grade,
+          line_item_num: it.line_item_num,
+        };
+      });
+      const unusedCandidates = csvCandidates
+        .filter((c) => !takenCsvIndices.has(c.csv_index))
+        .map((c) => ({
+          csv_index:   c.csv_index,
+          subject:     c.subject,
+          cert:        c.cert,
+          grade:       c.grade,
+          grade_label: c.grade_label,
+          card_number: c.card_number,
+          set_name:    c.set_name,
+          language:    c.language,
+          line_num:    c.line_num,
+        }));
+      if (unmatchedBatchItems.length === 0) {
+        toast.success('Nothing left for AI to match');
+        return { data: [] as Array<{ batch_item_id: string; csv_index: number; confidence: 'strong' | 'good' | 'weak'; reasoning: string }> };
+      }
+      if (unusedCandidates.length === 0) {
+        toast.error('No unused CSV rows left for AI to consider');
+        return { data: [] };
+      }
+      return api.post(`/grading-subs/${batch.id}/ai-suggest-matches`, {
+        batch_items: unmatchedBatchItems,
+        candidates:  unusedCandidates,
+      }).then((r) => r.data);
+    },
+    onSuccess: (result) => {
+      const matches: Array<{ batch_item_id: string; csv_index: number; confidence: 'strong' | 'good' | 'weak'; reasoning: string }> = result?.data ?? [];
+      if (matches.length === 0) {
+        toast('AI found no confident matches');
+        return;
+      }
+      const candByIndex = new Map(csvCandidates.map((c) => [c.csv_index, c]));
+      // AI can return multiple matches for the same slot only in pathological
+      // cases (the server dedupes greedily); handle by first-wins here too.
+      const perSlot = new Map<string, typeof matches[0]>();
+      for (const m of matches) if (!perSlot.has(m.batch_item_id)) perSlot.set(m.batch_item_id, m);
+
+      setSlots((prev) =>
+        prev.map((slot) => {
+          const m = perSlot.get(slot.batch_item_id);
+          if (!m) return slot;
+          const c = candByIndex.get(m.csv_index);
+          if (!c) return slot;
+          return {
+            ...slot,
+            cert_number:        c.cert || slot.cert_number,
+            grade:              c.grade !== null ? String(c.grade) : slot.grade,
+            csv_grade_label:    c.grade_label ?? slot.csv_grade_label,
+            card_name_override: c.subject || slot.card_name_override,
+            match_score:        undefined,  // no numeric score from AI
+            match_confidence:   m.confidence,
+            matched_csv_index:  c.csv_index,
+            ai_matched:         true,
+            ai_reasoning:       m.reasoning,
+            from_csv:           true,
+            override:           false,
+          };
+        }),
+      );
+      toast.success(`AI filled ${matches.length} slab${matches.length === 1 ? '' : 's'}`);
+    },
+    onError: (err: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error ?? 'AI assist failed';
+      toast.error(msg);
+    },
+  });
 
   const processReturn = useMutation({
     mutationFn: (payload: object) => api.post(`/grading-subs/${batch.id}/return`, payload).then((r) => r.data),
@@ -796,6 +907,16 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
             className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) handleCsvUpload(f); e.target.value = ''; }}
           />
+          <button
+            type="button"
+            onClick={() => aiSuggestMatches.mutate()}
+            disabled={aiSuggestMatches.isPending || csvCandidates.length === 0}
+            title={csvCandidates.length === 0 ? 'Upload a PSA CSV first' : 'Ask AI to match remaining slabs'}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-violet-600/20 text-violet-200 hover:bg-violet-600/30 hover:text-violet-100 transition-colors border border-violet-500/40 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Sparkles size={12} />
+            {aiSuggestMatches.isPending ? 'Thinking…' : 'AI assist'}
+          </button>
           <label className="text-zinc-400 text-xs">Returned Date</label>
           <input
             type="date"
@@ -836,11 +957,12 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                   conf === 'good'   ? 'bg-lime-500'    :
                   conf === 'weak'   ? 'bg-amber-500'   :
                                       'bg-zinc-600';
-                const confLabel =
-                  conf === 'strong' ? `Strong (${slot.match_score?.toFixed(1)})` :
-                  conf === 'good'   ? `Good (${slot.match_score?.toFixed(1)})`   :
-                  conf === 'weak'   ? `Weak (${slot.match_score?.toFixed(1)})`   :
-                                      'Manual';
+                const confLabel = slot.ai_matched
+                  ? `AI · ${conf ?? 'weak'}${slot.ai_reasoning ? ` — ${slot.ai_reasoning}` : ''}`
+                  : conf === 'strong' ? `Strong (${slot.match_score?.toFixed(1)})` :
+                    conf === 'good'   ? `Good (${slot.match_score?.toFixed(1)})`   :
+                    conf === 'weak'   ? `Weak (${slot.match_score?.toFixed(1)})`   :
+                                        'Manual';
                 const isGraded = slot.disposition === 'graded';
                 const dispDot =
                   slot.disposition === 'graded'        ? 'bg-emerald-500' :
@@ -946,9 +1068,14 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                       })()}
                     </td>
                     <td className="px-2 py-2">
-                      <div className="flex items-center gap-1.5 text-[10px] text-zinc-500 whitespace-nowrap">
-                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${confDot}`} />
-                        {confLabel}
+                      <div
+                        className="flex items-center gap-1.5 text-[10px] text-zinc-500 whitespace-nowrap"
+                        title={slot.ai_matched && slot.ai_reasoning ? slot.ai_reasoning : undefined}
+                      >
+                        {slot.ai_matched
+                          ? <Sparkles size={11} className="text-violet-300 shrink-0" />
+                          : <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${confDot}`} />}
+                        <span className={slot.ai_matched ? 'text-violet-300' : undefined}>{confLabel}</span>
                       </div>
                     </td>
                     <td className="px-2 py-2">

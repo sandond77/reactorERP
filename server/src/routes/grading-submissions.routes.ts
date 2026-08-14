@@ -20,5 +20,6 @@ gradingSubsRouter.post('/:id/items/:itemId/relink',        ctrl.relinkItem);
 gradingSubsRouter.post('/:id/items/:itemId/relink-legacy', ctrl.relinkItemLegacy);
 gradingSubsRouter.delete('/:id/items/:itemId',    ctrl.removeItem);
 gradingSubsRouter.post('/:id/return',             ctrl.processReturn);
+gradingSubsRouter.post('/:id/ai-suggest-matches', ctrl.aiSuggestReturnMatches);
 gradingSubsRouter.get('/:id/returned-slabs',      ctrl.getReturnedSlabs);
 gradingSubsRouter.post('/:id/revert-return',      ctrl.revertReturn);

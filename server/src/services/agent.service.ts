@@ -2188,62 +2188,10 @@ async function getUserInventorySummary(userId: string) {
   return { inventory_by_status: statusCounts, last_30_days_sales: recentSales };
 }
 
-// ── Expense receipt parsing ───────────────────────────────────────────────────
-
-export interface ParsedExpenseData {
-  date?: string;        // YYYY-MM-DD
-  description?: string;
-  type?: string;        // one of the known expense types if recognizable
-  amount?: number;      // in dollars
-  currency?: string;
-  order_number?: string;
-  link?: string;
-  confidence: 'high' | 'medium' | 'low';
-  notes?: string;
-}
-
-export async function parseExpenseImage(
-  imageBase64: string,
-  mediaType: 'image/jpeg' | 'image/png' | 'image/webp'
-): Promise<ParsedExpenseData> {
-  const prompt = `Parse this expense receipt or invoice image and extract the expense details.
-
-Known expense types (use one if it matches, otherwise suggest a short label):
-Shipping, Grading, Supplies, Card Show, Food, Travel, Other
-
-For order_number: extract ANY reference identifier on the receipt — this includes Order #, Ordr#, ORDR#, Order ID, Confirmation #, Transaction #, Receipt #, Check #, Ticket #, Invoice #, Reference #, or any similar identifier. Do NOT leave this null if any such number appears on the receipt.
-
-Return a JSON object:
-{
-  "date": "YYYY-MM-DD or null",
-  "description": "concise description of what was purchased (max 80 chars)",
-  "type": "best matching type from the list above, or a short custom label",
-  "amount": number in dollars (e.g. 12.99) or null,
-  "currency": "USD" or "JPY" or null,
-  "order_number": "any order/reference/confirmation/ticket number found on the receipt, or null if truly none",
-  "link": null,
-  "confidence": "high" | "medium" | "low",
-  "notes": "any caveats or null"
-}
-
-Only return the JSON object, no other text.`;
-
-  const response = await client.messages.create({
-    model: 'claude-opus-4-7',
-    max_tokens: 512,
-    messages: [{
-      role: 'user',
-      content: [
-        { type: 'image', source: { type: 'base64', media_type: mediaType, data: imageBase64 } },
-        { type: 'text', text: prompt },
-      ],
-    }],
-  });
-
-  const text = response.content.find((b) => b.type === 'text')?.text ?? '{}';
-  const json = text.match(/\{[\s\S]*\}/)?.[0] ?? '{}';
-  return JSON.parse(json) as ParsedExpenseData;
-}
+// ── Expense receipt parsing (subagent) ────────────────────────────────────────
+// Moved to `./ai/receipts.service.ts`. Re-exported here so existing callers
+// (expenses.controller) don't need to change their import path.
+export { parseExpenseImage, type ParsedExpenseData } from './ai/receipts.service';
 
 // ── Card image scanning ───────────────────────────────────────
 

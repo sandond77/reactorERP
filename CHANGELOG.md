@@ -1,5 +1,27 @@
 # Reactor — Changelog
 
+## August 6, 2026 (evening)
+
+### Features
+
+**AI — Expense-receipts subagent (`ai/receipts.service.ts`)**
+- Off the parked list from Aug 4. Receipt OCR for the "Scan Receipt" button on the Expenses page (and the same call the chat agent makes from `record_expense`) was living inline in `agent.service.ts`, invoked Opus 4.7 for what's really structured text extraction, and stuffed the whole prompt in the user turn — meaning cache_control was useless because the user turn always changes (the image bytes are in it).
+- New `server/src/services/ai/receipts.service.ts` moves `parseExpenseImage` into its own subagent. Same public shape (`ParsedExpenseData`), re-exported from `agent.service.ts` so no caller changes. Switches Opus 4.7 → **Sonnet 4.6** (roughly 5× cheaper, still solid on receipt vision — Haiku loses too often on handwritten/low-contrast). Hoists the prompt into a top-level `EXPENSE_RECEIPT_SYSTEM_PROMPT` const and moves it to the `system` block with `cache_control: { type: 'ephemeral' }`, so every scan inside a 5-min window is a cache read on the ~350-token prompt.
+- Also fixes a small robustness bug: the old inline version threw an uncaught `SyntaxError` if the model surfaced anything unparseable (the whole prompt lived in the user turn — occasional refusal or apology text bombed the endpoint). The new `parseExpenseResponse` returns a `{ confidence: 'low', notes: 'Failed to parse …' }` stub instead.
+- **10 tests** in `receipts.service.test.ts` — well-formed / prose-wrapped / empty / malformed input; model = sonnet-4-6; cache_control on the system block; system-prompt byte stability across calls (the cache-key contract); image passthrough; response parsing; no-text-block resilience.
+
+**AI — Sub-return matching subagent (`ai/return-matching.service.ts`) + SubReturns "AI assist" button**
+- Off the parked list from Aug 4. The Sub Returns page already runs a deterministic scorer (`scoreMatch` in `SubReturns.tsx`) that handles ~80% of PSA/BGS returns — perfect name and card-number overlaps. The tail (Japanese-name translation drift, PSA paraphrasing subjects, card # buried in prose, single-column CSVs with typos) is what needs help.
+- New subagent takes only the UNMATCHED batch items + UNUSED CSV candidates the deterministic pass left behind — never re-litigates matches already found — and returns `{ batch_item_id, csv_index, confidence: 'strong'|'good'|'weak', reasoning }[]`. Haiku 4.5, cached system prompt, greedy dedupe on the server so a stray double-match from the model can't corrupt state client-side.
+- New route `POST /grading-subs/:id/ai-suggest-matches` in [server/src/routes/grading-submissions.routes.ts](server/src/routes/grading-submissions.routes.ts). Controller re-verifies batch ownership (same 404 semantics as the rest of the batch endpoints), then Zod-validates the payload with hard caps (max 120 items each side) to bound worst-case model spend.
+- **Client — `Sparkles` "AI assist" button** in the SubReturns header, next to Upload PSA CSV. Disabled until a CSV is uploaded (needs candidates to work with). Payload builder scopes to just unresolved slots; toasts a helpful message if nothing's left to match or no unused candidates remain instead of firing an empty request.
+- Slots the AI fills get a `Sparkles` badge in the Match column (violet) with the AI's one-sentence reasoning in the tooltip — distinct from the deterministic scorer's colored confidence dot so the user can tell at a glance which fills came from where. Deterministic-scorer state is preserved on any slot that was already matched; AI never overwrites those.
+- **All manual controls remain fully available on AI-matched rows** — the Remap dropdown reassigns to any batch item, the Lock/Override toggle unlocks cert # / grade for edit, the card name textarea and disposition dropdown are always editable, and the Ignore (X) button still removes the row. AI assist is additive: it fills gaps the deterministic scorer left behind, and the user retains final authority over every row.
+- `csvCandidates` now kept in state after CSV upload (previously discarded once the scorer ran) so the button can rebuild the "unused" side of the payload without re-parsing.
+- **13 tests** in `return-matching.service.test.ts` — parsing (well-formed, prose-wrapped, confidence normalisation, ID/index validation, malformed JSON, non-array roots); short-circuit on empty input (no API call fired); model = haiku-4-5; cache_control + system-prompt byte-stability; greedy dedupe by confidence rank on same batch_item_id AND same csv_index; unparseable-response fallback; system-vs-user turn separation (regression test — payload data MUST stay in the user turn or every batch busts the cache).
+
+**Vitest suite grew again** — 2 test files → 4 (26 vision + 31 tz + 10 receipts + 13 return-matching = **80 passing**, ~200ms).
+
 ## August 6, 2026
 
 ### Fixes
