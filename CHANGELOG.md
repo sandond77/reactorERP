@@ -18,6 +18,17 @@
 - Left intentionally: two remaining `game = 'pokemon'` filters in `catalog.service.ts` (lines 235, 368) query the `card_catalog_seed` table — TCGdex-sourced, Pokémon-only by design. The `PKMN` default in `generatePartNumber` also stays as the unknown-game fallback.
 - Net: every user-facing search (Part# picker, InventorySummary, ReorderThresholds, Intake), Auto-fill, catalog reassign (via SKU regen), and agent-created card path now correctly handles non-Pokémon games. The 500-year-old `PKMN-JP-OP07-500` display bug the user hit gets fixed on the next `updateCatalogCard` — either through the Edit Card modal (`game` field change now triggers SKU regen) or by hitting the reassign endpoint (targets a One Piece catalog row that's now findable in search).
 
+**Catalog — Backfill script for legacy PKMN-prefixed SKUs on non-Pokémon rows**
+- The catalog fix above stops new writes from getting the wrong prefix, but leaves existing rows in place. A user who already has 500 One Piece parts stored as `PKMN-JP-OP07-…` would otherwise have to touch each catalog row through the Edit modal (or wait for each to be re-imported) before its SKU updated. Not viable for larger inventories.
+- New one-shot: [server/src/scripts/backfill-catalog-skus.ts](server/src/scripts/backfill-catalog-skus.ts). Reads every `card_catalog` row that has both `set_code` and `card_number`, resolves the expected prefix via `card_games.abbreviation` (falls back to `PKMN` when the game is unknown), and regenerates the SKU. Prints a compact diff summary grouped by `(old prefix → new prefix, game)` plus the first 20 individual rows in dry-run mode.
+- **Dry-run by default**; pass `--apply` to write. Applies inside a single transaction with per-row conflict-check (the `(user_id, sku)` uniqueness constraint would otherwise 23505 the whole statement if two rows collide on the recomputed value). Rows whose target SKU already exists on the same user get skipped and reported for manual merge instead of blocking the whole run.
+- Idempotent — safe to re-run; only rewrites rows where the current SKU differs from the recomputed value.
+- Prod invocation (from repo root):
+  ```
+  DATABASE_URL=$(railway variables --kv 2>/dev/null | grep DATABASE_PUBLIC_URL | head -1 | cut -d= -f2-) \
+    npx tsx server/src/scripts/backfill-catalog-skus.ts --apply
+  ```
+
 **UI — Add Part modal: Card # and Rarity inputs align**
 - The Card # label carries a `(numerator only — e.g. 215, not 215/172)` helper hint that wraps to two lines at the modal's width. Rarity's label is one line, so Rarity's input sat higher than Card #'s on the same grid row. Gave both labels `min-h-[2.25rem]` in [AddPartModal.tsx](client/src/components/catalog/AddPartModal.tsx#L397) so single-line labels reserve the same vertical space as the wrapping one — inputs stay aligned.
 
