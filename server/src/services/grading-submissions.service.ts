@@ -616,28 +616,21 @@ export interface RepeatItemInput {
 export async function repeatBatchItems(userId: string, batchId: string, items: RepeatItemInput[]) {
   if (!items.length) throw new AppError(400, 'No items to repeat');
 
-  // Pre-check: aggregate requested count per source ci and verify each has
-  // enough qty. Rejects the whole call before any writes — no partial adds.
-  const totalPerCi = new Map<string, number>();
+  // The client sends source_ci_id as an "anchor" identifying a lot the user
+  // sees in the picker. But `listRepeatSources` merges sibling ci rows in
+  // the same (catalog + condition + raw_purchase_id) group when displaying
+  // available qty — 5 individual qty=1 ci rows show up as "5 available"
+  // under a single anchor ci_id whose own qty is 1. So checking ci.quantity
+  // against the requested count rejects legit requests ("Only 1 available
+  // (requested 5)"). We instead resolve each anchor to its sibling group
+  // and consume across the whole group.
+  //
+  // Legacy buckets (set_code='LEGACY') are single-ci pools and don't need
+  // sibling resolution — their qty IS the ci qty.
+
+  // Sanity: no zero-count requests slip through.
   for (const req of items) {
     if (!Number.isFinite(req.count) || req.count < 1) throw new AppError(400, 'Count must be >= 1');
-    totalPerCi.set(req.source_ci_id, (totalPerCi.get(req.source_ci_id) ?? 0) + req.count);
-  }
-  for (const [ciId, requested] of totalPerCi) {
-    const ci = await db
-      .selectFrom('card_instances')
-      .select(['id', 'quantity', 'status', 'decision'])
-      .where('id', '=', ciId)
-      .where('user_id', '=', userId)
-      .executeTakeFirst();
-    if (!ci) throw new AppError(404, 'Source card not found');
-    if (ci.decision !== 'grade') throw new AppError(400, 'Source card is not decisioned for grading');
-    if (ci.status !== 'inspected' && ci.status !== 'purchased_raw') {
-      throw new AppError(400, 'Source card is not in raw inventory');
-    }
-    if ((ci.quantity ?? 0) < requested) {
-      throw new AppError(400, `Only ${ci.quantity ?? 0} available in source (requested ${requested})`);
-    }
   }
 
   // Resolve source metadata + (for legacy) anchor identity up-front so the
@@ -647,12 +640,9 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
   // For BOTH raw and legacy sources we also copy expected_grade + estimated_value
   // from an existing batch item so the repeated copies inherit the same grade
   // estimate the user already dialed in for this card. Without this, repeated
-  // rows come back with — / — for grade/value on the batch summary. For legacy
-  // we use the explicit anchor_batch_item_id; for raw we look up any batch
-  // item in this batch pointing at the same source_ci_id (all such rows
-  // should share the same values in practice, so first-match is fine).
+  // rows come back with — / — for grade/value on the batch summary.
   type Slot =
-    | { kind: 'raw'; source_ci_id: string; remaining: number;
+    | { kind: 'raw'; sibling_ci_ids: string[]; remaining: number;
         expected_grade: number | null; estimated_value: number | null }
     | { kind: 'legacy'; source_ci_id: string; remaining: number; anchor: {
         cardName: string; setName: string | null; cardNumber: string | null;
@@ -663,11 +653,21 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
       } };
   const slots: Slot[] = [];
 
+  // Track per-ci committed consumption across ALL slots so the pre-check
+  // catches over-allocation when the same sibling ci gets pulled into two
+  // different slots' pools (e.g., user requests 5 from lot A primary and 3
+  // from lot A alt — the alt list may collapse into the same sibling group).
+  const committedPerCi = new Map<string, number>();
+  const ciQtyCache = new Map<string, number>();
+
   for (const req of items) {
     const source = await db
       .selectFrom('card_instances as ci')
       .leftJoin('card_catalog as cc', 'cc.id', 'ci.catalog_id')
-      .select(['ci.id', 'ci.catalog_id', 'cc.set_code'])
+      .select([
+        'ci.id', 'ci.catalog_id', 'ci.condition', 'ci.raw_purchase_id',
+        'ci.quantity', 'ci.status', 'ci.decision', 'cc.set_code',
+      ])
       .where('ci.id', '=', req.source_ci_id)
       .where('ci.user_id', '=', userId)
       .executeTakeFirst();
@@ -678,6 +678,19 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
       if (!req.anchor_batch_item_id) {
         throw new AppError(400, 'Legacy repeat requires the anchor batch item id — the bucket has no card identity of its own');
       }
+      // Legacy bucket pool is the single bucket ci — check its own qty.
+      if (source.decision !== 'grade') throw new AppError(400, 'Source card is not decisioned for grading');
+      if (source.status !== 'inspected' && source.status !== 'purchased_raw') {
+        throw new AppError(400, 'Source card is not in raw inventory');
+      }
+      const already = committedPerCi.get(source.id) ?? 0;
+      const totalReq = already + req.count;
+      if ((source.quantity ?? 0) < totalReq) {
+        throw new AppError(400, `Only ${source.quantity ?? 0} available in source (requested ${totalReq})`);
+      }
+      committedPerCi.set(source.id, totalReq);
+      ciQtyCache.set(source.id, source.quantity ?? 0);
+
       const anchor = await db
         .selectFrom('grading_batch_items as gbi')
         .innerJoin('card_instances as ci', 'ci.id', 'gbi.card_instance_id')
@@ -713,6 +726,53 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
         },
       });
     } else {
+      // Raw source: expand to the whole sibling group so a merged "5 avail"
+      // anchor whose own ci is qty=1 can still fulfil the request from
+      // siblings in the same lot.
+      const siblings = await db
+        .selectFrom('card_instances')
+        .select(['id', 'quantity'])
+        .where('user_id', '=', userId)
+        .where('decision', '=', 'grade')
+        .where((eb) => eb.or([eb('status', '=', 'inspected'), eb('status', '=', 'purchased_raw')]))
+        .where('quantity', '>', 0)
+        .where((eb) => source.catalog_id
+          ? eb('catalog_id', '=', source.catalog_id)
+          : eb('catalog_id', 'is', null))
+        .where((eb) => source.condition
+          ? eb('condition', '=', source.condition)
+          : eb('condition', 'is', null))
+        .where((eb) => source.raw_purchase_id
+          ? eb('raw_purchase_id', '=', source.raw_purchase_id)
+          : eb('raw_purchase_id', 'is', null))
+        .orderBy('quantity', 'desc')
+        .execute();
+
+      // Sum available across siblings minus what earlier slots already
+      // committed against any of them.
+      let totalAvailable = 0;
+      for (const sib of siblings) {
+        const q = sib.quantity ?? 0;
+        ciQtyCache.set(sib.id, q);
+        totalAvailable += q - (committedPerCi.get(sib.id) ?? 0);
+      }
+      if (totalAvailable < req.count) {
+        throw new AppError(400, `Only ${totalAvailable} available in source (requested ${req.count})`);
+      }
+
+      // Commit the count against siblings greedily (largest qty first),
+      // matching the consumption order in the main loop.
+      let need = req.count;
+      for (const sib of siblings) {
+        if (need <= 0) break;
+        const q = ciQtyCache.get(sib.id) ?? 0;
+        const free = q - (committedPerCi.get(sib.id) ?? 0);
+        if (free <= 0) continue;
+        const take = Math.min(free, need);
+        committedPerCi.set(sib.id, (committedPerCi.get(sib.id) ?? 0) + take);
+        need -= take;
+      }
+
       // Prefer the caller's explicit anchor when provided; otherwise fall back
       // to the first batch item in this batch pointing at the same source.
       const anchor = await db
@@ -726,7 +786,7 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
 
       slots.push({
         kind: 'raw',
-        source_ci_id: req.source_ci_id,
+        sibling_ci_ids: siblings.map((s) => s.id),
         remaining: req.count,
         expected_grade: anchor?.expected_grade != null ? Number(anchor.expected_grade) : null,
         estimated_value: anchor?.estimated_value ?? null,
@@ -758,8 +818,31 @@ export async function repeatBatchItems(userId: string, batchId: string, items: R
         });
         created.push(it.batch_item);
       } else {
+        // Pick the first sibling ci in the pool that still has qty > 0.
+        // Fresh DB read because prior addItem calls in this loop may have
+        // decremented one of them (a specific ci flips to grading_submitted
+        // when its qty drains, so we walk to the next sibling).
+        let nextCiId: string | null = null;
+        for (const cid of s.sibling_ci_ids) {
+          const row = await db
+            .selectFrom('card_instances')
+            .select(['id', 'quantity', 'status'])
+            .where('id', '=', cid)
+            .where('user_id', '=', userId)
+            .executeTakeFirst();
+          if (row && (row.quantity ?? 0) > 0 &&
+              (row.status === 'inspected' || row.status === 'purchased_raw')) {
+            nextCiId = row.id;
+            break;
+          }
+        }
+        if (!nextCiId) {
+          // Should be unreachable — the pre-check verified enough qty across
+          // the pool. Defensive throw so we fail loudly rather than mid-loop.
+          throw new AppError(409, 'Source pool drained mid-repeat (concurrent modification?)');
+        }
         const it = await addItem(userId, batchId, {
-          card_instance_id: s.source_ci_id,
+          card_instance_id: nextCiId,
           quantity: 1,
           expected_grade: s.expected_grade ?? undefined,
           estimated_value: s.estimated_value ?? undefined,
