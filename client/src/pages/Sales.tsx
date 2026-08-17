@@ -516,15 +516,24 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
 
   // Bulk search: card show graded inventory
   const bulkIsEbay = platform === 'ebay';
+  // eBay Set Listing filters to cards grouped into a listing_group; Combined
+  // Order (bulkPricingMode='per_item') must NOT — a Combined Order can mix
+  // any eBay-listed inventory the buyer picked, most of which is solo listings.
+  // Both flows share this one query; splitting the filter here is what makes
+  // that work.
+  const bulkIsEbaySet = bulkIsEbay && bulkPricingMode === 'split';
   const { data: bulkSearchResults, isFetching: isBulkSearching } = useQuery<PaginatedResult<SlabResult>>({
-    queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay, bulkExactMatch],
+    queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay, bulkIsEbaySet, bulkExactMatch],
     queryFn: () => api.get('/grading/slabs', {
       params: bulkIsEbay
-        // eBay Set Listing: only cards already grouped into a listing_group
-        // (i.e. part of an active Set). Filters out individually-listed cards
-        // that aren't part of any set — those aren't valid inventory for a
-        // set-sale flow.
-        ? { search: debouncedBulkSearch, limit: 50, status: 'unsold', in_set_listing: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined }
+        ? {
+            search: debouncedBulkSearch, limit: 50, status: 'unsold',
+            // Set Listing only: restrict to grouped listings. Combined Order
+            // gets no set filter so solo listings surface too.
+            ...(bulkIsEbaySet ? { in_set_listing: 'yes' } : {}),
+            sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no',
+            exact: bulkExactMatch ? 'true' : undefined,
+          }
         : { search: debouncedBulkSearch, limit: 50, status: 'unsold', is_card_show: 'yes', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'graded',
@@ -535,13 +544,17 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Status list matches the individual raw sale flow so inspected/awaiting
   // cards are reachable from bulk too.
   const { data: bulkRawResults, isFetching: isBulkRawSearching } = useQuery<PaginatedResult<RawCardShowResult>>({
-    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay, bulkExactMatch],
+    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay, bulkIsEbaySet, bulkExactMatch],
     queryFn: () => api.get('/cards', {
       params: bulkIsEbay
-        // Same rationale as the graded branch: only raw cards already grouped
-        // into an active listing_group_id — the eBay Set Listing sale flow
-        // shouldn't surface individually-listed raw cards.
-        ? { search: debouncedBulkSearch || undefined, limit: 50, in_set_listing: 'yes', status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined }
+        ? {
+            search: debouncedBulkSearch || undefined, limit: 50,
+            // Same split as the graded branch: Set Listing filters to
+            // grouped listings; Combined Order sees all raw eBay inventory.
+            ...(bulkIsEbaySet ? { in_set_listing: 'yes' } : {}),
+            status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw',
+            is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined,
+          }
         : { search: debouncedBulkSearch || undefined, limit: 50, status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw', is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined },
     }).then(r => r.data),
     enabled: step === 'bulk-search' && bulkTab === 'raw',

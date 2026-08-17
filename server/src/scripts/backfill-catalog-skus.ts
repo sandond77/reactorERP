@@ -95,12 +95,28 @@ async function main() {
   const skippedNoAbbr = new Set<string>();
 
   for (const r of rows) {
-    const prefix = prefixFor(r.game);
-    if (!prefixByGame.has((r.game ?? '').toLowerCase())) {
+    const gameKey = (r.game ?? '').toLowerCase();
+    const knownPrefix = prefixByGame.get(gameKey) ?? null;
+    if (!knownPrefix) {
       skippedNoAbbr.add(r.game ?? '(null)');
+      continue;  // no authoritative prefix to rewrite to — leave the row alone
     }
-    const lang = (r.language ?? 'EN').toUpperCase() === 'JP' ? 'JP' : 'EN';
-    const next = generatePartNumber(lang, r.set_code!, r.card_number!, prefix);
+    // NARROWED SCOPE: only rewrite when the row's stored SKU has the wrong
+    // GAME PREFIX. Do not touch case, zero-padding, or middle segments —
+    // the full generatePartNumber would also strip meaningful sub-set
+    // prefixes like `TG` / `GG` (Trainer Gallery, Galarian Gallery) and
+    // coerce non-JP/EN language codes (e.g. ZH-TW → EN). Those are separate
+    // problems from the audit and would be data loss if we rewrote them
+    // blindly.
+    const oldPrefix = r.sku?.split('-')[0] ?? null;
+    if (oldPrefix === knownPrefix) continue;               // already correct
+    if (r.sku && !oldPrefix) continue;                     // shouldn't happen
+    // Compute the new SKU by ONLY swapping the game-prefix segment, keeping
+    // everything after the first `-` untouched. Preserves case, sub-set
+    // prefixes, dot-separated numbers, non-standard language codes, etc.
+    const next = r.sku
+      ? `${knownPrefix}${r.sku.slice(oldPrefix!.length)}`
+      : generatePartNumber((r.language ?? 'EN').toUpperCase() === 'JP' ? 'JP' : 'EN', r.set_code!, r.card_number!, knownPrefix);
     if (next !== r.sku) {
       diffs.push({ id: r.id, game: r.game, card_name: r.card_name, old: r.sku, next });
     }
