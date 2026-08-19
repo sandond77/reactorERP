@@ -67,6 +67,11 @@ async function main() {
 
   await pool.end();
 
+  // Leading machine-readable line — the weekly GitHub Actions workflow
+  // greps this to decide whether to open an issue (skip when count=0).
+  // Keep the exact `<!--curation:count=N-->` shape stable across changes.
+  console.log(`<!--curation:count=${rows.length}-->`);
+
   if (rows.length === 0) {
     console.log(`# Vision curation — no corrections in the last ${days} days.`);
     console.log(`Table is empty (or all rows already reviewed). Nothing to cluster.`);
