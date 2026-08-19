@@ -492,6 +492,25 @@ export interface Database {
   card_shows: CardShowsTable;
   alert_overrides: AlertOverridesTable;
   set_codes: SetCodesTable;
+  ai_extraction_corrections: AiExtractionCorrectionsTable;
+}
+
+export type AiCorrectionSource = 'card_extraction' | 'receipt' | 'return_matching';
+
+export interface AiExtractionCorrectionsTable {
+  id: Generated<string>;
+  user_id: string;
+  source: AiCorrectionSource;
+  image_hash: string | null;
+  model: string | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  model_output: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  final_output: any;
+  fields_changed: string[];
+  reviewed: Generated<boolean>;
+  reviewer_note: string | null;
+  created_at: Generated<Date>;
 }
 
 export interface SetCodesTable {

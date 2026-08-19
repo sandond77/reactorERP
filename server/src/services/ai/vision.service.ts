@@ -18,8 +18,33 @@
 // first shot.
 // ────────────────────────────────────────────────────────────────────────────
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { EN_SETS, JP_SETS } from '../../utils/set-codes';
 import { anthropic } from './client';
+
+// ── Corrections library ─────────────────────────────────────────────────────
+// Rules and examples curated from real user corrections. Loaded once at
+// module import time so they compile into the ephemeral-cached system prompt
+// exactly the same way on every call — a fresh file read per request would
+// bust the cache. Callers that want a live reload must restart the server.
+// (Files change infrequently by design: entries only get added after human
+// review of the curation script's report.)
+function readLibraryBlock(filename: string): string {
+  try {
+    const p = path.join(__dirname, filename);
+    const raw = fs.readFileSync(p, 'utf-8');
+    // Strip the human-facing header (everything up to and including the first
+    // horizontal rule) — those instructions are for maintainers, not for the
+    // model. The prompt just needs the rule/example content below the rule.
+    const idx = raw.indexOf('\n---\n');
+    return idx === -1 ? raw.trim() : raw.slice(idx + 5).trim();
+  } catch {
+    return '';   // missing/unreadable file is non-fatal — model just runs on schema alone
+  }
+}
+const VISION_RULES = readLibraryBlock('vision.rules.md');
+const VISION_EXAMPLES = readLibraryBlock('vision.examples.md');
 
 // Re-exported so agent.service.ts callers don't have to reach into the AI
 // subdir for the shared shape.
@@ -68,7 +93,7 @@ CRITICAL: card_name and set_name MUST be in English even when the card is Japane
 Set code reference (canonical English names — match these exactly when the card's set is in the list):
 EN set codes — ${enLines}
 JP set codes — ${jpLines}
-
+${VISION_RULES ? `\nCorrection rules from prior user feedback — apply these strictly:\n${VISION_RULES}\n` : ''}${VISION_EXAMPLES ? `\nReference examples:\n${VISION_EXAMPLES}\n` : ''}
 If not a card image, return null.`;
 }
 

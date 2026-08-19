@@ -1,6 +1,21 @@
 # Reactor — Changelog
 
-## August 14, 2026
+## August 18, 2026
+
+### Features
+
+**AI — Vision-subagent feedback loop and curated pattern library**
+- Baseline: the vision subagent (`extractCardInfoFromImage`) was stateless — every session started with the same static system prompt (schema + set-code reference). No memory of past corrections; no way to "teach" it that a specific label pattern keeps getting misread.
+- New end-to-end pipeline:
+  1. **[server/src/db/migrations/062_ai_extraction_corrections.sql](server/src/db/migrations/062_ai_extraction_corrections.sql)** — new table `ai_extraction_corrections` stores every (model_output, final_output, fields_changed, image_hash) tuple. Indexed by `(source, reviewed, created_at DESC)` and GIN on the `fields_changed` array so the curation queries stay cheap. `AiExtractionCorrectionsTable` typed in [server/src/types/db.ts](server/src/types/db.ts).
+  2. **[server/src/services/ai/corrections.service.ts](server/src/services/ai/corrections.service.ts) + [.diff.ts](server/src/services/ai/corrections.diff.ts)** — `recordCorrection` diffs the two JSON payloads at the top-level, drops no-op saves (identical model/final = nothing to record), computes `fields_changed`, hashes the image bytes via SHA-256 if provided. Diff helper is split into its own module so the Vitest suite can exercise it without loading the DB config (which would trip env validation).
+  3. **[POST /agent/corrections](server/src/routes/agent.routes.ts)** — Zod-validated body accepts `{ source, model_output, final_output, model?, image_hash? }` from any subagent shape. Returns 200 with `{ recorded: bool, id, fields_changed }` — fire-and-forget from the client.
+  4. **Client wiring** — [AddCardForm](client/src/components/inventory/AddCardForm.tsx) and [AddSlabForm](client/src/components/inventory/AddSlabForm.tsx) each capture a snapshot of what Auto-fill applied. On save, if the final form values differ from the snapshot, the correction posts in the background. AddSlabForm captures grade fields too (company, grade, grade_label, cert_number) so slab-specific misses (grade OCR errors, cert typos) also feed the library.
+  5. **Curated library files** — `vision.rules.md` and `vision.examples.md` live next to `vision.service.ts`. Read once at module import via `fs.readFileSync`, stripped of maintainer-only header content, and appended to the system prompt. Because the read is at import time (not per-request), each entry sits inside the ephemeral prompt cache — zero incremental token cost after the first call in a 5-minute window.
+  6. **Seed rules** shipped in `vision.rules.md` from the Aug 2026 audit: preserve set-code case (`SV8a` not `SV8A`), don't strip Trainer Gallery / Galarian Gallery prefixes (`TG05`/`GG17`), cert numbers are digits-only (never letter O), `language` describes the printed card not the output text, don't collapse `ZH-TW`/`KR` to `EN`, ARS labels are grade-inclusive. Every rule includes a `_Why:_` line pointing at the concrete correction pattern that motivated it — future maintainers can decide to drop or reword based on whether the pattern is still firing.
+  7. **[server/src/scripts/curate-vision-corrections.ts](server/src/scripts/curate-vision-corrections.ts)** — reads recent unreviewed corrections, computes recency-weighted per-field frequency (linear falloff over the window; recent misses count more than 4-week-old ones), clusters by `model_value → final_value` transformation, prints a markdown report to stdout. Human reviews, decides which patterns get promoted to `vision.rules.md` (declarative fixes) or `vision.examples.md` (concrete examples that don't compress into a rule). Script never modifies the library files — the LLM-generated → LLM-consumed loop always breaks at a human.
+  8. **Tests** — 8 new in `corrections.diff.test.ts` covering the deterministic ordering, null/undefined/empty-string equivalence, nested-object deep equality, add/remove/change semantics, and guard rails for non-object inputs. Suite is now **88 passing** (5 files: vision 26, tz 31, receipts 10, return-matching 13, corrections 8).
+- Prod migration (`062`) applies automatically on next Railway deploy. Corrections will begin accumulating on save-with-edits; when there's enough data, run the curation script to see what to promote.
 
 ### Fixes
 

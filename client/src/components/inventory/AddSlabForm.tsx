@@ -55,6 +55,10 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   const [unnumbered, setUnnumbered] = useState(false);
   const [unnumberedError, setUnnumberedError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Snapshot of the AI subagent's return so onSubmit can post a correction
+  // if the user edited any AI-supplied field. See identical pattern in
+  // AddCardForm — reset on each new Auto-fill run; server drops no-op diffs.
+  const aiSnapshotRef = useRef<Record<string, unknown> | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
@@ -121,6 +125,22 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       const pg = data.data?.parsed_grade;
       const parsedCert: string | undefined = data.data?.parsed_cert;
       if (s) {
+        // Snapshot the AI-supplied fields for later diffing on save. Includes
+        // grade fields when the model returned parsed_grade so slab-specific
+        // mistakes (wrong grade_label, cert typos) also feed the corrections
+        // library.
+        const appliedName = (s.catalog_exists && s.catalog_card_name) ? s.catalog_card_name : (s.card_name ?? '');
+        aiSnapshotRef.current = {
+          card_name_override: appliedName,
+          set_name_override: s.set_name ?? undefined,
+          card_number_override: s.card_number ? normalizeCardNumber(s.card_number) : undefined,
+          rarity: s.rarity ?? undefined,
+          language: s.language === 'JP' ? 'JP' : 'EN',
+          slab_company: pg?.company ?? undefined,
+          slab_grade: pg?.grade ?? undefined,
+          slab_grade_label: pg?.grade_label ?? undefined,
+          slab_cert_number: parsedCert ?? undefined,
+        };
         // Card name: prefer the established catalog name when one exists,
         // otherwise fall back to the AI-parsed name so the user has
         // something to refine. (Previously left blank for new parts which
@@ -175,6 +195,27 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
     if (!unnumbered && !data.card_number_override?.trim()) {
       setUnnumberedError('Card number required');
       return;
+    }
+    // Fire-and-forget correction log — mirrors AddCardForm. Only fires when
+    // Auto-fill ran and the final saved values differ from the AI snapshot.
+    if (aiSnapshotRef.current) {
+      const snap = aiSnapshotRef.current;
+      const final = {
+        card_name_override: data.card_name_override,
+        set_name_override: data.set_name_override,
+        card_number_override: data.card_number_override,
+        rarity: data.rarity,
+        language: data.language,
+        slab_company: data.slab_company,
+        slab_grade: data.slab_grade,
+        slab_grade_label: data.slab_grade_label,
+        slab_cert_number: data.slab_cert_number,
+      };
+      api.post('/agent/corrections', {
+        source: 'card_extraction',
+        model_output: snap,
+        final_output: final,
+      }).catch(() => { /* best-effort */ });
     }
     const { grading_cost, purchase_cost, ...rest } = data;
     await api.post('/cards', {

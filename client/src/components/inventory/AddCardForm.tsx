@@ -51,6 +51,12 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const [backPreview, setBackPreview] = useState<string | null>(null);
   const frontRef = useRef<HTMLInputElement>(null);
   const backRef = useRef<HTMLInputElement>(null);
+  // Snapshot of what the AI subagent returned the last time Auto-fill ran.
+  // Used on save to POST a correction row when the user edits any AI-supplied
+  // field. Reset whenever a new Auto-fill fires (only the LAST AI result is
+  // the reference — mid-edit changes aren't tracked as corrections until the
+  // user actually saves).
+  const aiSnapshotRef = useRef<Record<string, unknown> | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema) as any,
@@ -84,8 +90,21 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
       const res = await api.post('/agent/auto-fill', { partial_name: name, game: currentGame });
       const s = res.data.data?.suggestions?.[0];
       if (s) {
+        // Snapshot the AI-supplied fields so onSubmit can diff against the
+        // final saved values. Only the fields we ACTUALLY apply to the form
+        // land here; catalog-derived overrides (catalog_card_name) win over
+        // AI raw so we snapshot the applied value, not the raw suggestion.
+        const appliedName = s.catalog_card_name || s.card_name || '';
+        aiSnapshotRef.current = {
+          card_name_override: appliedName,
+          set_name_override: s.set_name ?? undefined,
+          card_number_override: s.card_number ?? undefined,
+          rarity: s.rarity ?? undefined,
+          language: s.language === 'JP' ? 'JP' : 'EN',
+          card_game: s.game ?? currentGame,
+        };
         // Always fill card name: prefer established catalog name, fall back to AI suggestion
-        setValue('card_name_override', s.catalog_card_name || s.card_name || '');
+        setValue('card_name_override', appliedName);
         if (s.set_name) setValue('set_name_override', s.set_name);
         if (s.card_number) setValue('card_number_override', s.card_number);
         if (s.rarity) setValue('rarity', s.rarity);
@@ -134,6 +153,25 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   const onSubmit = async (data: FormData) => {
     const qty = data.purchase_type === 'bulk' ? (data.quantity ?? 1) : 1;
     const costPerUnit = qty > 1 ? (Number(data.purchase_cost) / qty).toFixed(2) : Number(data.purchase_cost).toFixed(2);
+    // Fire-and-forget correction log — only fires when Auto-fill ran during
+    // this session AND the user edited at least one AI-supplied field. The
+    // server drops no-op diffs so an unchanged save doesn't add noise.
+    if (aiSnapshotRef.current) {
+      const snap = aiSnapshotRef.current;
+      const final = {
+        card_name_override: data.card_name_override,
+        set_name_override: data.set_name_override,
+        card_number_override: data.card_number_override,
+        rarity: data.rarity,
+        language: data.language,
+        card_game: data.card_game,
+      };
+      api.post('/agent/corrections', {
+        source: 'card_extraction',
+        model_output: snap,
+        final_output: final,
+      }).catch(() => { /* corrections are best-effort — never block a save */ });
+    }
     const res = await api.post('/cards', {
       ...data,
       catalog_id: catalogId ?? undefined,

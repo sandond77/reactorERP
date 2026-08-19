@@ -5,6 +5,7 @@ import { AppError } from '../middleware/errorHandler';
 import sharp from 'sharp';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { recordCorrection as recordCorrectionSvc } from '../services/ai/corrections.service';
 
 // Receipt image parsing
 export async function parseReceipt(req: Request, res: Response, next: NextFunction) {
@@ -189,4 +190,37 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
     console.error('[agent.chat] error:', err);
     next(err);
   }
+}
+
+// Correction recording — the client posts what the AI returned and what
+// the user actually saved after editing. The service diffs them and stores
+// only the ones with real changes (identical saves are dropped as noise).
+// Body shape is intentionally forgiving on model_output/final_output so
+// each subagent can send whatever payload shape it uses.
+const correctionSchema = z.object({
+  source: z.enum(['card_extraction', 'receipt', 'return_matching']),
+  model: z.string().max(128).optional().nullable(),
+  image_hash: z.string().max(128).optional().nullable(),
+  // z.unknown() forces the caller to send the field (required) without
+  // constraining shape — each subagent has its own payload schema, and the
+  // corrections table stores whatever JSON they send.
+  model_output: z.unknown(),
+  final_output: z.unknown(),
+});
+
+export async function recordCorrection(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = correctionSchema.parse(req.body);
+    if (body.model_output === undefined || body.final_output === undefined) {
+      throw new AppError(400, 'model_output and final_output are required');
+    }
+    const row = await recordCorrectionSvc(req.dataUserId, {
+      ...body,
+      model_output: body.model_output,
+      final_output: body.final_output,
+    });
+    // 200 for both "recorded" and "no changes — nothing to record" so the
+    // client doesn't need to branch — this is fire-and-forget from its side.
+    res.json({ data: { recorded: !!row, id: row?.id ?? null, fields_changed: row?.fields_changed ?? [] } });
+  } catch (err) { next(err); }
 }

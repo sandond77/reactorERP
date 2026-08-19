@@ -37,3 +37,7 @@ agentRouter.post('/auto-fill', upload.single('image'), agentController.autoFill)
 
 // Chat with the AI agent about inventory (optional image attachments, max 5)
 agentRouter.post('/chat', upload.fields([{ name: 'images', maxCount: 5 }, { name: 'files', maxCount: 5 }]), agentController.chat);
+
+// Record a correction — client posts (model_output, final_output) after a
+// user saves an auto-filled form with edits. Feeds the curation library.
+agentRouter.post('/corrections', agentController.recordCorrection);
