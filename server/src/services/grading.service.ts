@@ -298,4 +298,108 @@ export async function listSlabs(
   return buildPaginatedResult(rows.rows, total, pagination.page, pagination.limit);
 }
 
+// ── Card-show pricing suggestions ────────────────────────────────────────────
+//
+// For a set of slabs the user is about to add to a card show, look up what
+// price they've already put on OTHER slabs of the same (card_name,
+// grade_label, company) already sitting in card-show inventory. The point
+// is consistency within a show — if you priced a PSA 9 Ralts at $45
+// yesterday, the next PSA 9 Ralts you add should default to $45. The
+// suggestion is the most recent card_show_price for that identity; sample
+// count comes back too so the client can distinguish "based on 1 slab"
+// from "based on 8 slabs."
+//
+// Also returns per-slab total_cost (raw purchase + grading + any additional
+// slab cost) so the client can render a Total Cost column next to the
+// asking-price input. Cost basis is already computed elsewhere, we just
+// package it here so the whole Add-to-Card-Show pricing step is one round
+// trip instead of two.
+
+export interface CardShowPricingSuggestion {
+  slab_id: string;
+  total_cost_cents: number;
+  // Suggested asking price in cents. Null when no other slab of the same
+  // (card, grade, company) is currently in card-show inventory.
+  suggested_price_cents: number | null;
+  // How many other slabs the suggestion was drawn from — 0 means "none,
+  // no suggestion available." A count of 1 says "you only priced this
+  // once before" so the client can display that context if useful.
+  sample_count: number;
+}
+
+export async function getCardShowPricingSuggestions(
+  userId: string,
+  slabIds: string[],
+): Promise<CardShowPricingSuggestion[]> {
+  if (slabIds.length === 0) return [];
+
+  const rows = await sql<{
+    slab_id: string;
+    total_cost_cents: number;
+    suggested_price_cents: number | null;
+    sample_count: number;
+  }>`
+    WITH target AS (
+      SELECT
+        ci.id  AS slab_id,
+        COALESCE(ci.card_name_override, cc.card_name) AS card_name_key,
+        sd.grade_label,
+        sd.company,
+        (COALESCE(ci.purchase_cost, 0)
+          + COALESCE(sd.grading_cost, 0)
+          + COALESCE(sd.additional_cost, 0))::int AS total_cost_cents
+      FROM card_instances ci
+      INNER JOIN slab_details sd ON sd.card_instance_id = ci.id
+      LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
+      WHERE ci.user_id = ${userId}
+        AND ci.id IN (${sql.join(slabIds.map((v) => sql.val(v)))})
+    ),
+    -- The most recent card_show_price this user has set for each (card,
+    -- grade, company) combo — excluding the slab we're pricing NOW so a
+    -- re-add of a card previously in the show doesn't just echo its own
+    -- old value.
+    latest AS (
+      SELECT DISTINCT ON (t.slab_id)
+        t.slab_id,
+        ci2.card_show_price AS suggested_price_cents,
+        ci2.updated_at
+      FROM target t
+      INNER JOIN card_instances ci2 ON ci2.user_id = ${userId}
+      INNER JOIN slab_details    sd2 ON sd2.card_instance_id = ci2.id
+      LEFT  JOIN card_catalog    cc2 ON cc2.id = ci2.catalog_id
+      WHERE ci2.is_card_show = true
+        AND ci2.card_show_price IS NOT NULL
+        AND ci2.id <> t.slab_id
+        AND COALESCE(ci2.card_name_override, cc2.card_name) = t.card_name_key
+        AND sd2.grade_label = t.grade_label
+        AND sd2.company     = t.company
+      ORDER BY t.slab_id, ci2.updated_at DESC
+    ),
+    -- Sample count across the same identity so the UI can show "based on N."
+    samples AS (
+      SELECT t.slab_id, COUNT(*)::int AS sample_count
+      FROM target t
+      INNER JOIN card_instances ci2 ON ci2.user_id = ${userId}
+      INNER JOIN slab_details    sd2 ON sd2.card_instance_id = ci2.id
+      LEFT  JOIN card_catalog    cc2 ON cc2.id = ci2.catalog_id
+      WHERE ci2.is_card_show = true
+        AND ci2.card_show_price IS NOT NULL
+        AND ci2.id <> t.slab_id
+        AND COALESCE(ci2.card_name_override, cc2.card_name) = t.card_name_key
+        AND sd2.grade_label = t.grade_label
+        AND sd2.company     = t.company
+      GROUP BY t.slab_id
+    )
+    SELECT
+      t.slab_id,
+      t.total_cost_cents,
+      latest.suggested_price_cents,
+      COALESCE(samples.sample_count, 0) AS sample_count
+    FROM target t
+    LEFT JOIN latest  ON latest.slab_id  = t.slab_id
+    LEFT JOIN samples ON samples.slab_id = t.slab_id
+  `.execute(db);
+
+  return rows.rows;
+}
 

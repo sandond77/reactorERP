@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, Check, ArrowRight } from 'lucide-react';
 import { api, type PaginatedResult } from '../../lib/api';
@@ -15,6 +15,16 @@ interface SlabOption {
   listed_price: number | null;
   card_show_price: number | null;
   raw_cost: number;
+  // From listSlabs — already present in the payload, just typed here now
+  // so the price step can render (raw + grading) as Total Cost.
+  grading_cost: number;
+}
+
+interface PricingSuggestion {
+  slab_id: string;
+  total_cost_cents: number;
+  suggested_price_cents: number | null;
+  sample_count: number;
 }
 
 interface RawOption {
@@ -38,6 +48,21 @@ interface SelectedCard {
   card_show_price_input: string;
   inspection_notes: string | null;
   _type: 'graded' | 'raw';
+  // Total cost basis (raw purchase + grading + additional for graded;
+  // just purchase for raw). Set at toggle time from the row data so the
+  // price step can show it without a second fetch.
+  total_cost_cents: number;
+  // Populated by the pricing-suggestions fetch fired when the user
+  // advances to the price step. Null when either the fetch hasn't
+  // returned yet or no other card-show inventory exists for this
+  // (card, grade, company) identity.
+  suggested_price_cents: number | null;
+  suggested_sample_count: number;
+  // Set true once the pricing endpoint has been called for this slab
+  // (regardless of whether a suggestion came back). Prevents the price-
+  // step effect from re-firing forever when a legitimate zero-sample
+  // response never mutates the sample_count-based filter.
+  pricing_fetched: boolean;
 }
 
 const MAX_SELECT = 25;
@@ -99,6 +124,10 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
           card_show_price_input: row.listed_price ? (row.listed_price / 100).toFixed(2) : '',
           inspection_notes: null,
           _type: 'graded',
+          total_cost_cents: (row.raw_cost ?? 0) + (row.grading_cost ?? 0),
+          suggested_price_cents: null,
+          suggested_sample_count: 0,
+          pricing_fetched: false,
         });
       }
       return next;
@@ -124,6 +153,14 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
           card_show_price_input: '',
           inspection_notes: inspectionNotes,
           _type: 'raw',
+          // Raw cards have no grading cost — just the purchase basis.
+          total_cost_cents: row.purchase_cost ?? 0,
+          // Pricing suggestions only cover graded (server matches by
+          // card+grade+company). Raw stays null forever, which the UI
+          // renders as "—".
+          suggested_price_cents: null,
+          suggested_sample_count: 0,
+          pricing_fetched: true,   // never asked, never will — flag prevents effect re-entry
         });
       }
       return next;
@@ -138,6 +175,63 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
       return next;
     });
   }
+
+  // Fire the pricing-suggestions batch when the user advances to the price
+  // step. Only asks about graded slabs — raw cards have no consistent
+  // (card + grade + company) identity to look up. On response, backfills
+  // the suggested price + sample count on each selected row and, for any
+  // row whose CS price input is still empty (not pre-populated from a live
+  // eBay listing), auto-populates from the suggestion so the user isn't
+  // typing what the modal could have inferred.
+  useEffect(() => {
+    if (step !== 'price') return;
+    const toFetch = Array.from(selected.values())
+      .filter((c) => c._type === 'graded' && !c.pricing_fetched)
+      .map((c) => c.id);
+    if (toFetch.length === 0) return;
+    let cancelled = false;
+    api.post<{ data: PricingSuggestion[] }>('/grading/card-show-pricing-suggestions', { slab_ids: toFetch })
+      .then((r) => {
+        if (cancelled) return;
+        const byId = new Map(r.data.data.map((s) => [s.slab_id, s]));
+        setSelected((prev) => {
+          const next = new Map(prev);
+          for (const id of toFetch) {
+            const card = next.get(id);
+            if (!card) continue;
+            const sug = byId.get(id);
+            const shouldAutofill = card.card_show_price_input.trim() === ''
+              && !!sug?.suggested_price_cents;
+            next.set(id, {
+              ...card,
+              pricing_fetched: true,
+              suggested_price_cents: sug?.suggested_price_cents ?? null,
+              suggested_sample_count: sug?.sample_count ?? 0,
+              total_cost_cents: sug?.total_cost_cents ?? card.total_cost_cents,
+              card_show_price_input: shouldAutofill
+                ? (sug!.suggested_price_cents! / 100).toFixed(2)
+                : card.card_show_price_input,
+            });
+          }
+          return next;
+        });
+      })
+      .catch(() => {
+        // Even on failure, mark fetched=true so we don't retry every render.
+        // Suggestions are additive — a failure just leaves that column empty
+        // and the user fills the CS price manually.
+        if (cancelled) return;
+        setSelected((prev) => {
+          const next = new Map(prev);
+          for (const id of toFetch) {
+            const c = next.get(id);
+            if (c) next.set(id, { ...c, pricing_fetched: true });
+          }
+          return next;
+        });
+      });
+    return () => { cancelled = true; };
+  }, [step, selected]);
 
   const mutation = useMutation({
     mutationFn: () => {
@@ -166,15 +260,16 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
         <p className="text-sm text-zinc-400">Enter the card show asking price for each card. Strike price will record the actual sale price when sold.</p>
 
         <div className="rounded-xl border border-zinc-700 overflow-hidden">
-          <div className="grid grid-cols-[1fr_8rem_10rem_2.5rem] gap-x-4 px-4 py-3 bg-zinc-800/60 border-b border-zinc-700">
+          <div className="grid grid-cols-[1fr_6rem_6rem_10rem_2.5rem] gap-x-4 px-4 py-3 bg-zinc-800/60 border-b border-zinc-700">
             <span className="text-xs text-zinc-400 uppercase tracking-widest font-medium">Card</span>
-            <span className="text-xs text-zinc-400 uppercase tracking-widest font-medium text-right">eBay Price</span>
+            <span className="text-xs text-zinc-400 uppercase tracking-widest font-medium text-right">Total Cost</span>
+            <span className="text-xs text-zinc-400 uppercase tracking-widest font-medium text-right">eBay</span>
             <span className="text-xs text-zinc-400 uppercase tracking-widest font-medium text-right">CS Price</span>
             <span />
           </div>
           <div className="max-h-[420px] overflow-y-auto">
             {selectedList.map((card) => (
-              <div key={card.id} className="grid grid-cols-[1fr_8rem_10rem_2.5rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-start">
+              <div key={card.id} className="grid grid-cols-[1fr_6rem_6rem_10rem_2.5rem] gap-x-4 px-4 py-3.5 border-b border-zinc-800/60 last:border-0 items-start">
                 <div className="min-w-0">
                   <p className="text-sm text-zinc-100 font-medium whitespace-normal break-words leading-snug">{card.card_name ?? '—'}</p>
                   <p className="text-xs text-zinc-500 mt-0.5">{card.label}</p>
@@ -188,18 +283,47 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
                   )}
                 </div>
                 <span className="text-sm text-zinc-400 text-right block">
+                  {card.total_cost_cents > 0 ? formatCurrency(card.total_cost_cents) : '—'}
+                </span>
+                <span className="text-sm text-zinc-400 text-right block">
                   {card.listed_price ? formatCurrency(card.listed_price) : '—'}
                 </span>
-                <div className="flex items-center justify-end">
-                  <span className="text-sm text-zinc-500 mr-1.5">$</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={card.card_show_price_input}
-                    onChange={(e) => updatePrice(card.id, e.target.value.replace(/[^\d.]/g, ''))}
-                    className="w-24 px-2.5 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 text-right focus:outline-none focus:border-indigo-500"
-                    placeholder="0.00"
-                  />
+                <div className="flex flex-col items-end gap-0.5">
+                  <div className="flex items-center">
+                    <span className="text-sm text-zinc-500 mr-1.5">$</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={card.card_show_price_input}
+                      onChange={(e) => updatePrice(card.id, e.target.value.replace(/[^\d.]/g, ''))}
+                      className="w-24 px-2.5 py-1.5 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 text-right focus:outline-none focus:border-indigo-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  {/* Suggestion line — sits under the CS input. Shows the
+                      inferred price + sample count from other same-identity
+                      slabs already in card-show inventory. Click to apply
+                      when the current input differs; otherwise passive text. */}
+                  {card._type === 'graded' && card.suggested_price_cents != null && (() => {
+                    const suggested = card.suggested_price_cents;
+                    const suggestedStr = (suggested / 100).toFixed(2);
+                    const matches = card.card_show_price_input === suggestedStr;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => updatePrice(card.id, suggestedStr)}
+                        disabled={matches}
+                        title={matches ? 'CS price matches suggestion' : 'Apply suggested price'}
+                        className={cn(
+                          'text-[10px] leading-tight',
+                          matches ? 'text-zinc-600 cursor-default' : 'text-indigo-400 hover:text-indigo-300',
+                        )}
+                      >
+                        Suggested {formatCurrency(suggested)}
+                        <span className="text-zinc-600"> · {card.suggested_sample_count} sample{card.suggested_sample_count === 1 ? '' : 's'}</span>
+                      </button>
+                    );
+                  })()}
                 </div>
                 <button onClick={() => setSelected((prev) => { const next = new Map(prev); next.delete(card.id); return next; })}
                   className="text-sm text-zinc-600 hover:text-red-400 transition-colors px-1">✕</button>

@@ -1,5 +1,17 @@
 # Reactor — Changelog
 
+## August 21, 2026
+
+### Features
+
+**Card show — Add to Card Show modal shows Total Cost + suggested CS price**
+- Add-to-Card-Show flow was pricing blind: the modal's price step let you type an asking price with no context. If you'd already priced a PSA 9 Ralts at $45 last week, the next PSA 9 Ralts you added started from an empty input — inconsistent pricing across the show, mental overhead every time.
+- **New endpoint [POST /grading/card-show-pricing-suggestions](server/src/routes/grading.routes.ts#L11)** — takes up to 25 slab IDs, returns per-slab `{ total_cost_cents, suggested_price_cents, sample_count }`. Suggested price is the **most recent `card_show_price` from other slabs of the same `(card_name, grade_label, company)` currently in card-show inventory**, excluding the slab being priced. Pure card-show scope — doesn't reach into eBay listings or sold history. If you haven't shown that card+grade before, `suggested_price_cents` is null and the UI shows nothing.
+- **Total Cost column** on the price step in [AddToCardShowModal](client/src/components/inventory/AddToCardShowModal.tsx) — sums `purchase_cost + grading_cost + additional_cost` for graded, just `purchase_cost` for raw. Now you see cost basis right next to the asking price you're setting.
+- **Suggested price line** sits under the CS Price input on graded rows. Clickable to apply if the input differs from the suggestion; passive text if they already match. Includes `· N samples` so a "based on 1 slab" hint looks visually different from "based on 8 slabs."
+- **Autofill on empty** — if the CS Price input is empty when the pricing fetch lands (typically for cards without an active eBay listing to inherit from), it auto-populates with the suggestion. If you had already typed something, or the card had a live eBay listing whose price prefilled the field, autofill respects that and only surfaces the suggestion as a click-to-apply option.
+- Fetch fires exactly once per selected slab per session (`pricing_fetched` guard), including on failure — no infinite retry loop when the server 500s or a slab has no samples. Raw cards get flagged `pricing_fetched: true` at select time since the endpoint only covers graded identities.
+
 ## August 18, 2026
 
 ### Features

@@ -8,3 +8,4 @@ gradingRouter.use(requireAuth);
 
 gradingRouter.get('/slabs/filters', gradingController.getSlabFilters);
 gradingRouter.get('/slabs', gradingController.listSlabs);
+gradingRouter.post('/card-show-pricing-suggestions', gradingController.getCardShowPricingSuggestions);

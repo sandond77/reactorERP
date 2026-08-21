@@ -65,4 +65,20 @@ export async function getSlabFilters(req: Request, res: Response, next: NextFunc
   } catch (err) { next(err); }
 }
 
+// Batch pricing suggestions for a set of slabs about to be added to a
+// card show. Capped at the same 25-item ceiling the Add-to-Card-Show
+// modal enforces client-side, so a broken caller can't ask for a
+// megabatch of lookups.
+const pricingSchema = z.object({
+  slab_ids: z.array(z.string().uuid()).min(1).max(25),
+});
+
+export async function getCardShowPricingSuggestions(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { slab_ids } = pricingSchema.parse(req.body);
+    const suggestions = await gradingService.getCardShowPricingSuggestions(req.dataUserId, slab_ids);
+    res.json({ data: suggestions });
+  } catch (err) { next(err); }
+}
+
 
