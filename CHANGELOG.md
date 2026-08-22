@@ -2,6 +2,13 @@
 
 ## August 22, 2026
 
+### Features
+
+**Card Show bulk sale — enter Final Total to back-solve the discount, not just the other way around**
+- Only lever on the review step was `Discount % (all)` — user had to compute the percentage themselves for a "gimme the pile for $900" negotiation ($1030 sticker → 12.624%). Cumbersome and easy to fat-finger.
+- Added a mirrored `Final Total ($)` input in [client/src/pages/Sales.tsx](client/src/pages/Sales.tsx). Editing either input recomputes the OTHER + every per-card final via the same multiplier. Type $900 → discount auto-fills 12.624%, per-card finals recompute proportionally. Type 15% → total recomputes to $875.50. Either mental model works.
+- Both inputs are separate controlled state (`bulkDiscount`, `bulkFinalTotal`) so decimals in progress (`900.` before typing `50`) don't get stripped by the parseDollars round-trip a purely-derived value would suffer. Both reset alongside the cart on Back / mode-switch buttons.
+
 ### Fixes
 
 **Agent — image quality regression on multi-card scenes: keep quality, drop resolution instead**

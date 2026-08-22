@@ -224,6 +224,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [debouncedBulkSearch, setDebouncedBulkSearch] = useState('');
   const [bulkExactMatch, setBulkExactMatch] = useState(false);
   const [bulkDiscount, setBulkDiscount] = useState('');
+  // Final Total is a mirror of the summed per-card finals — either the user
+  // drives from this side (types $900, we distribute), or from the discount %
+  // side, or by editing individual rows. Kept as its own state so decimals
+  // in progress (typing "9." before adding "5") don't get stripped by the
+  // parseDollars round-trip that would happen if we derived it from bulkCart.
+  const [bulkFinalTotal, setBulkFinalTotal] = useState('');
   const [bulkTab, setBulkTab] = useState<'graded' | 'raw'>('graded');
   const [bulkSearchMode, setBulkSearchMode] = useState<'search' | 'url' | 'paste'>('search');
   const [pasteText, setPasteText] = useState('');
@@ -812,7 +818,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         </button>
         {platform === 'card_show' && (
           <button type="button"
-            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkUrl(''); setBulkSearchMode('search'); setStep('bulk-search'); }}
+            onClick={() => { setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkFinalTotal(''); setBulkUrl(''); setBulkSearchMode('search'); setStep('bulk-search'); }}
             className="rounded-xl border-2 border-teal-600/60 bg-teal-500/10 px-4 py-5 text-left hover:bg-teal-500/20 transition-colors">
             <p className="text-sm font-semibold text-teal-300">Bulk Sale</p>
             <p className="text-xs text-zinc-500 mt-0.5">Multiple cards, one transaction</p>
@@ -820,7 +826,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         )}
         {platform === 'ebay' && (
           <button type="button"
-            onClick={() => { setBulkPricingMode('split'); setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkUrl(''); setBulkSearchMode('search'); setStep('bulk-search'); }}
+            onClick={() => { setBulkPricingMode('split'); setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkFinalTotal(''); setBulkUrl(''); setBulkSearchMode('search'); setStep('bulk-search'); }}
             className="rounded-xl border-2 border-teal-600/60 bg-teal-500/10 px-4 py-5 text-left hover:bg-teal-500/20 transition-colors">
             <p className="text-sm font-semibold text-teal-300">Set Listing</p>
             <p className="text-xs text-zinc-500 mt-0.5">Multiple cards, total split evenly</p>
@@ -828,7 +834,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         )}
         {platform === 'ebay' && (
           <button type="button"
-            onClick={() => { setBulkPricingMode('per_item'); setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkUrl(''); setBulkSearchMode('search'); setOrderEarnings(''); setStrikePrice(''); setSplitOrderDetails(false); setOrderDetailsOverrides({}); setStep('bulk-search'); }}
+            onClick={() => { setBulkPricingMode('per_item'); setBulkCart([]); setBulkSearch(''); setBulkDiscount(''); setBulkFinalTotal(''); setBulkUrl(''); setBulkSearchMode('search'); setOrderEarnings(''); setStrikePrice(''); setSplitOrderDetails(false); setOrderDetailsOverrides({}); setStep('bulk-search'); }}
             className="rounded-xl border-2 border-sky-600/60 bg-sky-500/10 px-4 py-5 text-left hover:bg-sky-500/20 transition-colors">
             <p className="text-sm font-semibold text-sky-300">Combined Order</p>
             <p className="text-xs text-zinc-500 mt-0.5">Multiple listings, one buyer</p>
@@ -2111,26 +2117,61 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             </label>
           </div>
         ) : (
-          /* ── Card Show: per-card manual pricing ── */
-          <div className="flex items-end gap-3">
-            <div className="w-36">
-              <Input label="Discount % (all)" type="number" min="0" max="100" step="1"
-                placeholder="0" value={bulkDiscount} onChange={(e) => {
-                  const pct = parseDollars(e.target.value);
-                  setBulkDiscount(e.target.value);
-                  const multiplier = 1 - pct / 100;
-                  setBulkCart(prev => prev.map(c => ({
-                    ...c,
-                    final_price_input: c.sticker_price_input
-                      ? (parseDollars(c.sticker_price_input) * multiplier).toFixed(2)
-                      : c.final_price_input,
-                  })));
-                }} />
-            </div>
-            {parseDollars(bulkDiscount) > 0 && (
-              <p className="text-xs text-zinc-500 pb-2">{parseDollars(bulkDiscount)}% off each card</p>
-            )}
-          </div>
+          /* ── Card Show: per-card manual pricing ──
+             Two mirrored inputs — user picks whichever is more natural:
+             Discount % (buyer negotiated 15% off) OR Final Total (buyer
+             said "give me the pile for $900"). Editing either recomputes
+             the other AND every per-card final via the same multiplier
+             so the row totals stay in sync with what the user typed. */
+          (() => {
+            const totalStickerCents = bulkCart.reduce(
+              (s, c) => s + Math.round(parseDollars(c.sticker_price_input) * 100), 0);
+            const applyMultiplier = (multiplier: number) => setBulkCart(prev => prev.map(c => ({
+              ...c,
+              final_price_input: c.sticker_price_input
+                ? (parseDollars(c.sticker_price_input) * multiplier).toFixed(2)
+                : c.final_price_input,
+            })));
+            return (
+              <div className="flex items-end gap-3 flex-wrap">
+                <div className="w-36">
+                  <Input label="Discount % (all)" type="number" min="0" max="100" step="0.01"
+                    placeholder="0" value={bulkDiscount} onChange={(e) => {
+                      const raw = e.target.value;
+                      const pct = parseDollars(raw);
+                      const multiplier = 1 - pct / 100;
+                      setBulkDiscount(raw);
+                      // Mirror to Final Total input so the user sees both
+                      // sides update together.
+                      setBulkFinalTotal((totalStickerCents * multiplier / 100).toFixed(2));
+                      applyMultiplier(multiplier);
+                    }} />
+                </div>
+                <div className="w-36">
+                  <Input label="Final Total ($)" type="text" inputMode="decimal"
+                    placeholder="0.00"
+                    value={bulkFinalTotal}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^0-9.]/g, '');
+                      setBulkFinalTotal(raw);
+                      if (totalStickerCents <= 0) return;   // no sticker basis to distribute against
+                      const nextTotalCents = Math.round(parseDollars(raw) * 100);
+                      const multiplier = nextTotalCents / totalStickerCents;
+                      const pct = Math.max(0, (1 - multiplier) * 100);
+                      // 3-digit precision matches the discount % the user
+                      // saw when they came in from a "give me $900" price
+                      // — trailing zeros stripped so 13% doesn't show as
+                      // 13.000%.
+                      setBulkDiscount(pct > 0 ? pct.toFixed(3).replace(/\.?0+$/, '') : '');
+                      applyMultiplier(multiplier);
+                    }} />
+                </div>
+                {parseDollars(bulkDiscount) > 0 && (
+                  <p className="text-xs text-zinc-500 pb-2">{parseDollars(bulkDiscount).toFixed(2)}% off each card</p>
+                )}
+              </div>
+            );
+          })()
         )}
 
         <div className="rounded-lg border border-zinc-700 overflow-hidden">
