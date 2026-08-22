@@ -1,5 +1,6 @@
 import { sql } from 'kysely';
 import { db } from '../config/database';
+import { normalizeGradeLabel } from '../utils/grade-labels';
 
 export type PnlGroupBy = 'month' | 'platform' | 'game';
 export type PnlChannel = 'all' | 'ebay' | 'card_show' | 'other';
@@ -265,30 +266,37 @@ export async function getGradedDashboard(userId: string, view: 'all' | 'sold' | 
   `.execute(db);
 
   // ── Grade distribution ──────────────────────────────────────────────────────
-  const gradeDistributionQuery = sql<{
-    grade: number; grade_label: string | null; company: string; count: number;
+  //
+  // GROUP BY the numeric grade (authoritative) rather than by a normalized
+  // grade_label. Previous version's CASE-based ILIKE bucketing conflated
+  // grades whose stored labels shared a prefix — e.g. PSA 7 stored as
+  // "NEAR MINT" and PSA 7.5 stored as "NEAR MINT+" both matched the
+  // `near%mint%` branch and merged into a single "NEAR MINT" bucket, with
+  // MAX(sd.grade) displaying the higher of the two on the merged row.
+  // Same collision on 8 vs 8.5 via any "NEAR MINT-MINT+" variant.
+  //
+  // We keep grade_label off the GROUP BY entirely and let normalizeGradeLabel
+  // give us the canonical string per (company, grade) in application code.
+  // That's the same helper the AI scanner uses, so display stays consistent
+  // across the app regardless of how PSA/CGC/etc labelled a specific slab.
+  const gradeDistributionRaw = await sql<{
+    grade: number; company: string; count: number;
   }>`
-    SELECT MAX(sd.grade) as grade,
-      CASE
-        WHEN sd.grade_label ILIKE 'gem%mint%' OR sd.grade_label ILIKE 'gem%mt%' THEN 'GEM MINT'
-        WHEN sd.grade_label ILIKE 'near%mint%mint%' THEN 'NEAR MINT-MINT'
-        WHEN sd.grade_label ILIKE 'near%mint%'  THEN 'NEAR MINT'
-        WHEN sd.grade_label ILIKE 'mint%'       THEN 'MINT'
-        WHEN sd.grade_label ILIKE 'excellent%mint%' THEN 'EXCELLENT-MINT'
-        WHEN sd.grade_label ILIKE 'excellent%'  THEN 'EXCELLENT'
-        WHEN sd.grade_label ILIKE 'very%good%excellent%' THEN 'VERY GOOD-EXCELLENT'
-        WHEN sd.grade_label ILIKE 'very%good%'  THEN 'VERY GOOD'
-        WHEN sd.grade_label ILIKE 'good%'       THEN 'GOOD'
-        WHEN sd.grade_label ILIKE 'poor%'       THEN 'POOR'
-        ELSE sd.grade_label
-      END AS grade_label,
-      sd.company, COUNT(*)::int as count
+    SELECT sd.grade, sd.company, COUNT(*)::int as count
     FROM card_instances ci
     JOIN slab_details sd ON sd.card_instance_id = ci.id
     WHERE ci.user_id = ${userId} AND ${statusFilter}
-    GROUP BY grade_label, sd.company
-    ORDER BY MAX(sd.grade), grade_label
+    GROUP BY sd.grade, sd.company
+    ORDER BY sd.grade
   `.execute(db);
+  const gradeDistributionQuery = Promise.resolve({
+    rows: gradeDistributionRaw.rows.map((r) => ({
+      grade: r.grade,
+      grade_label: normalizeGradeLabel(r.company, Number(r.grade)),
+      company: r.company,
+      count: r.count,
+    })),
+  });
 
   // ── Pipeline ────────────────────────────────────────────────────────────────
   // graded_out=false on the raw-side counters (at_graders / unsubmitted) so

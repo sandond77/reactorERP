@@ -2,6 +2,14 @@
 
 ## August 21, 2026
 
+### Fixes
+
+**Dashboard — Grade Distribution no longer merges half-grades into their base grade's bucket**
+- User reported: chart showed `7.5 NEAR MINT` (16) and `8.5 NEAR MINT-MINT` (82) with no separate `7 NEAR MINT` or `8 NEAR MINT-MINT` rows — half-grades and their base grades were bucketing together, and the merged row was labeled with the higher grade.
+- Root cause in [server/src/services/reports.service.ts:270-291](server/src/services/reports.service.ts#L270-L291): the query CASE-normalized `sd.grade_label` via `ILIKE` prefixes then `GROUP BY grade_label`. Two grades whose STORED labels shared a prefix (e.g. PSA 7 stored as `"NEAR MINT"` and PSA 7.5 stored as `"NEAR MINT+"`) both matched the `near%mint%` branch → merged into a single `NEAR MINT` bucket, with `MAX(sd.grade)` displaying `7.5` on the merged row. Same collision path on `NEAR MINT-MINT` for grades 8 and 8.5.
+- Fix: query now groups by `(sd.grade, sd.company)` — numeric grade is authoritative, so grades 7 and 7.5 (and 8 vs 8.5) always sit in separate buckets. Canonical label per `(company, grade)` comes from `normalizeGradeLabel()` in application code — the same helper the AI scanner already uses, so display stays consistent regardless of how a specific slab's label was stored.
+- Net: chart now shows one bar per numeric grade the user actually owns. `7 NEAR MINT` and `7.5 NM+` are distinct rows in both the chart and the table beneath it.
+
 ### Features
 
 **Card show — Add to Card Show modal shows Total Cost + suggested CS price**
