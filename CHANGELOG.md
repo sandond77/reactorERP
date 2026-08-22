@@ -4,6 +4,11 @@
 
 ### Fixes
 
+**Dashboard — Grade Distribution labels no longer duplicate the numeric grade**
+- Follow-up to the half-grade split above. With separate buckets now rendering, labels came out as `5 EXCELLENT 5`, `10 GEM MINT 10`, etc. — grade appearing on both ends.
+- Root cause in [client/src/pages/Dashboard.tsx:1221-1222](client/src/pages/Dashboard.tsx#L1221-L1222): `gradeDisplayName` prepended `fmtGrade(grade)` when the label didn't start with a digit. Predates the `normalizeGradeLabel` unification — the canonical labels already end with the numeric grade for every supported company (`"EXCELLENT 5"`, `"GEM MINT 10"`, `"ARS10"`), so the prepend just doubled it.
+- Fix: drop the prepend, use the server-provided label verbatim. Fallback path (no label at all) still returns just the numeric grade, which is fine to display on its own.
+
 **Dashboard — Grade Distribution no longer merges half-grades into their base grade's bucket**
 - User reported: chart showed `7.5 NEAR MINT` (16) and `8.5 NEAR MINT-MINT` (82) with no separate `7 NEAR MINT` or `8 NEAR MINT-MINT` rows — half-grades and their base grades were bucketing together, and the merged row was labeled with the higher grade.
 - Root cause in [server/src/services/reports.service.ts:270-291](server/src/services/reports.service.ts#L270-L291): the query CASE-normalized `sd.grade_label` via `ILIKE` prefixes then `GROUP BY grade_label`. Two grades whose STORED labels shared a prefix (e.g. PSA 7 stored as `"NEAR MINT"` and PSA 7.5 stored as `"NEAR MINT+"`) both matched the `near%mint%` branch → merged into a single `NEAR MINT` bucket, with `MAX(sd.grade)` displaying `7.5` on the merged row. Same collision path on `NEAR MINT-MINT` for grades 8 and 8.5.
