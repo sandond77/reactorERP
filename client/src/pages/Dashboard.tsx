@@ -1217,11 +1217,12 @@ function GradedTab() {
   const allGradeKeysWithGrade = Array.from(
     new Map(filteredGrades.map((r) => [gradeKey(r), Number(r.grade)])).entries()
   ).sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]));
-  // Prepend numeric grade for alphabetic labels (e.g. "GEM MINT" → "10 GEM MINT")
-  const gradeDisplayName = (key: string, grade: number) =>
-    /^\d/.test(key) ? key : `${fmtGrade(grade)} ${key}`;
-  const gradeBarData = allGradeKeysWithGrade.map(([key, grade]) => ({
-    name: gradeDisplayName(key, grade),
+  // Server-provided grade_label already includes the numeric grade for every
+  // company we support (e.g. "EXCELLENT 5", "GEM MINT 10", "ARS10"), so use
+  // it verbatim. The label-less fallback path returns just the numeric
+  // grade, which is fine to display on its own.
+  const gradeBarData = allGradeKeysWithGrade.map(([key]) => ({
+    name: key,
     count: filteredGrades.filter((r) => gradeKey(r) === key).reduce((s, r) => s + r.count, 0),
   }));
 
