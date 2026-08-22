@@ -132,29 +132,42 @@ export async function chat(req: Request, res: Response, next: NextFunction) {
 
     const images: agentService.AgentImage[] = await Promise.all(
       imageFiles.map(async (file) => {
-        // Anthropic vision rejects images over 5MB raw. We aim for ~3.5MB
-        // worst-case to leave headroom. Single resize pass with sharp's
-        // lanczos3 kernel, then progressively drop quality if the encode
-        // is still too large for a particularly detailed photo.
+        // Anthropic vision rejects images over 5MB raw. We aim for ~4.5MB
+        // to leave a little headroom. Priorities, in order:
+        //   1. Preserve QUALITY over resolution. Text OCR (PSA cert numbers,
+        //      handwritten stickers, note tallies in a card-show display
+        //      photo) breaks down fast below q88. Prior version iterated
+        //      DOWN to q75, which routinely turned 8-digit cert numbers into
+        //      indistinguishable blur on multi-card scenes.
+        //   2. Try the source resolution first — a 12MP phone shot at q92
+        //      often fits fine and gives Claude the best possible detail.
+        //      Only shrink dimensions when we have to.
+        // Result: for the common single-card and small-scene case we
+        // encode at native resolution; for dense multi-card scenes we drop
+        // resolution instead of quality, which is what preserves the tiny
+        // label text the user is trying to read.
         const ANTHROPIC_MAX_BYTES = 4_500_000;
+        const QUALITY = 92;
         const meta = await sharp(file.buffer).metadata();
-        const qualities = [92, 88, 82, 75];
+        // Progressive resize ladder — try each cap in order, keeping q=92
+        // throughout. `withoutEnlargement` means passing a 3800 cap on a
+        // 2000px source is a no-op (native resolution retained).
+        const resizeLadder: (number | null)[] = [null, 4000, 3400, 3000, 2600];
         let resized: Buffer | null = null;
-        let usedQuality = qualities[0];
-        for (const q of qualities) {
-          const buf = await sharp(file.buffer)
-            .resize(3200, 3200, { fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' })
-            .jpeg({ quality: q, mozjpeg: true })
-            .toBuffer();
+        let usedCap: number | null = null;
+        for (const cap of resizeLadder) {
+          let pipeline = sharp(file.buffer);
+          if (cap != null) pipeline = pipeline.resize(cap, cap, { fit: 'inside', withoutEnlargement: true, kernel: 'lanczos3' });
+          const buf = await pipeline.jpeg({ quality: QUALITY, mozjpeg: true }).toBuffer();
           resized = buf;
-          usedQuality = q;
+          usedCap = cap;
           if (buf.length <= ANTHROPIC_MAX_BYTES) break;
         }
         const finalBuf = resized!;
         const out = await sharp(finalBuf).metadata();
         console.log(`[agent.chat] image ${file.originalname ?? '(unnamed)'}: ` +
           `${meta.width}x${meta.height} (${file.size} bytes) → ` +
-          `${out.width}x${out.height} (${finalBuf.length} bytes, q=${usedQuality})`);
+          `${out.width}x${out.height} (${finalBuf.length} bytes, q=${QUALITY}, cap=${usedCap ?? 'native'})`);
         return { base64: finalBuf.toString('base64'), mediaType: 'image/jpeg' as const };
       })
     );

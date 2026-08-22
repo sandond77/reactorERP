@@ -1,5 +1,19 @@
 # Reactor — Changelog
 
+## August 22, 2026
+
+### Fixes
+
+**Agent — image quality regression on multi-card scenes: keep quality, drop resolution instead**
+- User reported: mobile agent used to reliably read PSA cert numbers off a card-show display case photo (many small labels, tiny 8-digit certs) and now can't. Bisected to commit `3906811` (May 9), which capped image uploads at `3200×3200 @ q=92 → q=88 → q=82 → q=75` to fit under Anthropic's 5MB raw-image limit. That commit fixed a real problem (uploads > 5MB got rejected outright) but the iteration order — drop QUALITY progressively while keeping resolution — is exactly backwards for OCR: cert digits mush together long before pixels do.
+- Fix in [server/src/controllers/agent.controller.ts](server/src/controllers/agent.controller.ts): pipeline now holds `q=92` throughout and walks a resize ladder instead — try native resolution first, then `4000/3400/3000/2600` caps as fallback. For a common single-card photo the image encodes at source resolution; for a dense display-case scene the fallback shrinks the frame while keeping every remaining pixel at high quality. Prior comment in the codebase (`8b46fcf`, "single-pass resize, Sonnet for vision") said explicitly that "the 2400/92 pipeline was destroying" PSA-label text — this restores that regime with a graceful fallback for oversize inputs instead of clobbering quality on every large image.
+- Log line now includes `cap=native|4000|…` so future regressions in this pipeline are visible from the server log without reproducing.
+
+**Agent — new behavior rule for card-show display-case + tally-note scenario**
+- When the user uploads a photo of a display case with a handwritten note like `$50 × 18 = $900, $65 × 2 = $130 → $900`, the correct action is to trust the note's tallies and record 20 sales. The agent was instead running `list_inventory(is_card_show=true)`, finding fewer PSA-10 candidates than the note implied (because many slabs weren't tagged as show-attending in inventory), and enumerating 40+ candidate certs asking the user to pick — the opposite of "just record the sale."
+- Fix in [server/src/services/agent.service.ts](server/src/services/agent.service.ts) `BEHAVIOR RULES` #12: explicit rule for the display-case + tally scenario. Cert numbers visible on physical slabs are the primary matching signal; is_card_show is a hint, not a filter; if the count doesn't line up, surface a specific reconciliation question (`"tally says 18 × $50 but I only see 4 in your card-show inventory — sell across all PSA 10 eeveelutions?"`) rather than dumping the candidate list on the user.
+- The rule is scoped narrowly to this one scenario; existing "never guess IDs / condition / price" guards remain in force for one-off sales.
+
 ## August 21, 2026
 
 ### Fixes
