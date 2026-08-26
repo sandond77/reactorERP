@@ -666,17 +666,21 @@ function OverviewTab() {
               // bucket them under 'Meals' so historical windows total the
               // same amount.
               { label: 'Meals',       matches: (t) => t === 'Meals' || t === 'Food' },
-              // Anything business-operations flavored — supplies, shipping
-              // labels, PSA fees, etc — rolls up to Operational.
-              { label: 'Operational', matches: (t) => t === 'Operational' || t === 'Shipping' || t === 'Grading' || t === 'Supplies' },
+              // Business-operations bucket — includes shipping labels and
+              // supplies, plus any row explicitly tagged Operational.
+              // Grading is INTENTIONALLY excluded (has its own bucket
+              // below) because it's a big enough spend category the user
+              // wants to see it separately.
+              { label: 'Operational', matches: (t) => t === 'Operational' || t === 'Shipping' || t === 'Supplies' },
+              { label: 'Grading',     matches: (t) => t === 'Grading' },
             ];
             const byType = windowData.expenses_by_type ?? {};
-            const bucketTotals: Record<string, number> = { Travel: 0, 'Card Show': 0, Meals: 0, Operational: 0, Other: 0 };
+            const bucketTotals: Record<string, number> = { Travel: 0, 'Card Show': 0, Meals: 0, Operational: 0, Grading: 0, Other: 0 };
             for (const [type, amount] of Object.entries(byType)) {
               const bucket = BUCKETS.find((b) => b.matches(type))?.label ?? 'Other';
               bucketTotals[bucket] += Number(amount ?? 0);
             }
-            const ORDER = ['Travel', 'Card Show', 'Meals', 'Operational', 'Other'];
+            const ORDER = ['Travel', 'Card Show', 'Meals', 'Operational', 'Grading', 'Other'];
             const ordered = ORDER.filter((label) => bucketTotals[label] > 0);
             return (
               <>
