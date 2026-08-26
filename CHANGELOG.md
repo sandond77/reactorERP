@@ -1,5 +1,16 @@
 # Reactor — Changelog
 
+## August 26, 2026
+
+### Features
+
+**Dashboard — Revenue card gains an "Expenses by category" subrow that shares the window filter**
+- User asked whether expenses factor into P&L. They do — `Expenses` and `Net Profit (After Exp)` tiles have been in the Revenue card the whole time — but the breakdown wasn't visible, so "did I overspend on grading this month?" wasn't answerable at a glance.
+- Server: [expensesQuery](server/src/controllers/reports.controller.ts#L202-L226) rewritten to `SELECT type, SUM(amount) ... GROUP BY type` per window, returning `{ total, byType }`. Each window snapshot (`today`, `last_7_days`, `last_30_days`, `last_60_days`, `last_90_days`, `this_year`, `lifetime`) now carries `expenses_by_type: Record<string, number>` alongside `total_expenses`.
+- Client: new subrow under the main 6-tile grid in the Revenue card. Sits inside the same Card so it inherits the window tabs (Today / 7D / 30D / … / Lifetime) — flip the window, both the total AND the breakdown update together.
+- **Four display buckets** (Travel · Card Show · Meals · Operational) plus a display-only **Other** catch-all for anything that doesn't match one of the four. `Operational` sums the free-form types Shipping / Grading / Supplies / Operational; `Meals` folds legacy `Food` rows so historical windows still total consistently. The DB column stays free-form — the bucketing is display-only, applied client-side.
+- Zero-value buckets are dropped so quiet windows don't render an empty row.
+
 ## August 22, 2026
 
 ### Features

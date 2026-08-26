@@ -23,7 +23,7 @@ const C = {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface InventoryRow { status: string; count: number; total_cost: number }
-interface SalesRow { count: number; total_gross: number; total_net: number; total_cost: number; total_profit: number; total_expenses: number }
+interface SalesRow { count: number; total_gross: number; total_net: number; total_cost: number; total_profit: number; total_expenses: number; expenses_by_type?: Record<string, number> }
 interface ChannelRow { count: number; total_gross: number; total_cost: number; total_profit: number }
 interface ChannelBreakdown { ebay: ChannelRow; card_show: ChannelRow; other: ChannelRow }
 interface SalesSummary {
@@ -622,7 +622,7 @@ function OverviewTab() {
   const sellThroughRaw    = (cards.sold.raw + cards.unsold.raw) > 0
     ? ((cards.sold.raw / (cards.sold.raw + cards.unsold.raw)) * 100).toFixed(1)
     : null;
-  const EMPTY_ROW: SalesRow = { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0 };
+  const EMPTY_ROW: SalesRow = { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0, total_expenses: 0, expenses_by_type: {} };
   const windowData: SalesRow = salesWindow === 'today' ? (summary?.today ?? EMPTY_ROW)
     : salesWindow === '7d'       ? (summary?.last_7_days  ?? EMPTY_ROW)
     : salesWindow === '30d'      ? (summary?.last_30_days ?? EMPTY_ROW)
@@ -654,26 +654,67 @@ function OverviewTab() {
           </div>
           {(() => {
             const netProfit = (windowData.total_profit ?? 0) - (windowData.total_expenses ?? 0);
+            // Roll up the free-form `expenses.type` column into four
+            // display buckets — the categories the user actually thinks
+            // about — plus an "Other" catch-all that captures anything
+            // not matching the first four. "Other" is display-only; the
+            // DB still stores whatever the create-expense tool set.
+            const BUCKETS: Array<{ label: string; matches: (t: string) => boolean }> = [
+              { label: 'Travel',      matches: (t) => t === 'Travel' },
+              { label: 'Card Show',   matches: (t) => t === 'Card Show' },
+              // Legacy 'Food' rows still exist from before the rename;
+              // bucket them under 'Meals' so historical windows total the
+              // same amount.
+              { label: 'Meals',       matches: (t) => t === 'Meals' || t === 'Food' },
+              // Anything business-operations flavored — supplies, shipping
+              // labels, PSA fees, etc — rolls up to Operational.
+              { label: 'Operational', matches: (t) => t === 'Operational' || t === 'Shipping' || t === 'Grading' || t === 'Supplies' },
+            ];
+            const byType = windowData.expenses_by_type ?? {};
+            const bucketTotals: Record<string, number> = { Travel: 0, 'Card Show': 0, Meals: 0, Operational: 0, Other: 0 };
+            for (const [type, amount] of Object.entries(byType)) {
+              const bucket = BUCKETS.find((b) => b.matches(type))?.label ?? 'Other';
+              bucketTotals[bucket] += Number(amount ?? 0);
+            }
+            const ORDER = ['Travel', 'Card Show', 'Meals', 'Operational', 'Other'];
+            const ordered = ORDER.filter((label) => bucketTotals[label] > 0);
             return (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3 lg:gap-0 lg:divide-x lg:divide-zinc-800">
-                {([
-                  { label: 'Gross',                  value: formatCurrency(windowData.total_gross ?? 0),                              cls: 'text-zinc-100' },
-                  { label: 'Cost',                   value: formatCurrency(windowData.total_cost ?? 0),                               cls: 'text-zinc-100' },
-                  { label: 'Expenses',               value: formatCurrency(windowData.total_expenses ?? 0),                           cls: 'text-zinc-100' },
-                  { label: 'Profit',                 value: (windowData.total_profit >= 0 ? '+' : '') + formatCurrency(windowData.total_profit), cls: windowData.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400' },
-                  { label: 'Net Profit (After Exp)', value: (netProfit >= 0 ? '+' : '') + formatCurrency(netProfit),                  cls: netProfit >= 0 ? 'text-emerald-400' : 'text-red-400' },
-                  { label: '# of Sales',             value: String(windowData.count),                                                 cls: 'text-zinc-100' },
-                ]).map(({ label, value, cls }, i) => (
-                  <div key={label} className={cn(
-                    'lg:py-0',
-                    i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
-                    i === 5 ? 'lg:pr-0' : '',
-                  )}>
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
-                    <p className={cn('text-xl font-bold', cls)}>{value}</p>
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3 lg:gap-0 lg:divide-x lg:divide-zinc-800">
+                  {([
+                    { label: 'Gross',                  value: formatCurrency(windowData.total_gross ?? 0),                              cls: 'text-zinc-100' },
+                    { label: 'Cost',                   value: formatCurrency(windowData.total_cost ?? 0),                               cls: 'text-zinc-100' },
+                    { label: 'Expenses',               value: formatCurrency(windowData.total_expenses ?? 0),                           cls: 'text-zinc-100' },
+                    { label: 'Profit',                 value: (windowData.total_profit >= 0 ? '+' : '') + formatCurrency(windowData.total_profit), cls: windowData.total_profit >= 0 ? 'text-emerald-400' : 'text-red-400' },
+                    { label: 'Net Profit (After Exp)', value: (netProfit >= 0 ? '+' : '') + formatCurrency(netProfit),                  cls: netProfit >= 0 ? 'text-emerald-400' : 'text-red-400' },
+                    { label: '# of Sales',             value: String(windowData.count),                                                 cls: 'text-zinc-100' },
+                  ]).map(({ label, value, cls }, i) => (
+                    <div key={label} className={cn(
+                      'lg:py-0',
+                      i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
+                      i === 5 ? 'lg:pr-0' : '',
+                    )}>
+                      <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
+                      <p className={cn('text-xl font-bold', cls)}>{value}</p>
+                    </div>
+                  ))}
+                </div>
+                {ordered.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-zinc-800">
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">Expenses by category</p>
+                    <div className="flex flex-wrap gap-x-5 gap-y-2">
+                      {ordered.map((label) => (
+                        <div key={label} className="flex items-baseline gap-1.5">
+                          <span className="text-[11px] text-zinc-500">{label}</span>
+                          <span className="text-sm font-semibold text-zinc-200 tabular-nums">
+                            {formatCurrency(bucketTotals[label])}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             );
           })()}
         </Card>

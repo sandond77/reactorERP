@@ -199,13 +199,28 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
       .where('sold_at', '>=', yearStart) as any)
       .groupBy('platform').execute();
 
-    const expensesQuery = (days: number | null, from?: Date) => {
+    // Grouped-by-type version — replaces the old single-total query. Client
+    // uses total_expenses (sum of all rows) AND expenses_by_type (per-category
+    // breakdown for the same window) so the Revenue box can render the
+    // per-category subrow without a second round trip.
+    const expensesQuery = async (days: number | null, from?: Date) => {
       let q = db.selectFrom('expenses')
-        .select(sql<number>`COALESCE(SUM(amount), 0)::int`.as('total'))
+        .select([
+          'type',
+          sql<number>`COALESCE(SUM(amount), 0)::int`.as('total'),
+        ])
         .where('user_id', '=', req.dataUserId);
       if (from) q = q.where('date', '>=', from);
       else if (days !== null) q = q.where('date', '>=', new Date(now - days * MS));
-      return q.executeTakeFirst();
+      const rows = await q.groupBy('type').execute();
+      const byType: Record<string, number> = {};
+      let total = 0;
+      for (const r of rows) {
+        const t = r.type ?? 'Other';
+        byType[t] = (byType[t] ?? 0) + Number(r.total ?? 0);
+        total += Number(r.total ?? 0);
+      }
+      return { total, byType };
     };
 
     const pipelineQuery = db
@@ -264,6 +279,7 @@ export async function getSummary(req: Request, res: Response, next: NextFunction
     const snap = (r: typeof d30, exp: typeof exp30) => ({
       ...(r ?? { count: 0, total_gross: 0, total_net: 0, total_cost: 0, total_profit: 0 }),
       total_expenses: Number(exp?.total ?? 0),
+      expenses_by_type: exp?.byType ?? {},
     });
     res.json({
       today:        snap(dToday, expToday),
