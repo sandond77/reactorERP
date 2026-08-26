@@ -226,9 +226,9 @@ function ExpenseModal({
         // "google.com" or any relative URL on edit, even though the server
         // accepts empty strings via .optional().or(z.literal('')).
         // The server still validates format on submit for non-empty values.
-        label={<>Link <span className="text-zinc-600 font-normal normal-case">(optional)</span></>}
+        label={<>Notes <span className="text-zinc-600 font-normal normal-case">(optional)</span></>}
         type="text"
-        placeholder="https://…"
+        placeholder="Link or free-form notes"
         value={link}
         onChange={(e) => setLink(e.target.value)}
       />
@@ -464,18 +464,18 @@ export function Expenses() {
     amount:       colMinWidth('Amount',      true, false),
     order_number: colMinWidth('Order #',     true, false),
     receipt:      colMinWidth('Receipt', false, false),
-    link:         colMinWidth('Link',    false, false),
+    link:         colMinWidth('Notes',   false, false),
   };
 
   const { rz, totalWidth } = useColWidths({
-    expense_id:   Math.max(MINS.expense_id, 100),
-    date:         Math.max(MINS.date, 115),
-    type:         Math.max(MINS.type, 130),
-    description:  Math.max(MINS.description, 420),
-    amount:       Math.max(MINS.amount, 120),
-    order_number: Math.max(MINS.order_number, 150),
-    receipt:      Math.max(MINS.receipt, 80),
-    link:         Math.max(MINS.link, 60),
+    expense_id:   Math.max(MINS.expense_id, 120),
+    date:         Math.max(MINS.date, 130),
+    type:         Math.max(MINS.type, 150),
+    description:  Math.max(MINS.description, 520),
+    amount:       Math.max(MINS.amount, 140),
+    order_number: Math.max(MINS.order_number, 170),
+    receipt:      Math.max(MINS.receipt, 90),
+    link:         Math.max(MINS.link, 240),
   });
 
   useEffect(() => {
@@ -590,7 +590,7 @@ export function Expenses() {
                 <ColHeader label="Amount"      col="amount"      {...sh} {...rz('amount')}       minWidth={MINS.amount} align="center" />
                 <ColHeader label="Order #"     col="order_number" {...sh} {...rz('order_number')} minWidth={MINS.order_number} />
                 <ColHeader label="Receipt" col="" {...sh} {...rz('receipt')} minWidth={MINS.receipt} align="center" />
-                <ColHeader label="Link"    col="" {...sh} {...rz('link')}    minWidth={MINS.link}    align="center" />
+                <ColHeader label="Notes"   col="" {...sh} {...rz('link')}    minWidth={MINS.link} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
@@ -616,13 +616,18 @@ export function Expenses() {
                       </a>
                     )}
                   </td>
-                  <td className="px-2 py-2 text-center">
+                  <td className="px-3 py-2 text-zinc-400 truncate" title={expense.link ?? undefined}>
                     {expense.link && (
-                      <a href={expense.link} target="_blank" rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="inline-flex items-center justify-center text-indigo-400 hover:text-indigo-300 transition-colors">
-                        <ExternalLink size={13} />
-                      </a>
+                      /^https?:\/\//i.test(expense.link) ? (
+                        <a href={expense.link} target="_blank" rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 transition-colors">
+                          <ExternalLink size={13} />
+                          <span className="truncate">{expense.link.replace(/^https?:\/\//i, '')}</span>
+                        </a>
+                      ) : (
+                        <span className="text-zinc-400">{expense.link}</span>
+                      )
                     )}
                   </td>
                 </tr>
