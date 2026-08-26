@@ -2,6 +2,15 @@
 
 ## August 26, 2026
 
+### Refactors
+
+**Expenses — `link` column renamed to `notes` across the whole stack**
+- Follow-through on the earlier column-header rename: the DB column, server types, controller/service, exports, AI receipt parser, CSV import mapping, and every client reference now all say `notes`. The visible column had been renamed already; the schema/type/wire-format underneath still said `link` and would have confused any future dev.
+- Migration [063_rename_expenses_link_to_notes.sql](server/src/db/migrations/063_rename_expenses_link_to_notes.sql): single `ALTER TABLE expenses RENAME COLUMN link TO notes`. Nothing else changes on the DB side (still TEXT, still nullable).
+- CSV importer accepts both `notes` (new) and `link` (legacy) header names in [import.service.ts](server/src/services/import/import.service.ts) so old CSV templates keep working without user action.
+- AI receipt parser dropped its dead `link: null` field from [ParsedExpenseData](server/src/services/ai/receipts.service.ts) — it was never populated by the model and never consumed by the client. The parser's separate `notes` field (parse-quality caveats) is unrelated to the expense's `notes` column and now carries a comment saying so.
+- Prod DB will need `063` applied on next deploy.
+
 ### Fixes
 
 **Expenses — Link field no longer rejects legitimate stored values on edit**

@@ -68,7 +68,7 @@ const ALL_TARGET_FIELDS: { group: string; fields: string[] }[] = [
   { group: 'Purchase', fields: ['purchase_cost', 'cost', 'quantity', 'currency', 'purchased_at', 'order_number', 'source', 'type'] },
   { group: 'Sale',     fields: ['sold_at', 'sale_price', 'after_fees', 'net', 'platform_fees', 'shipping_cost', 'platform', 'unique_id', 'listing_url'] },
   { group: 'Listing',  fields: ['is_listed', 'list_price', 'listed_at'] },
-  { group: 'Expense',  fields: ['description', 'amount', 'date', 'link'] },
+  { group: 'Expense',  fields: ['description', 'amount', 'date', 'notes'] },
   { group: 'Bulk Sale',fields: ['identifier'] },
 ];
 
@@ -82,7 +82,7 @@ const FIELD_DOCS: Record<string, string> = {
   card_game:     'Defaults to "pokemon". Accepts other game names if you have multi-game inventory.',
   language:      'EN or JP. If omitted, inferred from card name keywords.',
   condition:     'NM / NM- / LP / LP+ / MP / HP / DMG. Free text accepted; normalized server-side.',
-  notes:         'Free-text notes preserved on the card_instance.',
+  notes:         'Free-text notes. On card rows: preserved on the card_instance. On expense rows: stored on the expense (auto-linkified if the value starts with http(s)://).',
   // Graded
   cert_number:   'PSA / BGS / CGC certificate number. Required for graded imports.',
   grade:         'Numeric grade (e.g. 10, 9.5). Range 0–10.',
@@ -116,7 +116,6 @@ const FIELD_DOCS: Record<string, string> = {
   description:   'What the expense was for. Required for expense imports.',
   amount:        'Expense amount. Required for expense imports.',
   date:          'Expense date. Required for expense imports.',
-  link:          'Receipt / reference URL.',
   // Bulk sale
   identifier:    'Cert # (graded) or purchase ID like RP-YYYY-NNN (raw). Used to match the row to existing inventory.',
 };

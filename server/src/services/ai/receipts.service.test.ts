@@ -18,7 +18,6 @@ describe('parseExpenseResponse', () => {
       amount: 300,
       currency: 'USD',
       order_number: 'PSA-8765',
-      link: null,
       confidence: 'high',
       notes: null,
     });

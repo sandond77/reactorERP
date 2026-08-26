@@ -394,7 +394,7 @@ export interface ExpensesTable {
   type: string;
   amount: number;
   currency: string;
-  link: string | null;
+  notes: string | null;
   order_number: string | null;
   receipt_url: string | null;
   created_at: Generated<Date>;

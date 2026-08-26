@@ -1048,7 +1048,9 @@ async function executeExpensesImport(
       const currency = normalizeCurrency(row['currency']);
       const date = parseDate(row['date']) ?? new Date();
       const order_number = row['order_number']?.trim() || undefined;
-      const link = row['link']?.trim() || undefined;
+      // Read either 'notes' (new) or legacy 'link' from the CSV in case the
+      // user is uploading a file mapped against the old field name.
+      const notes = (row['notes'] ?? row['link'])?.trim() || undefined;
 
       await createExpense(userId, {
         description,
@@ -1057,7 +1059,7 @@ async function executeExpensesImport(
         currency,
         date,
         order_number,
-        link,
+        notes,
       });
 
       importedCount++;

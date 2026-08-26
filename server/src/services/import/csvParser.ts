@@ -133,7 +133,7 @@ export async function aiDetectImport(headers: string[], sampleRows: Record<strin
     graded:       ['card_name', 'set_name', 'card_number', 'cert_number', 'grade', 'company', 'purchase_cost', 'grading_cost', 'currency', 'purchased_at', 'order_number', 'notes', 'purchase_id', 'sold_at', 'sale_price', 'after_fees', 'platform', 'is_listed', 'list_price', 'listing_url', 'listed_at', 'shipping_cost'],
     raw_purchase: ['card_name', 'set_name', 'card_number', 'condition', 'quantity', 'cost', 'currency', 'order_number', 'source', 'purchased_at', 'language', 'type', 'notes'],
     bulk_sale:    ['identifier', 'sale_price', 'platform', 'platform_fees', 'shipping_cost', 'currency', 'sold_at', 'unique_id'],
-    expenses:     ['description', 'amount', 'type', 'date', 'order_number', 'currency', 'link'],
+    expenses:     ['description', 'amount', 'type', 'date', 'order_number', 'currency', 'notes'],
   };
 
   const prompt = `You are analyzing a CSV/Excel file for a Pokemon card inventory management system called Reactor.

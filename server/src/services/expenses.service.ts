@@ -23,7 +23,7 @@ export interface ExpenseInput {
   type: string;
   amount: number;
   currency?: string;
-  link?: string;
+  notes?: string;
   order_number?: string;
   receipt_url?: string;
 }
@@ -94,7 +94,7 @@ export async function createExpense(userId: string, input: ExpenseInput) {
       type:         input.type,
       amount:       input.amount,
       currency:     input.currency ?? 'USD',
-      link:         input.link ?? null,
+      notes:        input.notes ?? null,
       order_number: input.order_number ?? null,
       receipt_url:  input.receipt_url ?? null,
     })
@@ -116,7 +116,7 @@ export async function updateExpense(userId: string, id: string, input: Partial<E
       ...(input.type        !== undefined && { type: input.type }),
       ...(input.amount      !== undefined && { amount: input.amount }),
       ...(input.currency    !== undefined && { currency: input.currency }),
-      ...(input.link        !== undefined && { link: input.link }),
+      ...(input.notes       !== undefined && { notes: input.notes }),
       ...(input.order_number !== undefined && { order_number: input.order_number }),
       ...(input.receipt_url !== undefined && { receipt_url: input.receipt_url }),
       updated_at: new Date(),
@@ -181,7 +181,7 @@ function fmtDate(d: Date | string) {
 
 export async function exportCSV(userId: string, filters: ExportFilters): Promise<string> {
   const rows = await fetchForExport(userId, filters);
-  const headers = ['ID', 'Date', 'Type', 'Description', 'Amount', 'Currency', 'Order #', 'Link'];
+  const headers = ['ID', 'Date', 'Type', 'Description', 'Amount', 'Currency', 'Order #', 'Notes'];
   const lines = [
     headers.join(','),
     ...rows.map((r) => [
@@ -192,7 +192,7 @@ export async function exportCSV(userId: string, filters: ExportFilters): Promise
       (r.amount / 100).toFixed(2),
       r.currency,
       `"${(r.order_number ?? '').replace(/"/g, '""')}"`,
-      `"${(r.link ?? '').replace(/"/g, '""')}"`,
+      `"${(r.notes ?? '').replace(/"/g, '""')}"`,
     ].join(',')),
   ];
   return lines.join('\r\n');

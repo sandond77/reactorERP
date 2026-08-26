@@ -15,7 +15,7 @@ async function main() {
       type         TEXT NOT NULL,
       amount       INTEGER NOT NULL,
       currency     TEXT NOT NULL DEFAULT 'USD',
-      link         TEXT,
+      notes        TEXT,
       order_number TEXT,
       created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()

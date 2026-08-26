@@ -27,8 +27,9 @@ export interface ParsedExpenseData {
   amount?: number;
   currency?: string;
   order_number?: string;
-  link?: string;
   confidence: 'high' | 'medium' | 'low';
+  // Parser caveats — not the expense's `notes` column. See the receipt prompt
+  // for how this differs from user-entered notes on the expense.
   notes?: string;
 }
 
@@ -49,9 +50,8 @@ Return this exact JSON shape:
   "amount": number in dollars (e.g. 12.99) or null,
   "currency": "USD" or "JPY" or null,
   "order_number": "any order/reference/confirmation/ticket number, or null if truly none",
-  "link": null,
   "confidence": "high" | "medium" | "low",
-  "notes": "any caveats or null"
+  "notes": "any caveats about the parse itself (e.g. amount unclear) — NOT expense-level notes"
 }`;
 
 const EXPENSE_RECEIPT_USER_PROMPT =

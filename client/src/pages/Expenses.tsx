@@ -19,7 +19,7 @@ interface Expense {
   type: string;
   amount: number;
   currency: string;
-  link: string | null;
+  notes: string | null;
   order_number: string | null;
   receipt_url: string | null;
   created_at: string;
@@ -61,7 +61,7 @@ function ExpenseModal({
   const [type, setType] = useState(expense?.type ?? EXPENSE_TYPES[0]);
   const [amount, setAmount] = useState(expense ? (expense.amount / 100).toFixed(2) : '');
   const [currency, setCurrency] = useState(expense?.currency ?? 'USD');
-  const [link, setLink] = useState(expense?.link ?? '');
+  const [notes, setNotes] = useState(expense?.notes ?? '');
   const [orderNumber, setOrderNumber] = useState(expense?.order_number ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [parsing, setParsing] = useState(false);
@@ -98,7 +98,7 @@ function ExpenseModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     // Required set: date, type, description, amount, currency.
-    // Link and order # are optional and pass through as undefined when empty.
+    // Notes and order # are optional and pass through as undefined when empty.
     if (!date) { toast.error('Date is required'); return; }
     if (!type) { toast.error('Type is required'); return; }
     if (!description.trim()) { toast.error('Description is required'); return; }
@@ -112,7 +112,7 @@ function ExpenseModal({
         type,
         amount,
         currency,
-        link: link.trim() || undefined,
+        notes: notes.trim() || undefined,
         order_number: orderNumber.trim() || undefined,
       };
       let savedId: string;
@@ -221,16 +221,13 @@ function ExpenseModal({
       </div>
 
       <Input
-        // type="text" (not "url") — the browser's HTML5 url validator is
-        // stricter than the server's schema. It rejects a stored value like
-        // "google.com" or any relative URL on edit, even though the server
-        // accepts empty strings via .optional().or(z.literal('')).
-        // The server still validates format on submit for non-empty values.
+        // Free-form text — link or plain notes. Renderer auto-linkifies http(s)://
+        // values in the table cell.
         label={<>Notes <span className="text-zinc-600 font-normal normal-case">(optional)</span></>}
         type="text"
         placeholder="Link or free-form notes"
-        value={link}
-        onChange={(e) => setLink(e.target.value)}
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
       />
 
       <Input
@@ -464,7 +461,7 @@ export function Expenses() {
     amount:       colMinWidth('Amount',      true, false),
     order_number: colMinWidth('Order #',     true, false),
     receipt:      colMinWidth('Receipt', false, false),
-    link:         colMinWidth('Notes',   false, false),
+    notes:        colMinWidth('Notes',   false, false),
   };
 
   const { rz, totalWidth } = useColWidths({
@@ -475,7 +472,7 @@ export function Expenses() {
     amount:       Math.max(MINS.amount, 140),
     order_number: Math.max(MINS.order_number, 170),
     receipt:      Math.max(MINS.receipt, 90),
-    link:         Math.max(MINS.link, 240),
+    notes:        Math.max(MINS.notes, 240),
   });
 
   useEffect(() => {
@@ -590,7 +587,7 @@ export function Expenses() {
                 <ColHeader label="Amount"      col="amount"      {...sh} {...rz('amount')}       minWidth={MINS.amount} align="center" />
                 <ColHeader label="Order #"     col="order_number" {...sh} {...rz('order_number')} minWidth={MINS.order_number} />
                 <ColHeader label="Receipt" col="" {...sh} {...rz('receipt')} minWidth={MINS.receipt} align="center" />
-                <ColHeader label="Notes"   col="" {...sh} {...rz('link')}    minWidth={MINS.link} />
+                <ColHeader label="Notes"   col="" {...sh} {...rz('notes')}   minWidth={MINS.notes} />
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
@@ -616,17 +613,17 @@ export function Expenses() {
                       </a>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-zinc-400 truncate" title={expense.link ?? undefined}>
-                    {expense.link && (
-                      /^https?:\/\//i.test(expense.link) ? (
-                        <a href={expense.link} target="_blank" rel="noopener noreferrer"
+                  <td className="px-3 py-2 text-zinc-400 truncate" title={expense.notes ?? undefined}>
+                    {expense.notes && (
+                      /^https?:\/\//i.test(expense.notes) ? (
+                        <a href={expense.notes} target="_blank" rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
                           className="inline-flex items-center gap-1 text-indigo-400 hover:text-indigo-300 transition-colors">
                           <ExternalLink size={13} />
-                          <span className="truncate">{expense.link.replace(/^https?:\/\//i, '')}</span>
+                          <span className="truncate">{expense.notes.replace(/^https?:\/\//i, '')}</span>
                         </a>
                       ) : (
-                        <span className="text-zinc-400">{expense.link}</span>
+                        <span className="text-zinc-400">{expense.notes}</span>
                       )
                     )}
                   </td>

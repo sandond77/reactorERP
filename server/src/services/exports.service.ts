@@ -412,13 +412,13 @@ interface ExpRow {
   amount: number;
   currency: string;
   order_number: string | null;
-  link: string | null;
+  notes: string | null;
 }
 
 async function fetchExpensesForExport(userId: string, f: ExpensesExportFilters): Promise<ExpRow[]> {
   const rows = await db
     .selectFrom('expenses as e')
-    .select(['e.expense_id', 'e.date', 'e.type', 'e.description', 'e.amount', 'e.currency', 'e.order_number', 'e.link'])
+    .select(['e.expense_id', 'e.date', 'e.type', 'e.description', 'e.amount', 'e.currency', 'e.order_number', 'e.notes'])
     .where('e.user_id', '=', userId)
     .$if(!!f.from, (qb) => qb.where('e.date', '>=', f.from! as any))
     .$if(!!f.to, (qb) => qb.where('e.date', '<=', f.to! as any))
@@ -431,7 +431,7 @@ async function fetchExpensesForExport(userId: string, f: ExpensesExportFilters):
   return rows as ExpRow[];
 }
 
-const EXPENSES_HEADERS = ['ID', 'Date', 'Type', 'Description', 'Amount', 'Currency', 'Order #', 'Link'];
+const EXPENSES_HEADERS = ['ID', 'Date', 'Type', 'Description', 'Amount', 'Currency', 'Order #', 'Notes'];
 
 function expensesToTable(rows: ExpRow[]): (string | number | null)[][] {
   return rows.map((r) => [
@@ -442,7 +442,7 @@ function expensesToTable(rows: ExpRow[]): (string | number | null)[][] {
     (r.amount / 100).toFixed(2),
     r.currency,
     r.order_number ?? '',
-    r.link ?? '',
+    r.notes ?? '',
   ]);
 }
 

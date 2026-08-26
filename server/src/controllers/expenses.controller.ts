@@ -47,11 +47,10 @@ const bodySchema = z.object({
   type:         z.string().min(1),
   amount:       z.union([z.string(), z.number()]).transform((v) => toCents(v)),
   currency:     z.enum(['USD', 'JPY']).default('USD'),
-  // Free-form string. Previously .url() which rejected legitimate stored
-  // values like "google.com" or receipt reference URLs that use a custom
-  // scheme on edit roundtrip. Frontend renders it as a clickable link
-  // when it starts with http(s):// and as plain text otherwise.
-  link:         z.string().max(2048).optional().or(z.literal('')),
+  // Free-form notes — links, order references, or plain-text context. Length-capped
+  // but no format validation; the frontend auto-detects http(s):// values and renders
+  // them as clickable links, everything else as text.
+  notes:        z.string().max(2048).optional().or(z.literal('')),
   order_number: z.string().optional(),
 });
 
@@ -61,7 +60,7 @@ export async function createExpense(req: Request, res: Response, next: NextFunct
     const expense = await expensesService.createExpense(req.dataUserId, {
       ...data,
       date: new Date(data.date),
-      link: data.link || undefined,
+      notes: data.notes || undefined,
     });
     res.status(201).json({ data: expense });
   } catch (err) { next(err); }
@@ -73,7 +72,7 @@ export async function updateExpense(req: Request, res: Response, next: NextFunct
     const expense = await expensesService.updateExpense(req.dataUserId, req.params['id'] as string, {
       ...data,
       date: data.date ? new Date(data.date) : undefined,
-      link: data.link || undefined,
+      notes: data.notes || undefined,
     });
     res.json({ data: expense });
   } catch (err) { next(err); }
