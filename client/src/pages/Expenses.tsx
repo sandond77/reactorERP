@@ -97,8 +97,13 @@ function ExpenseModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Required set: date, type, description, amount, currency.
+    // Link and order # are optional and pass through as undefined when empty.
+    if (!date) { toast.error('Date is required'); return; }
+    if (!type) { toast.error('Type is required'); return; }
     if (!description.trim()) { toast.error('Description is required'); return; }
     if (!amount) { toast.error('Amount is required'); return; }
+    if (!currency) { toast.error('Currency is required'); return; }
     setSubmitting(true);
     try {
       const body = {
@@ -168,13 +173,17 @@ function ExpenseModal({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Date</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+            Date <span className="text-red-500">*</span>
+          </label>
+          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} required
             className="w-full rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors [color-scheme:dark]" />
         </div>
         <div className="flex flex-col gap-1">
-          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Type</label>
-          <select value={type} onChange={(e) => setType(e.target.value)}
+          <label className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
+            Type <span className="text-red-500">*</span>
+          </label>
+          <select value={type} onChange={(e) => setType(e.target.value)} required
             className="rounded-lg bg-zinc-900 border border-zinc-700 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 transition-colors">
             {EXPENSE_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
@@ -182,38 +191,50 @@ function ExpenseModal({
       </div>
 
       <Input
-        label="Description"
+        label={<>Description <span className="text-red-500">*</span></>}
         placeholder="What was this expense for?"
         value={description}
         onChange={(e) => setDescription(e.target.value)}
         autoFocus={!isEdit}
+        required
       />
 
       <div className="grid grid-cols-2 gap-3">
         <Input
-          label="Amount"
+          label={<>Amount <span className="text-red-500">*</span></>}
           type="text"
           inputMode="decimal"
           placeholder="0.00"
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
+          required
         />
-        <Select label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+        <Select
+          label={<>Currency <span className="text-red-500">*</span></>}
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value)}
+          required
+        >
           <option value="USD">USD</option>
           <option value="JPY">JPY</option>
         </Select>
       </div>
 
       <Input
-        label="Link"
-        type="url"
+        // type="text" (not "url") — the browser's HTML5 url validator is
+        // stricter than the server's schema. It rejects a stored value like
+        // "google.com" or any relative URL on edit, even though the server
+        // accepts empty strings via .optional().or(z.literal('')).
+        // The server still validates format on submit for non-empty values.
+        label={<>Link <span className="text-zinc-600 font-normal normal-case">(optional)</span></>}
+        type="text"
         placeholder="https://…"
         value={link}
         onChange={(e) => setLink(e.target.value)}
       />
 
       <Input
-        label="Order #"
+        label={<>Order # <span className="text-zinc-600 font-normal normal-case">(optional)</span></>}
         placeholder="Order or reference number"
         value={orderNumber}
         onChange={(e) => setOrderNumber(e.target.value)}

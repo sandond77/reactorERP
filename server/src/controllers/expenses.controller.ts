@@ -47,7 +47,11 @@ const bodySchema = z.object({
   type:         z.string().min(1),
   amount:       z.union([z.string(), z.number()]).transform((v) => toCents(v)),
   currency:     z.enum(['USD', 'JPY']).default('USD'),
-  link:         z.string().url().optional().or(z.literal('')),
+  // Free-form string. Previously .url() which rejected legitimate stored
+  // values like "google.com" or receipt reference URLs that use a custom
+  // scheme on edit roundtrip. Frontend renders it as a clickable link
+  // when it starts with http(s):// and as plain text otherwise.
+  link:         z.string().max(2048).optional().or(z.literal('')),
   order_number: z.string().optional(),
 });
 

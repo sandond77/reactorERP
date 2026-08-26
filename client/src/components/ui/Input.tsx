@@ -1,8 +1,10 @@
-import { type InputHTMLAttributes, forwardRef } from 'react';
+import { type InputHTMLAttributes, type ReactNode, forwardRef } from 'react';
 import { cn } from '../../lib/utils';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
-  label?: string;
+  // Widened to ReactNode so callers can embed JSX (e.g. a red-asterisk
+  // required marker or a "(optional)" suffix) inside the label.
+  label?: ReactNode;
   error?: string;
 }
 

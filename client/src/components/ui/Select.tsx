@@ -1,8 +1,10 @@
-import { type SelectHTMLAttributes, forwardRef } from 'react';
+import { type SelectHTMLAttributes, type ReactNode, forwardRef } from 'react';
 import { cn } from '../../lib/utils';
 
 interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
-  label?: string;
+  // ReactNode so callers can inline JSX like a required asterisk or an
+  // "(optional)" suffix beside the label text.
+  label?: ReactNode;
   error?: string;
 }
 

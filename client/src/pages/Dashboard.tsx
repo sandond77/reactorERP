@@ -111,6 +111,54 @@ function StatRow({ label, value, highlight }: { label: string; value: string; hi
 
 // ── Chart sub-components ─────────────────────────────────────────────────────
 
+// Compact donut for Revenue-row subrows — shorter than MiniDonutChart and
+// puts the legend on the right so two of them fit side-by-side inside the
+// Revenue card without dominating the P/L numbers above.
+function SubrowDonut({ pieData }: { pieData: PieEntry[] }) {
+  if (!pieData.length) return <div className="flex items-center justify-center h-[320px] text-zinc-600 text-xs">No data</div>;
+  const total = pieData.reduce((s, e) => s + e.value, 0);
+  const RADIAN = Math.PI / 180;
+  // Always-visible value labels drawn inside each slice — user shouldn't
+  // need to hover to read numbers. Tiny slices (<4%) are skipped to avoid
+  // overlapping labels.
+  const renderLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, value }: {
+    cx?: number; cy?: number; midAngle?: number; innerRadius?: number; outerRadius?: number; percent?: number; value?: number;
+  }) => {
+    if (cx == null || cy == null || midAngle == null || innerRadius == null || outerRadius == null || value == null) return null;
+    if ((percent ?? 0) < 0.04) return null;
+    const r = (innerRadius + outerRadius) / 2;
+    const x = cx + r * Math.cos(-midAngle * RADIAN);
+    const y = cy + r * Math.sin(-midAngle * RADIAN);
+    return (
+      <text x={x} y={y} fill="#f4f4f5" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={600}>
+        {formatCurrency(value)}
+      </text>
+    );
+  };
+  return (
+    <ResponsiveContainer width="100%" height={320}>
+      <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+        <Pie data={pieData} innerRadius={80} outerRadius={130} paddingAngle={2} dataKey="value" label={renderLabel} labelLine={false} isAnimationActive={false}>
+          {pieData.map((e, i) => <Cell key={i} fill={e.color} />)}
+        </Pie>
+        <Legend
+          layout="vertical"
+          align="right"
+          verticalAlign="middle"
+          iconType="circle"
+          iconSize={7}
+          formatter={(v) => {
+            const entry = pieData.find((e) => e.name === v);
+            const pct = entry && total > 0 ? ((entry.value / total) * 100).toFixed(0) : '0';
+            return <span className="text-zinc-400 text-[10px]">{v} <span className="text-zinc-600">{pct}%</span></span>;
+          }}
+        />
+        <Tooltip formatter={(v) => [formatCurrency(v as number), '']} contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 6, fontSize: 12 }} />
+      </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
 function MiniDonutChart({ pieData, formatter }: { pieData: PieEntry[]; formatter: (v: number) => string }) {
   if (!pieData.length) return <div className="flex items-center justify-center h-[170px] text-zinc-600 text-xs">No data yet</div>;
   const RADIAN = Math.PI / 180;
@@ -654,37 +702,75 @@ function OverviewTab() {
           </div>
           {(() => {
             const netProfit = (windowData.total_profit ?? 0) - (windowData.total_expenses ?? 0);
-            // Roll up the free-form `expenses.type` column into four
+            // Roll up the free-form `expenses.type` column into six
             // display buckets — the categories the user actually thinks
             // about — plus an "Other" catch-all that captures anything
-            // not matching the first four. "Other" is display-only; the
+            // not matching the first six. "Other" is display-only; the
             // DB still stores whatever the create-expense tool set.
             const BUCKETS: Array<{ label: string; matches: (t: string) => boolean }> = [
-              { label: 'Travel',      matches: (t) => t === 'Travel' },
-              { label: 'Card Show',   matches: (t) => t === 'Card Show' },
+              { label: 'Travel',            matches: (t) => t === 'Travel' },
+              { label: 'Card Show',         matches: (t) => t === 'Card Show' },
               // Legacy 'Food' rows still exist from before the rename;
               // bucket them under 'Meals' so historical windows total the
               // same amount.
-              { label: 'Meals',       matches: (t) => t === 'Meals' || t === 'Food' },
-              // Business-operations bucket — includes shipping labels and
-              // supplies, plus any row explicitly tagged Operational.
-              // Grading is INTENTIONALLY excluded (has its own bucket
-              // below) because it's a big enough spend category the user
-              // wants to see it separately.
-              { label: 'Operational', matches: (t) => t === 'Operational' || t === 'Shipping' || t === 'Supplies' },
-              { label: 'Grading',     matches: (t) => t === 'Grading' },
+              { label: 'Meals',             matches: (t) => t === 'Meals' || t === 'Food' },
+              // Recurring business overhead — postage/shipping labels,
+              // subscription fees, and anything tagged Operational.
+              // Consumable supplies get their own bucket below.
+              { label: 'Operational Costs', matches: (t) => t === 'Operational Costs' || t === 'Operational' || t === 'Shipping' },
+              // Physical supplies — sleeves, toploaders, boxes, tape,
+              // office/security fees. Split out from Operational because
+              // the user tracks spend on these separately.
+              { label: 'Supplies',          matches: (t) => t === 'Supplies' },
+              { label: 'Grading',           matches: (t) => t === 'Grading' },
             ];
             const byType = windowData.expenses_by_type ?? {};
-            const bucketTotals: Record<string, number> = { Travel: 0, 'Card Show': 0, Meals: 0, Operational: 0, Grading: 0, Other: 0 };
+            const bucketTotals: Record<string, number> = { Travel: 0, 'Card Show': 0, Meals: 0, 'Operational Costs': 0, Supplies: 0, Grading: 0, Other: 0 };
             for (const [type, amount] of Object.entries(byType)) {
               const bucket = BUCKETS.find((b) => b.matches(type))?.label ?? 'Other';
               bucketTotals[bucket] += Number(amount ?? 0);
             }
-            const ORDER = ['Travel', 'Card Show', 'Meals', 'Operational', 'Grading', 'Other'];
-            const ordered = ORDER.filter((label) => bucketTotals[label] > 0);
+            const ORDER = ['Travel', 'Card Show', 'Meals', 'Operational Costs', 'Supplies', 'Grading', 'Other'];
+            const EXPENSE_COLORS: Record<string, string> = {
+              Travel:              C.indigo,
+              'Card Show':         C.teal,
+              Meals:               C.yellow,
+              'Operational Costs': C.blue,
+              Supplies:            C.amber,
+              Grading:             C.green,
+              Other:               C.red,
+            };
+            const plPie: PieEntry[] = [
+              { name: 'Cost',       value: windowData.total_cost ?? 0,       color: C.blue },
+              { name: 'Expenses',   value: windowData.total_expenses ?? 0,   color: C.amber },
+              { name: 'Net Profit', value: Math.max(0, netProfit),           color: C.green },
+            ].filter((e) => e.value > 0);
+            const expensesPie: PieEntry[] = ORDER
+              .map((label) => ({ name: label, value: bucketTotals[label] ?? 0, color: EXPENSE_COLORS[label] ?? C.red }))
+              .filter((e) => e.value > 0);
+            const channels = summary?.by_channel?.[wk];
+            const channelPie: PieEntry[] = [
+              { name: 'eBay',       value: channels?.ebay?.total_gross      ?? 0, color: C.indigo },
+              { name: 'Card Shows', value: channels?.card_show?.total_gross ?? 0, color: C.teal },
+              { name: 'Other',      value: channels?.other?.total_gross     ?? 0, color: C.amber },
+            ].filter((e) => e.value > 0);
             return (
               <>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3 lg:gap-0 lg:divide-x lg:divide-zinc-800">
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">P/L Breakdown</p>
+                    <SubrowDonut pieData={plPie} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">Sales by Channel</p>
+                    <SubrowDonut pieData={channelPie} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">Expenses Breakdown</p>
+                    <SubrowDonut pieData={expensesPie} />
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-zinc-800 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-x-4 gap-y-3 lg:gap-0 lg:divide-x lg:divide-zinc-800">
                   {([
                     { label: 'Gross',                  value: formatCurrency(windowData.total_gross ?? 0),                              cls: 'text-zinc-100' },
                     { label: 'Cost',                   value: formatCurrency(windowData.total_cost ?? 0),                               cls: 'text-zinc-100' },
@@ -703,49 +789,27 @@ function OverviewTab() {
                     </div>
                   ))}
                 </div>
-                {ordered.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-zinc-800">
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">Expenses by category</p>
-                    <div className="flex flex-wrap gap-x-5 gap-y-2">
-                      {ordered.map((label) => (
-                        <div key={label} className="flex items-baseline gap-1.5">
-                          <span className="text-[11px] text-zinc-500">{label}</span>
-                          <span className="text-sm font-semibold text-zinc-200 tabular-nums">
-                            {formatCurrency(bucketTotals[label])}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                <div className="mt-3 pt-3 border-t border-zinc-800">
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">Expenses by category</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-x-4 gap-y-3 lg:gap-0 lg:divide-x lg:divide-zinc-800">
+                    {ORDER.map((label, i) => (
+                      <div key={label} className={cn(
+                        'lg:py-0',
+                        i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
+                        i === ORDER.length - 1 ? 'lg:pr-0' : '',
+                      )}>
+                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
+                        <p className="text-xl font-bold text-zinc-100 tabular-nums">{formatCurrency(bucketTotals[label] ?? 0)}</p>
+                      </div>
+                    ))}
                   </div>
-                )}
+                </div>
               </>
             );
           })()}
         </Card>
 
-        {/* Row 2: Inventory */}
-        <Card>
-          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Inventory</p>
-          <div className="grid grid-cols-3 gap-x-4 lg:gap-0 lg:divide-x lg:divide-zinc-800">
-            {([
-              { label: 'Total Cards',  value: cards.total.all,  sub: `Graded ${cards.total.graded}  ·  Raw ${cards.total.raw}` },
-              { label: 'Unsold Cards', value: cards.unsold.all, sub: `Graded ${cards.unsold.graded}  ·  Raw ${cards.unsold.raw}` },
-              { label: 'Sold Cards',   value: cards.sold.all,   sub: `Graded ${cards.sold.graded}  ·  Raw ${cards.sold.raw}` },
-            ]).map(({ label, value, sub }, i) => (
-              <div key={label} className={cn(
-                'lg:py-0',
-                i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
-                i === 2 ? 'lg:pr-0' : '',
-              )}>
-                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
-                <p className="text-xl font-bold text-zinc-100">{value}</p>
-                <p className="text-xs text-zinc-600 mt-0.5">{sub}</p>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* Row 3: Sales by channel */}
+        {/* Row 2: Sales by channel */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {([
             { key: 'ebay',      label: 'eBay' },
@@ -784,48 +848,74 @@ function OverviewTab() {
           })}
         </div>
 
-        {/* Row 4: Pipeline */}
+        {/* Row 3: Inventory + Pipeline (Pipeline as subrow) */}
         <Card>
-          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Pipeline</p>
-          <div className="grid grid-cols-1 lg:grid-cols-4 lg:divide-x lg:divide-zinc-800 divide-y divide-zinc-800/40 lg:divide-y-0">
-            <div className="py-3 lg:py-0 lg:pr-6 lg:pt-0">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <p className="text-xl font-bold text-zinc-100 leading-none">{sellThroughGraded != null ? `${sellThroughGraded}%` : '—'}</p>
-                  <p className="text-[10px] text-zinc-500 mt-1">Graded</p>
-                  <p className="text-[10px] text-zinc-600">{cards.sold.graded} / {cards.sold.graded + cards.unsold.graded}</p>
-                </div>
-                <div>
-                  <p className="text-xl font-bold text-zinc-100 leading-none">{sellThroughRaw != null ? `${sellThroughRaw}%` : '—'}</p>
-                  <p className="text-[10px] text-zinc-500 mt-1">Raw</p>
-                  <p className="text-[10px] text-zinc-600">{cards.sold.raw} / {cards.sold.raw + cards.unsold.raw}</p>
+          <p className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Inventory</p>
+          <div className="grid grid-cols-3 gap-x-4 lg:gap-0 lg:divide-x lg:divide-zinc-800">
+            {([
+              { label: 'Total Cards',  value: cards.total.all,  sub: `Graded ${cards.total.graded}  ·  Raw ${cards.total.raw}` },
+              { label: 'Unsold Cards', value: cards.unsold.all, sub: `Graded ${cards.unsold.graded}  ·  Raw ${cards.unsold.raw}` },
+              { label: 'Sold Cards',   value: cards.sold.all,   sub: `Graded ${cards.sold.graded}  ·  Raw ${cards.sold.raw}` },
+            ]).map(({ label, value, sub }, i) => (
+              <div key={label} className={cn(
+                'lg:py-0',
+                i === 0 ? 'lg:pr-6 lg:pt-0' : 'lg:px-6',
+                i === 2 ? 'lg:pr-0' : '',
+              )}>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">{label}</p>
+                <p className="text-xl font-bold text-zinc-100">{value}</p>
+                <p className="text-xs text-zinc-600 mt-0.5">{sub}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 pt-3 border-t border-zinc-800">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2">Pipeline</p>
+            <div className="grid grid-cols-1 lg:grid-cols-4 lg:divide-x lg:divide-zinc-800 divide-y divide-zinc-800/40 lg:divide-y-0">
+              <div className="py-3 lg:py-0 lg:pr-6 lg:pt-0">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Sell-Through</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-100 leading-none tabular-nums">{sellThroughGraded != null ? `${sellThroughGraded}%` : '—'}</p>
+                    <p className="text-[10px] text-zinc-500 mt-1">Graded</p>
+                    <p className="text-[10px] text-zinc-600">{cards.sold.graded} / {cards.sold.graded + cards.unsold.graded}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-100 leading-none tabular-nums">{sellThroughRaw != null ? `${sellThroughRaw}%` : '—'}</p>
+                    <p className="text-[10px] text-zinc-500 mt-1">Raw</p>
+                    <p className="text-[10px] text-zinc-600">{cards.sold.raw} / {cards.sold.raw + cards.unsold.raw}</p>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="py-3 lg:py-0 lg:px-6">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Pending Orders</p>
-              <p className={cn('text-xl font-bold', performance.pending_orders > 0 ? 'text-amber-400' : 'text-zinc-100')}>{performance.pending_orders}</p>
-              <p className="text-xs text-zinc-600 mt-0.5">purchases ordered, not received</p>
-            </div>
-            <div className="py-3 lg:py-0 lg:px-6">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Needs Inspection</p>
-              <p className={cn('text-xl font-bold', pipeline.needs_inspection > 0 ? 'text-amber-400' : 'text-zinc-100')}>{pipeline.needs_inspection}</p>
-              <p className="text-xs text-zinc-600 mt-0.5">purchased, not yet inspected</p>
-            </div>
-            <div className="py-3 lg:py-0 lg:pl-6 lg:pb-0">
-              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">At Graders</p>
-              <p className="text-xl font-bold text-zinc-100">{grading.card_count}</p>
-              <p className="text-xs text-zinc-600 mt-0.5">{grading.sub_count} {grading.sub_count === 1 ? 'submission' : 'submissions'}</p>
+              <div className="py-3 lg:py-0 lg:px-6">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Pending Orders</p>
+                <p className={cn('text-sm font-semibold tabular-nums', performance.pending_orders > 0 ? 'text-amber-400' : 'text-zinc-100')}>{performance.pending_orders}</p>
+                <p className="text-xs text-zinc-600 mt-0.5">purchases ordered, not received</p>
+              </div>
+              <div className="py-3 lg:py-0 lg:px-6">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">Needs Inspection</p>
+                <p className={cn('text-sm font-semibold tabular-nums', pipeline.needs_inspection > 0 ? 'text-amber-400' : 'text-zinc-100')}>{pipeline.needs_inspection}</p>
+                <p className="text-xs text-zinc-600 mt-0.5">purchased, not yet inspected</p>
+              </div>
+              <div className="py-3 lg:py-0 lg:pl-6 lg:pb-0">
+                <p className="text-[10px] text-zinc-500 uppercase tracking-widest mb-1">At Graders</p>
+                <p className="text-sm font-semibold text-zinc-100 tabular-nums">{grading.card_count}</p>
+                <p className="text-xs text-zinc-600 mt-0.5">{grading.sub_count} {grading.sub_count === 1 ? 'submission' : 'submissions'}</p>
+              </div>
             </div>
           </div>
         </Card>
 
       </div>{/* end shrink-0 stats block */}
 
-      {/* Alerts — flex-1 min-h-0 always fills remaining space */}
-      <AttentionCard />
+    </div>
+  );
+}
 
+// ── Tab: Alerts ───────────────────────────────────────────────────────────────
+function AlertsTab() {
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <AttentionCard />
     </div>
   );
 }
@@ -1562,7 +1652,7 @@ function GradedTab() {
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
-const TABS = ['Overview', 'Graded', 'Raw Cards'] as const;
+const TABS = ['Overview', 'Graded', 'Raw Cards', 'Alerts'] as const;
 type Tab = typeof TABS[number];
 
 export function Dashboard() {
@@ -1594,6 +1684,7 @@ export function Dashboard() {
         {tab === 'Overview' && <OverviewTab />}
         {tab === 'Raw Cards' && <RawCardsTab />}
         {tab === 'Graded' && <GradedTab />}
+        {tab === 'Alerts' && <AlertsTab />}
       </div>
     </div>
   );

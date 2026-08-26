@@ -2,14 +2,44 @@
 
 ## August 26, 2026
 
+### Fixes
+
+**Expenses — Link field no longer rejects legitimate stored values on edit**
+- User reported form validation flagged the `Link` field when editing an existing expense. Root cause was two overlapping strict validators for the same optional field:
+  - Client-side `<input type="url">` — HTML5 browser validation. Rejects values missing an `https://` prefix (e.g. `google.com`) or containing non-standard schemes.
+  - Server-side `z.string().url()` — same strictness.
+  - If either older imports OR the AI receipt scanner ever populated `link` with anything less than a full URL, the row loaded fine but couldn't be re-saved without editing the field.
+- Fix on both sides:
+  - Client: [Expenses.tsx](client/src/pages/Expenses.tsx) Link input switched from `type="url"` to `type="text"` — server retains the final say on what's acceptable.
+  - Server: [expenses.controller.ts:44-54](server/src/controllers/expenses.controller.ts#L44-L54) relaxed `link` schema from `.url()` to `.string().max(2048).optional().or(z.literal(''))`. Free-form string with a length cap; the frontend renders it as a clickable link when it starts with `http(s)://` and as plain text otherwise.
+
 ### Features
+
+**Expenses — form now explicitly marks which fields are required**
+- Five required: `Date`, `Type`, `Description`, `Amount`, `Currency` — each label gets a red asterisk plus the input carries `required` so browser validation catches empty submits.
+- Two optional: `Link`, `Order #` — each label gets a small `(optional)` suffix in dimmed text.
+- Explicit client-side validation added for date/type/currency (previously only description + amount were checked in-JS). Server treats the same fields as required so client + server agree.
+- [Input](client/src/components/ui/Input.tsx) and [Select](client/src/components/ui/Select.tsx) label prop widened from `string` → `ReactNode` so JSX like `<>Date <span className="text-red-500">*</span></>` can be passed inline.
 
 **Dashboard — Revenue card gains an "Expenses by category" subrow that shares the window filter**
 - User asked whether expenses factor into P&L. They do — `Expenses` and `Net Profit (After Exp)` tiles have been in the Revenue card the whole time — but the breakdown wasn't visible, so "did I overspend on grading this month?" wasn't answerable at a glance.
 - Server: [expensesQuery](server/src/controllers/reports.controller.ts#L202-L226) rewritten to `SELECT type, SUM(amount) ... GROUP BY type` per window, returning `{ total, byType }`. Each window snapshot (`today`, `last_7_days`, `last_30_days`, `last_60_days`, `last_90_days`, `this_year`, `lifetime`) now carries `expenses_by_type: Record<string, number>` alongside `total_expenses`.
-- Client: new subrow under the main 6-tile grid in the Revenue card. Sits inside the same Card so it inherits the window tabs (Today / 7D / 30D / … / Lifetime) — flip the window, both the total AND the breakdown update together.
-- **Five display buckets** (Travel · Card Show · Meals · Operational · Grading) plus a display-only **Other** catch-all for anything that doesn't match one of the five. `Operational` sums the free-form types Shipping / Supplies / Operational; `Grading` is its own bucket (big enough spend to warrant separate visibility); `Meals` folds legacy `Food` rows so historical windows still total consistently. The DB column stays free-form — the bucketing is display-only, applied client-side.
-- Zero-value buckets are dropped so quiet windows don't render an empty row.
+- Client: new subrow inside the same Card so it inherits the window tabs (Today / 7D / 30D / … / Lifetime) — flip the window, total AND breakdown update together.
+- **Seven display buckets, rendered as a 7-column grid that mirrors the P/L row above it** — Travel · Card Show · Meals · Operational Costs · Supplies · Grading · Other. Same `lg:divide-x` column separators and same `text-xl` numeric weight as the main P/L tiles so the two rows read as siblings, not parent/child. All seven always show (including $0) so windows compare visually.
+- Bucket mapping: `Operational Costs` sums Shipping / subscription fees / anything tagged Operational; `Supplies` was split out from Operational because the user tracks physical supplies (sleeves, toploaders, boxes, security fees) separately; `Grading` is its own bucket (big enough spend to warrant visibility); `Meals` folds legacy `Food` rows for consistency across historical windows. The DB `expenses.type` column stays free-form — the bucketing is display-only, applied client-side.
+
+**Dashboard — Revenue card gains a 3-donut pie subrow above the P/L tiles**
+- P/L Breakdown (Cost · Expenses · Net Profit), Sales by Channel (eBay · Card Shows · Other, by gross), and Expenses Breakdown (all 7 buckets from the row below). All three donuts respect the same window filter as the rest of the Revenue card.
+- Values are drawn inside each slice — no hover required to read the numbers. Slices under 4% are label-skipped to avoid overlap; every slice's name + percentage appears in a right-hand legend.
+- Zero-value slices are filtered out per pie so quiet windows still render clean donuts.
+
+**Dashboard — Alerts split out to a dedicated tab (was previously the tail of Overview)**
+- The five Alerts boxes (Order More · Grade More · Needs Grading Submission · eBay Listings 30+ Days · Card Show Inventory 30+ Days) used to live below Pipeline on the Overview tab, forcing a scroll and squeezing the main dashboard into ~⅓ of the viewport.
+- Now they're a 4th tab: Overview · Graded · Raw Cards · **Alerts**. The Overview stats row breathes; the Alerts view gets the whole viewport when the user wants to work through the pile.
+
+**Dashboard — Overview row order + Inventory/Pipeline merge**
+- New order: **Revenue → Sales by channel → Inventory (with Pipeline as a subrow inside the same card)**. Prior order had Inventory before Sales-by-channel and Pipeline as its own card row.
+- Inventory + Pipeline live in one Card now, separated by the same `border-t` divider used for other subrows. Pipeline values drop to `text-sm font-semibold` so the numeric hierarchy reads Inventory-primary, Pipeline-subordinate.
 
 ## August 22, 2026
 
