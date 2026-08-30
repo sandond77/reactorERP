@@ -30,6 +30,35 @@ export async function resetAlert(userId: string, entityType: AlertEntityType, en
     .execute();
 }
 
+// Mirrors of the last_activity SQL fragments in reports.service.ts —
+// duplicated because Kysely inline sql`` fragments can't be reused across
+// module boundaries without turning into either a compiled RawBuilder or a
+// factory. Keep the two definitions in sync when either query changes.
+const EBAY_LAST_ACTIVITY_SQL = sql<Date>`GREATEST(
+  l.listed_at,
+  (SELECT MAX(s.sold_at) FROM sales s WHERE s.listing_id = l.id),
+  (SELECT MAX(sib.listed_at) FROM listings sib
+     WHERE sib.user_id = l.user_id
+       AND sib.ebay_listing_url IS NOT NULL
+       AND sib.ebay_listing_url = l.ebay_listing_url
+       AND sib.id <> l.id)
+)`;
+
+const CARD_SHOW_LAST_ACTIVITY_SQL = sql<Date>`GREATEST(
+  ci.card_show_added_at,
+  (SELECT MAX(s.sold_at) FROM sales s
+     JOIN card_instances ci_a ON ci_a.id = s.card_instance_id
+    WHERE ci_a.user_id = ci.user_id
+      AND ci_a.catalog_id IS NOT NULL
+      AND ci_a.catalog_id = ci.catalog_id
+      AND s.card_show_id IS NOT NULL),
+  (SELECT MAX(ci_b.card_show_added_at) FROM card_instances ci_b
+    WHERE ci_b.user_id = ci.user_id
+      AND ci_b.catalog_id IS NOT NULL
+      AND ci_b.catalog_id = ci.catalog_id
+      AND ci_b.is_card_show = true)
+)`;
+
 export async function getStaleEbayListingsFull(userId: string, days: number) {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   return db
@@ -51,7 +80,7 @@ export async function getStaleEbayListingsFull(userId: string, days: number) {
       'l.list_price',
       'l.listed_at',
       'l.ebay_listing_url',
-      sql<number>`EXTRACT(DAY FROM NOW() - l.listed_at)::int`.as('days_listed'),
+      sql<number>`EXTRACT(DAY FROM NOW() - ${EBAY_LAST_ACTIVITY_SQL})::int`.as('days_listed'),
       'sd.company as grading_company',
       'sd.grade_label',
       sql<string | null>`sd.cert_number::text`.as('cert_number'),
@@ -62,8 +91,8 @@ export async function getStaleEbayListingsFull(userId: string, days: number) {
     .where('l.user_id', '=', userId)
     .where('l.listing_status', '=', 'active')
     .where('l.platform', '=', 'ebay')
-    .where('l.listed_at', '<', cutoff)
-    .orderBy('l.listed_at', 'asc')
+    .where(sql`${EBAY_LAST_ACTIVITY_SQL} < ${cutoff}` as any)
+    .orderBy(sql`${EBAY_LAST_ACTIVITY_SQL}` as any, 'asc')
     .execute();
 }
 
@@ -87,7 +116,7 @@ export async function getStaleCardShowFull(userId: string, days: number) {
       'ci.quantity',
       'ci.purchase_cost',
       'ci.card_show_added_at',
-      sql<number>`EXTRACT(DAY FROM NOW() - ci.card_show_added_at)::int`.as('days_held'),
+      sql<number>`EXTRACT(DAY FROM NOW() - ${CARD_SHOW_LAST_ACTIVITY_SQL})::int`.as('days_held'),
       'sd.company as grading_company',
       'sd.grade_label',
       sql<string | null>`sd.cert_number::text`.as('cert_number'),
@@ -98,7 +127,7 @@ export async function getStaleCardShowFull(userId: string, days: number) {
     .where('ci.user_id', '=', userId)
     .where('ci.is_card_show', '=', true)
     .where('ci.status', 'not in', ['sold', 'lost_damaged'])
-    .where('ci.card_show_added_at', '<', cutoff)
-    .orderBy('ci.card_show_added_at', 'asc')
+    .where(sql`${CARD_SHOW_LAST_ACTIVITY_SQL} < ${cutoff}` as any)
+    .orderBy(sql`${CARD_SHOW_LAST_ACTIVITY_SQL}` as any, 'asc')
     .execute();
 }

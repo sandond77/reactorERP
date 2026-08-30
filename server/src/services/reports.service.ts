@@ -966,6 +966,21 @@ export async function getPendingGradingSub(userId: string) {
 }
 
 
+// A listing's staleness is measured against last_activity, not listed_at
+// alone. Signals that reset the clock: (a) a cert from this listing recently
+// sold, (b) a sibling cert was added under the same eBay URL (set / grouped
+// listings). Postgres GREATEST ignores NULLs, so absent signals fall back to
+// listed_at without breaking the comparison.
+const EBAY_LAST_ACTIVITY_SQL = sql<Date>`GREATEST(
+  l.listed_at,
+  (SELECT MAX(s.sold_at) FROM sales s WHERE s.listing_id = l.id),
+  (SELECT MAX(sib.listed_at) FROM listings sib
+     WHERE sib.user_id = l.user_id
+       AND sib.ebay_listing_url IS NOT NULL
+       AND sib.ebay_listing_url = l.ebay_listing_url
+       AND sib.id <> l.id)
+)`;
+
 export async function getStaleEbayListings(userId: string, days: number) {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   return db
@@ -979,15 +994,36 @@ export async function getStaleEbayListings(userId: string, days: number) {
       'l.list_price',
       'l.listed_at',
       'l.ebay_listing_url',
-      sql<number>`EXTRACT(DAY FROM NOW() - l.listed_at)::int`.as('days_listed'),
+      sql<number>`EXTRACT(DAY FROM NOW() - ${EBAY_LAST_ACTIVITY_SQL})::int`.as('days_listed'),
     ])
     .where('l.user_id', '=', userId)
     .where('l.listing_status', '=', 'active')
     .where('l.platform', '=', 'ebay')
-    .where('l.listed_at', '<', cutoff)
-    .orderBy('l.listed_at', 'asc')
+    .where(sql`${EBAY_LAST_ACTIVITY_SQL} < ${cutoff}` as any)
+    .orderBy(sql`${EBAY_LAST_ACTIVITY_SQL}` as any, 'asc')
     .execute();
 }
+
+// A card-show item's staleness is measured against last_activity, not
+// card_show_added_at alone. Signals that reset the clock: (a) a same-part
+// copy sold recently at any card show (the pile is moving), (b) another
+// same-part copy was added to card-show inventory recently (user restocked).
+// Both signals are catalog_id-scoped — unlinked rows (catalog_id IS NULL)
+// fall through to card_show_added_at alone.
+const CARD_SHOW_LAST_ACTIVITY_SQL = sql<Date>`GREATEST(
+  ci.card_show_added_at,
+  (SELECT MAX(s.sold_at) FROM sales s
+     JOIN card_instances ci_a ON ci_a.id = s.card_instance_id
+    WHERE ci_a.user_id = ci.user_id
+      AND ci_a.catalog_id IS NOT NULL
+      AND ci_a.catalog_id = ci.catalog_id
+      AND s.card_show_id IS NOT NULL),
+  (SELECT MAX(ci_b.card_show_added_at) FROM card_instances ci_b
+    WHERE ci_b.user_id = ci.user_id
+      AND ci_b.catalog_id IS NOT NULL
+      AND ci_b.catalog_id = ci.catalog_id
+      AND ci_b.is_card_show = true)
+)`;
 
 export async function getStaleCardShowInventory(userId: string, days: number) {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
@@ -1001,12 +1037,12 @@ export async function getStaleCardShowInventory(userId: string, days: number) {
       'ci.quantity',
       'ci.purchase_cost',
       'ci.card_show_added_at',
-      sql<number>`EXTRACT(DAY FROM NOW() - ci.card_show_added_at)::int`.as('days_held'),
+      sql<number>`EXTRACT(DAY FROM NOW() - ${CARD_SHOW_LAST_ACTIVITY_SQL})::int`.as('days_held'),
     ])
     .where('ci.user_id', '=', userId)
     .where('ci.is_card_show', '=', true)
     .where('ci.status', 'not in', ['sold', 'lost_damaged'])
-    .where('ci.card_show_added_at', '<', cutoff)
-    .orderBy('ci.card_show_added_at', 'asc')
+    .where(sql`${CARD_SHOW_LAST_ACTIVITY_SQL} < ${cutoff}` as any)
+    .orderBy(sql`${CARD_SHOW_LAST_ACTIVITY_SQL}` as any, 'asc')
     .execute();
 }

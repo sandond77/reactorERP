@@ -2,6 +2,16 @@
 
 ## August 30, 2026
 
+### Fixes
+
+**Stale-alerts (Card Show + eBay) — clock now resets on real activity, not just creation date**
+- Both dashboard tiles ("Card Show Inventory Unsold 30+ Days" and "eBay Listings Unsold 30+ Days") were flagging items solely on `card_show_added_at` / `l.listed_at` — a static stamp set once at creation. On [user 8bc4d8bb's account](server/src/services/reports.service.ts), that produced 407 stale card-show entries, most of which were false positives: same-part copies had sold at recent shows, or the user had restocked with more copies since. Same class of bug on eBay: a listing 60 days old was flagged even if a cert from it sold last week or another cert was added to the same URL yesterday.
+- Fix in [reports.service.ts](server/src/services/reports.service.ts) and mirrored in [alert-overrides.service.ts](server/src/services/alert-overrides.service.ts) (which powers the full-page `/alerts` view). Two shared `sql\`\`` fragments (`EBAY_LAST_ACTIVITY_SQL`, `CARD_SHOW_LAST_ACTIVITY_SQL`) compute `last_activity = GREATEST(created_at, ...activity signals...)` and drive both the WHERE cutoff and the `days_held`/`days_listed` display value. Postgres `GREATEST` ignores NULLs so absent signals fall through to the base timestamp.
+- **Card Show activity signals**: (a) `MAX(sales.sold_at)` for any card-show sale of the same catalog part (`catalog_id`), (b) `MAX(card_show_added_at)` across any same-part copy currently in card-show inventory (covers user restocking). Unlinked rows (`catalog_id IS NULL`) fall through to `card_show_added_at` alone — activity signals are catalog-scoped.
+- **eBay activity signals**: (a) `MAX(sales.sold_at) WHERE listing_id = l.id` — direct sale from this listing, (b) `MAX(sib.listed_at)` for sibling listings sharing the same `ebay_listing_url` — covers set/grouped listings where "adding more certs" appears as new listings under the same URL, not a mutation of the existing row.
+- Prod impact verified before push (both users with stale inventory queried directly): Card Show 30d dropped from 407→270 for the primary affected user (**-137 false positives**). eBay 30d dropped 174→173 (-1) — the smaller delta reflects real staleness on most listings, which is the intended outcome. No schema change; pure query rewrite. Correlated subqueries add ~3× per-row overhead but should stay under load given existing indexes on `sales(card_instance_id)`, `sales(listing_id)`, and `listings(ebay_listing_url)`.
+- Kysely note: `.where(sql\`...\`)` and `.orderBy(sql\`...\`)` needed `as any` casts (Kysely's typed API rejects raw `sql\`\`` fragments at those slots — a known edge case, documented in CLAUDE.md).
+
 ### Features
 
 **Card catalog — 5th SKU segment for variants (First Edition, Alt Art, etc.)**
