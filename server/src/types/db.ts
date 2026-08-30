@@ -70,6 +70,7 @@ export interface CardCatalogTable {
   tcgplayer_id: string | null;
   external_id: string | null;
   sku: string | null;
+  catalog_notes: string | null;
   created_at: Generated<Date>;
   updated_at: Generated<Date>;
 }
@@ -337,6 +338,16 @@ export interface CardGamesTable {
   created_at: Generated<Date>;
 }
 
+export interface CardGameVariantsTable {
+  game: string;
+  code: string;
+  name: string;
+  description: string | null;
+  sort_order: Generated<number>;
+  created_at: Generated<Date>;
+  updated_at: Generated<Date>;
+}
+
 export interface PokemonSetAliasesTable {
   id: Generated<string>;
   user_id: string;
@@ -483,6 +494,7 @@ export interface Database {
   csv_imports: CsvImportsTable;
   audit_log: AuditLogTable;
   card_games: CardGamesTable;
+  card_game_variants: CardGameVariantsTable;
   pokemon_set_aliases: PokemonSetAliasesTable;
   raw_purchases: RawPurchasesTable;
   raw_purchase_sequences: RawPurchaseSequencesTable;

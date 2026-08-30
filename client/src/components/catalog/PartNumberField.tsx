@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, Plus, X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { AddPartModal } from './AddPartModal';
+import { VariantChip } from './VariantChip';
 
 export interface CatalogMatch {
   id: string;
@@ -126,6 +127,7 @@ export function PartNumberField({ form, catalogMatch, onSelect, onClear }: Props
                   className="w-full px-3 py-2 text-left flex items-center gap-3 hover:bg-zinc-800/60 transition-colors border-b border-zinc-800/50 last:border-0">
                   <span className="font-mono text-xs text-indigo-300 shrink-0">{s.sku ?? '—'}</span>
                   <span className="text-zinc-300 text-xs truncate">{s.card_name}</span>
+                  <VariantChip code={(s as { variant?: string | null }).variant} />
                   <span className="text-zinc-500 text-[10px] shrink-0 ml-auto">{s.set_name}{s.card_number ? ` · #${s.card_number}` : ''}</span>
                 </button>
               ));

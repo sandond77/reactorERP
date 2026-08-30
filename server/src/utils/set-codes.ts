@@ -498,10 +498,21 @@ export async function buildLookupWithDbAliases(
  * `gamePrefix` defaults to 'PKMN' for backwards compatibility but should be
  * passed as the game's abbreviation (from `card_games.abbreviation`) for any
  * non-Pokémon catalog rows.
+ * `variantCode` is the optional 5th segment (e.g. '1ED', 'ALT') sourced from
+ * `card_game_variants.code`. Unlimited is implied by omission — passing null
+ * or empty keeps the SKU 4-segment.
  */
-export function generatePartNumber(language: string, setCode: string, cardNumber: string, gamePrefix: string = 'PKMN'): string {
+export function generatePartNumber(
+  language: string,
+  setCode: string,
+  cardNumber: string,
+  gamePrefix: string = 'PKMN',
+  variantCode?: string | null,
+): string {
   const rawNum = cardNumber.split('/')[0].trim();
   const digitsOnly = rawNum.replace(/[^0-9]/g, '');
   const paddedNum = digitsOnly ? digitsOnly.padStart(3, '0') : rawNum.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return `${gamePrefix}-${language}-${setCode}-${paddedNum}`;
+  const base = `${gamePrefix}-${language}-${setCode}-${paddedNum}`;
+  const tail = (variantCode ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return tail ? `${base}-${tail}` : base;
 }

@@ -9,6 +9,8 @@ import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { AddPartModal } from '../components/catalog/AddPartModal';
+import { VariantCodeSelect } from '../components/catalog/VariantCodeSelect';
+import { VariantChip } from '../components/catalog/VariantChip';
 import toast from 'react-hot-toast';
 
 interface SummaryRow {
@@ -387,8 +389,14 @@ function EditPartModal({ row, onClose, onReassign }: EditPartModalProps) {
             <input className={inputCls} value={form.rarity} onChange={field('rarity')} placeholder="optional" />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Variant</label>
-            <input className={inputCls} value={form.variant} onChange={field('variant')} placeholder="optional" />
+            <label className="block text-xs text-zinc-400 mb-1">
+              Variant <span className="text-zinc-600 text-[10px] font-normal">— Unlimited implied</span>
+            </label>
+            <VariantCodeSelect
+              game={form.game}
+              value={form.variant || null}
+              onChange={(code) => setForm(prev => ({ ...prev, variant: code ?? '' }))}
+            />
           </div>
         </div>
 
@@ -469,7 +477,7 @@ function ReassignModal({ row, onClose }: { row: ReassignTarget; onClose: () => v
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data: results = [] } = useQuery<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }[]>({
+  const { data: results = [] } = useQuery<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string; variant: string | null }[]>({
     queryKey: ['catalog-search', debouncedSearch],
     queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 20 } }).then(r => r.data.data),
     enabled: debouncedSearch.length >= 2,
@@ -533,6 +541,7 @@ function ReassignModal({ row, onClose }: { row: ReassignTarget; onClose: () => v
               >
                 <span className="font-mono text-indigo-300 text-xs mr-2">{r.sku ?? '—'}</span>
                 <span className="text-zinc-300">{r.card_name}</span>
+                <VariantChip code={r.variant} className="ml-1.5" />
                 <span className="text-zinc-600 ml-1 text-xs">· {r.set_name}</span>
               </button>
             ))}
@@ -580,7 +589,7 @@ function ReassignPartModal({ part, onClose }: { part: SummaryRow; onClose: () =>
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data: results = [] } = useQuery<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string }[]>({
+  const { data: results = [] } = useQuery<{ id: string; sku: string | null; card_name: string; set_name: string; card_number: string | null; language: string; variant: string | null }[]>({
     queryKey: ['catalog-search', debouncedSearch],
     queryFn: () => api.get('/catalog/search', { params: { q: debouncedSearch, limit: 20 } }).then(r => r.data.data),
     enabled: debouncedSearch.length >= 2,
@@ -679,6 +688,7 @@ function ReassignPartModal({ part, onClose }: { part: SummaryRow; onClose: () =>
                   >
                     <span className="font-mono text-indigo-300 text-xs mr-2">{r.sku ?? '—'}</span>
                     <span className="text-zinc-300">{r.card_name}</span>
+                    <VariantChip code={r.variant} className="ml-1.5" />
                     <span className="text-zinc-600 ml-1 text-xs">· {r.set_name}</span>
                   </button>
                 ))}
@@ -2016,7 +2026,10 @@ export function InventorySummary() {
                       </td>
                       <td className="px-3 py-1.5 text-zinc-400 whitespace-normal break-words">{setName}</td>
                       <td className="px-3 py-1.5 text-zinc-200 whitespace-normal break-words">
-                        {displayName}
+                        <span className="inline-flex items-center gap-1.5 flex-wrap">
+                          {displayName}
+                          <VariantChip code={groupRows[0].variant} />
+                        </span>
                       </td>
                       <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{lang}</td>
                       <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{rarity}</td>
@@ -2051,7 +2064,10 @@ export function InventorySummary() {
                     </td>
                     <td className="px-3 py-1.5 text-zinc-400 whitespace-normal break-words">{setName}</td>
                     <td className="px-3 py-1.5 text-zinc-200 font-medium whitespace-normal break-words">
-                      {displayName}
+                      <span className="inline-flex items-center gap-1.5 flex-wrap">
+                        {displayName}
+                        <VariantChip code={groupRows[0].variant} />
+                      </span>
                     </td>
                     <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{lang}</td>
                     <td className="px-3 py-1.5 text-zinc-500 whitespace-nowrap">{rarity}</td>

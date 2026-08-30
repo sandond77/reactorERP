@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { api } from '../../lib/api';
 import { Button } from '../ui/Button';
 import { SetCombobox, useMergedSets } from './SetCombobox';
+import { VariantCodeSelect } from './VariantCodeSelect';
 
 const ADD_GAME_SENTINEL = '__add_new_game__';
 
@@ -133,7 +134,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     if (games.length === 0) return;
     setForm((prev) => ({
       ...prev,
-      sku: autoSku(prev.game, prev.language, prev.set_code, prev.card_number, prev.card_name, unnumbered),
+      sku: autoSku(prev.game, prev.language, prev.set_code, prev.card_number, prev.card_name, unnumbered, prev.variant),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [games.length]);
@@ -160,7 +161,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     }
   }
 
-  function autoSku(game: string, lang: string, setCode: string, cardNum: string, cardName: string, isUnnumbered: boolean) {
+  function autoSku(game: string, lang: string, setCode: string, cardNum: string, cardName: string, isUnnumbered: boolean, variantCode: string) {
     const prefix = gamePrefixes.get(game.toLowerCase()) ?? fallbackPrefix(game);
     // When unnumbered, substitute a normalized card name for the card-number
     // segment so each unnumbered card under the same set still gets a unique,
@@ -170,14 +171,17 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
     const nameKey = (cardName ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 24);
     const tail = isUnnumbered ? nameKey : cardNum.toUpperCase();
     if (!setCode && !tail) return '';
-    return [prefix, lang.toUpperCase(), setCode.toUpperCase(), tail].filter(Boolean).join('-');
+    const base = [prefix, lang.toUpperCase(), setCode.toUpperCase(), tail].filter(Boolean).join('-');
+    // 5th segment: variant code. Unlimited implied by omission (no tail added).
+    const vTail = (variantCode ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return vTail ? `${base}-${vTail}` : base;
   }
 
   const field = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const val = e.target.value;
     setForm(prev => {
       const next = { ...prev, [key]: val };
-      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
+      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered, next.variant);
       return next;
     });
   };
@@ -363,7 +367,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                 onTyped={(name) => setForm((prev) => ({ ...prev, set_name: name }))}
                 onSelect={(entry) => setForm((prev) => {
                   const next = { ...prev, set_name: entry.name, set_code: entry.code };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered, next.variant);
                   return next;
                 })}
                 onAddNew={handleAddNewSet}
@@ -380,12 +384,12 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                 typedSetCode={form.set_code}
                 onTyped={(code) => setForm((prev) => {
                   const next = { ...prev, set_code: code };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered, next.variant);
                   return next;
                 })}
                 onSelect={(entry) => setForm((prev) => {
                   const next = { ...prev, set_code: entry.code, set_name: entry.name };
-                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered);
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered, next.variant);
                   return next;
                 })}
                 onAddNew={handleAddNewSet}
@@ -412,7 +416,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                     setUnnumbered(checked);
                     setForm((prev) => {
                       const next = checked ? { ...prev, card_number: '' } : prev;
-                      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, checked);
+                      next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, checked, next.variant);
                       return next;
                     });
                   }}
@@ -425,8 +429,18 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
               <input className={inputCls} value={form.rarity} onChange={field('rarity')} placeholder="e.g. Special Illustration Rare" />
             </div>
             <div className="col-span-2">
-              <label className="block text-xs text-zinc-400 mb-1">Variant</label>
-              <input className={inputCls} value={form.variant} onChange={field('variant')} placeholder="e.g. Reverse Holo" />
+              <label className="block text-xs text-zinc-400 mb-1">
+                Variant <span className="text-zinc-600 text-[10px] font-normal">— Unlimited implied by leaving blank</span>
+              </label>
+              <VariantCodeSelect
+                game={form.game}
+                value={form.variant || null}
+                onChange={(code) => setForm(prev => {
+                  const next = { ...prev, variant: code ?? '' };
+                  next.sku = autoSku(next.game, next.language, next.set_code, next.card_number, next.card_name, unnumbered, next.variant);
+                  return next;
+                })}
+              />
             </div>
           </div>
 

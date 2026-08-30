@@ -41,6 +41,10 @@ export interface CardFilters {
   // used by the eBay Set Listing sale flow so the picker only shows cards
   // that are already grouped as a set.
   in_set_listing?: string;  // 'yes'
+  // Restrict to cards that currently have (or don't have) an active listing.
+  // Used by the eBay Combined Order sale flow to default the picker to
+  // already-listed inventory.
+  is_listed?: string;  // 'yes' | 'no'
   // Raw cards that have been converted to slabs via grading carry
   // graded_out=true (see migration 057). Default behavior hides them from
   // inventory views; set include_graded_out=true to opt in (lifecycle
@@ -144,6 +148,22 @@ export async function listCards(
         .where('l2.listing_status', '=', 'active')
         .where('l2.listing_group_id', 'is not', null),
     ));
+  }
+  if (filters.is_listed === 'yes') {
+    query = query.where((eb) => eb.exists(
+      eb.selectFrom('listings as l2')
+        .select('l2.id')
+        .whereRef('l2.card_instance_id', '=', 'ci.id')
+        .where('l2.listing_status', '=', 'active'),
+    ));
+  }
+  if (filters.is_listed === 'no') {
+    query = query.where((eb) => eb.not(eb.exists(
+      eb.selectFrom('listings as l2')
+        .select('l2.id')
+        .whereRef('l2.card_instance_id', '=', 'ci.id')
+        .where('l2.listing_status', '=', 'active'),
+    )));
   }
   if (filters.for_sale === 'yes') {
     query = query.where((eb) => eb.or([

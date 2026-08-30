@@ -9,6 +9,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
 import { formatCurrency, cn } from '../lib/utils';
+import { ActionItemsPill } from '../components/dashboard/ActionItems';
 
 // ── Color palette ────────────────────────────────────────────────────────────
 const C = {
@@ -515,11 +516,14 @@ function AttentionCard() {
 
   return (
     <div className="flex flex-col flex-1 min-h-[500px]">
-      <div className="flex items-center gap-2 mb-2 shrink-0">
-        <AlertTriangle size={13} className={hasAny ? 'text-orange-400' : 'text-zinc-600'} />
-        <p className={cn('text-xs font-semibold uppercase tracking-wider', hasAny ? 'text-orange-300' : 'text-zinc-500')}>
-          Alerts
-        </p>
+      <div className="flex items-center justify-between mb-2 shrink-0">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={13} className={hasAny ? 'text-orange-400' : 'text-zinc-600'} />
+          <p className={cn('text-xs font-semibold uppercase tracking-wider', hasAny ? 'text-orange-300' : 'text-zinc-500')}>
+            Alerts
+          </p>
+        </div>
+        <ActionItemsPill />
       </div>
 
       {/* Row 1: 3 equal boxes */}

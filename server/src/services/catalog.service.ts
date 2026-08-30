@@ -96,7 +96,7 @@ export function generateSku(params: {
   gamePrefix?: string;
 }): string {
   const lang = params.language.toUpperCase() === 'JPN' ? 'JP' : params.language.toUpperCase() as 'EN' | 'JP';
-  return generatePartNumber(lang, params.setCode, params.cardNumber, params.gamePrefix ?? 'PKMN');
+  return generatePartNumber(lang, params.setCode, params.cardNumber, params.gamePrefix ?? 'PKMN', params.variant);
 }
 
 /**
@@ -354,7 +354,7 @@ export async function findOrCreateCatalogCard(params: {
 }): Promise<string | null> {
   const rawNum = params.cardNumber.split('/')[0].trim();
   const paddedNum = rawNum.replace(/[^0-9]/g, '').padStart(3, '0') || rawNum;
-  const sku = generatePartNumber(params.language, params.setCodePart, paddedNum);
+  const sku = generatePartNumber(params.language, params.setCodePart, paddedNum, 'PKMN', params.variant);
 
   // 1. Try to find by SKU in seed table
   const bySkuRows = await sql<{ id: string }>`
@@ -504,7 +504,7 @@ export async function createCatalogCard(userId: string, params: {
   // silently. Falls back to PKMN when the game is unknown or missing.
   const gamePrefix = await getGamePrefix(params.game);
   const autoSku = (!params.sku && params.set_code && normalizedNumber)
-    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber, gamePrefix })
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber, gamePrefix, variant: params.variant ?? null })
     : null;
 
   const result = await db
@@ -579,7 +579,7 @@ export async function searchCatalog(userId: string, params: {
   card_number?: string;
   language?: string;
   limit?: number;
-}): Promise<Array<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string }>> {
+}): Promise<Array<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string; variant: string | null; game: string }>> {
   const { q, card_name, set_name, card_number, language, limit = 20 } = params;
   if (!q && !card_name && !set_name && !card_number) return [];
 
@@ -601,8 +601,8 @@ export async function searchCatalog(userId: string, params: {
   // returned "no matches for that query" no matter how exact the input.
   // Removed — the picker is used across all games and lets the user's own
   // catalog contents scope the results.
-  const rows = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string }>`
-    SELECT id, sku, card_name, set_name, set_code, card_number, language
+  const rows = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string; variant: string | null; game: string }>`
+    SELECT id, sku, card_name, set_name, set_code, card_number, language, variant, game
     FROM card_catalog
     WHERE user_id = ${userId}
       ${qPattern ? sql`AND (card_name ILIKE ${qPattern} OR sku ILIKE ${qPattern})` : sql``}
@@ -620,8 +620,8 @@ export async function searchCatalog(userId: string, params: {
   // that doesn't exist in the user's catalog (e.g. "Legendary Holo
   // Collection" when the row is stored as "Legendary Shine Collection").
   if (rows.rows.length === 0 && setClauses.length > 0 && card_name && card_number) {
-    const retry = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string }>`
-      SELECT id, sku, card_name, set_name, set_code, card_number, language
+    const retry = await sql<{ id: string; sku: string | null; card_name: string; set_name: string; set_code: string | null; card_number: string | null; language: string; variant: string | null; game: string }>`
+      SELECT id, sku, card_name, set_name, set_code, card_number, language, variant, game
       FROM card_catalog
       WHERE user_id = ${userId}
         AND card_name ILIKE ${'%' + card_name + '%'}
@@ -745,7 +745,7 @@ export async function linkUnlinkedByCardName(userId: string, params: {
   // onto a stray PKMN-prefixed row (which could match a real Pokémon card).
   const gamePrefix = await getGamePrefix(params.game);
   const autoSku = (!params.sku && params.set_code && normalizedNumber)
-    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber, gamePrefix })
+    ? generateSku({ language: lang, setCode: params.set_code, cardNumber: normalizedNumber, gamePrefix, variant: params.variant ?? null })
     : null;
 
   // Look up an existing entry: first by SKU (if we can compute one), then by card_name+set_code
@@ -817,23 +817,21 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
     fields.card_number = normalized ?? undefined;
   }
 
-  // Auto-generate SKU when either `card_number` OR `game` is being changed
-  // and no explicit sku is provided. The previous version only regen'd on
-  // card_number change — reassigning a row's game (e.g. Pokémon → One Piece)
-  // left the stored sku on its old prefix, so cards kept displaying
-  // "PKMN-JP-OP07-500" even after being switched to one_piece. Now we pull
-  // the target game's abbreviation from card_games (via getGamePrefix) and
-  // rebuild the sku accordingly.
+  // Auto-generate SKU when `card_number`, `game`, or `variant` is being
+  // changed and no explicit sku is provided. `variant` is the 5th SKU segment
+  // (e.g. -1ED, -ALT) — without this trigger, switching a part from base to
+  // First Edition via EditPartModal would silently leave the SKU tail wrong.
   let effectiveSku = fields.sku;
-  if (!effectiveSku && (fields.card_number || fields.game)) {
+  if (!effectiveSku && (fields.card_number || fields.game || fields.variant !== undefined)) {
     const existing = await db.selectFrom('card_catalog')
-      .select(['set_code', 'language', 'card_number', 'game'])
+      .select(['set_code', 'language', 'card_number', 'game', 'variant'])
       .where('id', '=', id)
       .executeTakeFirst();
     const setCode = fields.set_code ?? existing?.set_code;
     const lang = (fields.language ?? existing?.language ?? 'EN').toUpperCase();
     const cardNumber = fields.card_number ?? existing?.card_number ?? null;
     const game = fields.game ?? existing?.game ?? null;
+    const variant = fields.variant !== undefined ? fields.variant : (existing?.variant ?? null);
     if (setCode && cardNumber) {
       const gamePrefix = await getGamePrefix(game);
       effectiveSku = generateSku({
@@ -841,6 +839,7 @@ export async function updateCatalogCard(userId: string, id: string, fields: {
         setCode,
         cardNumber,
         gamePrefix,
+        variant,
       });
     }
   }

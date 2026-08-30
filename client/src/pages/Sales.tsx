@@ -223,6 +223,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [bulkSearch, setBulkSearch] = useState('');
   const [debouncedBulkSearch, setDebouncedBulkSearch] = useState('');
   const [bulkExactMatch, setBulkExactMatch] = useState(false);
+  // Combined Order default: already-listed inventory only. Sellers pick
+  // Combined Order when a buyer combined multiple existing listings, so
+  // unlisted cards are almost never the intent. Toggle off to widen the
+  // search to all eBay inventory.
+  const [bulkListedOnly, setBulkListedOnly] = useState(true);
   const [bulkDiscount, setBulkDiscount] = useState('');
   // Final Total is a mirror of the summed per-card finals — either the user
   // drives from this side (types $900, we distribute), or from the discount %
@@ -528,8 +533,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Both flows share this one query; splitting the filter here is what makes
   // that work.
   const bulkIsEbaySet = bulkIsEbay && bulkPricingMode === 'split';
+  const bulkIsEbayCombined = bulkIsEbay && bulkPricingMode === 'per_item';
+  const bulkCombinedListedOnly = bulkIsEbayCombined && bulkListedOnly;
   const { data: bulkSearchResults, isFetching: isBulkSearching } = useQuery<PaginatedResult<SlabResult>>({
-    queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay, bulkIsEbaySet, bulkExactMatch],
+    queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay, bulkIsEbaySet, bulkExactMatch, bulkCombinedListedOnly],
     queryFn: () => api.get('/grading/slabs', {
       params: bulkIsEbay
         ? {
@@ -537,6 +544,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
             // Set Listing only: restrict to grouped listings. Combined Order
             // gets no set filter so solo listings surface too.
             ...(bulkIsEbaySet ? { in_set_listing: 'yes' } : {}),
+            // Combined Order default: only show cards that already have an
+            // active listing. User can widen via the toggle.
+            ...(bulkCombinedListedOnly ? { is_listed: 'yes' } : {}),
             sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no',
             exact: bulkExactMatch ? 'true' : undefined,
           }
@@ -550,14 +560,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Status list matches the individual raw sale flow so inspected/awaiting
   // cards are reachable from bulk too.
   const { data: bulkRawResults, isFetching: isBulkRawSearching } = useQuery<PaginatedResult<RawCardShowResult>>({
-    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay, bulkIsEbaySet, bulkExactMatch],
+    queryKey: ['bulk-sale-raw-search', debouncedBulkSearch, bulkIsEbay, bulkIsEbaySet, bulkExactMatch, bulkCombinedListedOnly],
     queryFn: () => api.get('/cards', {
       params: bulkIsEbay
         ? {
             search: debouncedBulkSearch || undefined, limit: 50,
             // Same split as the graded branch: Set Listing filters to
-            // grouped listings; Combined Order sees all raw eBay inventory.
+            // grouped listings; Combined Order sees all raw eBay inventory
+            // unless the "already listed" default is on.
             ...(bulkIsEbaySet ? { in_set_listing: 'yes' } : {}),
+            ...(bulkCombinedListedOnly ? { is_listed: 'yes' } : {}),
             status: 'purchased_raw,inspected,raw_for_sale', decision: 'sell_raw',
             is_personal_collection: 'no', exact: bulkExactMatch ? 'true' : undefined,
           }
@@ -1706,6 +1718,13 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 className="accent-indigo-500" />
               Strict match — require exact term (no fuzzy/substring)
             </label>
+            {bulkIsEbayCombined && (
+              <label className="flex items-center gap-2 text-[11px] text-zinc-400 cursor-pointer select-none">
+                <input type="checkbox" checked={bulkListedOnly} onChange={(e) => setBulkListedOnly(e.target.checked)}
+                  className="accent-indigo-500" />
+                Already-listed only — hide inventory without an active eBay listing
+              </label>
+            )}
           </>
         )}
         {activeRows.length > 0 ? (
