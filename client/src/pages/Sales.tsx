@@ -1791,12 +1791,20 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
                   <div className="min-w-0">
-                    <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
+                    <p className="text-sm text-zinc-200 truncate flex items-center gap-1.5">
+                      <span className="truncate">{r.card_name ?? '—'}</span>
+                      {bulkIsEbay && r.is_listed && (
+                        <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">eBay</span>
+                      )}
+                    </p>
                     <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.cert_number ? ` · #${r.cert_number}` : ''}</p>
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-xs text-zinc-400 font-medium">{r.company} {r.grade_label}</p>
-                    <p className="text-xs text-zinc-500">{r.card_show_price ? `$${(r.card_show_price / 100).toFixed(2)}` : 'No price'}</p>
+                    {(() => {
+                      const price = bulkIsEbay ? (r.listed_price ?? r.card_show_price) : r.card_show_price;
+                      return <p className="text-xs text-zinc-500">{price ? `$${(price / 100).toFixed(2)}` : 'No price'}</p>;
+                    })()}
                   </div>
                 </button>
               );
@@ -1853,10 +1861,13 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   }}
                   className="w-full text-left px-4 py-2.5 hover:bg-zinc-800 border-b border-zinc-700/40 last:border-0 flex items-center justify-between gap-3 transition-colors disabled:opacity-40 disabled:cursor-default">
                   <div className="min-w-0">
-                    <p className="text-sm text-zinc-200 truncate">
-                      {r.card_name ?? '—'}
+                    <p className="text-sm text-zinc-200 truncate flex items-center gap-1.5">
+                      <span className="truncate">{r.card_name ?? '—'}</span>
+                      {bulkIsEbay && r.is_listed && (
+                        <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">eBay</span>
+                      )}
                       {usedQty > 0 && (
-                        <span className="ml-2 text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
                           in cart ×{usedQty}
                         </span>
                       )}
@@ -1865,7 +1876,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-xs text-zinc-400 font-medium">{r.condition ?? 'Raw'}</p>
-                    <p className="text-xs text-zinc-500">{r.card_show_price ? `$${(r.card_show_price / 100).toFixed(2)}` : 'No price'}</p>
+                    {(() => {
+                      const price = bulkIsEbay ? (r.listed_price ?? r.card_show_price) : r.card_show_price;
+                      return <p className="text-xs text-zinc-500">{price ? `$${(price / 100).toFixed(2)}` : 'No price'}</p>;
+                    })()}
                   </div>
                 </button>
               );

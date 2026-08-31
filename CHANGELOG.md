@@ -1,5 +1,16 @@
 # Reactor — Changelog
 
+## August 31, 2026
+
+### Fixes
+
+**Sales — Combined Order search results now show eBay listing status and price inline**
+- Search result rows in the bulk-sale picker ([Sales.tsx](client/src/pages/Sales.tsx)) always displayed `r.card_show_price` in the right-hand price column, regardless of platform context. For eBay Combined Order, that column showed "No price" for every eBay-listed row because those rows carry `listed_price` (set) and `card_show_price` (null). Only signal that a row was actually listed was the LIST PRICE field populating *after* click-to-add.
+- Fix on both the graded row ([Sales.tsx:1793-1802](client/src/pages/Sales.tsx#L1793-L1802)) and raw row ([Sales.tsx:1855-1875](client/src/pages/Sales.tsx#L1855-L1875)) renderers:
+  - Price display now branches on `bulkIsEbay`: eBay flow reads `r.listed_price ?? r.card_show_price` (fallback preserves the old value for cross-tagged inventory); Card Show flow keeps `r.card_show_price` alone.
+  - Small sky-blue `eBay` chip renders inline with the card name when `bulkIsEbay && r.is_listed`. Chip is hidden entirely in the Card Show flow so it stays contextual — the user only sees the listing badge when it's relevant to the decision they're making.
+- The `Already-listed only` default filter (shipped 2026-08-30) is still on by default; this fix is what the user sees when they turn that filter off to browse the wider inventory.
+
 ## August 30, 2026
 
 ### Fixes
