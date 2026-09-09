@@ -158,7 +158,13 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
       setEditing(false);
       onClose();
     },
-    onError: () => toast.error('Failed to save'),
+    onError: (err: unknown) => {
+      // Prefer the server's specific message (e.g. cert-uniqueness 409) over
+      // a generic "Failed to save" so the user learns *why* it failed.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error ?? 'Failed to save';
+      toast.error(msg);
+    },
   });
 
   const deleteMut = useMutation({

@@ -1,5 +1,14 @@
 # Reactor — Changelog
 
+## September 9, 2026
+
+### Fixes
+
+**Add Slab / Edit Slab — server errors (e.g. duplicate cert) now surface as toasts instead of silent console failures**
+- `POST /api/v1/cards` returns 409 with a specific error message when the submitted `(company, cert_number)` pair is already recorded on another slab (server-side guard at [cards.service.ts:527-542](server/src/services/cards.service.ts#L527-L542)). The client wasn't catching that: [AddSlabForm.tsx](client/src/components/inventory/AddSlabForm.tsx)'s onSubmit had no try/catch, so the axios rejection propagated up unhandled and the failure only showed as a red line in the browser console. Modal stayed open with no explanation — user had to open devtools to know why.
+- [SlabDetailModal](client/src/components/inventory/SlabDetailModal.tsx)'s edit path did catch, but with a generic `toast.error('Failed to save')` — the specific server message (which names the exact cert) was thrown away.
+- Both call sites now read `err.response?.data?.error` first and toast it verbatim. Falls back to a generic message when the server didn't send one. Success path (toast + form close) is unaffected.
+
 ## August 31, 2026
 
 ### Fixes

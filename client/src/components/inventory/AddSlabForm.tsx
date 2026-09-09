@@ -218,14 +218,24 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       }).catch(() => { /* best-effort */ });
     }
     const { grading_cost, purchase_cost, ...rest } = data;
-    await api.post('/cards', {
-      ...rest,
-      purchase_type: 'pre_graded',
-      purchase_cost: purchase_cost.toFixed(2),
-      slab_additional_cost: grading_cost.toFixed(2),
-      is_personal_collection: rest.is_personal_collection ?? false,
-      ...(catalogId ? { catalog_id: catalogId } : {}),
-    });
+    try {
+      await api.post('/cards', {
+        ...rest,
+        purchase_type: 'pre_graded',
+        purchase_cost: purchase_cost.toFixed(2),
+        slab_additional_cost: grading_cost.toFixed(2),
+        is_personal_collection: rest.is_personal_collection ?? false,
+        ...(catalogId ? { catalog_id: catalogId } : {}),
+      });
+    } catch (err: unknown) {
+      // Surface the server's specific error (e.g. cert-uniqueness 409) as a
+      // toast — the previous version let it bubble unhandled, so the user
+      // only saw the failure in the browser console.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error ?? 'Failed to add slab. Please try again.';
+      toast.error(msg);
+      return;
+    }
     toast.success('Slab added!');
     onSuccess();
   };
