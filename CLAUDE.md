@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **No unnecessary abstractions** — don't add helpers or utilities for one-time operations.
 - **No comments on unchanged code** — only add comments where logic isn't self-evident.
 - **Migrations are plain SQL files** — sequential numbered files in `server/src/db/migrations/`. When the migration runner has ordering issues, apply SQL directly via the Node.js pg Pool.
+- **After updating CHANGELOG.md, output a copy-paste-ready markdown summary of the changes** — put it in a fenced ` ```markdown ` code block at the end of the turn so the user can paste the raw markdown into release notes, Slack, PR descriptions, etc. without hunting for it. Same content as the CHANGELOG entry; don't re-render as prose.
 
 ## Secret handling (non-negotiable)
 
