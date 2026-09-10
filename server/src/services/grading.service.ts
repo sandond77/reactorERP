@@ -206,6 +206,7 @@ export async function listSlabs(
     location_id: string | null;
     raw_purchase_label: string | null;
     sku: string | null;
+    at_show_count: number;
   }>`
     SELECT
       ci.id,
@@ -270,7 +271,24 @@ export async function listSlabs(
       loc.name AS location_name,
       ci.location_id,
       rp.purchase_id AS raw_purchase_label,
-      cc.sku
+      cc.sku,
+      -- Same-identity siblings already at a card show (catalog_id + grade +
+      -- company match, self excluded, sold/lost excluded). Powers the "at
+      -- show: N" indicator in the Card Show Pick List picker so users don't
+      -- over-stock a card they already have supply of at the booth.
+      COALESCE((
+        SELECT COUNT(*)::int
+        FROM card_instances ci_cs
+        JOIN slab_details sd_cs ON sd_cs.card_instance_id = ci_cs.id
+        WHERE ci_cs.user_id = ci.user_id
+          AND ci_cs.is_card_show = true
+          AND ci_cs.status NOT IN ('sold', 'lost_damaged')
+          AND ci_cs.id <> ci.id
+          AND ci_cs.catalog_id IS NOT NULL
+          AND ci_cs.catalog_id = ci.catalog_id
+          AND sd_cs.company = sd.company
+          AND sd_cs.grade IS NOT DISTINCT FROM sd.grade
+      ), 0)                                           AS at_show_count
     FROM card_instances ci
     LEFT JOIN card_catalog cc ON cc.id = ci.catalog_id
     INNER JOIN slab_details sd ON sd.card_instance_id = ci.id

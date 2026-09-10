@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { Search, X, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, type PaginatedResult } from '../../lib/api';
@@ -27,6 +27,10 @@ interface SlabRow {
   card_show_price: number | null;
   raw_cost: number;
   grading_cost: number;
+  // Same-identity siblings (catalog_id + grade + company match) already at a
+  // card show. Shown inline as an amber "@show: N" chip so the user doesn't
+  // over-stock a card that's already got copies at the booth.
+  at_show_count: number;
 }
 
 interface Props {
@@ -96,16 +100,21 @@ export function PickListModal({ open, onClose }: Props) {
   // pattern per CLAUDE.md (no window.confirm ever).
   const [clearArmed, setClearArmed] = useState(false);
 
-  // Add-mode search: unsold slabs not in card-show inventory
-  const addQuery = useQuery<PaginatedResult<SlabRow>>({
+  // Add-mode search: unsold slabs not in card-show inventory. Infinite-scroll
+  // pagination via IntersectionObserver on a sentinel row at the bottom of
+  // the table body.
+  const PAGE_LIMIT = 50;
+  const addQuery = useInfiniteQuery<PaginatedResult<SlabRow>>({
     queryKey: ['card-show-picker-add', debouncedSearch, sortBy, sortDir],
-    queryFn: () => api.get('/grading/slabs', {
+    queryFn: ({ pageParam }) => api.get('/grading/slabs', {
       params: {
         status: 'unsold', is_card_show: 'no', personal_collection: 'no',
-        search: debouncedSearch || undefined, limit: 50, page: 1,
+        search: debouncedSearch || undefined, limit: PAGE_LIMIT, page: pageParam,
         sort_by: sortBy, sort_dir: sortDir,
       },
     }).then((r) => r.data),
+    initialPageParam: 1,
+    getNextPageParam: (last) => (last.page < last.total_pages ? last.page + 1 : undefined),
     enabled: open && mode === 'add',
   });
 
@@ -125,10 +134,14 @@ export function PickListModal({ open, onClose }: Props) {
   // If any picks are no longer eligible (sold, moved to card show elsewhere),
   // silently drop them from localStorage and toast the count so the user knows
   // why the number changed.
+  // Reconciliation only runs in review mode (see effect below), so we key the
+  // eligible-ids set solely off the review-mode query. Add-mode results are
+  // search-filtered and paged, so they don't represent the full eligible
+  // universe anyway.
   const eligibleIds = useMemo(() => {
-    const src = mode === 'review' ? reviewQuery.data?.data : addQuery.data?.data;
+    const src = reviewQuery.data?.data;
     return new Set((src ?? []).map((r) => r.id));
-  }, [mode, reviewQuery.data, addQuery.data]);
+  }, [reviewQuery.data]);
   const reconciledOnceRef = useRef(false);
   useEffect(() => {
     if (!open || pickedIds.length === 0) return;
@@ -206,8 +219,12 @@ export function PickListModal({ open, onClose }: Props) {
   });
   const readyTotalCents = readyRows.reduce((sum, r) => sum + (parseCents(reviewState[r.id].price) ?? 0), 0);
 
-  // Add-mode rows
-  const addRows = addQuery.data?.data ?? [];
+  // Add-mode rows — flatten all pages the infinite query has fetched so far
+  const addRows = useMemo<SlabRow[]>(
+    () => addQuery.data?.pages.flatMap((p) => p.data) ?? [],
+    [addQuery.data],
+  );
+  const addTotal = addQuery.data?.pages[0]?.total ?? 0;
 
   function toggleReview(id: string, patch: Partial<ReviewEntry>) {
     // Delegates to the localStorage helper; the useSyncExternalStore
@@ -304,10 +321,14 @@ export function PickListModal({ open, onClose }: Props) {
               setSearch={setSearch}
               rows={addRows}
               pickedSet={pickedSet}
-              loading={addQuery.isLoading || addQuery.isFetching}
+              loading={addQuery.isLoading}
               sortBy={sortBy}
               sortDir={sortDir}
               onSort={toggleSort}
+              total={addTotal}
+              hasNextPage={!!addQuery.hasNextPage}
+              isFetchingNextPage={addQuery.isFetchingNextPage}
+              fetchNextPage={() => addQuery.fetchNextPage()}
             />
           ) : (
             <ReviewMode
@@ -370,8 +391,32 @@ function AddMode(props: {
   sortBy: SortCol;
   sortDir: 'asc' | 'desc';
   onSort: (col: SortCol) => void;
+  total: number;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  fetchNextPage: () => void;
 }) {
-  const { search, setSearch, rows, pickedSet, loading, sortBy, sortDir, onSort } = props;
+  const { search, setSearch, rows, pickedSet, loading, sortBy, sortDir, onSort, total, hasNextPage, isFetchingNextPage, fetchNextPage } = props;
+
+  // Infinite-scroll sentinel: an IntersectionObserver on a tiny row at the
+  // bottom of the tbody triggers fetchNextPage. Scoped to the scroll container
+  // via `root` so it only fires when the sentinel actually enters the modal's
+  // visible area, not the full document viewport.
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    if (!hasNextPage || isFetchingNextPage) return;
+    const root = scrollRef.current;
+    const target = sentinelRef.current;
+    if (!root || !target) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (e.isIntersecting) { fetchNextPage(); break; }
+      }
+    }, { root, rootMargin: '200px 0px', threshold: 0 });
+    io.observe(target);
+    return () => io.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, rows.length]);
   const sortIcon = (col: SortCol) => {
     if (sortBy !== col) return <span className="text-zinc-600">↕</span>;
     return <span className="text-indigo-400">{sortDir === 'asc' ? '↑' : '↓'}</span>;
@@ -409,7 +454,7 @@ function AddMode(props: {
         // column set (Cert · Card · Grade · Company · Cost · Listed) so scanning
         // the pick candidates feels identical to browsing the main table.
         <div className="border border-zinc-800 rounded-lg overflow-hidden">
-          <div className="max-h-[55vh] overflow-y-auto">
+          <div ref={scrollRef} className="max-h-[55vh] overflow-y-auto">
             <table className="w-full text-xs table-fixed">
               <colgroup>
                 <col className="w-10" />
@@ -461,6 +506,14 @@ function AddMode(props: {
                               eBay
                             </span>
                           )}
+                          {r.at_show_count > 0 && (
+                            <span
+                              className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-amber-500/15 border border-amber-500/40 text-amber-300"
+                              title={`${r.at_show_count} same-identity slab${r.at_show_count === 1 ? '' : 's'} already at a card show`}
+                            >
+                              @show ×{r.at_show_count}
+                            </span>
+                          )}
                         </div>
                         {r.set_name && (
                           <div className="truncate text-[10px] text-zinc-500">{r.set_name}</div>
@@ -475,6 +528,28 @@ function AddMode(props: {
                     </tr>
                   );
                 })}
+                {/* Sentinel row that trips the IntersectionObserver to load
+                    the next page. Height 1px so it doesn't add visible space
+                    at the end of the list. */}
+                {hasNextPage && (
+                  <tr ref={sentinelRef} aria-hidden>
+                    <td colSpan={7} className="h-px" />
+                  </tr>
+                )}
+                {isFetchingNextPage && (
+                  <tr>
+                    <td colSpan={7} className="px-2 py-3 text-center text-[11px] text-zinc-500">
+                      <Loader2 size={11} className="inline animate-spin mr-1.5" />Loading more…
+                    </td>
+                  </tr>
+                )}
+                {!hasNextPage && rows.length > 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-2 py-2 text-center text-[10px] text-zinc-600">
+                      End of results · {total} total
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -525,6 +600,14 @@ function ReviewMode(props: {
                   {r.is_listed && (
                     <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
                       eBay
+                    </span>
+                  )}
+                  {r.at_show_count > 0 && (
+                    <span
+                      className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-amber-500/15 border border-amber-500/40 text-amber-300"
+                      title={`${r.at_show_count} same-identity slab${r.at_show_count === 1 ? '' : 's'} already at a card show`}
+                    >
+                      @show ×{r.at_show_count}
                     </span>
                   )}
                 </p>
