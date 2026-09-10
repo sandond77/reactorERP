@@ -5,7 +5,7 @@ function toTitleCase(s: string) {
 }
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Pencil, Plus, X } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, apiErrorMessage } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { AddPartModal } from '../components/catalog/AddPartModal';
@@ -241,8 +241,7 @@ function EditPartModal({ row, onClose, onReassign }: EditPartModalProps) {
       queryClient.invalidateQueries({ queryKey: ['empty-parts'] });
       onClose();
     } catch (err: unknown) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setError((err as any)?.response?.data?.error ?? 'Failed to delete.');
+      setError(apiErrorMessage(err, 'Failed to delete.'));
       setDeleteStep(0);
     } finally {
       setDeleting(false);
@@ -282,8 +281,7 @@ function EditPartModal({ row, onClose, onReassign }: EditPartModalProps) {
       queryClient.invalidateQueries({ queryKey: ['inventory-summary'] });
       onClose();
     } catch (err: unknown) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setError((err as any)?.response?.data?.error ?? 'Failed to save.');
+      setError(apiErrorMessage(err, 'Failed to save.'));
       setConfirm(false);
     } finally {
       setSaving(false);
@@ -499,8 +497,7 @@ function ReassignModal({ row, onClose }: { row: ReassignTarget; onClose: () => v
       toast.success(newCatalogId ? 'Reassigned' : 'Unlinked');
       onClose();
     } catch (err: unknown) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setError((err as any)?.response?.data?.error ?? 'Failed.');
+      setError(apiErrorMessage(err, 'Failed.'));
     } finally {
       setSaving(false);
     }
@@ -609,8 +606,7 @@ function ReassignPartModal({ part, onClose }: { part: SummaryRow; onClose: () =>
       queryClient.invalidateQueries({ queryKey: ['empty-parts'] });
       setMoved({ count: res.data?.updated ?? 0 });
     } catch (err: unknown) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setError((err as any)?.response?.data?.error ?? 'Failed to reassign.');
+      setError(apiErrorMessage(err, 'Failed to reassign.'));
     } finally {
       setSaving(false);
     }

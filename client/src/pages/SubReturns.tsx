@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen, Sparkles } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, apiErrorMessage } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { formatDate, formatCurrency } from '../lib/utils';
@@ -763,9 +763,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
       toast.success(`AI filled ${matches.length} slab${matches.length === 1 ? '' : 's'}`);
     },
     onError: (err: unknown) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msg = (err as any)?.response?.data?.error ?? 'AI assist failed';
-      toast.error(msg);
+      toast.error(apiErrorMessage(err, 'AI assist failed'));
     },
   });
 

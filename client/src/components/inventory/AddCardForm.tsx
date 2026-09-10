@@ -57,8 +57,8 @@ export function AddCardForm({ onSuccess }: AddCardFormProps) {
   // the reference — mid-edit changes aren't tracked as corrections until the
   // user actually saves).
   const aiSnapshotRef = useRef<Record<string, unknown> | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(schema) as any,
     defaultValues: { card_game: 'pokemon', language: 'EN', purchase_type: 'raw', quantity: 1, currency: 'USD' },
   });

@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Sparkles, Loader2, Upload, X } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api } from '../../lib/api';
+import { api, apiErrorMessage } from '../../lib/api';
 import { normalizeCardNumber } from '../../lib/utils';
 import { labelsForCompany, getCanonicalLabel } from '../../lib/grade-labels';
 import { Button } from '../ui/Button';
@@ -59,8 +59,8 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
   // if the user edited any AI-supplied field. See identical pattern in
   // AddCardForm — reset on each new Auto-fill run; server drops no-op diffs.
   const aiSnapshotRef = useRef<Record<string, unknown> | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { register, handleSubmit, setValue, watch, formState: { errors, isSubmitting } } = useForm<FormData>({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     resolver: zodResolver(schema) as any,
     defaultValues: { card_game: 'pokemon', language: 'EN', currency: 'USD', slab_company: 'PSA', is_personal_collection: false },
   });
@@ -231,9 +231,7 @@ export function AddSlabForm({ onSuccess }: AddSlabFormProps) {
       // Surface the server's specific error (e.g. cert-uniqueness 409) as a
       // toast — the previous version let it bubble unhandled, so the user
       // only saw the failure in the browser console.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msg = (err as any)?.response?.data?.error ?? 'Failed to add slab. Please try again.';
-      toast.error(msg);
+      toast.error(apiErrorMessage(err, 'Failed to add slab. Please try again.'));
       return;
     }
     toast.success('Slab added!');

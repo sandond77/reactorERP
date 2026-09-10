@@ -60,6 +60,11 @@ export function PartNumberField({ form, catalogMatch, onSelect, onClear }: Props
 
   useEffect(() => {
     if (debounceRef3.current) clearTimeout(debounceRef3.current);
+    // Reset when query is too short. Legit sync-with-external-state pattern
+    // — the lint rule flags any setState in an effect body but the reset is
+    // the correct behavior: stale results shouldn't stick around after a
+    // backspace shortens the query below the threshold.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (manualQuery.trim().length < 2) { setManualResults([]); return; }
     debounceRef3.current = setTimeout(() => {
       api.get('/catalog/search', { params: { q: manualQuery.trim(), limit: 12 } })

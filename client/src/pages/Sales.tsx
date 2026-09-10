@@ -670,7 +670,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     setCardSearch(match.card_name);
     setSelectedCard(match);
     setStep('copies');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [searchResults, debouncedSearch, step]);
 
 
@@ -2824,6 +2824,10 @@ function PasteOrderList({
     }
     document.addEventListener('paste', onPaste);
     return () => document.removeEventListener('paste', onPaste);
+    // loadImage is defined inline in this component and captured in the
+    // closure. Adding it to deps would re-register the paste listener on
+    // every render — the mount-only registration is intentional here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const matchedCount = pasteResults.filter(r => r.matched).length;

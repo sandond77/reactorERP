@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
-import { api } from '../../lib/api';
+import { api, apiErrorMessage } from '../../lib/api';
 import { Button } from '../ui/Button';
 
 interface CardGame {
@@ -130,8 +130,8 @@ export function CardGameSelect({ label = 'Game', value, onChange }: Props) {
                   setAddingGame(false);
                   setNewGameName('');
                   setNewGameAbbrev('');
-                } catch (err: any) {
-                  toast.error(err?.response?.data?.error ?? 'Failed to add game');
+                } catch (err: unknown) {
+                  toast.error(apiErrorMessage(err, 'Failed to add game'));
                 } finally {
                   setSaving(false);
                 }

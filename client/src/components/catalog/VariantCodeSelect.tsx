@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Loader2 } from 'lucide-react';
-import { api } from '../../lib/api';
+import { api, apiErrorMessage } from '../../lib/api';
 
 interface VariantCode {
   code: string;
@@ -64,8 +64,8 @@ export function VariantCodeSelect({ game, value, onChange, className = '', place
       setAdding(false);
       setNewCode('');
       setNewName('');
-    } catch (err: any) {
-      setAddError(err?.response?.data?.error ?? 'Failed to add code.');
+    } catch (err: unknown) {
+      setAddError(apiErrorMessage(err, 'Failed to add code.'));
     } finally {
       setSaving(false);
     }

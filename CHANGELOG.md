@@ -2,6 +2,45 @@
 
 ## September 10, 2026
 
+### Features
+
+**Mobile Agent — Quick Sale (sale-by-text subagent)**
+- New button at the top of the MobileAgent suggestions row opens a two-phase modal ([QuickSaleModal.tsx](client/src/components/mobile/QuickSaleModal.tsx)). Phase 1 is a single input field with placeholder examples ("sold Charizard PSA 10 to John for 200"); phase 2 is a confirm view with a candidate picker and every parsed field editable before commit.
+- Server subagent: [parse-sale.service.ts](server/src/services/ai/parse-sale.service.ts) — Haiku 4.5 (`claude-haiku-4-5-20251001`) with cached system prompt. Parses one sentence into `{ card_query, company, grade, cert_number, price, quantity, buyer, platform, sold_at, confidence, notes }`. Defensive JSON cleanup + type-guarded field mapping in case the model slips.
+- Endpoint: `POST /sales/quick-parse` ([sales.controller.ts](server/src/controllers/sales.controller.ts)) — takes free text, runs the parser, then executes an inventory search (cert-number preferred, card_query fallback) and returns `{ parsed, candidates }`. Candidate list is refined by grade + company when the parser knows them.
+- Confirmation is required by design — nothing writes until the user taps Confirm sale. Phone keyboard's built-in mic button handles voice-to-text (no custom speech recognition).
+- Why a subagent instead of a chat-agent tool call: Haiku is ~60× cheaper than the chat agent's Sonnet, and this flow replaces 5–6 conversational turns with a single dictate + confirm — the natural pattern for a booth clerk processing sales in a queue.
+
+**Anomaly review — deterministic data-hygiene checks, surfaced through Action Items**
+- New [anomalies.service.ts](server/src/services/anomalies.service.ts) runs six correlated SQL checks over recent sales + inventory:
+  - `sold_but_listed` (high) — sold slabs with an active eBay listing still open
+  - `cost_outlier` (medium) — raw purchase cost > $10,000, likely a decimal typo
+  - `orphan_show_sale` (low) — `platform=card_show` sale without a linked `card_show_id`
+  - `personal_sold` (low) — `is_personal_collection=true` slabs that were sold anyway
+  - `duplicate_listing` (medium) — same `card_instance_id` with >1 active listing
+  - `heavy_loss` (low) — recent sale price < 50% of cost basis (>$5 cost threshold to skip trivia)
+- Wired into the existing Action Items aggregator ([action-items.routes.ts](server/src/routes/action-items.routes.ts)) as a second source in parallel with `legacy_variants`. Runs in one `Promise.all`; both readers use the same auth gate.
+- Client renderer: new `AnomaliesResolver` in [ActionItems.tsx](client/src/components/dashboard/ActionItems.tsx) — read-only for now (no inline fixers), color-coded severity chip + count strip (`3 high · 5 medium · 12 low`). The pill on the Dashboard picks the count up automatically since it already sums across all sources.
+- No AI in this pass — deterministic checks catch the high-signal cases cheaply. The Haiku layer is a follow-up for pattern-shaped anomalies that SQL can't easily express.
+
+### Refactors
+
+**Client-wide lint sweep — 0 errors, 0 warnings from 17E/9W**
+- Historical debt from months of unchecked commits: 12 `no-explicit-any` errors (mostly `(err as any)?.response?.data?.error` in mutation handlers), 2 `set-state-in-effect` errors, 1 `react-refresh/only-export-components`, 1 missing-deps warning, plus 8 stale `eslint-disable` directives from lint rules that had since been renamed or removed.
+- New shared helper [apiErrorMessage(err, fallback)](client/src/lib/api.ts) — properly typed via `axios.isAxiosError` + `AxiosError<{ error?: string }>`. Falls through to `Error.message` for non-axios throws, then to the caller's fallback string. Adopted at **13 callsites across 9 files** (PickListModal, AddPartModal, VariantCodeSelect, AddSlabForm, SlabDetailModal, CardGameSelect, Grading, Inspection, Intake, InspectionPanel, SubReturns, InventorySummary, QuickSaleModal).
+- **New file [use-merged-sets.ts](client/src/components/catalog/use-merged-sets.ts)** — extracted the `useMergedSets` hook + `SetOption` type out of [SetCombobox.tsx](client/src/components/catalog/SetCombobox.tsx) so that file only exports the component. This is required by `react-refresh/only-export-components` — mixing hooks and components in the same module breaks HMR. Two callers (AddPartModal, Intake) updated to import the hook from the new module directly.
+- **[use-paged-or-infinite.ts](client/src/lib/use-paged-or-infinite.ts):** the "write ref during render" pattern (`loadMoreRef.current = loadMore`) moved into a no-dep `useEffect`. Same behavior, lint-clean.
+- **[PartNumberField.tsx](client/src/components/catalog/PartNumberField.tsx) + [Sales.tsx](client/src/pages/Sales.tsx):** targeted `eslint-disable-next-line` with a comment explaining why for two genuinely-legit exceptions (sync-with-external-state effect reset; mount-only paste listener with inline callback in closure).
+- **Zod resolver `as any` in AddCardForm + AddSlabForm** — known react-hook-form ↔ zod type incompatibility. Kept the cast; moved the eslint-disable to the exact line where `any` appears (was stale-positioned above the wrong line before).
+- **Intake.tsx `setFStatus(s.val as any)`** — defensive noise from a TS widening quirk that no longer exists. Removed cleanly.
+- All 8 stale directives auto-removed via `eslint --fix` at the end.
+
+### Working preferences
+
+**`npm run lint` added to the standard pre-commit gate** ([CLAUDE.md](CLAUDE.md))
+- Historically only `git status` + `tsc --noEmit` were being run pre-commit. Lint was ad-hoc. Debt accumulated silently — the 17-error backlog above happened over months of unchecked commits.
+- CLAUDE.md now names lint as a commit blocker: 0 errors AND 0 warnings expected; fix new hits in the same commit; use `apiErrorMessage` instead of `(err as any)?.response?.data?.error`; use targeted `eslint-disable-next-line <rule>` with a comment for genuinely-unavoidable exceptions (never file-wide disables).
+
 ### UX
 
 **Dashboard — Revenue window default flipped from `Today` to `7D`**

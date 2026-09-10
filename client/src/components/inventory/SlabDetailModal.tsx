@@ -5,7 +5,7 @@ import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { formatCurrency, formatDate } from '../../lib/utils';
 import { labelsForCompany, getCanonicalLabel } from '../../lib/grade-labels';
-import { api } from '../../lib/api';
+import { api, apiErrorMessage } from '../../lib/api';
 import { useLocations } from '../../hooks/useLocations';
 import toast from 'react-hot-toast';
 
@@ -161,9 +161,7 @@ export function SlabDetailModal({ slab, onClose, onDeleted, cardShowMode = false
     onError: (err: unknown) => {
       // Prefer the server's specific message (e.g. cert-uniqueness 409) over
       // a generic "Failed to save" so the user learns *why* it failed.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msg = (err as any)?.response?.data?.error ?? 'Failed to save';
-      toast.error(msg);
+      toast.error(apiErrorMessage(err, 'Failed to save'));
     },
   });
 

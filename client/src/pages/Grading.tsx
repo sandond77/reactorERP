@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Plus, ArrowLeft, Loader2, Trash2, X, Sparkles } from 'lucide-react';
-import { api, type PaginatedResult } from '../lib/api';
+import { api, apiErrorMessage, type PaginatedResult } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
@@ -761,7 +761,7 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
     if (!name.trim()) return;
     setAutoFilling(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const res = await api.post('/agent/auto-fill', { partial_name: name, game: 'pokemon' });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const s = (res.data as any)?.data?.suggestions?.[0];
@@ -819,8 +819,8 @@ function AddCardLegacy({ batchId, onClose }: { batchId: string; onClose: () => v
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
       onClose();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to add legacy card');
+    } catch (err: unknown) {
+      toast.error(apiErrorMessage(err, 'Failed to add legacy card'));
     } finally {
       setSaving(false);
     }
@@ -1010,7 +1010,7 @@ function FixIdentityTab({ item, batchId, onClose }: { item: BatchItem; batchId: 
     if (!name.trim()) return;
     setAutoFilling(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const res = await api.post('/agent/auto-fill', { partial_name: name, game: 'pokemon' });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const s = (res.data as any)?.data?.suggestions?.[0];
@@ -1340,7 +1340,7 @@ function ReplaceFromLegacyTab({ item, batchId, onClose }: { item: BatchItem; bat
     if (!name.trim()) return;
     setAutoFilling(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       const res = await api.post('/agent/auto-fill', { partial_name: name, game: 'pokemon' });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const s = (res.data as any)?.data?.suggestions?.[0];

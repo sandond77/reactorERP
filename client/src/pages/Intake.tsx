@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Plus, X, PackageCheck, Ban, ImagePlus, Sparkles, Loader2, RotateCcw } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, apiErrorMessage } from '../lib/api';
 import { PartNumberField, type CatalogMatch } from '../components/catalog/PartNumberField';
 import { AddPartModal, type CreatedPart } from '../components/catalog/AddPartModal';
-import { SetCombobox, useMergedSets } from '../components/catalog/SetCombobox';
+import { SetCombobox } from '../components/catalog/SetCombobox';
+import { useMergedSets } from '../components/catalog/use-merged-sets';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
 import { formatCurrency, formatDate, parseDollars, toCents } from '../lib/utils';
@@ -307,7 +308,7 @@ function PurchaseForm({
     const yen  = parseDollars(form.total_cost_yen);
     const rate = parseDollars(form.fx_rate);
     if (yen > 0 && rate > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
+       
       setForm((f) => ({ ...f, total_cost_usd: (yen / rate).toFixed(2) }));
     }
   }, [form.total_cost_yen, form.fx_rate]);
@@ -1057,13 +1058,13 @@ export function Intake() {
   const unreceiveMut = useMutation({
     mutationFn: (id: string) => api.post(`/raw-purchases/${id}/unreceive`).then(r => r.data),
     onSuccess: () => { invalidate(); setUnreceiveRow(null); toast.success('Reverted to Ordered'); },
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to unreceive'),
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to unreceive')),
   });
 
   const uncancelMut = useMutation({
     mutationFn: (id: string) => api.patch(`/raw-purchases/${id}`, { status: 'ordered' }).then(r => r.data),
     onSuccess: () => { invalidate(); setUncancelRow(null); toast.success('Reverted to Ordered'); },
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to revert'),
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to revert')),
   });
 
   const deleteMut = useMutation({
@@ -1107,7 +1108,7 @@ export function Intake() {
               { val: 'received',   label: 'Received' },
               { val: 'cancelled',  label: 'Cancelled' },
             ] as const).map(s => (
-              <button key={String(s.val)} onClick={() => { setFStatus(s.val as any); setPage(1); }}
+              <button key={String(s.val)} onClick={() => { setFStatus(s.val); setPage(1); }}
                 className={`px-3 py-1 text-xs rounded-md font-medium transition-colors ${fStatus === s.val ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
                 {s.label}
               </button>

@@ -10,6 +10,7 @@ salesRouter.get('/filters', salesController.getSaleFilters);
 salesRouter.get('/', salesController.listSales);
 salesRouter.post('/batch', salesController.recordBulkSale);
 salesRouter.post('/parse-order-items', salesController.parseOrderItems);
+salesRouter.post('/quick-parse', salesController.quickParseSale);
 salesRouter.post('/', salesController.recordSale);
 salesRouter.get('/:id', salesController.getSale);
 salesRouter.put('/:id', salesController.updateSale);

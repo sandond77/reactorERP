@@ -21,6 +21,17 @@ interface LegacyVariantEntry {
   sku: string | null;
 }
 
+// Anomaly finding shape from GET /action-items. Mirrors server's Anomaly.
+interface AnomalyEntry {
+  type: string;
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  detail: string;
+  card_instance_id?: string;
+  sale_id?: string;
+  listing_id?: string;
+}
+
 // Preview the SKU the server would produce for a legacy row when the user
 // picks a code. Legacy row SKUs are always 4-segment (the pre-migration
 // generatePartNumber stripped letter suffixes and never wrote a 5th segment)
@@ -82,6 +93,13 @@ function ActionItemsModal({ items, onClose }: { items: ActionItemGroup[]; onClos
                   title={group.title}
                   description={group.description}
                   entries={group.entries as LegacyVariantEntry[]}
+                />
+              )}
+              {group.type === 'anomalies' && (
+                <AnomaliesResolver
+                  title={group.title}
+                  description={group.description}
+                  entries={group.entries as AnomalyEntry[]}
                 />
               )}
             </div>
@@ -204,6 +222,78 @@ function LegacyVariantsResolver({
         >
           {saving ? <><Loader2 size={12} className="animate-spin mr-1.5" />Saving…</> : `Save ${dirtyCount || ''} fix${dirtyCount === 1 ? '' : 'es'}`.trim()}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+// Anomalies resolver — read-only for now. Each finding is displayed with its
+// severity chip, title, and detail. No inline actions since fixes vary
+// widely by anomaly type (edit a sale, end a listing, unflag a personal
+// collection). Deep-link buttons could be added later; for now the value is
+// surfacing the finding at all so the user notices it.
+function AnomaliesResolver({
+  title,
+  description,
+  entries,
+}: {
+  title: string;
+  description: string;
+  entries: AnomalyEntry[];
+}) {
+  const bySeverity = { high: 0, medium: 0, low: 0 };
+  for (const e of entries) bySeverity[e.severity]++;
+  return (
+    <div className="p-5 space-y-4">
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
+          <span className="text-[10px] font-semibold text-amber-300 bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 rounded-full">
+            {entries.length} finding{entries.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <p className="text-xs text-zinc-500 leading-relaxed">{description}</p>
+        {(bySeverity.high > 0 || bySeverity.medium > 0) && (
+          <div className="flex items-center gap-2 mt-2 text-[10px]">
+            {bySeverity.high > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-red-500/15 border border-red-500/40 text-red-300 font-semibold uppercase tracking-wider">
+                {bySeverity.high} high
+              </span>
+            )}
+            {bySeverity.medium > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 font-semibold uppercase tracking-wider">
+                {bySeverity.medium} medium
+              </span>
+            )}
+            {bySeverity.low > 0 && (
+              <span className="px-1.5 py-0.5 rounded bg-zinc-700/40 border border-zinc-600/40 text-zinc-400 font-semibold uppercase tracking-wider">
+                {bySeverity.low} low
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-2">
+        {entries.map((e, i) => {
+          const tone = e.severity === 'high'
+            ? 'bg-red-500/10 border-red-500/40 text-red-300'
+            : e.severity === 'medium'
+              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+              : 'bg-zinc-700/30 border-zinc-600/40 text-zinc-400';
+          return (
+            <div key={`${e.type}-${i}`} className="p-3 rounded-lg border border-zinc-800 bg-zinc-900/40 space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className={`text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded border ${tone}`}>
+                  {e.severity}
+                </span>
+                <span className="text-[10px] text-zinc-500 font-mono">{e.type}</span>
+              </div>
+              <p className="text-sm text-zinc-100 leading-snug">{e.title}</p>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">{e.detail}</p>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Plus, ChevronLeft, Trash2, Pencil, ImagePlus, X } from 'lucide-react';
-import { api } from '../../lib/api';
+import { api, apiErrorMessage } from '../../lib/api';
 import { Button } from '../../components/ui/Button';
 import { Modal } from '../../components/ui/Modal';
 import { formatCurrency, toCents } from '../../lib/utils';
@@ -415,14 +415,14 @@ export function InspectionPanel({
       return card;
     },
     onSuccess: () => { invalidate(); setAddLineOpen(false); toast.success('Line added'); },
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to add line'),
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to add line')),
   });
 
   const updateMut = useMutation({
     mutationFn: ({ cardId, body }: { cardId: string; body: Record<string, unknown> }) =>
       api.patch(`/raw-purchases/${purchase.id}/lines/${cardId}`, body).then((r) => r.data),
     onSuccess: () => { invalidate(); setEditLine(null); toast.success('Updated'); },
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to update'),
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to update')),
   });
 
   const deleteMut = useMutation({
@@ -438,7 +438,7 @@ export function InspectionPanel({
       qc.invalidateQueries({ queryKey: ['slab-picker'] });   // picker results may have included the now-unlinked slab
       toast.success('Back-link removed (slab kept)');
     },
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to unlink'),
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to unlink')),
   });
 
   const allocated = data?.cards.reduce((s, c) => s + c.quantity, 0) ?? 0;

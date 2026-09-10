@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
-import { api } from '../../lib/api';
+import { api, apiErrorMessage } from '../../lib/api';
 import { Button } from '../ui/Button';
-import { SetCombobox, useMergedSets } from './SetCombobox';
+import { SetCombobox } from './SetCombobox';
+import { useMergedSets } from './use-merged-sets';
 import { VariantCodeSelect } from './VariantCodeSelect';
 
 const ADD_GAME_SENTINEL = '__add_new_game__';
@@ -153,11 +154,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
       });
       queryClient.invalidateQueries({ queryKey: ['set-aliases'] });
     } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'response' in err
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (err as any).response?.data?.error ?? 'Failed to register set.'
-        : 'Failed to register set.';
-      setError(msg);
+      setError(apiErrorMessage(err, 'Failed to register set.'));
     }
   }
 
@@ -222,11 +219,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
         onClose();
       }
     } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'response' in err
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (err as any).response?.data?.error ?? 'Failed to save.'
-        : 'Failed to save.';
-      setError(msg);
+      setError(apiErrorMessage(err, 'Failed to save.'));
     } finally {
       setSubmitting(false);
     }
@@ -318,11 +311,7 @@ export function AddPartModal({ onClose, onCreated, prefill }: Props) {
                           });
                           setAddingGame(false);
                         } catch (err: unknown) {
-                          const msg = err && typeof err === 'object' && 'response' in err
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                            ? (err as any).response?.data?.error ?? 'Failed to add game.'
-                            : 'Failed to add game.';
-                          setError(msg);
+                          setError(apiErrorMessage(err, 'Failed to add game.'));
                         }
                       }}
                     >

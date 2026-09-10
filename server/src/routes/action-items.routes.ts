@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth';
 import { db } from '../config/database';
+import { getAnomalies } from '../services/anomalies.service';
 
 // Action Items: one-time chores the app surfaces to a user until resolved
 // (unlike perpetual alerts on the Dashboard's AttentionCard). Each source
@@ -62,7 +63,12 @@ async function getLegacyVariants(userId: string): Promise<LegacyVariantEntry[]> 
 
 actionItemsRouter.get('/', async (req, res, next) => {
   try {
-    const legacyVariants = await getLegacyVariants(req.dataUserId);
+    // Run both sources in parallel — neither depends on the other, and both
+    // are pure reads so there's no ordering concern.
+    const [legacyVariants, anomalies] = await Promise.all([
+      getLegacyVariants(req.dataUserId),
+      getAnomalies(req.dataUserId),
+    ]);
     const items = [] as Array<{
       type: string;
       title: string;
@@ -78,6 +84,16 @@ actionItemsRouter.get('/', async (req, res, next) => {
           'Some catalog entries still use free-text variant labels from before the standard codes existed. Pick a code from the enum (or clear the field) so the SKU picks up the correct 5th segment.',
         count: legacyVariants.length,
         entries: legacyVariants,
+      });
+    }
+    if (anomalies.length > 0) {
+      items.push({
+        type: 'anomalies',
+        title: 'Data anomalies to review',
+        description:
+          'Sanity-check findings from the deterministic anomaly scan — sold-but-still-listed cards, cost-basis outliers, orphan card-show sales, and other data hygiene items.',
+        count: anomalies.length,
+        entries: anomalies,
       });
     }
     res.json({ data: items });

@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Bot, Send, Camera, ImageIcon, X, Loader2, LogOut } from 'lucide-react';
+import { Bot, Send, Camera, ImageIcon, X, Loader2, LogOut, Mic } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { api } from '../lib/api';
 import { invalidateResources, type Resource } from '../lib/query-invalidation';
+import { QuickSaleModal } from '../components/mobile/QuickSaleModal';
 
 const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const ACCEPTED_TYPES = [...IMAGE_TYPES, 'text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].join(',');
@@ -88,6 +89,7 @@ export function MobileAgent() {
   const [loading, setLoading] = useState(false);
   const [attachments, setAttachments] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
+  const [quickSaleOpen, setQuickSaleOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const galleryRef = useRef<HTMLInputElement>(null);
@@ -186,6 +188,7 @@ export function MobileAgent() {
 
   return (
     <div className="flex flex-col bg-zinc-950 text-zinc-100" style={{ height: '100svh' }}>
+      <QuickSaleModal open={quickSaleOpen} onClose={() => setQuickSaleOpen(false)} />
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 bg-zinc-900 border-b border-zinc-800 shrink-0">
         <div className="flex items-center gap-3">
@@ -231,6 +234,17 @@ export function MobileAgent() {
               <p className="text-xs text-zinc-400 leading-relaxed">This page is optimized for AI agent operations and image uploads from your phone. Use the camera or gallery buttons below to attach card photos, then describe what to do.</p>
             </div>
             <div className="space-y-2">
+              {/* Quick Sale — one-liner subagent flow. Skips the multi-turn
+                  chat agent entirely; parses + shows a confirm modal. Best
+                  for booth clerks processing a queue of sales. */}
+              <button
+                type="button"
+                onClick={() => setQuickSaleOpen(true)}
+                className="w-full text-left px-4 py-3 rounded-xl bg-indigo-600/20 border border-indigo-500/50 text-sm font-medium text-indigo-200 active:bg-indigo-600/30 flex items-center gap-2"
+              >
+                <Mic size={15} className="text-indigo-400" />
+                <span>Quick Sale — dictate a one-liner</span>
+              </button>
               {SUGGESTIONS.map(s => (
                 <button key={s.label} onClick={() => { setInput(s.prompt); textRef.current?.focus(); }}
                   className="w-full text-left px-4 py-3 rounded-xl bg-zinc-800 border border-zinc-700 text-sm text-zinc-300 active:bg-zinc-700">

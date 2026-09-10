@@ -105,7 +105,12 @@ export function useInfiniteSentinel(
 ): (el: HTMLElement | null) => void {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const loadMoreRef = useRef(loadMore);
-  loadMoreRef.current = loadMore;
+  // Keep the ref pointing at the freshest callback without adding `loadMore`
+  // to the observer effect's deps (which would tear down/rebuild the
+  // IntersectionObserver on every render). No dep array = runs every render.
+  useEffect(() => {
+    loadMoreRef.current = loadMore;
+  });
   useEffect(() => {
     if (!el || !hasMore) return;
     // 800px root margin means "start loading when the sentinel is within a

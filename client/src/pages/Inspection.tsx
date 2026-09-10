@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { X, Undo2, RotateCcw } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, apiErrorMessage } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/utils';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { loadFilters, saveFilters } from '../lib/filter-store';
@@ -108,13 +108,13 @@ export function Inspection() {
       setRevertRow(null);
       toast.success(`Reverted — ${deleted} inspection line${deleted === 1 ? '' : 's'} cleared`);
     },
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to revert'),
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to revert')),
   });
 
   const unreceiveMut = useMutation({
     mutationFn: (id: string) => api.post(`/raw-purchases/${id}/unreceive`).then(r => r.data),
     onSuccess: () => { invalidate(); setUnreceiveRow(null); toast.success('Reverted to Ordered'); },
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to unreceive'),
+    onError: (err: unknown) => toast.error(apiErrorMessage(err, 'Failed to unreceive')),
   });
 
   const hasActiveFilters = !!debouncedSearch || fType !== null;

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
 import { Search, X, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api, type PaginatedResult } from '../../lib/api';
+import { api, apiErrorMessage, type PaginatedResult } from '../../lib/api';
 import { Button } from '../ui/Button';
 import {
   getPicks, togglePick, removePicks, clearPicks,
@@ -261,9 +261,7 @@ export function PickListModal({ open, onClose }: Props) {
       }
     },
     onError: (err: unknown) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const msg = (err as any)?.response?.data?.error ?? (err as Error)?.message ?? 'Failed to commit picks.';
-      toast.error(msg);
+      toast.error(apiErrorMessage(err, 'Failed to commit picks.'));
     },
   });
 

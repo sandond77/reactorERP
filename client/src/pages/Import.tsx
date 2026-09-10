@@ -364,7 +364,7 @@ function LanguageResolutionModal({
       setAllSetCodes(codesRes.data);
       setAllAliases(aliasesRes.data);
     }).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, []);
 
 
