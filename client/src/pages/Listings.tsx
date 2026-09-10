@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { ExternalLink, Plus, X, Loader2, Minus, Trash2, ChevronRight } from 'lucide-react';
-import { api, type PaginatedResult } from '../lib/api';
+import { api, apiErrorMessage, type PaginatedResult } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
@@ -1237,9 +1237,8 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to cancel listing');
+    } catch (err: unknown) {
+      toast.error(apiErrorMessage(err, 'Failed to cancel listing'));
       setDeleteStep(null);
     }
   }
@@ -1252,11 +1251,17 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
       setLocalCerts(remaining);
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
-      if (remaining.length === 0) { toast.success('All listings cancelled'); onClose(); }
-      else toast.success('Listing cancelled');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to cancel listing');
+      // Persisting multi-qty listings drain down to zero and stay open; the
+      // "listing" itself hasn't ended. Only close the modal when nothing's
+      // left AND the group can't be added back to.
+      if (remaining.length === 0) {
+        toast.success(effectiveMultiQty ? 'Cert removed — listing is now drained' : 'Listing cancelled');
+        if (!effectiveMultiQty) onClose();
+      } else {
+        toast.success('Cert removed');
+      }
+    } catch (err: unknown) {
+      toast.error(apiErrorMessage(err, 'Failed to cancel listing'));
     } finally {
       setCancellingId(null);
     }
@@ -1341,12 +1346,20 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                     {c.list_price != null && <span className="ml-auto text-zinc-400">{formatCurrency(c.list_price, row.currency)}</span>}
                   </div>
                 </div>
-                {c.listing_id && localCerts.length > 1 && !singleListingId && (
+                {/* Per-cert remove — only meaningful for MULTI-QTY listings:
+                    each cert lives on its own listings row and cancelling
+                    one just drains the group down (the persisting listing
+                    stays). For non-multi-qty (solo) listings, removing "the
+                    cert" would just be ending the listing, which the End
+                    listing action handles — so no per-cert button there.
+                    The old guard was `localCerts.length > 1` which wrongly
+                    hid the button on the last cert of a multi-qty group. */}
+                {c.listing_id && effectiveMultiQty && !singleListingId && (
                   <button type="button"
                     disabled={cancellingId === c.listing_id}
                     onClick={() => cancelOneListing(c.listing_id!)}
                     className="shrink-0 flex items-center gap-1 text-[11px] text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-40"
-                    title="Cancel this listing">
+                    title="Remove this cert from the listing">
                     {cancellingId === c.listing_id ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                   </button>
                 )}

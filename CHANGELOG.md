@@ -2,6 +2,19 @@
 
 ## September 10, 2026
 
+### Fixes
+
+**Listings — per-cert remove now works on the last cert of a multi-qty group**
+- The trash icon in the Listings edit modal was gated on `localCerts.length > 1`, which meant the last cert of a persisting **multi-qty listing** couldn't be removed. That's exactly wrong for the shape's whole point: multi-qty listings are supposed to drain down to zero and stay open so you can add certs back later.
+- Fix at [Listings.tsx:1352](client/src/pages/Listings.tsx#L1352) — swapped the guard from `localCerts.length > 1` to `effectiveMultiQty` (the per-cert-vs-aggregate multi-qty flag already computed in the same component). Result:
+  - **Multi-qty listing** → trash icon on every cert regardless of remaining count. Removing the last one drains the group to 0 but keeps the listing structure alive.
+  - **Non-multi-qty (solo) listing** → no per-cert button. The existing End listing action handles the "delete the whole thing" case — nothing to remove per-cert since there's only ever one cert.
+- Toast copy corrected. Previously "All listings cancelled" always fired when the group drained to zero, which was wrong for multi-qty. Now:
+  - Multi-qty drained to zero → *"Cert removed — listing is now drained"* + **modal stays open** (add more certs)
+  - Non-multi-qty solo listing → *"Listing cancelled"* + modal closes
+  - Any other single-cert remove → *"Cert removed"*
+- Also swept the two `err as any` catches in the same file over to the shared `apiErrorMessage` helper per the new pre-commit lint rule.
+
 ### Features
 
 **Mobile Agent — Quick Sale (sale-by-text subagent)**
