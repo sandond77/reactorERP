@@ -29,8 +29,18 @@ interface SlabRow {
   grading_cost: number;
   // Same-identity siblings (catalog_id + grade + company match) already at a
   // card show. Shown inline as an amber "@show: N" chip so the user doesn't
-  // over-stock a card that's already got copies at the booth.
+  // over-stock a card that's already got copies at the booth. IDs are used
+  // when the user opts to propagate their entered price to those siblings on
+  // commit.
   at_show_count: number;
+  at_show_sibling_ids: string[];
+}
+
+interface PricingSuggestion {
+  slab_id: string;
+  total_cost_cents: number;
+  suggested_price_cents: number | null;
+  sample_count: number;
 }
 
 interface Props {
@@ -100,6 +110,16 @@ export function PickListModal({ open, onClose }: Props) {
   // pattern per CLAUDE.md (no window.confirm ever).
   const [clearArmed, setClearArmed] = useState(false);
 
+  // Per-row toggle: "also update N same-identity siblings already at a card
+  // show to my entered price on commit." Modal-local state; not persisted —
+  // it's a per-commit decision, not scratchpad state worth carrying forward.
+  const [propagateIds, setPropagateIds] = useState<Set<string>>(new Set());
+  const togglePropagate = (id: string) => setPropagateIds((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   // Add-mode search: unsold slabs not in card-show inventory. Infinite-scroll
   // pagination via IntersectionObserver on a sentinel row at the bottom of
   // the table body.
@@ -129,6 +149,22 @@ export function PickListModal({ open, onClose }: Props) {
     }).then((r) => r.data),
     enabled: open && mode === 'review' && pickedIds.length > 0,
   });
+
+  // Pricing suggestions — reuses the /grading/card-show-pricing-suggestions
+  // endpoint that the Add-to-Card-Show modal already relies on. Suggestion is
+  // the most recent card_show_price set on a same-identity slab currently at
+  // a card show; sample_count reports how many contributing slabs there were.
+  const suggestionsQuery = useQuery<PricingSuggestion[]>({
+    queryKey: ['card-show-picker-pricing', pickedIds.join(',')],
+    queryFn: () => api.post('/grading/card-show-pricing-suggestions', { slab_ids: pickedIds })
+      .then((r) => r.data),
+    enabled: open && mode === 'review' && pickedIds.length > 0,
+  });
+  const suggestionMap = useMemo(() => {
+    const m = new Map<string, PricingSuggestion>();
+    for (const s of suggestionsQuery.data ?? []) m.set(s.slab_id, s);
+    return m;
+  }, [suggestionsQuery.data]);
 
   // Reconcile localStorage against eligible IDs whenever new slab data arrives.
   // If any picks are no longer eligible (sold, moved to card show elsewhere),
@@ -175,7 +211,10 @@ export function PickListModal({ open, onClose }: Props) {
     return pickedIds.map((id) => map.get(id)).filter((r): r is SlabRow => !!r);
   }, [mode, pickedIds, reviewQuery.data]);
 
-  // Commit: bulk /card-shows/add-inventory for Found+Priced rows only.
+  // Commit: bulk /card-shows/add-inventory for Found+Priced rows only. When
+  // a row has Propagate ticked, its at_show_sibling_ids are appended to the
+  // payload with the same price — the endpoint already handles "existing
+  // card-show slab, new price" as a straight update.
   const commitMut = useMutation({
     mutationFn: async () => {
       const eligible = reviewRows.filter((r) => {
@@ -185,20 +224,36 @@ export function PickListModal({ open, onClose }: Props) {
         return priceCents !== null;
       });
       if (eligible.length === 0) throw new Error('Nothing to commit');
-      const payload = {
-        cards: eligible.map((r) => ({ id: r.id, card_show_price: parseCents(reviewState[r.id].price)! })),
-      };
-      await api.post('/card-shows/add-inventory', payload);
-      return { count: eligible.length, ids: eligible.map((r) => r.id) };
+      const cards: { id: string; card_show_price: number }[] = [];
+      let propagatedCount = 0;
+      for (const r of eligible) {
+        const priceCents = parseCents(reviewState[r.id].price)!;
+        cards.push({ id: r.id, card_show_price: priceCents });
+        if (propagateIds.has(r.id) && r.at_show_sibling_ids.length > 0) {
+          for (const sibId of r.at_show_sibling_ids) {
+            cards.push({ id: sibId, card_show_price: priceCents });
+            propagatedCount++;
+          }
+        }
+      }
+      await api.post('/card-shows/add-inventory', { cards });
+      return { count: eligible.length, propagatedCount, ids: eligible.map((r) => r.id) };
     },
-    onSuccess: ({ count, ids }) => {
+    onSuccess: ({ count, propagatedCount, ids }) => {
       removePicks(ids);
       // Clear review state only for the committed rows so any not-found rows
       // keep their entries in localStorage for next session.
       clearReviewEntries(ids);
+      // Clear propagate flags for committed rows.
+      setPropagateIds((prev) => {
+        const next = new Set(prev);
+        for (const id of ids) next.delete(id);
+        return next;
+      });
       qc.invalidateQueries({ queryKey: ['overall'] });
       qc.invalidateQueries({ queryKey: ['grading-slabs'] });
-      toast.success(`Moved ${count} card${count === 1 ? '' : 's'} to card show inventory.`);
+      const propagated = propagatedCount > 0 ? ` · repriced ${propagatedCount} existing` : '';
+      toast.success(`Moved ${count} card${count === 1 ? '' : 's'} to card show inventory${propagated}.`);
       // If nothing left to review, drop back to Add mode.
       if (getPicks().length === 0) {
         setMode('add');
@@ -338,6 +393,9 @@ export function PickListModal({ open, onClose }: Props) {
               onRemovePick={(id) => { removePicks([id]); clearReviewEntries([id]); }}
               loading={reviewQuery.isLoading || reviewQuery.isFetching}
               empty={pickedIds.length === 0}
+              suggestions={suggestionMap}
+              propagateIds={propagateIds}
+              onTogglePropagate={togglePropagate}
             />
           )}
         </div>
@@ -568,8 +626,11 @@ function ReviewMode(props: {
   onRemovePick: (id: string) => void;
   loading: boolean;
   empty: boolean;
+  suggestions: Map<string, PricingSuggestion>;
+  propagateIds: Set<string>;
+  onTogglePropagate: (id: string) => void;
 }) {
-  const { rows, reviewState, onChange, onRemovePick, loading, empty } = props;
+  const { rows, reviewState, onChange, onRemovePick, loading, empty, suggestions, propagateIds, onTogglePropagate } = props;
   if (empty) {
     return (
       <div className="text-center text-xs text-zinc-500 py-8">
@@ -591,6 +652,15 @@ function ReviewMode(props: {
         const priceValid = priceCents !== null;
         const cost = ((r.raw_cost ?? 0) + (r.grading_cost ?? 0)) / 100;
         const listed = r.listed_price != null ? r.listed_price / 100 : null;
+        // Pricing suggestion for this identity (most recent card_show_price
+        // on a same-identity sibling currently at a show).
+        const sug = suggestions.get(r.id);
+        const suggested = sug?.suggested_price_cents != null ? sug.suggested_price_cents / 100 : null;
+        const sampleCount = sug?.sample_count ?? 0;
+        const propagate = propagateIds.has(r.id);
+        // Only offer propagate when there's a valid entered price and there
+        // are siblings whose prices might actually change.
+        const canPropagate = state.found && priceValid && r.at_show_sibling_ids.length > 0;
         return (
           <div key={r.id} className="border border-zinc-800 rounded-lg p-3 space-y-2">
             <div className="flex items-start justify-between gap-3">
@@ -662,6 +732,40 @@ function ReviewMode(props: {
                 )}
               </div>
             </div>
+            {/* Suggested price line — reference only. Shown when a same-identity
+                sibling at a show has a card_show_price set. Small "Use" button
+                pre-fills the input so users don't have to retype the number. */}
+            {suggested != null && (
+              <div className="flex items-center gap-2 pl-6 text-[11px]">
+                <span className="text-zinc-500">
+                  Suggested <span className="text-zinc-200 font-semibold tabular-nums">${suggested.toFixed(2)}</span>
+                  <span className="text-zinc-600 ml-1">· {sampleCount} sample{sampleCount === 1 ? '' : 's'}</span>
+                </span>
+                {state.found && Math.round(suggested * 100) !== parseCents(state.price) && (
+                  <button
+                    type="button"
+                    onClick={() => onChange(r.id, { price: suggested.toFixed(2) })}
+                    className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors"
+                  >
+                    Use
+                  </button>
+                )}
+              </div>
+            )}
+            {/* Propagate toggle — bundle the sibling IDs into the commit
+                payload so their card_show_price gets updated to match this
+                row's entered price. Hidden until Found + valid price. */}
+            {canPropagate && (
+              <label className="flex items-center gap-1.5 pl-6 text-[11px] text-zinc-400 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={propagate}
+                  onChange={() => onTogglePropagate(r.id)}
+                  className="accent-amber-500"
+                />
+                Also update {r.at_show_sibling_ids.length} other cop{r.at_show_sibling_ids.length === 1 ? 'y' : 'ies'} at show to <span className="text-zinc-200 font-semibold tabular-nums">${(priceCents! / 100).toFixed(2)}</span>
+              </label>
+            )}
           </div>
         );
       })}

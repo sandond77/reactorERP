@@ -18,6 +18,11 @@ interface SlabOption {
   // From listSlabs — already present in the payload, just typed here now
   // so the price step can render (raw + grading) as Total Cost.
   grading_cost: number;
+  // Same-identity siblings currently at a card show (catalog_id + grade +
+  // company match). Non-empty → the price step offers a "propagate my
+  // entered price to all copies at show" checkbox, same shape as the Pick
+  // List modal's Review-mode toggle.
+  at_show_sibling_ids: string[];
 }
 
 interface PricingSuggestion {
@@ -48,6 +53,11 @@ interface SelectedCard {
   card_show_price_input: string;
   inspection_notes: string | null;
   _type: 'graded' | 'raw';
+  // Siblings + user-controlled toggle for propagating the entered price to
+  // every same-identity slab currently at a card show. Only meaningful for
+  // graded rows (identity is defined by catalog_id + grade + company).
+  at_show_sibling_ids: string[];
+  propagate: boolean;
   // Total cost basis (raw purchase + grading + additional for graded;
   // just purchase for raw). Set at toggle time from the row data so the
   // price step can show it without a second fetch.
@@ -128,6 +138,8 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
           suggested_price_cents: null,
           suggested_sample_count: 0,
           pricing_fetched: false,
+          at_show_sibling_ids: row.at_show_sibling_ids ?? [],
+          propagate: false,
         });
       }
       return next;
@@ -161,6 +173,11 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
           suggested_price_cents: null,
           suggested_sample_count: 0,
           pricing_fetched: true,   // never asked, never will — flag prevents effect re-entry
+          // Raw cards have no catalog-based identity for sibling matching —
+          // the server's at_show subquery only fires for graded rows. Empty
+          // array; propagate toggle is hidden accordingly in the price step.
+          at_show_sibling_ids: [],
+          propagate: false,
         });
       }
       return next;
@@ -235,10 +252,19 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
 
   const mutation = useMutation({
     mutationFn: () => {
-      const cards = Array.from(selected.values()).map((c) => ({
-        id: c.id,
-        card_show_price: toCents(c.card_show_price_input),
-      }));
+      const cards: { id: string; card_show_price: number }[] = [];
+      for (const c of selected.values()) {
+        const priceCents = toCents(c.card_show_price_input);
+        cards.push({ id: c.id, card_show_price: priceCents });
+        // Propagate: bundle every same-identity sibling already at a show
+        // with the same entered price. The endpoint already handles
+        // existing card-show slabs as a straight price update.
+        if (c.propagate && c.at_show_sibling_ids.length > 0) {
+          for (const sibId of c.at_show_sibling_ids) {
+            cards.push({ id: sibId, card_show_price: priceCents });
+          }
+        }
+      }
       return api.post('/card-shows/add-inventory', { cards });
     },
     onSuccess: () => {
@@ -322,6 +348,31 @@ export function AddToCardShowModal({ onSuccess }: { onSuccess: () => void }) {
                         Suggested {formatCurrency(suggested)}
                         <span className="text-zinc-600"> · {card.suggested_sample_count} sample{card.suggested_sample_count === 1 ? '' : 's'}</span>
                       </button>
+                    );
+                  })()}
+                  {/* Propagate toggle — offers to also update every
+                      same-identity slab currently at a card show to the
+                      entered price. Same shape as the Pick List modal's
+                      Review-mode toggle. Only for graded rows with siblings
+                      and a non-empty entered price. */}
+                  {card._type === 'graded' && card.at_show_sibling_ids.length > 0 && card.card_show_price_input.trim() !== '' && (() => {
+                    const priceCents = toCents(card.card_show_price_input);
+                    const n = card.at_show_sibling_ids.length;
+                    return (
+                      <label className="flex items-center gap-1 mt-1 text-[10px] text-zinc-400 cursor-pointer select-none whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={card.propagate}
+                          onChange={(e) => setSelected((prev) => {
+                            const next = new Map(prev);
+                            const c = next.get(card.id);
+                            if (c) next.set(card.id, { ...c, propagate: e.target.checked });
+                            return next;
+                          })}
+                          className="accent-amber-500"
+                        />
+                        Also update {n} at show to <span className="text-zinc-200 font-semibold tabular-nums">${(priceCents / 100).toFixed(2)}</span>
+                      </label>
                     );
                   })()}
                 </div>
