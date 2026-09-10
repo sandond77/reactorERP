@@ -1,5 +1,20 @@
 # Reactor — Changelog
 
+## September 10, 2026
+
+### Features
+
+**Show Schedule — new "Prep Next Show" pick list for staging card-show inventory**
+- Replicates the spreadsheet workflow of marking a "Move" column on unsold slabs, filtering by it, and physically pulling those cards before a show. Prior to this, users either had to click Add to Card Show one slab at a time or track picks in an external spreadsheet.
+- New button in the Show Schedule header ([ShowSchedule.tsx](client/src/pages/ShowSchedule.tsx)) with a live count badge showing how many cards are queued for the next commit. Badge reads from localStorage, updates instantly via `useSyncExternalStore`.
+- Two-phase modal ([PickListModal.tsx](client/src/components/card-shows/PickListModal.tsx)):
+  - **Add mode** — search-scoped list of unsold, non-card-show slab inventory (`/grading/slabs?status=unsold&is_card_show=no`). Checkbox per row to add/remove from the pick list. Persists across sessions via localStorage.
+  - **Review mode** — the current pick list with a per-row `Found` checkbox and a CS Price input. Price input is disabled until Found is ticked; commit refuses rows without a positive price. Footer shows Ready count and running sticker total.
+- **Commit** posts to the existing `POST /card-shows/add-inventory` endpoint — no new server code, no new DB migration. Cards get `is_card_show=true`, `card_show_added_at=NOW()`, `card_show_price`, and a card-show location (auto-assigned by `ensureCardShowLocation`, same as the existing Add to Card Show flow). Only Found + Priced rows are committed; not-found rows stay in the pick list for the next session.
+- **Stale-pick reconciliation** — on modal open in Review mode, any picked IDs that are no longer eligible (sold since pick, moved to card-show inventory via another flow) are silently dropped from localStorage with an info toast: *"3 picks removed — those cards are no longer eligible."*
+- **Clear All** — outlined button in the header, only visible when picks > 0. Two-click destructive gate (arm → confirm) using the inline-confirm pattern from `CLAUDE.md` (no `window.confirm` — the confirm strip shows the count with a red styled button and Cancel affordance).
+- **Storage design** — new [card-show-picks.ts](client/src/lib/card-show-picks.ts) util. Stores only card_instance UUIDs in `localStorage['reactor:card-show-picks']`; all display data (names, prices, physically-found status) is derived at render time from a fresh slabs query so nothing goes stale. Deliberately per-browser — matches the "one spreadsheet on one machine" mental model of the original workflow; can be swapped for a DB-backed pick list later if cross-device sync becomes needed.
+
 ## September 9, 2026
 
 ### Fixes

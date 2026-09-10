@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useSyncExternalStore } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Pencil, Trash2, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, Trash2, ChevronDown, ClipboardList } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api } from '../lib/api';
 import { Card } from '../components/ui/Card';
@@ -8,6 +8,8 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { cn } from '../lib/utils';
+import { PickListModal } from '../components/card-shows/PickListModal';
+import { getPicks, subscribeToPicks } from '../lib/card-show-picks';
 
 interface CardShow {
   id: string;
@@ -160,7 +162,19 @@ export function ShowSchedule() {
   const [editing, setEditing]       = useState<CardShow | null>(null);
   const [deleting, setDeleting]     = useState<CardShow | null>(null);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [showPickList, setShowPickList] = useState(false);
   const archiveRef = useRef<HTMLDivElement>(null);
+
+  // Live count of the current card-show pick list (from localStorage), so the
+  // "Prep Next Show" button shows how many cards are queued without opening
+  // the modal. Uses useSyncExternalStore so multiple browser tabs / this page
+  // and the modal stay consistent.
+  const pickCountRaw = useSyncExternalStore(
+    (cb) => subscribeToPicks(cb),
+    () => String(getPicks().length),
+    () => '0',
+  );
+  const pickCount = Number(pickCountRaw);
 
   const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const { data, isLoading } = useQuery<{ data: CardShow[] }>({
@@ -210,8 +224,20 @@ export function ShowSchedule() {
     <div className="p-6 space-y-6 h-full overflow-y-auto">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-zinc-100">Show Schedule</h1>
-        <Button onClick={() => setShowAdd(true)}><Plus size={14} /> Add Show</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" onClick={() => setShowPickList(true)}>
+            <ClipboardList size={14} /> Prep Next Show
+            {pickCount > 0 && (
+              <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-500/25 border border-indigo-500/40 text-indigo-200">
+                {pickCount}
+              </span>
+            )}
+          </Button>
+          <Button onClick={() => setShowAdd(true)}><Plus size={14} /> Add Show</Button>
+        </div>
       </div>
+
+      <PickListModal open={showPickList} onClose={() => setShowPickList(false)} />
 
       {isLoading ? (
         <div className="text-zinc-500 text-sm py-8">Loading…</div>

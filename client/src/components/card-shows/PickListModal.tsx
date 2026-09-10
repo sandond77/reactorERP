@@ -1,0 +1,505 @@
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search, X, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
+import { api, type PaginatedResult } from '../../lib/api';
+import { Button } from '../ui/Button';
+import {
+  getPicks, togglePick, removePicks, clearPicks,
+  reconcilePicks, subscribeToPicks,
+} from '../../lib/card-show-picks';
+
+// Slab shape from GET /grading/slabs?status=unsold&is_card_show=no
+interface SlabRow {
+  id: string;
+  card_name: string | null;
+  set_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  company: string;
+  listed_price: number | null;
+  card_show_price: number | null;
+  raw_cost: number;
+  grading_cost: number;
+}
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+// Two-phase pick-list workflow:
+//   1. Add mode  — search unsold non-card-show slab inventory, tick to add to
+//      the browser-local pick list. Persists across sessions in localStorage.
+//   2. Review mode — for each pick, mark "Found" (physically in hand) and
+//      enter a CS Price. Commit sends only Found + Priced rows to the
+//      existing POST /card-shows/add-inventory endpoint, which handles
+//      is_card_show=true + location assignment. Cards not found stay in the
+//      pick list for the next session.
+export function PickListModal({ open, onClose }: Props) {
+  const qc = useQueryClient();
+
+  // Subscribe to picks storage so both modes see the same list. Using the
+  // React 18 useSyncExternalStore API for the correct snapshot semantics.
+  const picks = useSyncExternalStore(
+    (cb) => subscribeToPicks(cb),
+    () => JSON.stringify(getPicks()),
+    () => '[]',
+  );
+  const pickedIds = useMemo<string[]>(() => JSON.parse(picks || '[]'), [picks]);
+  const pickedSet = useMemo(() => new Set(pickedIds), [pickedIds]);
+
+  const [mode, setMode] = useState<'add' | 'review'>('add');
+  const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Debounce search input
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // Per-row review state — Found flag + CS Price input string. Kept in modal
+  // state (not localStorage) since it's transient: once committed, the row
+  // is gone; if the modal closes mid-review, the user is expected to redo
+  // the Found/Price step next time. Persisting these would risk stale
+  // prices when the reference value changes.
+  const [reviewState, setReviewState] = useState<Record<string, { found: boolean; price: string }>>({});
+  // Two-click confirm for the destructive "Clear all picks" button — inline
+  // pattern per CLAUDE.md (no window.confirm ever).
+  const [clearArmed, setClearArmed] = useState(false);
+
+  // Add-mode search: unsold slabs not in card-show inventory
+  const addQuery = useQuery<PaginatedResult<SlabRow>>({
+    queryKey: ['card-show-picker-add', debouncedSearch],
+    queryFn: () => api.get('/grading/slabs', {
+      params: {
+        status: 'unsold', is_card_show: 'no', personal_collection: 'no',
+        search: debouncedSearch || undefined, limit: 50, page: 1,
+      },
+    }).then((r) => r.data),
+    enabled: open && mode === 'add',
+  });
+
+  // Review mode: fetch the full slab detail for currently-picked ids. Server
+  // doesn't have a bulk-by-id endpoint, so reuse the same list query
+  // unbounded (limit 100) and filter client-side. For pick lists of typical
+  // size (<50) this is fine.
+  const reviewQuery = useQuery<PaginatedResult<SlabRow>>({
+    queryKey: ['card-show-picker-review', pickedIds.join(',')],
+    queryFn: () => api.get('/grading/slabs', {
+      params: { status: 'unsold', is_card_show: 'no', personal_collection: 'no', limit: 100, page: 1 },
+    }).then((r) => r.data),
+    enabled: open && mode === 'review' && pickedIds.length > 0,
+  });
+
+  // Reconcile localStorage against eligible IDs whenever new slab data arrives.
+  // If any picks are no longer eligible (sold, moved to card show elsewhere),
+  // silently drop them from localStorage and toast the count so the user knows
+  // why the number changed.
+  const eligibleIds = useMemo(() => {
+    const src = mode === 'review' ? reviewQuery.data?.data : addQuery.data?.data;
+    return new Set((src ?? []).map((r) => r.id));
+  }, [mode, reviewQuery.data, addQuery.data]);
+  const reconciledOnceRef = useRef(false);
+  useEffect(() => {
+    if (!open || pickedIds.length === 0) return;
+    // Only reconcile once per open, and only when we have review-mode data
+    // (add-mode data is filtered by search so it doesn't represent the full
+    // eligible universe).
+    if (mode !== 'review') return;
+    if (reviewQuery.isFetching) return;
+    if (reconciledOnceRef.current) return;
+    const dropped = reconcilePicks(eligibleIds);
+    reconciledOnceRef.current = true;
+    if (dropped.length > 0) {
+      toast(
+        `${dropped.length} pick${dropped.length === 1 ? '' : 's'} removed — those cards are no longer eligible.`,
+        { icon: 'ℹ️' },
+      );
+    }
+  }, [open, mode, pickedIds.length, eligibleIds, reviewQuery.isFetching]);
+
+  // Reset the reconcile guard whenever the modal closes so a fresh open
+  // triggers a new check.
+  useEffect(() => {
+    if (!open) reconciledOnceRef.current = false;
+  }, [open]);
+
+  // Rows for review mode: the intersection of picks and eligible slabs.
+  const reviewRows = useMemo<SlabRow[]>(() => {
+    if (mode !== 'review') return [];
+    const all = reviewQuery.data?.data ?? [];
+    const map = new Map(all.map((r) => [r.id, r]));
+    return pickedIds.map((id) => map.get(id)).filter((r): r is SlabRow => !!r);
+  }, [mode, pickedIds, reviewQuery.data]);
+
+  // Commit: bulk /card-shows/add-inventory for Found+Priced rows only.
+  const commitMut = useMutation({
+    mutationFn: async () => {
+      const eligible = reviewRows.filter((r) => {
+        const s = reviewState[r.id];
+        if (!s || !s.found) return false;
+        const priceCents = parseCents(s.price);
+        return priceCents !== null;
+      });
+      if (eligible.length === 0) throw new Error('Nothing to commit');
+      const payload = {
+        cards: eligible.map((r) => ({ id: r.id, card_show_price: parseCents(reviewState[r.id].price)! })),
+      };
+      await api.post('/card-shows/add-inventory', payload);
+      return { count: eligible.length, ids: eligible.map((r) => r.id) };
+    },
+    onSuccess: ({ count, ids }) => {
+      removePicks(ids);
+      // Clear review state only for the committed rows so any not-found rows
+      // keep their transient state if the modal stays open.
+      setReviewState((prev) => {
+        const next = { ...prev };
+        for (const id of ids) delete next[id];
+        return next;
+      });
+      qc.invalidateQueries({ queryKey: ['overall'] });
+      qc.invalidateQueries({ queryKey: ['grading-slabs'] });
+      toast.success(`Moved ${count} card${count === 1 ? '' : 's'} to card show inventory.`);
+      // If nothing left to review, drop back to Add mode.
+      if (getPicks().length === 0) {
+        setMode('add');
+        onClose();
+      }
+    },
+    onError: (err: unknown) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const msg = (err as any)?.response?.data?.error ?? (err as Error)?.message ?? 'Failed to commit picks.';
+      toast.error(msg);
+    },
+  });
+
+  // Ready-to-commit summary
+  const readyRows = reviewRows.filter((r) => {
+    const s = reviewState[r.id];
+    return s?.found && parseCents(s.price) !== null;
+  });
+  const readyTotalCents = readyRows.reduce((sum, r) => sum + (parseCents(reviewState[r.id].price) ?? 0), 0);
+
+  // Add-mode rows
+  const addRows = addQuery.data?.data ?? [];
+
+  function toggleReview(id: string, patch: Partial<{ found: boolean; price: string }>) {
+    setReviewState((prev) => {
+      const cur = prev[id] ?? { found: false, price: '' };
+      const next = { ...cur, ...patch };
+      // If unchecking Found, clear the price so the row isn't accidentally
+      // committed on a re-check.
+      if (patch.found === false) next.price = '';
+      return { ...prev, [id]: next };
+    });
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-zinc-800 shrink-0">
+          <div>
+            <h2 className="text-base font-semibold text-zinc-100">Card Show Pick List</h2>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              Working list of slabs for your next show — persists in this browser until committed.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Mode filter pills */}
+        <div className="px-5 py-3 border-b border-zinc-800 shrink-0 flex items-center gap-3">
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => setMode('add')}
+              className={
+                'px-3 py-1 text-xs rounded-md font-medium transition-colors ' +
+                (mode === 'add' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200')
+              }
+            >
+              Add cards
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('review')}
+              className={
+                'px-3 py-1 text-xs rounded-md font-medium transition-colors ' +
+                (mode === 'review' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200')
+              }
+            >
+              Review picks
+              <span className={`ml-1.5 text-[10px] ${mode === 'review' ? 'text-indigo-200' : 'text-zinc-500'}`}>
+                {pickedIds.length}
+              </span>
+            </button>
+          </div>
+          {pickedIds.length > 0 && (
+            clearArmed ? (
+              <div className="ml-auto flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-red-500/10 border border-red-500/40">
+                <AlertTriangle size={12} className="text-red-400" />
+                <span className="text-xs text-red-200">
+                  Clear all <span className="font-semibold">{pickedIds.length}</span> pick{pickedIds.length === 1 ? '' : 's'}? This can't be undone.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { clearPicks(); setReviewState({}); setClearArmed(false); }}
+                  className="ml-1 px-2 py-0.5 text-[11px] font-semibold rounded bg-red-600 hover:bg-red-500 text-white transition-colors"
+                >
+                  Yes, clear all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setClearArmed(false)}
+                  className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setClearArmed(true)}
+                className="ml-auto inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-zinc-700 text-zinc-400 hover:text-red-300 hover:border-red-500/50 transition-colors"
+              >
+                <Trash2 size={11} /> Clear All
+              </button>
+            )
+          )}
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {mode === 'add' ? (
+            <AddMode
+              search={search}
+              setSearch={setSearch}
+              rows={addRows}
+              pickedSet={pickedSet}
+              loading={addQuery.isLoading || addQuery.isFetching}
+            />
+          ) : (
+            <ReviewMode
+              rows={reviewRows}
+              reviewState={reviewState}
+              onChange={toggleReview}
+              onRemovePick={(id) => { removePicks([id]); setReviewState((p) => { const n = { ...p }; delete n[id]; return n; }); }}
+              loading={reviewQuery.isLoading || reviewQuery.isFetching}
+              empty={pickedIds.length === 0}
+            />
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t border-zinc-800 p-4 shrink-0 flex items-center justify-between">
+          <div className="text-xs text-zinc-400">
+            {mode === 'review' ? (
+              <>
+                Ready: <span className="text-zinc-100 font-semibold">{readyRows.length} / {reviewRows.length}</span>
+                {readyRows.length > 0 && (
+                  <span className="ml-2 text-zinc-500">
+                    · Sticker total <span className="text-zinc-100 font-semibold">${(readyTotalCents / 100).toFixed(2)}</span>
+                  </span>
+                )}
+              </>
+            ) : (
+              <>Picks so far: <span className="text-zinc-100 font-semibold">{pickedIds.length}</span></>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+            {mode === 'review' && (
+              <Button
+                size="sm"
+                onClick={() => commitMut.mutate()}
+                disabled={readyRows.length === 0 || commitMut.isPending}
+              >
+                {commitMut.isPending
+                  ? <><Loader2 size={12} className="animate-spin mr-1.5" />Committing…</>
+                  : `Commit ${readyRows.length} → Card Show`}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Add mode ─────────────────────────────────────────────────────────────────
+
+function AddMode(props: {
+  search: string;
+  setSearch: (s: string) => void;
+  rows: SlabRow[];
+  pickedSet: Set<string>;
+  loading: boolean;
+}) {
+  const { search, setSearch, rows, pickedSet, loading } = props;
+  return (
+    <div className="space-y-3">
+      <div className="relative">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search unsold slab inventory (name or cert #)…"
+          className="w-full pl-8 pr-3 py-2 text-sm bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500"
+          autoFocus
+        />
+      </div>
+      {loading ? (
+        <div className="text-center text-xs text-zinc-500 py-6"><Loader2 size={13} className="inline animate-spin mr-1.5" />Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-center text-xs text-zinc-500 py-6">
+          {search ? 'No matches.' : 'Start typing to search unsold slabs.'}
+        </div>
+      ) : (
+        <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800 max-h-[50vh] overflow-y-auto">
+          {rows.map((r) => {
+            const picked = pickedSet.has(r.id);
+            const cost = ((r.raw_cost ?? 0) + (r.grading_cost ?? 0)) / 100;
+            return (
+              <label
+                key={r.id}
+                className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${picked ? 'bg-indigo-900/20 hover:bg-indigo-900/30' : 'hover:bg-zinc-800/60'}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={picked}
+                  onChange={() => togglePick(r.id)}
+                  className="accent-indigo-500"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
+                  <p className="text-[11px] text-zinc-500 truncate">
+                    {r.set_name ?? ''}
+                    {r.cert_number ? ` · #${r.cert_number}` : ''}
+                    {' · '}{r.company} {r.grade_label}
+                  </p>
+                </div>
+                <div className="text-[11px] text-zinc-500 shrink-0 text-right">
+                  Cost <span className="text-zinc-300">${cost.toFixed(2)}</span>
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Review mode ──────────────────────────────────────────────────────────────
+
+function ReviewMode(props: {
+  rows: SlabRow[];
+  reviewState: Record<string, { found: boolean; price: string }>;
+  onChange: (id: string, patch: Partial<{ found: boolean; price: string }>) => void;
+  onRemovePick: (id: string) => void;
+  loading: boolean;
+  empty: boolean;
+}) {
+  const { rows, reviewState, onChange, onRemovePick, loading, empty } = props;
+  if (empty) {
+    return (
+      <div className="text-center text-xs text-zinc-500 py-8">
+        No picks yet. Switch to <span className="text-zinc-300">Add cards</span> to build your list.
+      </div>
+    );
+  }
+  if (loading) {
+    return <div className="text-center text-xs text-zinc-500 py-6"><Loader2 size={13} className="inline animate-spin mr-1.5" />Loading…</div>;
+  }
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-zinc-500 leading-relaxed">
+        Pull each card from storage. Tick <span className="text-zinc-300">Found</span> once in hand and enter the sticker price for the show. Only Found + Priced rows will be committed.
+      </p>
+      {rows.map((r) => {
+        const state = reviewState[r.id] ?? { found: false, price: '' };
+        const priceCents = parseCents(state.price);
+        const priceValid = priceCents !== null;
+        const cost = ((r.raw_cost ?? 0) + (r.grading_cost ?? 0)) / 100;
+        const listed = r.listed_price != null ? r.listed_price / 100 : null;
+        return (
+          <div key={r.id} className="border border-zinc-800 rounded-lg p-3 space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm text-zinc-100 truncate">{r.card_name ?? '—'}</p>
+                <p className="text-[11px] text-zinc-500 truncate">
+                  {r.set_name ?? ''}
+                  {r.cert_number ? ` · #${r.cert_number}` : ''}
+                  {' · '}{r.company} {r.grade_label}
+                </p>
+                <p className="text-[10px] text-zinc-600 mt-0.5">
+                  Cost ${cost.toFixed(2)}{listed != null && ` · Listed $${listed.toFixed(2)}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemovePick(r.id)}
+                className="text-[10px] text-zinc-500 hover:text-red-400 transition-colors shrink-0"
+                title="Remove from pick list"
+              >
+                Remove
+              </button>
+            </div>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={state.found}
+                  onChange={(e) => onChange(r.id, { found: e.target.checked })}
+                  className="accent-indigo-500"
+                />
+                Found
+              </label>
+              <div className="flex-1 flex items-center gap-1.5">
+                <span className="text-[11px] text-zinc-500">CS Price $</span>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={state.price}
+                  onChange={(e) => onChange(r.id, { price: e.target.value })}
+                  disabled={!state.found}
+                  placeholder={listed != null ? listed.toFixed(2) : '0.00'}
+                  className={
+                    'flex-1 max-w-[9rem] px-2 py-1 text-xs rounded border transition-colors ' +
+                    (state.found
+                      ? (priceValid || state.price === ''
+                          ? 'bg-zinc-800 border-zinc-700 text-zinc-100 focus:outline-none focus:border-indigo-500'
+                          : 'bg-zinc-800 border-red-500 text-red-300 focus:outline-none')
+                      : 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed')
+                  }
+                />
+                {state.found && !priceValid && state.price !== '' && (
+                  <span className="text-[10px] text-red-400">Invalid</span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Parse a user-entered dollar string into cents. Returns null on invalid or
+// zero — commit refuses to send cards without a positive price.
+function parseCents(input: string): number | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return Math.round(num * 100);
+}
