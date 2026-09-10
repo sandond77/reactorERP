@@ -12,6 +12,13 @@
 // query — localStorage never stores anything that can go stale.
 
 const STORAGE_KEY = 'reactor:card-show-picks';
+const REVIEW_KEY  = 'reactor:card-show-review';
+
+// Per-pick transient review state — Found flag + CS Price the user is
+// entering during the physical-pull step. Persisted so accidental
+// backdrop-clicks don't wipe entries mid-review. Pruned when the pick is
+// removed, cleared entirely on commit for the committed rows.
+export interface ReviewEntry { found: boolean; price: string; }
 
 function readRaw(): string[] {
   try {
@@ -83,7 +90,8 @@ export function clearPicks(): void {
 // Prune picks whose IDs are no longer eligible (sold, in card-show inventory
 // already, or otherwise gone). Called on modal open with the current set of
 // eligible IDs from the search endpoint. Returns the IDs that were dropped so
-// the UI can optionally surface them.
+// the UI can optionally surface them. Also drops any orphaned review-state
+// entries for the same dropped IDs so nothing lingers.
 export function reconcilePicks(eligibleIds: Set<string>): string[] {
   const current = readRaw();
   const kept: string[] = [];
@@ -91,6 +99,74 @@ export function reconcilePicks(eligibleIds: Set<string>): string[] {
   for (const id of current) {
     (eligibleIds.has(id) ? kept : dropped).push(id);
   }
-  if (dropped.length > 0) writeRaw(kept);
+  if (dropped.length > 0) {
+    writeRaw(kept);
+    clearReviewEntries(dropped);
+  }
   return dropped;
+}
+
+// ── Review state (Found + CS Price) ──────────────────────────────────────────
+
+function readReview(): Record<string, ReviewEntry> {
+  try {
+    const raw = localStorage.getItem(REVIEW_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, ReviewEntry> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const obj = v as Record<string, unknown>;
+        const found = typeof obj.found === 'boolean' ? obj.found : false;
+        const price = typeof obj.price === 'string' ? obj.price : '';
+        out[k] = { found, price };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeReview(state: Record<string, ReviewEntry>): void {
+  try {
+    localStorage.setItem(REVIEW_KEY, JSON.stringify(state));
+    notifyListeners();
+  } catch {
+    // Private tabs / quota / disabled — treat as no-op
+  }
+}
+
+export function getReviewState(): Record<string, ReviewEntry> {
+  return readReview();
+}
+
+// Merge a partial patch into one row's review state. Unchecking Found also
+// clears the price so a subsequent re-check doesn't accidentally commit a
+// stale value from before the uncheck.
+export function updateReviewEntry(id: string, patch: Partial<ReviewEntry>): void {
+  const cur = readReview();
+  const existing = cur[id] ?? { found: false, price: '' };
+  const next: ReviewEntry = { ...existing, ...patch };
+  if (patch.found === false) next.price = '';
+  writeReview({ ...cur, [id]: next });
+}
+
+// Clear review entries for specific IDs — called on commit (for committed
+// rows) or when a pick is removed.
+export function clearReviewEntries(ids: string[]): void {
+  if (ids.length === 0) return;
+  const cur = readReview();
+  const next = { ...cur };
+  let changed = false;
+  for (const id of ids) {
+    if (id in next) { delete next[id]; changed = true; }
+  }
+  if (changed) writeReview(next);
+}
+
+// Wipe all review state — called from the header "Clear All picks" action.
+export function clearAllReviewState(): void {
+  writeReview({});
 }

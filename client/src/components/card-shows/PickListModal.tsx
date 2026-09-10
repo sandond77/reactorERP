@@ -7,6 +7,8 @@ import { Button } from '../ui/Button';
 import {
   getPicks, togglePick, removePicks, clearPicks,
   reconcilePicks, subscribeToPicks,
+  getReviewState, updateReviewEntry, clearReviewEntries, clearAllReviewState,
+  type ReviewEntry,
 } from '../../lib/card-show-picks';
 
 // Slab shape from GET /grading/slabs?status=unsold&is_card_show=no.
@@ -57,29 +59,51 @@ export function PickListModal({ open, onClose }: Props) {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
+  // Sort state for the Add-mode table. Server sorts via `sort_by`/`sort_dir`
+  // params; default is cert ascending (matches how users physically scan a
+  // storage box — low cert to high). Only server-supported sort keys here —
+  // company would need client-side sort so it's omitted for now.
+  type SortCol = 'cert_number' | 'card_name' | 'grade' | 'raw_cost' | 'listed_price';
+  const [sortBy, setSortBy] = useState<SortCol>('cert_number');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  function toggleSort(col: SortCol) {
+    if (sortBy === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(col);
+      setSortDir('asc');
+    }
+  }
+
   // Debounce search input
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(t);
   }, [search]);
 
-  // Per-row review state — Found flag + CS Price input string. Kept in modal
-  // state (not localStorage) since it's transient: once committed, the row
-  // is gone; if the modal closes mid-review, the user is expected to redo
-  // the Found/Price step next time. Persisting these would risk stale
-  // prices when the reference value changes.
-  const [reviewState, setReviewState] = useState<Record<string, { found: boolean; price: string }>>({});
+  // Per-row review state — Found flag + CS Price input string. Persisted to
+  // localStorage alongside the pick list so accidentally clicking the
+  // backdrop doesn't wipe partial work. Subscribes to the same listeners as
+  // the pick list, so any keystroke re-renders the modal (fine at typical
+  // pick-list sizes; keeps the UI honest about what's persisted).
+  const reviewRaw = useSyncExternalStore(
+    (cb) => subscribeToPicks(cb),
+    () => JSON.stringify(getReviewState()),
+    () => '{}',
+  );
+  const reviewState = useMemo<Record<string, ReviewEntry>>(() => JSON.parse(reviewRaw || '{}'), [reviewRaw]);
   // Two-click confirm for the destructive "Clear all picks" button — inline
   // pattern per CLAUDE.md (no window.confirm ever).
   const [clearArmed, setClearArmed] = useState(false);
 
   // Add-mode search: unsold slabs not in card-show inventory
   const addQuery = useQuery<PaginatedResult<SlabRow>>({
-    queryKey: ['card-show-picker-add', debouncedSearch],
+    queryKey: ['card-show-picker-add', debouncedSearch, sortBy, sortDir],
     queryFn: () => api.get('/grading/slabs', {
       params: {
         status: 'unsold', is_card_show: 'no', personal_collection: 'no',
         search: debouncedSearch || undefined, limit: 50, page: 1,
+        sort_by: sortBy, sort_dir: sortDir,
       },
     }).then((r) => r.data),
     enabled: open && mode === 'add',
@@ -157,12 +181,8 @@ export function PickListModal({ open, onClose }: Props) {
     onSuccess: ({ count, ids }) => {
       removePicks(ids);
       // Clear review state only for the committed rows so any not-found rows
-      // keep their transient state if the modal stays open.
-      setReviewState((prev) => {
-        const next = { ...prev };
-        for (const id of ids) delete next[id];
-        return next;
-      });
+      // keep their entries in localStorage for next session.
+      clearReviewEntries(ids);
       qc.invalidateQueries({ queryKey: ['overall'] });
       qc.invalidateQueries({ queryKey: ['grading-slabs'] });
       toast.success(`Moved ${count} card${count === 1 ? '' : 's'} to card show inventory.`);
@@ -189,15 +209,10 @@ export function PickListModal({ open, onClose }: Props) {
   // Add-mode rows
   const addRows = addQuery.data?.data ?? [];
 
-  function toggleReview(id: string, patch: Partial<{ found: boolean; price: string }>) {
-    setReviewState((prev) => {
-      const cur = prev[id] ?? { found: false, price: '' };
-      const next = { ...cur, ...patch };
-      // If unchecking Found, clear the price so the row isn't accidentally
-      // committed on a re-check.
-      if (patch.found === false) next.price = '';
-      return { ...prev, [id]: next };
-    });
+  function toggleReview(id: string, patch: Partial<ReviewEntry>) {
+    // Delegates to the localStorage helper; the useSyncExternalStore
+    // subscription above will re-render this modal in response.
+    updateReviewEntry(id, patch);
   }
 
   if (!open) return null;
@@ -205,7 +220,7 @@ export function PickListModal({ open, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col">
+      <div className="relative bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-7xl mx-4 max-h-[90vh] flex flex-col">
 
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-zinc-800 shrink-0">
@@ -256,7 +271,7 @@ export function PickListModal({ open, onClose }: Props) {
                 </span>
                 <button
                   type="button"
-                  onClick={() => { clearPicks(); setReviewState({}); setClearArmed(false); }}
+                  onClick={() => { clearPicks(); clearAllReviewState(); setClearArmed(false); }}
                   className="ml-1 px-2 py-0.5 text-[11px] font-semibold rounded bg-red-600 hover:bg-red-500 text-white transition-colors"
                 >
                   Yes, clear all
@@ -290,13 +305,16 @@ export function PickListModal({ open, onClose }: Props) {
               rows={addRows}
               pickedSet={pickedSet}
               loading={addQuery.isLoading || addQuery.isFetching}
+              sortBy={sortBy}
+              sortDir={sortDir}
+              onSort={toggleSort}
             />
           ) : (
             <ReviewMode
               rows={reviewRows}
               reviewState={reviewState}
               onChange={toggleReview}
-              onRemovePick={(id) => { removePicks([id]); setReviewState((p) => { const n = { ...p }; delete n[id]; return n; }); }}
+              onRemovePick={(id) => { removePicks([id]); clearReviewEntries([id]); }}
               loading={reviewQuery.isLoading || reviewQuery.isFetching}
               empty={pickedIds.length === 0}
             />
@@ -341,14 +359,33 @@ export function PickListModal({ open, onClose }: Props) {
 
 // ── Add mode ─────────────────────────────────────────────────────────────────
 
+type SortCol = 'cert_number' | 'card_name' | 'grade' | 'raw_cost' | 'listed_price';
+
 function AddMode(props: {
   search: string;
   setSearch: (s: string) => void;
   rows: SlabRow[];
   pickedSet: Set<string>;
   loading: boolean;
+  sortBy: SortCol;
+  sortDir: 'asc' | 'desc';
+  onSort: (col: SortCol) => void;
 }) {
-  const { search, setSearch, rows, pickedSet, loading } = props;
+  const { search, setSearch, rows, pickedSet, loading, sortBy, sortDir, onSort } = props;
+  const sortIcon = (col: SortCol) => {
+    if (sortBy !== col) return <span className="text-zinc-600">↕</span>;
+    return <span className="text-indigo-400">{sortDir === 'asc' ? '↑' : '↓'}</span>;
+  };
+  const headerBtn = (col: SortCol, label: string, align: 'left' | 'right' = 'left') => (
+    <button
+      type="button"
+      onClick={() => onSort(col)}
+      className={`w-full flex items-center gap-1 uppercase tracking-wide font-medium hover:text-zinc-200 transition-colors ${align === 'right' ? 'justify-end' : ''}`}
+    >
+      <span>{label}</span>
+      {sortIcon(col)}
+    </button>
+  );
   return (
     <div className="space-y-3">
       <div className="relative">
@@ -373,16 +410,25 @@ function AddMode(props: {
         // the pick candidates feels identical to browsing the main table.
         <div className="border border-zinc-800 rounded-lg overflow-hidden">
           <div className="max-h-[55vh] overflow-y-auto">
-            <table className="w-full text-xs">
+            <table className="w-full text-xs table-fixed">
+              <colgroup>
+                <col className="w-10" />
+                <col className="w-28" />
+                <col />
+                <col className="w-32" />
+                <col className="w-20" />
+                <col className="w-24" />
+                <col className="w-24" />
+              </colgroup>
               <thead className="sticky top-0 z-10 bg-zinc-900/95 backdrop-blur">
-                <tr className="border-b border-zinc-700 text-zinc-400 uppercase tracking-wide">
-                  <th className="px-2 py-2 text-left w-8"></th>
-                  <th className="px-2 py-2 text-left font-medium">Cert</th>
-                  <th className="px-2 py-2 text-left font-medium">Card</th>
-                  <th className="px-2 py-2 text-left font-medium">Grade</th>
-                  <th className="px-2 py-2 text-left font-medium">Company</th>
-                  <th className="px-2 py-2 text-right font-medium">Cost</th>
-                  <th className="px-2 py-2 text-right font-medium">Listed</th>
+                <tr className="border-b border-zinc-700 text-zinc-400">
+                  <th className="px-2 py-2"></th>
+                  <th className="px-2 py-2 text-left">{headerBtn('cert_number', 'Cert')}</th>
+                  <th className="px-2 py-2 text-left">{headerBtn('card_name', 'Card')}</th>
+                  <th className="px-2 py-2 text-left">{headerBtn('grade', 'Grade')}</th>
+                  <th className="px-2 py-2 text-left uppercase tracking-wide font-medium">Company</th>
+                  <th className="px-2 py-2 text-right">{headerBtn('raw_cost', 'Cost', 'right')}</th>
+                  <th className="px-2 py-2 text-right">{headerBtn('listed_price', 'Listed', 'right')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -407,8 +453,8 @@ function AddMode(props: {
                       <td className="px-2 py-1.5 font-mono text-[11px] text-indigo-300 whitespace-nowrap">
                         {r.cert_number ?? '—'}
                       </td>
-                      <td className="px-2 py-1.5 text-zinc-200 max-w-0">
-                        <div className="truncate flex items-center gap-1.5">
+                      <td className="px-2 py-1.5 text-zinc-200 overflow-hidden">
+                        <div className="flex items-center gap-1.5 min-w-0">
                           <span className="truncate">{r.card_name ?? '—'}</span>
                           {r.is_listed && (
                             <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
@@ -420,8 +466,8 @@ function AddMode(props: {
                           <div className="truncate text-[10px] text-zinc-500">{r.set_name}</div>
                         )}
                       </td>
-                      <td className="px-2 py-1.5 text-zinc-300 whitespace-nowrap">{r.grade_label ?? '—'}</td>
-                      <td className="px-2 py-1.5 text-zinc-400 whitespace-nowrap">{r.company}</td>
+                      <td className="px-2 py-1.5 text-zinc-300 truncate">{r.grade_label ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-zinc-400 truncate">{r.company}</td>
                       <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums whitespace-nowrap">${cost.toFixed(2)}</td>
                       <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums whitespace-nowrap">
                         {r.listed_price != null ? `$${(r.listed_price / 100).toFixed(2)}` : '—'}
@@ -442,8 +488,8 @@ function AddMode(props: {
 
 function ReviewMode(props: {
   rows: SlabRow[];
-  reviewState: Record<string, { found: boolean; price: string }>;
-  onChange: (id: string, patch: Partial<{ found: boolean; price: string }>) => void;
+  reviewState: Record<string, ReviewEntry>;
+  onChange: (id: string, patch: Partial<ReviewEntry>) => void;
   onRemovePick: (id: string) => void;
   loading: boolean;
   empty: boolean;
