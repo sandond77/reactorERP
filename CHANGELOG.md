@@ -2,6 +2,11 @@
 
 ## September 10, 2026
 
+### UX
+
+**Dashboard — Revenue window default flipped from `Today` to `7D`**
+- `Today` set as the initial window ~year ago when daily sales were routine. Sales are lumpier now — most days there are none, so opening the dashboard to an all-zero P/L card wasn't answering the actual question ("how am I doing lately?"). Single-line change in [Dashboard.tsx:663](client/src/pages/Dashboard.tsx#L663): `useState<SalesWindow>('today')` → `useState<SalesWindow>('7d')`. Every downstream tile (P/L, expenses breakdown, 3-donut pie subrow, Sales-by-channel) already keys off `salesWindow`, so the flip cascades automatically. `Today` pill stays clickable — it's just no longer the default.
+
 ### Features
 
 **Card Show Inventory — new "Prep Next Show" pick list for staging card-show inventory**

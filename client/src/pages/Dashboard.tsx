@@ -660,7 +660,7 @@ function OverviewTab() {
     queryFn: () => api.get('/reports/summary', { params: { tz: userTz } }).then((r) => r.data),
   });
 
-  const [salesWindow, setSalesWindow] = useState<SalesWindow>('today');
+  const [salesWindow, setSalesWindow] = useState<SalesWindow>('7d');
 
   const grading      = summary?.grading     ?? { sub_count: 0, card_count: 0 };
   const cards        = summary?.cards       ?? { total: { all: 0, graded: 0, raw: 0 }, unsold: { all: 0, graded: 0, raw: 0 }, sold: { all: 0, graded: 0, raw: 0 }, listed: { all: 0, graded: 0, raw: 0 }, card_show: { all: 0, unsold: 0, graded: 0, raw: 0 } };
