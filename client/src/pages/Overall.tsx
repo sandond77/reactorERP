@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Plus, X, List, MoveVertical } from 'lucide-react';
+import { ExternalLink, Plus, X, List, MoveVertical, ClipboardList } from 'lucide-react';
 import { api } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Modal } from '../components/ui/Modal';
@@ -10,6 +10,8 @@ import { SlabDetailModal } from '../components/inventory/SlabDetailModal';
 import { CardDetailModal } from '../components/inventory/CardDetailModal';
 import { AddSlabForm } from '../components/inventory/AddSlabForm';
 import { AddToCardShowModal } from '../components/inventory/AddToCardShowModal';
+import { PickListModal } from '../components/card-shows/PickListModal';
+import { getPicks, subscribeToPicks } from '../lib/card-show-picks';
 import { ColHeader, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { invalidateResources } from '../lib/query-invalidation';
 import { usePagedOrInfinite, useViewMode, useInfiniteSentinel } from '../lib/use-paged-or-infinite';
@@ -133,6 +135,16 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
   const qc = useQueryClient();
   const [addOpen, setAddOpen] = useState(false);
   const [addToCardShowOpen, setAddToCardShowOpen] = useState(false);
+  // "Prep Next Show" — the browser-local pick list workflow. Lives on the
+  // Card Show Inventory page so users can build a pick list next to the
+  // full-context view of their card-show slabs.
+  const [pickListOpen, setPickListOpen] = useState(false);
+  const pickCountRaw = useSyncExternalStore(
+    (cb) => subscribeToPicks(cb),
+    () => String(getPicks().length),
+    () => '0',
+  );
+  const pickCount = Number(pickCountRaw);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState(saved.search);
   const [debouncedSearch, setDebouncedSearch] = useState(saved.search);
@@ -332,9 +344,19 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
             className="w-64 px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
           />
           {cardShowMode ? (
-            <Button size="sm" onClick={() => setAddToCardShowOpen(true)}>
-              <Plus size={14} /> Add to Card Show
-            </Button>
+            <>
+              <Button size="sm" variant="secondary" onClick={() => setPickListOpen(true)}>
+                <ClipboardList size={14} /> Prep Next Show
+                {pickCount > 0 && (
+                  <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-500/25 border border-indigo-500/40 text-indigo-200">
+                    {pickCount}
+                  </span>
+                )}
+              </Button>
+              <Button size="sm" onClick={() => setAddToCardShowOpen(true)}>
+                <Plus size={14} /> Add to Card Show
+              </Button>
+            </>
           ) : (
             <Button size="sm" onClick={() => setAddOpen(true)}>
               <Plus size={14} /> Add Slab
@@ -543,6 +565,7 @@ export function Overall({ cardShowMode = false }: { cardShowMode?: boolean }) {
       <Modal open={addToCardShowOpen} onClose={() => setAddToCardShowOpen(false)} title="Add to Card Show" className="max-w-5xl">
         <AddToCardShowModal onSuccess={() => setAddToCardShowOpen(false)} />
       </Modal>
+      <PickListModal open={pickListOpen} onClose={() => setPickListOpen(false)} />
 
       {(() => {
         // The pagination footer always read `data` (the graded query). On the

@@ -9,14 +9,18 @@ import {
   reconcilePicks, subscribeToPicks,
 } from '../../lib/card-show-picks';
 
-// Slab shape from GET /grading/slabs?status=unsold&is_card_show=no
+// Slab shape from GET /grading/slabs?status=unsold&is_card_show=no.
+// Columns mirror what the Card Show Inventory table shows, so users have the
+// same scan-friendly context (Cert · Card · Grade · Company · Cost · Listed).
 interface SlabRow {
   id: string;
+  sku: string | null;
   card_name: string | null;
   set_name: string | null;
   cert_number: string | null;
   grade_label: string | null;
   company: string;
+  is_listed: boolean;
   listed_price: number | null;
   card_show_price: number | null;
   raw_cost: number;
@@ -201,7 +205,7 @@ export function PickListModal({ open, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-3xl mx-4 max-h-[90vh] flex flex-col">
+      <div className="relative bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-full max-w-5xl mx-4 max-h-[90vh] flex flex-col">
 
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-zinc-800 shrink-0">
@@ -364,35 +368,70 @@ function AddMode(props: {
           {search ? 'No matches.' : 'Start typing to search unsold slabs.'}
         </div>
       ) : (
-        <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800 max-h-[50vh] overflow-y-auto">
-          {rows.map((r) => {
-            const picked = pickedSet.has(r.id);
-            const cost = ((r.raw_cost ?? 0) + (r.grading_cost ?? 0)) / 100;
-            return (
-              <label
-                key={r.id}
-                className={`flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${picked ? 'bg-indigo-900/20 hover:bg-indigo-900/30' : 'hover:bg-zinc-800/60'}`}
-              >
-                <input
-                  type="checkbox"
-                  checked={picked}
-                  onChange={() => togglePick(r.id)}
-                  className="accent-indigo-500"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm text-zinc-200 truncate">{r.card_name ?? '—'}</p>
-                  <p className="text-[11px] text-zinc-500 truncate">
-                    {r.set_name ?? ''}
-                    {r.cert_number ? ` · #${r.cert_number}` : ''}
-                    {' · '}{r.company} {r.grade_label}
-                  </p>
-                </div>
-                <div className="text-[11px] text-zinc-500 shrink-0 text-right">
-                  Cost <span className="text-zinc-300">${cost.toFixed(2)}</span>
-                </div>
-              </label>
-            );
-          })}
+        // Tabular layout to match Card Show Inventory / Graded Overall — same
+        // column set (Cert · Card · Grade · Company · Cost · Listed) so scanning
+        // the pick candidates feels identical to browsing the main table.
+        <div className="border border-zinc-800 rounded-lg overflow-hidden">
+          <div className="max-h-[55vh] overflow-y-auto">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 z-10 bg-zinc-900/95 backdrop-blur">
+                <tr className="border-b border-zinc-700 text-zinc-400 uppercase tracking-wide">
+                  <th className="px-2 py-2 text-left w-8"></th>
+                  <th className="px-2 py-2 text-left font-medium">Cert</th>
+                  <th className="px-2 py-2 text-left font-medium">Card</th>
+                  <th className="px-2 py-2 text-left font-medium">Grade</th>
+                  <th className="px-2 py-2 text-left font-medium">Company</th>
+                  <th className="px-2 py-2 text-right font-medium">Cost</th>
+                  <th className="px-2 py-2 text-right font-medium">Listed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const picked = pickedSet.has(r.id);
+                  const cost = ((r.raw_cost ?? 0) + (r.grading_cost ?? 0)) / 100;
+                  return (
+                    <tr
+                      key={r.id}
+                      onClick={() => togglePick(r.id)}
+                      className={`cursor-pointer transition-colors border-b border-zinc-800 last:border-0 ${picked ? 'bg-indigo-900/20 hover:bg-indigo-900/30' : 'hover:bg-zinc-800/50'}`}
+                    >
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="checkbox"
+                          checked={picked}
+                          onChange={() => togglePick(r.id)}
+                          onClick={(e) => e.stopPropagation()}
+                          className="accent-indigo-500"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5 font-mono text-[11px] text-indigo-300 whitespace-nowrap">
+                        {r.cert_number ?? '—'}
+                      </td>
+                      <td className="px-2 py-1.5 text-zinc-200 max-w-0">
+                        <div className="truncate flex items-center gap-1.5">
+                          <span className="truncate">{r.card_name ?? '—'}</span>
+                          {r.is_listed && (
+                            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
+                              eBay
+                            </span>
+                          )}
+                        </div>
+                        {r.set_name && (
+                          <div className="truncate text-[10px] text-zinc-500">{r.set_name}</div>
+                        )}
+                      </td>
+                      <td className="px-2 py-1.5 text-zinc-300 whitespace-nowrap">{r.grade_label ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-zinc-400 whitespace-nowrap">{r.company}</td>
+                      <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums whitespace-nowrap">${cost.toFixed(2)}</td>
+                      <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums whitespace-nowrap">
+                        {r.listed_price != null ? `$${(r.listed_price / 100).toFixed(2)}` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -435,7 +474,14 @@ function ReviewMode(props: {
           <div key={r.id} className="border border-zinc-800 rounded-lg p-3 space-y-2">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm text-zinc-100 truncate">{r.card_name ?? '—'}</p>
+                <p className="text-sm text-zinc-100 truncate flex items-center gap-1.5">
+                  <span className="truncate">{r.card_name ?? '—'}</span>
+                  {r.is_listed && (
+                    <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
+                      eBay
+                    </span>
+                  )}
+                </p>
                 <p className="text-[11px] text-zinc-500 truncate">
                   {r.set_name ?? ''}
                   {r.cert_number ? ` · #${r.cert_number}` : ''}
