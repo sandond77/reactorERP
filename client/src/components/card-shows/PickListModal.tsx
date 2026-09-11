@@ -155,9 +155,11 @@ export function PickListModal({ open, onClose }: Props) {
   // the most recent card_show_price set on a same-identity slab currently at
   // a card show; sample_count reports how many contributing slabs there were.
   const suggestionsQuery = useQuery<PricingSuggestion[]>({
+    // Endpoint wraps in { data: [...] } like the rest of the API. Unwrap
+    // here so the query returns the flat array the rest of the modal expects.
     queryKey: ['card-show-picker-pricing', pickedIds.join(',')],
-    queryFn: () => api.post('/grading/card-show-pricing-suggestions', { slab_ids: pickedIds })
-      .then((r) => r.data),
+    queryFn: () => api.post<{ data: PricingSuggestion[] }>('/grading/card-show-pricing-suggestions', { slab_ids: pickedIds })
+      .then((r) => r.data.data),
     enabled: open && mode === 'review' && pickedIds.length > 0,
   });
   const suggestionMap = useMemo(() => {
@@ -542,7 +544,7 @@ function AddMode(props: {
                       onClick={() => togglePick(r.id)}
                       className={`cursor-pointer transition-colors border-b border-zinc-800 last:border-0 ${picked ? 'bg-indigo-900/20 hover:bg-indigo-900/30' : 'hover:bg-zinc-800/50'}`}
                     >
-                      <td className="px-2 py-1.5">
+                      <td className="px-2 py-1.5 align-top">
                         <input
                           type="checkbox"
                           checked={picked}
@@ -551,20 +553,25 @@ function AddMode(props: {
                           className="accent-indigo-500"
                         />
                       </td>
-                      <td className="px-2 py-1.5 font-mono text-[11px] text-indigo-300 whitespace-nowrap">
+                      <td className="px-2 py-1.5 font-mono text-[11px] text-indigo-300 whitespace-nowrap align-top">
                         {r.cert_number ?? '—'}
                       </td>
-                      <td className="px-2 py-1.5 text-zinc-200 overflow-hidden">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="truncate">{r.card_name ?? '—'}</span>
+                      <td className="px-2 py-1.5 text-zinc-200 align-top">
+                        {/* Card names can be very long (long PSA labels).
+                            Wrap instead of truncating so the whole title is
+                            visible while scanning. Chips stay inline via
+                            flex-wrap so they float to the end of the last
+                            wrapped line rather than colliding with the text. */}
+                        <div className="flex items-start gap-1.5 flex-wrap">
+                          <span className="whitespace-normal break-words">{r.card_name ?? '—'}</span>
                           {r.is_listed && (
-                            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
+                            <span className="shrink-0 mt-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
                               eBay
                             </span>
                           )}
                           {r.at_show_count > 0 && (
                             <span
-                              className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-amber-500/15 border border-amber-500/40 text-amber-300"
+                              className="shrink-0 mt-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-amber-500/15 border border-amber-500/40 text-amber-300"
                               title={`${r.at_show_count} same-identity slab${r.at_show_count === 1 ? '' : 's'} already at a card show`}
                             >
                               @show ×{r.at_show_count}
@@ -572,13 +579,13 @@ function AddMode(props: {
                           )}
                         </div>
                         {r.set_name && (
-                          <div className="truncate text-[10px] text-zinc-500">{r.set_name}</div>
+                          <div className="whitespace-normal break-words text-[10px] text-zinc-500 mt-0.5">{r.set_name}</div>
                         )}
                       </td>
-                      <td className="px-2 py-1.5 text-zinc-300 truncate">{r.grade_label ?? '—'}</td>
-                      <td className="px-2 py-1.5 text-zinc-400 truncate">{r.company}</td>
-                      <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums whitespace-nowrap">${cost.toFixed(2)}</td>
-                      <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums whitespace-nowrap">
+                      <td className="px-2 py-1.5 text-zinc-300 align-top">{r.grade_label ?? '—'}</td>
+                      <td className="px-2 py-1.5 text-zinc-400 align-top">{r.company}</td>
+                      <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums whitespace-nowrap align-top">${cost.toFixed(2)}</td>
+                      <td className="px-2 py-1.5 text-right text-zinc-300 tabular-nums whitespace-nowrap align-top">
                         {r.listed_price != null ? `$${(r.listed_price / 100).toFixed(2)}` : '—'}
                       </td>
                     </tr>
@@ -663,23 +670,23 @@ function ReviewMode(props: {
           <div key={r.id} className="border border-zinc-800 rounded-lg p-3 space-y-2">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-sm text-zinc-100 truncate flex items-center gap-1.5">
-                  <span className="truncate">{r.card_name ?? '—'}</span>
+                <div className="text-sm text-zinc-100 flex items-start gap-1.5 flex-wrap">
+                  <span className="whitespace-normal break-words">{r.card_name ?? '—'}</span>
                   {r.is_listed && (
-                    <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
+                    <span className="shrink-0 mt-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
                       eBay
                     </span>
                   )}
                   {r.at_show_count > 0 && (
                     <span
-                      className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-amber-500/15 border border-amber-500/40 text-amber-300"
+                      className="shrink-0 mt-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-amber-500/15 border border-amber-500/40 text-amber-300"
                       title={`${r.at_show_count} same-identity slab${r.at_show_count === 1 ? '' : 's'} already at a card show`}
                     >
                       @show ×{r.at_show_count}
                     </span>
                   )}
-                </p>
-                <p className="text-[11px] text-zinc-500 truncate">
+                </div>
+                <p className="text-[11px] text-zinc-500 whitespace-normal break-words">
                   {r.set_name ?? ''}
                   {r.cert_number ? ` · #${r.cert_number}` : ''}
                   {' · '}{r.company} {r.grade_label}

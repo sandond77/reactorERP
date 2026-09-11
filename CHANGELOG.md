@@ -1,6 +1,18 @@
 # Reactor — Changelog
 
-## September 10, 2026
+## September 11, 2026
+
+### Fixes
+
+**Card Show Pick List — Review mode crashed with "object is not iterable" when there were picks**
+- Root cause was a client shape mismatch, not a server bug. The pricing-suggestions query at [PickListModal.tsx:157-162](client/src/components/card-shows/PickListModal.tsx#L157-L162) was unwrapping the axios response with `.then(r => r.data)`, but the endpoint returns `{ data: PricingSuggestion[] }` — so the query cached the wrapper object rather than the array. Then `for (const s of suggestionsQuery.data ?? [])` tried to iterate an object → `Symbol.iterator` error → whole modal blew up in Review mode. Fixed by typing the call as `api.post<{ data: PricingSuggestion[] }>` and unwrapping `.data.data`.
+
+**Card Show Pick List — long card names now wrap instead of truncating**
+- Add-mode table (Card column) and Review-mode cards were both using `truncate` on card_name, so long PSA labels ("2023 POKEMON JAPANESE CLK-TRADING CARD GAME CLASSIC BLASTOISE & SUICUNE ex DECK 008 LAPRAS") got cut off mid-word and users couldn't tell what they'd picked. Replaced with `whitespace-normal break-words` on both surfaces. Chips (`eBay`, `@show ×N`) now sit inline via `flex-wrap` + `mt-0.5` so they float to the end of the last wrapped line instead of colliding. Every `<td>` in the row got `align-top` so cert / grade / company / cost / listed line up cleanly with the top of a wrapping name.
+
+**Server error handler — Zod validation failures now return 400, not 500**
+- [errorHandler.ts](server/src/middleware/errorHandler.ts) fell through to `console.error` + generic 500 for anything that wasn't an `AppError`. Zod's `ZodError` was landing in that catch-all, so bad request payloads looked like server crashes both in the browser console and in the server logs.
+- Added a `ZodError` branch: extract the first issue's `path` and `message`, return `400 { error: "path: message", code: "validation_error" }`. Two payoffs: (a) clients get a real, actionable message they can toast instead of "Internal server error"; (b) any 500 we see going forward is a real bug worth investigating, not schema noise. This unmasks a subtle real 500 that would otherwise have been misdiagnosed for months.
 
 ### Fixes
 
