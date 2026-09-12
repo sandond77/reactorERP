@@ -703,14 +703,14 @@ function ReviewMode(props: {
         const canPropagate = state.found && priceValid && r.at_show_sibling_ids.length > 0;
         const armed = armedRemove.has(r.id);
         return (
-          <div key={r.id} className="border border-zinc-800 rounded-lg p-3 space-y-2">
-            {/* 70/30 split — card info left, controls (Remove + Found + CS
-                Price) stacked on the right. Keeps each row to roughly three
-                lines' worth of height and stops the checkbox/price fields
-                from pushing to a second wasted line. */}
+          <div key={r.id} className="border border-zinc-800 rounded-lg px-3 py-2 space-y-1">
+            {/* 70/30 split — card info left, controls (Remove + Found+CS $
+                inline) stacked on the right. Cost / Listed / Suggested are
+                merged into a single meta line so the row height stays at
+                three text lines regardless of whether a suggestion exists. */}
             <div className="grid grid-cols-10 gap-4">
               <div className="col-span-7 min-w-0">
-                <div className="text-sm text-zinc-100 flex items-start gap-1.5 flex-wrap">
+                <div className="text-sm text-zinc-100 flex items-start gap-1.5 flex-wrap leading-snug">
                   <span className="whitespace-normal break-words">{r.card_name ?? '—'}</span>
                   {r.is_listed && (
                     <span className="shrink-0 mt-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">
@@ -726,14 +726,34 @@ function ReviewMode(props: {
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500 whitespace-normal break-words">
+                <p className="text-[11px] text-zinc-500 whitespace-normal break-words leading-snug">
                   {r.set_name ?? ''}
                   {r.cert_number ? ` · #${r.cert_number}` : ''}
                   {' · '}{r.company} {r.grade_label}
                 </p>
-                <p className="text-[10px] text-zinc-600 mt-0.5">
-                  Cost ${cost.toFixed(2)}{listed != null && ` · Listed $${listed.toFixed(2)}`}
-                </p>
+                <div className="text-[11px] text-zinc-600 flex items-center gap-1.5 flex-wrap leading-snug">
+                  <span>Cost <span className="tabular-nums">${cost.toFixed(2)}</span></span>
+                  {listed != null && (
+                    <span>· Listed <span className="tabular-nums">${listed.toFixed(2)}</span></span>
+                  )}
+                  {suggested != null && (
+                    <>
+                      <span className="text-zinc-500">
+                        · Suggested <span className="text-zinc-200 font-semibold tabular-nums">${suggested.toFixed(2)}</span>
+                        <span className="text-zinc-600 ml-1">· {sampleCount} sample{sampleCount === 1 ? '' : 's'}</span>
+                      </span>
+                      {state.found && Math.round(suggested * 100) !== parseCents(state.price) && (
+                        <button
+                          type="button"
+                          onClick={() => onChange(r.id, { price: suggested.toFixed(2) })}
+                          className="px-1.5 py-[1px] text-[10px] font-semibold rounded bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors"
+                        >
+                          Use
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
               <div className="col-span-3 flex flex-col items-end gap-1.5">
                 {armed ? (
@@ -763,61 +783,41 @@ function ReviewMode(props: {
                     Remove
                   </button>
                 )}
-                <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer select-none">
-                  <input
-                    type="checkbox"
-                    checked={state.found}
-                    onChange={(e) => onChange(r.id, { found: e.target.checked })}
-                    className="accent-indigo-500"
-                  />
-                  Found
-                </label>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[11px] text-zinc-500">CS $</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={state.price}
-                    onChange={(e) => onChange(r.id, { price: e.target.value })}
-                    disabled={!state.found}
-                    placeholder={listed != null ? listed.toFixed(2) : '0.00'}
-                    className={
-                      'w-24 px-2 py-1 text-xs text-right rounded border transition-colors tabular-nums ' +
-                      (state.found
-                        ? (priceValid || state.price === ''
-                            ? 'bg-zinc-800 border-zinc-700 text-zinc-100 focus:outline-none focus:border-indigo-500'
-                            : 'bg-zinc-800 border-red-500 text-red-300 focus:outline-none')
-                        : 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed')
-                    }
-                  />
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs text-zinc-300 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={state.found}
+                      onChange={(e) => onChange(r.id, { found: e.target.checked })}
+                      className="accent-indigo-500"
+                    />
+                    Found
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] text-zinc-500">CS $</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={state.price}
+                      onChange={(e) => onChange(r.id, { price: e.target.value })}
+                      disabled={!state.found}
+                      placeholder={listed != null ? listed.toFixed(2) : '0.00'}
+                      className={
+                        'w-24 px-2 py-1 text-xs text-right rounded border transition-colors tabular-nums ' +
+                        (state.found
+                          ? (priceValid || state.price === ''
+                              ? 'bg-zinc-800 border-zinc-700 text-zinc-100 focus:outline-none focus:border-indigo-500'
+                              : 'bg-zinc-800 border-red-500 text-red-300 focus:outline-none')
+                          : 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed')
+                      }
+                    />
+                  </div>
                 </div>
                 {state.found && !priceValid && state.price !== '' && (
                   <span className="text-[10px] text-red-400">Invalid price</span>
                 )}
               </div>
             </div>
-            {/* Suggested price line — reference only. Shown when a same-identity
-                sibling at a show has a card_show_price set. Small "Use" button
-                pre-fills the input so users don't have to retype the number.
-                Sits at the row's left edge below the main 70/30 grid — under
-                the card info, so it reads as context on the item itself. */}
-            {suggested != null && (
-              <div className="flex items-center gap-2 text-[11px]">
-                <span className="text-zinc-500">
-                  Suggested <span className="text-zinc-200 font-semibold tabular-nums">${suggested.toFixed(2)}</span>
-                  <span className="text-zinc-600 ml-1">· {sampleCount} sample{sampleCount === 1 ? '' : 's'}</span>
-                </span>
-                {state.found && Math.round(suggested * 100) !== parseCents(state.price) && (
-                  <button
-                    type="button"
-                    onClick={() => onChange(r.id, { price: suggested.toFixed(2) })}
-                    className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 hover:bg-indigo-500/30 transition-colors"
-                  >
-                    Use
-                  </button>
-                )}
-              </div>
-            )}
             {/* Propagate toggle — bundle the sibling IDs into the commit
                 payload so their card_show_price gets updated to match this
                 row's entered price. Hidden until Found + valid price. */}

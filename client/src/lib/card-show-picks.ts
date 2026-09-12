@@ -142,14 +142,16 @@ export function getReviewState(): Record<string, ReviewEntry> {
   return readReview();
 }
 
-// Merge a partial patch into one row's review state. Unchecking Found also
-// clears the price so a subsequent re-check doesn't accidentally commit a
-// stale value from before the uncheck.
+// Merge a partial patch into one row's review state. Preserves price when
+// Found is unticked — commit already gates on found && priceValid, so a
+// stale price on an un-Found row is inert. A previous version wiped price
+// on found=false to guard against "re-check commits stale price," but that
+// same wipe caused visible data loss when Found was toggled accidentally
+// (or when an earlier reconciliation bug flipped state under the user).
 export function updateReviewEntry(id: string, patch: Partial<ReviewEntry>): void {
   const cur = readReview();
   const existing = cur[id] ?? { found: false, price: '' };
   const next: ReviewEntry = { ...existing, ...patch };
-  if (patch.found === false) next.price = '';
   writeReview({ ...cur, [id]: next });
 }
 

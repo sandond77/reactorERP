@@ -2,7 +2,21 @@
 
 ## September 11, 2026
 
+### Fixes
+
+**Card Show Pick List — silent price loss when Found is toggled off**
+- User reported after a commit: 13 straggler rows still ticked Found but with empty CS Price fields, despite having entered values before committing. Root cause was in [card-show-picks.ts:151](client/src/lib/card-show-picks.ts#L151) — `updateReviewEntry` intentionally wiped the price whenever a `found: false` patch came through. The rationale was "don't accidentally commit a stale price if the user re-Founds later," but the commit flow already gates on `found && parseCents(price) !== null` so a stale price on an un-Found row is inert. In practice the wipe caused visible data loss when Found got toggled by any means — an accidental double-click on the checkbox, or (before this morning's `slab_ids` fix) an earlier reconciliation flipping state under the user.
+- Removed the wipe. Now un-Founding preserves the entered price; re-Founding brings it right back into the input. Commit behavior unchanged because the gate on the mutation side already handles the "found: false + price present" case correctly.
+
 ### UX
+
+**Card Show Pick List — Review rows tightened (~30% shorter)**
+- Rows still felt too tall on longer pick lists. Consolidated:
+  - `p-3` → `px-3 py-2` and outer `space-y-2` → `space-y-1` on the row container. Shaves ~8px per row from padding alone.
+  - Cost / Listed / Suggested / Use merged into a **single** meta line under the set·cert·grade line. Previously "Cost $X.XX" and "Suggested $Y.YY · N samples · [Use]" were separate rows — dropping a whole line for every row that had a suggestion (which is most of them).
+  - Right column's Found checkbox and CS $ input moved onto one line via `flex items-center gap-3`. Stacked Remove above it, so the right col is now two rows instead of three.
+- Net: left column stays three lines (name, meta, cost-with-suggested); right column drops from three lines to two. Rows now consistently land around 62px tall instead of ~90px, so ~50% more rows fit on screen without scrolling.
+- Suggested/Use is still inline with the cost line, keeping the "context on the item" placement while collapsing its vertical footprint.
 
 **Card Show Pick List — Review list now sorted by cert number ascending**
 - Review rows previously appeared in whatever order the picks landed in localStorage (alphabetical string order of UUIDs, effectively random from the user's perspective). The Add-mode table already defaults to `sort_by=cert_number asc` because low-to-high cert matches how storage boxes are physically ordered — Review needs the same order or the pull sequence doesn't match the box. Sorted `reviewRows` by `Number(cert_number)` ascending; non-numeric or missing cert numbers fall to the end and secondary-sort by card name so any oddballs still group together predictably.
