@@ -2,6 +2,14 @@
 
 ## September 11, 2026
 
+### UX
+
+**Card Show Pick List — Review rows compacted via 70/30 grid + red two-click Remove**
+- Found + CS Price used to sit on a second line below the card info — at typical pick-list sizes that doubled every row's height for two controls that could easily fit inline. Rebuilt each row as a two-column grid (`col-span-7` / `col-span-3`): card name/set/cert/cost on the left, `Remove` → `Found` → `CS $` stacked at the right edge. Same content, ~40% less vertical space per row, so 2× as many rows fit on screen without scrolling.
+- **Remove is now destructive-visible.** Was muted zinc that fired instantly on click — no confirm despite dropping in-progress review state. Now red text (`text-red-400 hover:text-red-300`) by default, and clicking it arms an inline "Confirm remove | Cancel" pair; the drop only happens on the second click. Matches CLAUDE.md's no-`window.confirm` pattern. Armed state is a local `Set<string>` in `ReviewMode`, cleared on confirm or cancel.
+- CS Price input narrowed from `max-w-[9rem]` → `w-24` to fit the right column, and now right-aligned + `tabular-nums` so prices line up column-wise across rows — easier to scan for typos.
+- Suggested-price and Propagate lines had a `pl-6` that was aligning them to the old left-side checkbox column. Removed — they now sit at the row's left edge under the card info, reading as context on the item itself rather than as annotations on a control that no longer sits there.
+
 ### Fixes
 
 **Card Show Pick List — Review mode only showed a fraction of picks when the user's slab inventory exceeded ~100**
