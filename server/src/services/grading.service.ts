@@ -131,7 +131,8 @@ export async function listSlabs(
   purchaseDates?: string[],
   listedDates?: string[],
   soldDates?: string[],
-  inSetListing?: string
+  inSetListing?: string,
+  slabIds?: string[]
 ) {
   const offset = getPaginationOffset(pagination.page, pagination.limit);
   const status = statusFilter === 'all' || !statusFilter ? null : statusFilter;
@@ -162,6 +163,10 @@ export async function listSlabs(
   const purchaseDateCond = purchaseDates?.length ? sql`AND (ci.purchased_at AT TIME ZONE 'UTC')::date IN (${sql.join(purchaseDates.map((v) => sql`${v}::date`))})` : sql``;
   const listedDateCond   = listedDates?.length   ? sql`AND EXISTS (SELECT 1 FROM listings l2 WHERE l2.card_instance_id = ci.id AND (l2.listed_at AT TIME ZONE 'UTC')::date IN (${sql.join(listedDates.map((v) => sql`${v}::date`))}))` : sql``;
   const soldDateCond     = soldDates?.length      ? sql`AND EXISTS (SELECT 1 FROM sales s2 WHERE s2.card_instance_id = ci.id AND (s2.sold_at AT TIME ZONE 'UTC')::date IN (${sql.join(soldDates.map((v) => sql`${v}::date`))}))` : sql``;
+  // Bulk-by-ID filter for pickers (Card Show Pick List Review, etc.). When
+  // set, ci.id must be in the provided list — undefined means "no filter",
+  // empty array means "filter to nothing" (matches other CSV filters).
+  const slabIdIn         = slabIds === undefined ? sql`` : slabIds.length ? sql`AND ci.id IN (${sql.join(slabIds.map((v) => sql.val(v)))})` : sql`AND 1=0`;
 
   const countResult = await sql<{ count: string }>`
     SELECT COUNT(*) AS count
@@ -170,7 +175,7 @@ export async function listSlabs(
     WHERE ci.user_id = ${userId}
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
-    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${inSetListingCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${inSetListingCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond} ${slabIdIn}
   `.execute(db);
 
   const total = Number(countResult.rows[0]?.count ?? 0);
@@ -325,7 +330,7 @@ export async function listSlabs(
     WHERE ci.user_id = ${userId}
     ${unsold ? sql`AND ci.status != 'sold'` : status === 'graded' ? sql`AND ci.status IN ('graded', 'sold')` : status ? sql`AND ci.status = ${status}` : sql``}
     ${fuzzyNameClause(search, 'ci.card_name_override', 'sd.cert_number::text')}
-    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${inSetListingCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond}
+    ${companyIn} ${gradeIn} ${listedCond} ${cardShowCond} ${personalCollectionCond} ${purchaseYearIn} ${listedYearIn} ${soldYearIn} ${forSaleCond} ${inSetListingCond} ${purchaseDateCond} ${listedDateCond} ${soldDateCond} ${slabIdIn}
     ORDER BY ${sql.raw(sortExpr)} ${dir} NULLS LAST
     LIMIT ${pagination.limit} OFFSET ${offset}
   `.execute(db);

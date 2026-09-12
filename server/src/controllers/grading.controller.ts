@@ -22,6 +22,7 @@ const slabsQuerySchema = z.object({
   purchase_dates: z.string().optional(),
   listed_dates: z.string().optional(),
   sold_dates: z.string().optional(),
+  slab_ids: z.string().optional(),              // CSV of card_instance IDs — bulk fetch for pickers
 });
 
 // Returns undefined when param not sent (no filter), [] when sent as empty (filter to nothing)
@@ -52,7 +53,8 @@ export async function listSlabs(req: Request, res: Response, next: NextFunction)
       splitCSV(q.purchase_dates),
       splitCSV(q.listed_dates),
       splitCSV(q.sold_dates),
-      q.in_set_listing
+      q.in_set_listing,
+      splitCSV(q.slab_ids)
     );
     res.json(result);
   } catch (err) { next(err); }
@@ -70,7 +72,10 @@ export async function getSlabFilters(req: Request, res: Response, next: NextFunc
 // modal enforces client-side, so a broken caller can't ask for a
 // megabatch of lookups.
 const pricingSchema = z.object({
-  slab_ids: z.array(z.string().uuid()).min(1).max(25),
+  // Bumped to 200 so the Card Show Pick List review query can price its
+  // whole pick list in one call (typical picks ≤ 50–100, hard cap here
+  // matches the /grading/slabs page-limit ceiling).
+  slab_ids: z.array(z.string().uuid()).min(1).max(200),
 });
 
 export async function getCardShowPricingSuggestions(req: Request, res: Response, next: NextFunction) {

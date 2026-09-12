@@ -138,14 +138,21 @@ export function PickListModal({ open, onClose }: Props) {
     enabled: open && mode === 'add',
   });
 
-  // Review mode: fetch the full slab detail for currently-picked ids. Server
-  // doesn't have a bulk-by-id endpoint, so reuse the same list query
-  // unbounded (limit 100) and filter client-side. For pick lists of typical
-  // size (<50) this is fine.
+  // Review mode: fetch the exact set of picked slabs by ID. Previously this
+  // grabbed the first page of the unsold-non-card-show list (limit 100) and
+  // filtered client-side — which silently dropped picks whose IDs weren't in
+  // that first page, so a user with >100 unsold slabs would see only a
+  // fraction of their picks. Now we push the ID list to the server via the
+  // slab_ids filter so every pick comes back regardless of underlying
+  // inventory size.
   const reviewQuery = useQuery<PaginatedResult<SlabRow>>({
     queryKey: ['card-show-picker-review', pickedIds.join(',')],
     queryFn: () => api.get('/grading/slabs', {
-      params: { status: 'unsold', is_card_show: 'no', personal_collection: 'no', limit: 100, page: 1 },
+      params: {
+        status: 'unsold', is_card_show: 'no', personal_collection: 'no',
+        slab_ids: pickedIds.join(','),
+        limit: Math.min(Math.max(pickedIds.length, 1), 200), page: 1,
+      },
     }).then((r) => r.data),
     enabled: open && mode === 'review' && pickedIds.length > 0,
   });
