@@ -213,11 +213,25 @@ export function PickListModal({ open, onClose }: Props) {
   }, [open]);
 
   // Rows for review mode: the intersection of picks and eligible slabs.
+  // Sorted by numeric cert ascending so the review order matches how users
+  // physically scan a storage box (low cert → high). Non-numeric or missing
+  // cert numbers fall to the end and secondary-sort by card name so they at
+  // least group together predictably.
   const reviewRows = useMemo<SlabRow[]>(() => {
     if (mode !== 'review') return [];
     const all = reviewQuery.data?.data ?? [];
     const map = new Map(all.map((r) => [r.id, r]));
-    return pickedIds.map((id) => map.get(id)).filter((r): r is SlabRow => !!r);
+    const rows = pickedIds.map((id) => map.get(id)).filter((r): r is SlabRow => !!r);
+    return rows.sort((a, b) => {
+      const na = a.cert_number ? Number(a.cert_number) : NaN;
+      const nb = b.cert_number ? Number(b.cert_number) : NaN;
+      const aOk = Number.isFinite(na);
+      const bOk = Number.isFinite(nb);
+      if (aOk && bOk) return na - nb;
+      if (aOk) return -1;
+      if (bOk) return 1;
+      return (a.card_name ?? '').localeCompare(b.card_name ?? '');
+    });
   }, [mode, pickedIds, reviewQuery.data]);
 
   // Commit: bulk /card-shows/add-inventory for Found+Priced rows only. When

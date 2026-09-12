@@ -4,6 +4,9 @@
 
 ### UX
 
+**Card Show Pick List — Review list now sorted by cert number ascending**
+- Review rows previously appeared in whatever order the picks landed in localStorage (alphabetical string order of UUIDs, effectively random from the user's perspective). The Add-mode table already defaults to `sort_by=cert_number asc` because low-to-high cert matches how storage boxes are physically ordered — Review needs the same order or the pull sequence doesn't match the box. Sorted `reviewRows` by `Number(cert_number)` ascending; non-numeric or missing cert numbers fall to the end and secondary-sort by card name so any oddballs still group together predictably.
+
 **Card Show Pick List — Review rows compacted via 70/30 grid + red two-click Remove**
 - Found + CS Price used to sit on a second line below the card info — at typical pick-list sizes that doubled every row's height for two controls that could easily fit inline. Rebuilt each row as a two-column grid (`col-span-7` / `col-span-3`): card name/set/cert/cost on the left, `Remove` → `Found` → `CS $` stacked at the right edge. Same content, ~40% less vertical space per row, so 2× as many rows fit on screen without scrolling.
 - **Remove is now destructive-visible.** Was muted zinc that fired instantly on click — no confirm despite dropping in-progress review state. Now red text (`text-red-400 hover:text-red-300`) by default, and clicking it arms an inline "Confirm remove | Cancel" pair; the drop only happens on the second click. Matches CLAUDE.md's no-`window.confirm` pattern. Armed state is a local `Set<string>` in `ReviewMode`, cleared on confirm or cancel.
