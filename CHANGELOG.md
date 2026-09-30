@@ -1,5 +1,15 @@
 # Reactor — Changelog
 
+## September 30, 2026
+
+### Content
+
+**Set-code seed refresh — 2 JP + 8 EN Mega-era sets**
+- [set-codes.ts](server/src/utils/set-codes.ts) had drifted behind the last few releases; imports of newer slabs were falling through to the unlinked-resolution modal because no alias matched.
+- **JP** added: `M6` Storm Emeralda, `M6a` 30th Celebration (JP variant tagged `30th celebration jp` alongside the bare name for language-aware matching).
+- **EN** added (new Mega Evolution era): `MEG` Mega Evolution, `PEL` Phantasmal Flames, `POR` Perfect Order, `ASC` Ascended Heroes, `CRI` Chaos Rising, `PBL` Pitch Black, `30C` 30th Celebration (EN variant tagged `30th celebration en` + bare name), `DLR` Delta Reign.
+- Bare `30th celebration` alias intentionally lives in both `EN_SETS` and `JP_SETS`; `lookupSetCode(language, text)` picks the correct list from the `language` arg, matching the existing pattern (e.g. `forbidden light jp` vs `forbidden light`).
+
 ## September 11, 2026
 
 ### Fixes

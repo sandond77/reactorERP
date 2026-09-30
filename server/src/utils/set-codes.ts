@@ -159,6 +159,15 @@ export const EN_SETS: SetEntry[] = [
   { code: 'SV9',   names: ['destined rivals'] },
   { code: 'SV10',   names: ['black bolt & white flare', 'black bolt white flare'] },
   { code: 'SV-DECK', names: ['sv decks', 'scarlet & violet deck', 'scarlet and violet deck', 'sv theme deck'] },
+  // Mega Evolution era (2026-)
+  { code: 'MEG',    names: ['mega evolution'] },
+  { code: 'PEL',    names: ['phantasmal flames'] },
+  { code: 'POR',    names: ['perfect order'] },
+  { code: 'ASC',    names: ['ascended heroes'] },
+  { code: 'CRI',    names: ['chaos rising'] },
+  { code: 'PBL',    names: ['pitch black'] },
+  { code: '30C',    names: ['30th celebration en', '30th celebration'] },
+  { code: 'DLR',    names: ['delta reign'] },
   // Promos
   { code: 'SV-P',    names: ['scarlet & violet promo', 'scarlet & violet promos', 'sv promo', 'sv promos', 'sv black star promo', 'sv black star promos'] },
   { code: 'SWSH-P',  names: ['sword & shield promo', 'sword & shield promos', 'swsh promo', 'swsh promos', 'swsh black star promo', 'swsh black star promos', 'sword shield promo'] },
@@ -385,6 +394,8 @@ export const JP_SETS: SetEntry[] = [
   { code: 'M3',    names: ['nihil zero'] },
   { code: 'M4',    names: ['ninja spinner'] },
   { code: 'M5',    names: ['abyss eye'] },
+  { code: 'M6',    names: ['storm emeralda'] },
+  { code: 'M6a',   names: ['30th celebration jp', '30th celebration'] },
   // Promos
   { code: 'SV-P',  names: ['scarlet & violet promo', 'sv-p promo', 'sv promo jp'] },
   { code: 'S-P',   names: ['sword & shield promo', 's-p promo', 'swsh promo jp'] },
