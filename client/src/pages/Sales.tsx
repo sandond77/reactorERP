@@ -139,6 +139,26 @@ interface RawCardResult {
   location_name: string | null;
 }
 
+// Row shape from GET /listings/by-url/all — every active listing sharing one
+// eBay URL. `sku` and `numeric_grade` are what let the client tell a multi-qty
+// listing (N copies of one card) from a set listing (N different cards).
+interface BulkUrlRow {
+  id: string;
+  listing_id: string;
+  card_name: string | null;
+  set_name: string | null;
+  cert_number: string | null;
+  grade_label: string | null;
+  numeric_grade: number | null;
+  company: string | null;
+  sku: string | null;
+  raw_purchase_label: string | null;
+  card_show_price: number | null;
+  condition: string | null;
+  list_price?: number | null;
+  listed_price?: number | null;
+}
+
 interface BulkCartItem {
   cart_entry_id: string;  // unique per cart row; lets the same card_instance be added multiple times
   id: string;             // card_instance_id (the source lot — may repeat across entries)
@@ -259,6 +279,18 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [pasteResolved, setPasteResolved] = useState<Set<number>>(new Set());
   const [bulkUrl, setBulkUrl] = useState('');
   const [bulkUrlLoading, setBulkUrlLoading] = useState(false);
+  // Quantity prompt for a multi-qty listing URL — N copies of ONE card under a
+  // single URL. The URL can't say how many of them sold, so we ask instead of
+  // guessing. (A set listing, N *different* cards on one URL, needs no prompt:
+  // one of each is the only sensible reading.) Rows are pre-sorted FIFO, so
+  // answering "2" takes the two lowest certs.
+  const [urlQtyPrompt, setUrlQtyPrompt] = useState<{
+    cardName: string;
+    gradeLabel: string | null;
+    company: string | null;
+    rows: BulkUrlRow[];
+    qty: string;
+  } | null>(null);
   // Re-add confirmation for the bulk raw cart — replaces window.confirm so the
   // prompt matches the rest of the app's styling.
   const [reAddPrompt, setReAddPrompt] = useState<{
@@ -766,60 +798,104 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     }
   }
 
+  // Identity for URL-lookup rows: part number + numeric grade + company, the
+  // same key the pricing and @show queries use. Previously this matched on
+  // card_name + grade_label, both of which fragment — grade_label because PSA
+  // 10 appears under four different label strings, card_name because overrides
+  // differ in casing between import sources. Falls back to the name only when
+  // a row has no part number.
+  function urlRowIdentity(r: BulkUrlRow): string {
+    return `${r.sku ?? r.card_name ?? ''}|${r.numeric_grade ?? r.grade_label ?? ''}|${r.company ?? ''}`;
+  }
+
+  function bulkItemFromUrlRow(r: BulkUrlRow): BulkCartItem {
+    return {
+      cart_entry_id: crypto.randomUUID(),
+      id: r.id,
+      listing_id: r.listing_id,
+      card_name: r.card_name,
+      set_name: r.set_name,
+      cert_number: r.cert_number,
+      grade_label: r.grade_label ?? r.condition,
+      company: r.company,
+      raw_purchase_label: r.raw_purchase_label,
+      sticker_price_input: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '',
+      final_price_input: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '',
+      card_type: r.cert_number ? 'graded' : 'raw',
+      quantity: 1,
+      // URL-lookup path doesn't return the source lot quantity; default to
+      // 1 (the lookup is per-listing, which is usually one card anyway).
+      lot_quantity: 1,
+      card_show_price: r.card_show_price ?? null,
+      listed_price: r.list_price ?? r.listed_price ?? null,
+      is_listed: true,  // came from /listings/by-url so it IS listed
+    };
+  }
+
   async function handleBulkUrlLookup() {
     if (!bulkUrl.trim()) return;
     setBulkUrlLoading(true);
     try {
       const res = await api.get('/listings/by-url/all', { params: { url: bulkUrl.trim() } });
-      const rows: Array<{
-        id: string; listing_id: string; card_name: string | null; set_name: string | null;
-        cert_number: string | null; grade_label: string | null; company: string | null;
-        raw_purchase_label: string | null; card_show_price: number | null;
-        condition: string | null; list_price?: number | null; listed_price?: number | null;
-      }> = res.data.data;
+      const rows: BulkUrlRow[] = res.data.data;
       if (!rows.length) { toast.error('No active listings found for that URL'); return; }
       const alreadyAdded = new Set(bulkCart.map(c => c.id));
-      // Deduplicate: one card per unique identity (name + grade + company)
-      const seenIdentities = new Set<string>();
-      const newItems: BulkCartItem[] = rows
+      const available = rows
+        .filter(r => !alreadyAdded.has(r.id))
+        .sort((a, b) => compareCertAsc(a, b) || (a.cert_number ?? '').localeCompare(b.cert_number ?? ''));
+      if (!available.length) { toast('All cards from that URL are already in the cart'); return; }
+
+      const identities = new Set(available.map(urlRowIdentity));
+
+      // Multi-qty listing: every remaining row is the SAME card, so the number
+      // that sold is genuinely unknown and has to be asked. Previously these
+      // collapsed to a single row and the rest were dropped silently, which
+      // under-recorded the sale and left the other copies showing as in stock.
+      if (identities.size === 1 && available.length > 1) {
+        const head = available[0];
+        setUrlQtyPrompt({
+          cardName: head.card_name ?? 'this card',
+          gradeLabel: head.grade_label,
+          company: head.company,
+          rows: available,
+          qty: String(available.length),
+        });
+        return;
+      }
+
+      // Set listing (or a single card): one per identity is the only sensible
+      // reading — a buyer taking the set takes one of each.
+      const seen = new Set<string>();
+      const newItems = available
         .filter(r => {
-          if (alreadyAdded.has(r.id)) return false;
-          const key = `${r.card_name ?? ''}|${r.grade_label ?? ''}|${r.company ?? ''}`;
-          if (seenIdentities.has(key)) return false;
-          seenIdentities.add(key);
+          const key = urlRowIdentity(r);
+          if (seen.has(key)) return false;
+          seen.add(key);
           return true;
         })
-        .map<BulkCartItem>(r => ({
-          cart_entry_id: crypto.randomUUID(),
-          id: r.id,
-          listing_id: r.listing_id,
-          card_name: r.card_name,
-          set_name: r.set_name,
-          cert_number: r.cert_number,
-          grade_label: r.grade_label ?? r.condition,
-          company: r.company,
-          raw_purchase_label: r.raw_purchase_label,
-          sticker_price_input: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '',
-          final_price_input: r.card_show_price ? (r.card_show_price / 100).toFixed(2) : '',
-          card_type: r.cert_number ? 'graded' : 'raw',
-          quantity: 1,
-          // URL-lookup path doesn't return the source lot quantity; default to
-          // 1 (the lookup is per-listing, which is usually one card anyway).
-          lot_quantity: 1,
-          card_show_price: r.card_show_price ?? null,
-          listed_price: r.list_price ?? r.listed_price ?? null,
-          is_listed: true,  // came from /listings/by-url so it IS listed
-        }));
-      if (!newItems.length) { toast('All cards from that URL are already in the cart'); return; }
+        .map(bulkItemFromUrlRow);
+
       setBulkCart(prev => [...prev, ...newItems]);
       toast.success(`Added ${newItems.length} card${newItems.length !== 1 ? 's' : ''} from listing`);
       setBulkUrl('');
-     
+
     } catch (err) {
       toast.error(apiErrorMessage(err, 'Could not find listing'));
     } finally {
       setBulkUrlLoading(false);
     }
+  }
+
+  // Commit the answer to the multi-qty prompt: take the first N rows, which are
+  // already cert-ascending, so "2 sold" means the two oldest certs.
+  function confirmUrlQty() {
+    if (!urlQtyPrompt) return;
+    const n = Math.min(Math.max(parseInt(urlQtyPrompt.qty, 10) || 0, 1), urlQtyPrompt.rows.length);
+    const picked = urlQtyPrompt.rows.slice(0, n).map(bulkItemFromUrlRow);
+    setBulkCart(prev => [...prev, ...picked]);
+    toast.success(`Added ${n} of ${urlQtyPrompt.rows.length} cop${urlQtyPrompt.rows.length === 1 ? 'y' : 'ies'}`);
+    setUrlQtyPrompt(null);
+    setBulkUrl('');
   }
 
   // ── Step: platform-type ───────────────────────────────────────────────────
@@ -1735,10 +1811,54 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               value={bulkUrl} onChange={(e) => setBulkUrl(e.target.value)}
               autoFocus autoComplete="off" />
             <Button type="button" variant="secondary" className="w-full"
-              disabled={!bulkUrl.trim() || bulkUrlLoading}
+              disabled={!bulkUrl.trim() || bulkUrlLoading || !!urlQtyPrompt}
               onClick={handleBulkUrlLookup}>
               {bulkUrlLoading ? <><Loader2 size={13} className="animate-spin mr-1.5" />Finding cards…</> : 'Find All Cards in Listing'}
             </Button>
+
+            {/* Multi-qty listing: several copies of one card under this URL.
+                The URL can't say how many sold, so ask rather than guess —
+                silently taking one under-records the sale and leaves the rest
+                showing as in stock. */}
+            {urlQtyPrompt && (
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 space-y-2.5">
+                <div>
+                  <p className="text-xs font-semibold text-amber-200">
+                    {urlQtyPrompt.rows.length} copies of this card on one listing
+                  </p>
+                  <p className="text-[11px] text-zinc-400 mt-0.5 whitespace-normal break-words">
+                    {urlQtyPrompt.cardName}
+                    {urlQtyPrompt.company ? ` · ${urlQtyPrompt.company}` : ''}
+                    {urlQtyPrompt.gradeLabel ? ` ${urlQtyPrompt.gradeLabel}` : ''}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-[11px] text-zinc-400 shrink-0">How many sold?</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    value={urlQtyPrompt.qty}
+                    onChange={(e) => setUrlQtyPrompt(p => p && { ...p, qty: e.target.value.replace(/[^0-9]/g, '') })}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmUrlQty(); } }}
+                    className="w-16 px-2 py-1 text-xs text-right tabular-nums rounded border bg-zinc-800 border-zinc-700 text-zinc-100 focus:outline-none focus:border-indigo-500"
+                  />
+                  <span className="text-[11px] text-zinc-500">of {urlQtyPrompt.rows.length}</span>
+                </div>
+                <p className="text-[10px] text-zinc-500">
+                  Adds the {urlQtyPrompt.qty === '1' ? 'oldest cert' : 'oldest certs'} first (lowest cert number).
+                </p>
+                <div className="flex gap-2">
+                  <Button type="button" size="sm" onClick={confirmUrlQty}
+                    disabled={!urlQtyPrompt.qty || parseInt(urlQtyPrompt.qty, 10) < 1}>
+                    Add {Math.min(Math.max(parseInt(urlQtyPrompt.qty, 10) || 0, 1), urlQtyPrompt.rows.length)} to cart
+                  </Button>
+                  <Button type="button" size="sm" variant="ghost" onClick={() => setUrlQtyPrompt(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <>

@@ -60,6 +60,11 @@ function buildByUrlQuery(userId: string, url: string) {
       'sd.grade_label',
       'sd.grade as numeric_grade',
       'sd.company',
+      // Part number — lets the client tell "N copies of one card" (multi-qty
+      // listing) apart from "N different cards" (set listing) using the same
+      // identity key the rest of the app uses, rather than matching on the
+      // display name, which varies by import source and casing.
+      'cc.sku',
       'ci.currency',
       'ci.condition',
       'ci.purchased_at as raw_purchase_date',
