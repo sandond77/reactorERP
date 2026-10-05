@@ -42,9 +42,10 @@ interface PricingSuggestion {
   suggested_price_cents: number | null;
   sample_count: number;
   // Which pool produced the number — 'at_show' means copies currently on a
-  // table, 'sales' means past card-show sale prices. Labeled distinctly
-  // because "3 samples" reads very differently depending on which it is.
-  source: 'at_show' | 'sales' | null;
+  // table, 'past_show' means the sticker those copies carried at an earlier
+  // show. Labeled distinctly because "3 samples" reads very differently
+  // depending on which it is.
+  source: 'at_show' | 'past_show' | null;
 }
 
 interface Props {
@@ -745,9 +746,9 @@ function ReviewMode(props: {
                       <span className="text-zinc-500">
                         · Suggested <span className="text-zinc-200 font-semibold tabular-nums">${suggested.toFixed(2)}</span>
                         <span className="text-zinc-600 ml-1">
-                          {sug?.source === 'sales'
-                            ? `· ${sampleCount} past show sale${sampleCount === 1 ? '' : 's'}`
-                            : `· ${sampleCount} at show`}
+                          {sug?.source === 'past_show'
+                            ? `· ${sampleCount} previously at show`
+                            : `· ${sampleCount} at show now`}
                         </span>
                       </span>
                       {state.found && Math.round(suggested * 100) !== parseCents(state.price) && (

@@ -372,13 +372,16 @@ export interface CardShowPricingSuggestion {
   // How many records the suggestion was drawn from. 0 means no suggestion.
   sample_count: number;
   // Which tier produced it, so the client can label the number honestly:
-  //   'at_show' — other copies of this card currently sitting at a show.
-  //               Primary tier: the point is to not put two prices on the
-  //               same card on the same table.
-  //   'sales'   — past card-show sale prices for this card. Fallback used
-  //               only when nothing comparable is at a show right now.
-  //   null      — no suggestion.
-  source: 'at_show' | 'sales' | null;
+  //   'at_show'   — other copies of this card currently sitting at a show.
+  //                 Primary tier: the point is to not put two prices on the
+  //                 same card on the same table.
+  //   'past_show' — the sticker price copies carried at a previous show,
+  //                 read off slabs that have since sold. Fallback used only
+  //                 when nothing comparable is at a show right now.
+  //   null        — no suggestion.
+  // Both tiers read card_show_price, never a realized sale price: the
+  // question is what to tag this at, and a sale price is a different number.
+  source: 'at_show' | 'past_show' | null;
 }
 
 export async function getCardShowPricingSuggestions(
@@ -404,7 +407,7 @@ export async function getCardShowPricingSuggestions(
     total_cost_cents: number;
     suggested_price_cents: number | null;
     sample_count: number;
-    source: 'at_show' | 'sales' | null;
+    source: 'at_show' | 'past_show' | null;
   }>`
     WITH target AS (
       SELECT
@@ -442,21 +445,26 @@ export async function getCardShowPricingSuggestions(
         AND sd2.company = t.company
         AND sd2.grade IS NOT DISTINCT FROM t.grade
     ),
-    -- Fallback tier: what this card actually SOLD for at past card shows.
-    -- Uses sales.sale_price (realized), never the card_show_price left
-    -- behind on the slab. Only consulted when at_show has nothing.
-    past_sales AS (
-      SELECT t.slab_id, s.sale_price AS price_cents, s.sold_at AS ranked_at
+    -- Fallback tier: the sticker price this card carried at a PAST show —
+    -- copies that have since sold but still hold the card_show_price they
+    -- were tagged with. Deliberately the sticker, not sales.sale_price:
+    -- the question being answered is "what do I tag this at", and a sale
+    -- price is a different number. It can be a negotiated-down figure, and
+    -- for a bulk or combined card-show sale it is a lump sum split
+    -- proportionally across certs, which yields values like $96.67 that are
+    -- meaningless as a sticker.
+    past_show AS (
+      SELECT t.slab_id, ci2.card_show_price AS price_cents, ci2.updated_at AS ranked_at
       FROM target t
       INNER JOIN card_instances ci2 ON ci2.user_id = ${userId}
       INNER JOIN slab_details    sd2 ON sd2.card_instance_id = ci2.id
       INNER JOIN card_catalog    cc2 ON cc2.id = ci2.catalog_id
-      INNER JOIN sales           s   ON s.card_instance_id = ci2.id
-      WHERE s.platform = 'card_show'
-        -- Strictly positive: zero-price card-show rows exist (giveaways,
-        -- throw-ins, incomplete entries) and a $0.00 suggestion is worse
-        -- than none — it reads as a real number and can be committed.
-        AND s.sale_price > 0
+      WHERE ci2.is_card_show = true
+        AND ci2.status = 'sold'
+        -- Strictly positive: zero/blank stickers exist on older rows, and a
+        -- $0.00 suggestion is worse than none — it reads as a real number
+        -- and can be committed straight through.
+        AND ci2.card_show_price > 0
         AND ci2.id <> t.slab_id
         AND t.sku_key IS NOT NULL
         AND cc2.sku = t.sku_key
@@ -471,28 +479,28 @@ export async function getCardShowPricingSuggestions(
     at_show_count AS (
       SELECT slab_id, COUNT(*)::int AS n FROM at_show GROUP BY slab_id
     ),
-    sales_pick AS (
-      SELECT DISTINCT ON (slab_id) slab_id, price_cents FROM past_sales
+    past_pick AS (
+      SELECT DISTINCT ON (slab_id) slab_id, price_cents FROM past_show
       ORDER BY slab_id, ranked_at DESC
     ),
-    sales_count AS (
-      SELECT slab_id, COUNT(*)::int AS n FROM past_sales GROUP BY slab_id
+    past_count AS (
+      SELECT slab_id, COUNT(*)::int AS n FROM past_show GROUP BY slab_id
     )
     SELECT
       t.slab_id,
       t.total_cost_cents,
-      COALESCE(asp.price_cents, sp.price_cents)                       AS suggested_price_cents,
+      COALESCE(asp.price_cents, pp.price_cents)                       AS suggested_price_cents,
       CASE WHEN asp.price_cents IS NOT NULL THEN COALESCE(asc2.n, 0)
-           WHEN sp.price_cents  IS NOT NULL THEN COALESCE(sc.n, 0)
+           WHEN pp.price_cents  IS NOT NULL THEN COALESCE(pc.n, 0)
            ELSE 0 END                                                 AS sample_count,
       CASE WHEN asp.price_cents IS NOT NULL THEN 'at_show'
-           WHEN sp.price_cents  IS NOT NULL THEN 'sales'
+           WHEN pp.price_cents  IS NOT NULL THEN 'past_show'
            ELSE NULL END                                              AS source
     FROM target t
     LEFT JOIN at_show_pick  asp  ON asp.slab_id  = t.slab_id
     LEFT JOIN at_show_count asc2 ON asc2.slab_id = t.slab_id
-    LEFT JOIN sales_pick    sp   ON sp.slab_id   = t.slab_id
-    LEFT JOIN sales_count   sc   ON sc.slab_id   = t.slab_id
+    LEFT JOIN past_pick     pp   ON pp.slab_id   = t.slab_id
+    LEFT JOIN past_count    pc   ON pc.slab_id   = t.slab_id
   `.execute(db);
 
   return rows.rows;
