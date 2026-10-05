@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Bot, User, ChevronDown, ChevronRight, RotateCcw, Loader2 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, apiErrorMessage } from '../lib/api';
 import { formatDate } from '../lib/utils';
 import toast from 'react-hot-toast';
 
@@ -86,8 +86,7 @@ function RevertButton({ entry, onReverted }: { entry: AuditEntry; onReverted: ()
       onReverted();
      
     } catch (err) {
-      const msg = err?.response?.data?.message ?? 'Failed to restore record';
-      toast.error(msg);
+      toast.error(apiErrorMessage(err, 'Failed to restore record'));
       setStep(0);
     }
   }
