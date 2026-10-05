@@ -28,6 +28,17 @@
 - Replaced with `parsePositiveCents` in `lib/utils.ts`, built on `toCents` so it inherits the stripping. It keeps the strict contract the Pick List needs — null for empty, non-numeric, zero or negative, so "nothing entered" stays distinguishable from "legitimately zero" and an unpriced row still can't be committed. A leading minus is rejected explicitly rather than stripped, since `parseDollars` would otherwise read `-5` as `5`, and in a price field that is a typo to surface rather than a value to accept.
 - Verified against the old implementation across 22 inputs. Five differ: `$45`, `$45.00`, `1,200` and `1,200.50` now parse where they previously returned null, and `4.5e2` now reads as `$4.52` rather than `$450` — scientific notation loses to text-stripping, which is already true of every other money field, so this makes the Pick List consistent rather than newly wrong.
 
+**Build break from the `apiErrorMessage` sweep — two failed production deploys**
+- `ActionLog.tsx`'s revert handler read `err?.response?.data?.message`. The conversion regex only matched `.data?.error`, so this callsite kept its raw property access — but the follow-up pass that stripped `: any` from catch blocks was a blanket regex and hit it anyway. `err` became `unknown`, the property access stopped compiling, and the Railway build failed twice.
+- Converted properly, which also repairs dead code: the server's error handler emits `{ error }`, never `{ message }`, so `.data?.message` was always `undefined` and that toast has only ever shown its generic fallback. It now surfaces the real server message.
+- Root cause of the miss: the pre-commit check ran `tsc --noEmit`, which on this client checks **zero files** — see the tooling note below. The codemod lesson stands on its own though: a pass that strips type annotations must be gated on the sites the conversion actually touched, not applied as a blanket regex.
+
+### Tooling
+
+**`tsc --noEmit` silently checks nothing in `client/` — use the build**
+- `client/tsconfig.json` is solution-style: `"files": []` with only `references` to `tsconfig.app.json` and `tsconfig.node.json`. A bare `tsc --noEmit` therefore type-checks **zero files** and exits 0 regardless of what is broken. Confirm with `npx tsc --noEmit --listFiles | wc -l`, which returns `0`. Only build mode (`tsc -b`) follows project references.
+- This let a real type error reach `main` and fail two production deploys while local checks reported clean. [CLAUDE.md](CLAUDE.md) now names `npm run build` (or `npx tsc -b`) as the only valid client typecheck, with the detection command so the claim is falsifiable rather than taken on faith. The server's `tsc --noEmit` is fine — ordinary config, real file list.
+
 ### Refactors
 
 **`apiErrorMessage` adopted at the remaining 39 callsites — and 40 dead lint suppressions fell out**
@@ -61,8 +72,6 @@
 **Pick List — `@show ×N` chip and Suggested price now agree**
 - The chip and the price beneath it used two different definitions of "same card": the chip keyed on `catalog_id` + company + numeric grade, the price on display-name string + company + `grade_label`. Two numbers on one row describing different sets of cards.
 - Both now key on part number + company + numeric grade. Moving the chip off `catalog_id` also fixes a blind spot of its own — duplicate catalog rows for one card (import-name variants, and in one case a `Tohoku's` / `Tokohu's` typo pair) have different `catalog_id`s but the same SKU, so the chip previously under-counted them.
-
-### Fixes
 
 **Part numbers — set-code casing drift split one card across two SKUs**
 - Set codes are identity, not display text: `m2a`, `M2a`, `M2A` and `m2A` are the same set. But [`generatePartNumber`](server/src/utils/set-codes.ts#L516) embedded the code verbatim, so a code arriving in two casings minted two part numbers for one card — and `idx_card_catalog_sku` is `UNIQUE (user_id, sku)`, so the two never reconciled.
