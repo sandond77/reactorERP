@@ -1,5 +1,16 @@
 # Reactor — Changelog
 
+## October 4, 2026
+
+### Fixes
+
+**Combined Order search now collapses duplicate certs and offers FIFO, matching the individual-sale picker**
+- Searching a card with multiple listed copies (e.g. "scragg" → three identical `SV11W-WHITE FLARE 136 SCRAGGY ART RARE` PSA 10s at $94.49) rendered one row per cert. The seller had to know which cert number to click — but that's precisely the decision FIFO is supposed to make for them, and the individual-sale flow already does it: Phase 1 dedupes to card names, Phase 2 sorts copies by cert ascending and auto-selects the earliest non-set copy. Combined Order skipped both steps and dumped every cert flat.
+- Combined Order graded results are now grouped by identity (`card_name` + `company` + `grade_label`). Each group renders a single row whose displayed cert is the **FIFO head** — the lowest cert number not already in the cart. Clicking adds that cert; clicking again advances to the next one, so a buyer who genuinely combined two copies of the same card still works without hunting for cert numbers.
+- Row shows a `×N` count chip and an amber `· FIFO` marker on the cert line whenever a group holds more than one available copy, so it's clear the row stands for several certs rather than one. The row disables only once every cert in its group is in the cart (previously it disabled per-cert).
+- Scoped to Combined Order deliberately. **Set Listing** auto-pulls every sibling under a listing URL on click, so collapsing there would hide members of the set the user needs to see; **card-show bulk** is a separate workflow with its own picker semantics. Both keep flat per-cert rows — `gradedDisplayRows` falls through to the unmodified `bulkSearchRows` and `groupRemaining` stays empty, so their behavior is byte-identical to before.
+- Cert ordering uses a numeric comparator (not string sort), with non-numeric or missing certs falling to the end — same approach as the Card Show Pick List review sort.
+
 ## September 30, 2026
 
 ### Content

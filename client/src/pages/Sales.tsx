@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Plus, X, Loader2, Pencil, Trash2, ExternalLink } from 'lucide-react';
 import { api, type PaginatedResult } from '../lib/api';
@@ -579,6 +579,55 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   });
   const bulkSearchRows = bulkSearchResults?.data ?? [];
   const bulkRawRows = bulkRawResults?.data ?? [];
+
+  // Combined Order: collapse same-identity certs (card + company + grade)
+  // into one row whose head is the FIFO copy — earliest cert number not yet
+  // in the cart. This mirrors the individual-sale picker, which dedupes to
+  // card names and auto-selects FIFO rather than making the user choose a
+  // cert. Without it, a card with 3 listed copies shows 3 byte-identical
+  // rows and the seller has to know which cert to click, which is exactly
+  // the decision FIFO exists to make for them. Clicking the row again picks
+  // up the next cert, so a buyer who genuinely bought 2 copies still works.
+  //
+  // Scoped to Combined Order only. Set Listing auto-pulls every sibling
+  // under a listing URL on click, so collapsing there would hide members of
+  // the set the user needs to see; card-show bulk is a separate workflow.
+  const certAsc = (a: SlabResult, b: SlabResult) => {
+    const na = a.cert_number ? Number(a.cert_number) : NaN;
+    const nb = b.cert_number ? Number(b.cert_number) : NaN;
+    const aOk = Number.isFinite(na);
+    const bOk = Number.isFinite(nb);
+    if (aOk && bOk) return na - nb;
+    if (aOk) return -1;
+    if (bOk) return 1;
+    return (a.cert_number ?? '').localeCompare(b.cert_number ?? '');
+  };
+  const bulkCartIds = new Set(bulkCart.map(c => c.id));
+  const { gradedDisplayRows, groupRemaining } = useMemo(() => {
+    if (!bulkIsEbayCombined) {
+      return { gradedDisplayRows: bulkSearchRows, groupRemaining: new Map<string, number>() };
+    }
+    const groups = new Map<string, SlabResult[]>();
+    for (const r of bulkSearchRows) {
+      const key = `${r.card_name ?? '—'}|${r.company ?? '—'}|${r.grade_label ?? '—'}`;
+      const list = groups.get(key);
+      if (list) list.push(r); else groups.set(key, [r]);
+    }
+    const heads: SlabResult[] = [];
+    const remaining = new Map<string, number>();
+    for (const list of groups.values()) {
+      const sorted = [...list].sort(certAsc);
+      const unAdded = sorted.filter(r => !bulkCartIds.has(r.id));
+      // Head is the FIFO un-added cert; when the whole group is in the cart
+      // we still render rows[0] so the row shows as disabled rather than
+      // vanishing mid-session.
+      const head = unAdded[0] ?? sorted[0];
+      heads.push(head);
+      remaining.set(head.id, unAdded.length);
+    }
+    return { gradedDisplayRows: heads, groupRemaining: remaining };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bulkIsEbayCombined, bulkSearchRows, bulkCart]);
 
   const uniqueRawCardNames = rawResults
     ? Array.from(
@@ -1729,8 +1778,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         )}
         {activeRows.length > 0 ? (
           <div className="rounded-lg border border-zinc-700 overflow-hidden max-h-52 overflow-y-auto">
-            {bulkTab === 'graded' ? bulkSearchRows.map((r) => {
-              const added = alreadyAdded.has(r.id);
+            {bulkTab === 'graded' ? gradedDisplayRows.map((r) => {
+              // Combined Order rows are identity groups: `added` means every
+              // cert in the group is already in the cart, not just this one.
+              const groupLeft = groupRemaining.get(r.id);
+              const added = bulkIsEbayCombined ? groupLeft === 0 : alreadyAdded.has(r.id);
               return (
                 <button key={r.id} type="button" disabled={added}
                   onClick={async () => {
@@ -1796,8 +1848,24 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       {bulkIsEbay && r.is_listed && (
                         <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-sky-500/15 border border-sky-500/40 text-sky-300">eBay</span>
                       )}
+                      {/* Only meaningful on Combined Order, where a row stands
+                          for every same-identity cert rather than just one. */}
+                      {bulkIsEbayCombined && (groupLeft ?? 0) > 1 && (
+                        <span
+                          className="shrink-0 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-zinc-700/60 border border-zinc-600 text-zinc-300"
+                          title={`${groupLeft} copies available — clicking adds the earliest cert (FIFO), click again for the next`}
+                        >
+                          ×{groupLeft}
+                        </span>
+                      )}
                     </p>
-                    <p className="text-xs text-zinc-500 truncate">{r.set_name ?? ''}{r.cert_number ? ` · #${r.cert_number}` : ''}</p>
+                    <p className="text-xs text-zinc-500 truncate">
+                      {r.set_name ?? ''}
+                      {r.cert_number ? ` · #${r.cert_number}` : ''}
+                      {bulkIsEbayCombined && (groupLeft ?? 0) > 1 && (
+                        <span className="text-amber-500/80"> · FIFO</span>
+                      )}
+                    </p>
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-xs text-zinc-400 font-medium">{r.company} {r.grade_label}</p>
