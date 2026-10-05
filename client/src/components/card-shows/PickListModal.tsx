@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tansta
 import { Search, X, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, apiErrorMessage, type PaginatedResult } from '../../lib/api';
+import { compareCertAsc } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import {
   getPicks, togglePick, removePicks, clearPicks,
@@ -227,16 +228,11 @@ export function PickListModal({ open, onClose }: Props) {
     const all = reviewQuery.data?.data ?? [];
     const map = new Map(all.map((r) => [r.id, r]));
     const rows = pickedIds.map((id) => map.get(id)).filter((r): r is SlabRow => !!r);
-    return rows.sort((a, b) => {
-      const na = a.cert_number ? Number(a.cert_number) : NaN;
-      const nb = b.cert_number ? Number(b.cert_number) : NaN;
-      const aOk = Number.isFinite(na);
-      const bOk = Number.isFinite(nb);
-      if (aOk && bOk) return na - nb;
-      if (aOk) return -1;
-      if (bOk) return 1;
-      return (a.card_name ?? '').localeCompare(b.card_name ?? '');
-    });
+    // Tiebreak on name: this list spans many different cards, so grouping
+    // the non-numeric stragglers by name is more useful than comparing
+    // their cert strings.
+    return rows.sort((a, b) =>
+      compareCertAsc(a, b) || (a.card_name ?? '').localeCompare(b.card_name ?? ''));
   }, [mode, pickedIds, reviewQuery.data]);
 
   // Commit: bulk /card-shows/add-inventory for Found+Priced rows only. When

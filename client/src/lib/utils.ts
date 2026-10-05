@@ -49,6 +49,35 @@ export function formatCertNumber(cert: string | number | null | undefined): stri
   return `#${String(cert).padStart(8, '0')}`;
 }
 
+/**
+ * Order slabs by cert number ascending — low cert first, matching the order
+ * cards sit in a physical storage box, which is why every picker that
+ * auto-selects an "oldest" copy sorts this way.
+ *
+ * Compares numerically, not as strings, so 9 sorts before 10. Certs that
+ * aren't numeric (or are missing) fall to the end and compare equal to each
+ * other, returning 0 so the caller can chain its own tiebreak:
+ *
+ *   rows.sort((a, b) => compareCertAsc(a, b) || myTiebreak(a, b))
+ *
+ * The tiebreak is left to the caller because the useful one differs by
+ * context: a list spanning many cards wants to group by name, while a list
+ * already narrowed to one card has only the cert string left to go on.
+ */
+export function compareCertAsc(
+  a: { cert_number: string | null },
+  b: { cert_number: string | null },
+): number {
+  const na = a.cert_number ? Number(a.cert_number) : NaN;
+  const nb = b.cert_number ? Number(b.cert_number) : NaN;
+  const aOk = Number.isFinite(na);
+  const bOk = Number.isFinite(nb);
+  if (aOk && bOk) return na - nb;
+  if (aOk) return -1;
+  if (bOk) return 1;
+  return 0;
+}
+
 export const STATUS_LABELS: Record<string, string> = {
   purchased_raw: 'Purchased Raw',
   inspected: 'Inspected',

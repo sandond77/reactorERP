@@ -2,6 +2,14 @@
 
 ## October 5, 2026
 
+### Refactors
+
+**Cert-ordering comparator consolidated into one shared helper**
+- The "sort by cert number ascending" rule was written out twice — [PickListModal.tsx](client/src/components/card-shows/PickListModal.tsx) and [Sales.tsx](client/src/pages/Sales.tsx) — and the two copies had already drifted: identical for 7 lines, differing on the final tiebreak. Both happened to be correct for their own context, but that's the copy-paste-then-diverge pattern that produced the Combined Order FIFO gap, so it gets one home.
+- New `compareCertAsc` in [lib/utils.ts](client/src/lib/utils.ts), beside `formatCertNumber`. It handles the shared part — numeric compare so 9 sorts before 10, non-numeric and missing certs to the end — and returns 0 when certs tie so the caller chains its own tiebreak: `rows.sort((a, b) => compareCertAsc(a, b) || myTiebreak(a, b))`.
+- The tiebreak stays with the caller because the useful one genuinely differs. The Pick List spans many cards, so it groups stragglers by `card_name`. The Sales picker runs after rows are narrowed to one identity, where every `card_name` already matches and only the cert string can separate two entries. The `|| tiebreak` idiom makes that difference explicit instead of burying it on line 9 of two near-identical blocks.
+- **One behavior change, verified by exhaustive pair comparison** (1600 pairs across numeric, zero-padded, empty, null and alphabetic certs): the only divergence is when two certs parse to the *same* number. Previously that returned 0 and left the pair in input order; now it falls through to the tiebreak. Production holds 3 such cert values, each on 2 slabs. Sales is unaffected (identical cert strings compare equal anyway); the Pick List now orders those pairs by card name instead of insertion order, which is deterministic where it previously wasn't.
+
 ### Features
 
 **Card-show pricing suggestions rebuilt as two explicit tiers**

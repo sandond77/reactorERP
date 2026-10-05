@@ -6,7 +6,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
 import { Modal } from '../components/ui/Modal';
-import { formatCurrency, formatDate, cn, parseDollars, toCents } from '../lib/utils';
+import { formatCurrency, formatDate, cn, parseDollars, toCents, compareCertAsc } from '../lib/utils';
 import { loadFilters, saveFilters } from '../lib/filter-store';
 import { ColHeader, ColumnFilter, useColWidths, colMinWidth } from '../components/ui/TableHeader';
 import { FilterDrawer, FilterDrawerLauncher } from '../components/ui/FilterDrawer';
@@ -592,16 +592,11 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // Scoped to Combined Order only. Set Listing auto-pulls every sibling
   // under a listing URL on click, so collapsing there would hide members of
   // the set the user needs to see; card-show bulk is a separate workflow.
-  const certAsc = (a: SlabResult, b: SlabResult) => {
-    const na = a.cert_number ? Number(a.cert_number) : NaN;
-    const nb = b.cert_number ? Number(b.cert_number) : NaN;
-    const aOk = Number.isFinite(na);
-    const bOk = Number.isFinite(nb);
-    if (aOk && bOk) return na - nb;
-    if (aOk) return -1;
-    if (bOk) return 1;
-    return (a.cert_number ?? '').localeCompare(b.cert_number ?? '');
-  };
+  // Tiebreak on the cert string: by the time this runs the rows are already
+  // narrowed to one identity, so every card_name matches and only the cert
+  // can separate two non-numeric entries.
+  const certAsc = (a: SlabResult, b: SlabResult) =>
+    compareCertAsc(a, b) || (a.cert_number ?? '').localeCompare(b.cert_number ?? '');
   const bulkCartIds = new Set(bulkCart.map(c => c.id));
   const { gradedDisplayRows, groupRemaining } = useMemo(() => {
     if (!bulkIsEbayCombined) {
