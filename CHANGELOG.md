@@ -4,6 +4,13 @@
 
 ### Refactors
 
+**`apiErrorMessage` adopted at the remaining 39 callsites — and 40 dead lint suppressions fell out**
+- The September sweep converted 39 callsites to the shared helper but left 42 behind, so nine files carried both patterns at once (Listings had 8 raw alongside 3 converted, Grading 8 alongside 2). Two conventions inside one file is worse than either one used consistently.
+- All 39 remaining `x?.response?.data?.error ?? 'fallback'` expressions now call `apiErrorMessage(x, 'fallback')` across Expenses, Grading, Import, JoinOrg, Listings, Sales, SubReturns, Team and Trades.
+- **Why the September sweep missed them.** They typed the handler parameter as `(e: any)` or `catch (err: any)` rather than casting inside the body. `no-explicit-any` does fire on that — but all 40 sites carried an `eslint-disable-next-line` comment to silence it. The rule was never the gap; the suppressions were. With the bodies converted, the `any` annotations became unnecessary (26 `catch` blocks, 13 `onError` handlers — none used the caught value for anything beyond the toast), and removing them turned all 40 disable comments into dead directives that `eslint --fix` then swept.
+- Net effect is a precisely symmetric 110-line diff with no behavior change, and the error-handling convention is now uniform across the client.
+- Three callsites deliberately untouched: `AgentPanel.tsx` ×2 and `MobileAgent.tsx` read `response.data.data.reply`, which is an agent reply payload rather than an error string. Different shape, different meaning — `apiErrorMessage` would be the wrong tool.
+
 **Cert-ordering comparator consolidated into one shared helper**
 - The "sort by cert number ascending" rule was written out twice — [PickListModal.tsx](client/src/components/card-shows/PickListModal.tsx) and [Sales.tsx](client/src/pages/Sales.tsx) — and the two copies had already drifted: identical for 7 lines, differing on the final tiebreak. Both happened to be correct for their own context, but that's the copy-paste-then-diverge pattern that produced the Combined Order FIFO gap, so it gets one home.
 - New `compareCertAsc` in [lib/utils.ts](client/src/lib/utils.ts), beside `formatCertNumber`. It handles the shared part — numeric compare so 9 sorts before 10, non-numeric and missing certs to the end — and returns 0 when certs tie so the caller chains its own tiebreak: `rows.sort((a, b) => compareCertAsc(a, b) || myTiebreak(a, b))`.

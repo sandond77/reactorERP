@@ -477,9 +477,9 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['raw-inventory-grouped'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to create listing');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to create listing'));
     } finally {
       setSubmitting(false);
     }
@@ -1001,9 +1001,9 @@ function AddCertsToListingModal({ base, listingLabel, onClose, onAdded }: { base
       toast.success(`${res.data.added} cert${res.data.added !== 1 ? 's' : ''} added`);
       onAdded();
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to add certs');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to add certs'));
     } finally {
       setSubmitting(false);
     }
@@ -1125,9 +1125,9 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to end listing');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to end listing'));
     } finally {
       setEnding(false);
     }
@@ -1143,9 +1143,9 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
         : 'Already multi-qty');
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to promote listing');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to promote listing'));
     } finally {
       setPromoting(false);
     }
@@ -1161,9 +1161,9 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
         : 'Already multi-qty');
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to promote set');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to promote set'));
     } finally {
       setPromoting(false);
     }
@@ -1178,9 +1178,9 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to end set');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to end set'));
     } finally {
       setEnding(false);
     }
@@ -1224,9 +1224,9 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to update listing');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to update listing'));
     } finally {
       setSaving(false);
     }
@@ -1537,8 +1537,8 @@ export function Listings() {
       queryClient.invalidateQueries({ queryKey: ['listings'] });
       queryClient.invalidateQueries({ queryKey: ['listing-filter-options'] });
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Migration failed'),
+     
+    onError: (err) => toast.error(apiErrorMessage(err, 'Migration failed')),
   });
 
   // eslint-disable-next-line react-hooks/set-state-in-effect

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Users, Loader2 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, apiErrorMessage } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import toast from 'react-hot-toast';
@@ -33,9 +33,9 @@ export function JoinOrg() {
       await api.post('/org/invites/accept', { token });
       toast.success('You have joined the organization!');
       navigate('/team');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (e: any) {
-      toast.error(e.response?.data?.error ?? 'Failed to accept invite');
+     
+    } catch (e) {
+      toast.error(apiErrorMessage(e, 'Failed to accept invite'));
       setAccepting(false);
     }
   }

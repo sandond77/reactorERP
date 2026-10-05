@@ -130,9 +130,9 @@ function CreateBatchModal({ onClose }: { onClose: () => void }) {
       toast.success('Batch created');
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to create batch');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to create batch'));
     } finally {
       setSaving(false);
     }
@@ -317,9 +317,9 @@ function RepeatInSub({ batchId, onClose }: { batchId: string; onClose: () => voi
       toast.success(`${n} line item${n !== 1 ? 's' : ''} added`);
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to repeat items');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to repeat items'));
     } finally {
       setSubmitting(false);
     }
@@ -564,9 +564,9 @@ function AddCardFromInventory({ batchId, onClose, onPendingCountChange }: { batc
       toast.success(rows.length === 1 ? 'Card added to batch' : `${rows.length} cards added to batch`);
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to add cards');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to add cards'));
     } finally {
       setSaving(false);
     }
@@ -1066,8 +1066,8 @@ function FixIdentityTab({ item, batchId, onClose }: { item: BatchItem; batchId: 
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) { toast.error(err?.response?.data?.error ?? 'Failed to update'); }
+     
+    } catch (err) { toast.error(apiErrorMessage(err, 'Failed to update')); }
     finally { setSaving(false); }
   }
 
@@ -1215,9 +1215,9 @@ function ReplaceFromInventoryTab({ item, batchId, onClose }: { item: BatchItem; 
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to relink');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to relink'));
     } finally {
       setSaving(false);
     }
@@ -1397,9 +1397,9 @@ function ReplaceFromLegacyTab({ item, batchId, onClose }: { item: BatchItem; bat
       qc.invalidateQueries({ queryKey: ['grading-batch', batchId] });
       qc.invalidateQueries({ queryKey: ['legacy-buckets'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to relink');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to relink'));
     } finally {
       setSaving(false);
     }
@@ -1544,9 +1544,9 @@ function CloseSubModal({ batch, onClose }: { batch: Batch; onClose: () => void }
       qc.invalidateQueries({ queryKey: ['grading-batch', batch.id] });
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to close sub');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to close sub'));
     } finally {
       setSaving(false);
     }
@@ -1605,9 +1605,9 @@ function EditBatchModal({ batch, onClose }: { batch: Batch; onClose: () => void 
       qc.invalidateQueries({ queryKey: ['grading-batch', batch.id] });
       qc.invalidateQueries({ queryKey: ['grading-batches'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to update');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to update'));
     } finally {
       setSaving(false);
     }

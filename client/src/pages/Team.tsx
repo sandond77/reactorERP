@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, Link, Mail, Trash2, Copy, Check, UserMinus, Pencil, LogIn, DatabaseZap, Download, ChevronLeft, AlertTriangle } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, apiErrorMessage } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
@@ -315,15 +315,15 @@ export function Team() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['org-invites'] });
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to create invite'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Failed to create invite')),
   });
 
   const deleteInviteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/org/invites/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['org-invites'] }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to delete invite'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Failed to delete invite')),
   });
 
   const removeMemberMut = useMutation({
@@ -333,8 +333,8 @@ export function Team() {
       setRemovingMember(null);
       toast.success('Member removed');
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to remove member'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Failed to remove member')),
   });
 
   const leaveMut = useMutation({
@@ -346,8 +346,8 @@ export function Team() {
       setShowLeaveModal(false);
       setLeaveConfirmText('');
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to leave team'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Failed to leave team')),
   });
 
   const renameMut = useMutation({
@@ -357,8 +357,8 @@ export function Team() {
       setShowRenameModal(false);
       toast.success('Organization renamed');
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to rename'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Failed to rename')),
   });
 
   const isOwner = org?.role === 'owner';
@@ -379,8 +379,8 @@ export function Team() {
       setJoinLink('');
       setJoinWarning(null);
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to join team'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Failed to join team')),
   });
 
   function handleJoin() {

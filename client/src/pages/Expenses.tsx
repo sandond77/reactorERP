@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, Loader2, Trash2, ExternalLink, Download, ImagePlus } from 'lucide-react';
-import { api, type PaginatedResult } from '../lib/api';
+import { api, type PaginatedResult, apiErrorMessage } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -134,9 +134,9 @@ function ExpenseModal({
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-filters'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to save expense');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to save expense'));
     } finally {
       setSubmitting(false);
     }
@@ -270,9 +270,9 @@ function ExpenseActionModal({ expense, onClose }: { expense: Expense; onClose: (
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-filters'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to delete expense');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to delete expense'));
     } finally { setSubmitting(false); }
   }
 

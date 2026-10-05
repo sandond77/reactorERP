@@ -774,8 +774,8 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
       qc.invalidateQueries({ queryKey: ['grading-subs'] });
       onBack();
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to process return'),
+     
+    onError: (err) => toast.error(apiErrorMessage(err, 'Failed to process return')),
   });
 
   function updateSlot(idx: number, patch: Partial<Slot>) {
@@ -1447,8 +1447,8 @@ export function SubReturns() {
       qc.invalidateQueries({ queryKey: ['grading-subs'] });
       setConfirmRevertId(null);
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError:    (err: any) => toast.error(err?.response?.data?.error ?? 'Failed to revert return'),
+     
+    onError:    (err) => toast.error(apiErrorMessage(err, 'Failed to revert return')),
     onSettled:  () => setRevertingId(null),
   });
 

@@ -84,8 +84,8 @@ function RevertButton({ entry, onReverted }: { entry: AuditEntry; onReverted: ()
       await api.post(`/audit/revert/${entry.id}`);
       toast.success('Record restored to inventory');
       onReverted();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
+     
+    } catch (err) {
       const msg = err?.response?.data?.message ?? 'Failed to restore record';
       toast.error(msg);
       setStep(0);

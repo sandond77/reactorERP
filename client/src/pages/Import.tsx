@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Upload, Download, FileText, Loader2, CheckCircle, XCircle, Sparkles, AlertTriangle, Trash2, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { api } from '../lib/api';
+import { api, apiErrorMessage } from '../lib/api';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 
@@ -938,8 +938,8 @@ function ImportFlow() {
         setImportType(detected as ImportType);
       }
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to parse file'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Failed to parse file')),
   });
 
   const preflightMut = useMutation({
@@ -958,8 +958,8 @@ function ImportFlow() {
         runPreflightUnlinked({});
       }
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Preflight failed'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Preflight failed')),
   });
 
   const preflightUnlinkedMut = useMutation({
@@ -979,8 +979,8 @@ function ImportFlow() {
         doExecute(langOverrides, {});
       }
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Preflight failed'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Preflight failed')),
   });
 
   const executeMut = useMutation({
@@ -1011,8 +1011,8 @@ function ImportFlow() {
         toast.success(`Imported ${res.imported_count} rows`);
       }
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Import failed'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Import failed')),
   });
 
   function runPreflightUnlinked(langOverrides: Record<number, string>) {
@@ -1361,8 +1361,8 @@ function ImportHistory() {
   const deleteMut = useMutation({
     mutationFn: (id: string) => api.delete(`/import/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['imports'] }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Delete failed'),
+     
+    onError: (e) => toast.error(apiErrorMessage(e, 'Delete failed')),
   });
 
   if (isLoading) return <div className="flex justify-center py-8"><Loader2 size={18} className="text-zinc-600 animate-spin" /></div>;

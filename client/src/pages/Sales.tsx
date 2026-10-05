@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Plus, X, Loader2, Pencil, Trash2, ExternalLink } from 'lucide-react';
-import { api, type PaginatedResult } from '../lib/api';
+import { api, type PaginatedResult, apiErrorMessage } from '../lib/api';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Select } from '../components/ui/Select';
@@ -758,9 +758,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       toast.success('Sale recorded!');
       invalidateAfterSale(queryClient);
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to record sale');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to record sale'));
     } finally {
       setSubmitting(false);
     }
@@ -814,9 +814,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
       setBulkCart(prev => [...prev, ...newItems]);
       toast.success(`Added ${newItems.length} card${newItems.length !== 1 ? 's' : ''} from listing`);
       setBulkUrl('');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Could not find listing');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Could not find listing'));
     } finally {
       setBulkUrlLoading(false);
     }
@@ -2580,9 +2580,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
         toast.success(`${itemsWithFinal.length} sales recorded!`);
         invalidateAfterSale(queryClient);
         onClose();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-        toast.error(err?.response?.data?.error ?? 'Failed to record sales');
+       
+    } catch (err) {
+        toast.error(apiErrorMessage(err, 'Failed to record sales'));
       } finally {
         setSubmitting(false);
       }
@@ -2836,9 +2836,9 @@ function PasteOrderList({
       const ambiguous = results.filter(r => !r.matched && r.candidates.length > 0).length;
       const unmatched = results.filter(r => !r.matched && r.candidates.length === 0).length;
       toast.success(`Parsed ${results.length}. Added ${added}${ambiguous ? `, ${ambiguous} to review` : ''}${unmatched ? `, ${unmatched} unmatched` : ''}.`);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to parse pasted content');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to parse pasted content'));
     } finally {
       setPasteLoading(false);
     }
@@ -3180,9 +3180,9 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       toast.success('Sale updated');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to update sale');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to update sale'));
     } finally { setSubmitting(false); }
   }
 
@@ -3193,9 +3193,9 @@ function SaleActionModal({ sale, onClose }: { sale: Sale; onClose: () => void })
       toast.success('Sale deleted — card returned to inventory');
       queryClient.invalidateQueries({ queryKey: ['sales'] });
       onClose();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } catch (err: any) {
-      toast.error(err?.response?.data?.error ?? 'Failed to delete sale');
+     
+    } catch (err) {
+      toast.error(apiErrorMessage(err, 'Failed to delete sale'));
     } finally { setSubmitting(false); }
   }
 
