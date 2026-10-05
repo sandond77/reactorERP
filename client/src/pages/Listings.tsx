@@ -93,6 +93,85 @@ function slabDedupeKey(s: { sku?: string | null; card_name: string | null }): st
   return s.sku ?? (s.card_name ?? 'Unknown').toLowerCase();
 }
 
+interface PickerName { name: string; count: number; onShow: number }
+
+// Two-phase card picker shared by both Listings flows — the single-card
+// listing builder and the per-slot picker inside a set listing.
+//
+// Phase 1 searches unsold inventory by name and collapses it to one entry per
+// card. Phase 2 pulls that card's copies and narrows them to what can actually
+// be listed: already-listed and personal-collection copies are dropped, and
+// copies sitting at a card show sort last so the picker prefers stock that
+// isn't already committed to a booth.
+//
+// Both flows had their own copy of all of this. The queries were identical,
+// but the phase-1 grouping had quietly diverged — one used '' as the fallback
+// display name and the other 'Unknown', and one carried a dead truthiness
+// guard on a key that is never empty. 'Unknown' wins; the guard is dropped.
+//
+// Note the query keys are shared rather than per-caller, so several set-listing
+// slots searching the same term now hit one cache entry instead of one each.
+function useListingCardPicker(opts: {
+  search: string;
+  cardName: string | null;
+  cardKey: string | null;
+  searchEnabled: boolean;
+  copiesEnabled: boolean;
+}) {
+  const { search, cardName, cardKey, searchEnabled, copiesEnabled } = opts;
+
+  const searchQ = useQuery<PaginatedResult<SlabResult>>({
+    queryKey: ['listing-card-search', search],
+    queryFn: () => api.get('/grading/slabs', {
+      params: { search, limit: 100, status: 'unsold', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
+    }).then(r => r.data),
+    enabled: searchEnabled && search.length >= 2,
+  });
+
+  const copiesQ = useQuery<PaginatedResult<SlabResult>>({
+    queryKey: ['listing-card-copies', cardName],
+    queryFn: () => api.get('/grading/slabs', {
+      params: { search: cardName, limit: 200, status: 'unsold', sort_by: 'cert_number', sort_dir: 'asc', personal_collection: 'no' },
+    }).then(r => r.data),
+    enabled: copiesEnabled && !!cardName,
+  });
+
+  const names: [string, PickerName][] = searchQ.data
+    ? Array.from(
+        searchQ.data.data.reduce((map, s) => {
+          const key = slabDedupeKey(s);
+          const name = s.card_name ?? 'Unknown';
+          const cur = map.get(key) ?? { name, count: 0, onShow: 0 };
+          cur.count += 1;
+          if (s.is_card_show) cur.onShow += 1;
+          // Keep the longest spelling seen — imports vary between a short
+          // catalog name and a full PSA label for the same card.
+          if (name.length > cur.name.length) cur.name = name;
+          map.set(key, cur);
+          return map;
+        }, new Map<string, PickerName>())
+      ).filter(([, v]) => v.count > 0)
+    : [];
+
+  // Every copy of the selected card, including ones already listed — callers
+  // use this to report "N already listed" alongside what's available.
+  const allCopies = copiesQ.data?.data.filter(
+    c => cardKey != null && slabDedupeKey(c) === cardKey
+  ) ?? [];
+
+  const availableCopies = allCopies
+    .filter(c => !c.is_listed && !c.is_personal_collection)
+    .sort((a, b) => Number(a.is_card_show) - Number(b.is_card_show));
+
+  return {
+    names,
+    allCopies,
+    availableCopies,
+    isSearching: searchQ.isFetching,
+    isLoadingCopies: copiesQ.isFetching,
+  };
+}
+
 interface RawCardResult {
   id: string;
   card_name: string | null;
@@ -132,39 +211,14 @@ function SetSlotRow({
     return () => clearTimeout(t);
   }, [search]);
 
-  const { data: searchData, isFetching: isSearching } = useQuery<PaginatedResult<SlabResult>>({
-    queryKey: ['set-slot-search', index, debounced],
-    queryFn: () => api.get('/grading/slabs', {
-      params: { search: debounced, limit: 100, status: 'unsold', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
-    }).then(r => r.data),
-    enabled: debounced.length >= 2 && !slot.cardName,
-  });
-
-  const { data: copiesData, isFetching: isLoadingCopies } = useQuery<PaginatedResult<SlabResult>>({
-    queryKey: ['set-slot-copies', index, slot.cardName],
-    queryFn: () => api.get('/grading/slabs', {
-      params: { search: slot.cardName, limit: 200, status: 'unsold', sort_by: 'cert_number', sort_dir: 'asc', personal_collection: 'no' },
-    }).then(r => r.data),
-    enabled: !!slot.cardName && !slot.slab,
-  });
-
-  const uniqueNames = searchData
-    ? Array.from(searchData.data.reduce((m, s) => {
-        const key = slabDedupeKey(s);
-        const name = s.card_name ?? '';
-        const cur = m.get(key) ?? { name, count: 0, onShow: 0 };
-        cur.count += 1;
-        if (s.is_card_show) cur.onShow += 1;
-        if (name.length > cur.name.length) cur.name = name;
-        m.set(key, cur);
-        return m;
-      }, new Map<string, { name: string; count: number; onShow: number }>())).filter(([k, v]) => k && v.count > 0)
-    : [];
-
-  // Sort non-card-show certs first so on-show ones drop to the bottom of the picker.
-  const copies = (copiesData?.data ?? [])
-    .filter(c => slot.cardKey != null && slabDedupeKey(c) === slot.cardKey && !c.is_listed && !c.is_personal_collection)
-    .sort((a, b) => Number(a.is_card_show) - Number(b.is_card_show));
+  const { names: uniqueNames, availableCopies: copies, isSearching, isLoadingCopies } =
+    useListingCardPicker({
+      search: debounced,
+      cardName: slot.cardName,
+      cardKey: slot.cardKey,
+      searchEnabled: !slot.cardName,
+      copiesEnabled: !slot.slab,
+    });
 
   // Collapsed state — cert has been picked
   if (slot.slab && !open) {
@@ -330,23 +384,14 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     setCustomSelected(new Set());
   }, [selectedCardName]);
 
-  // Phase 1: search for unique card names (single mode)
-  const { data: searchResults, isFetching: isSearching } = useQuery<PaginatedResult<SlabResult>>({
-    queryKey: ['listing-card-search', debouncedSearch],
-    queryFn: () => api.get('/grading/slabs', {
-      params: { search: debouncedSearch, limit: 100, status: 'unsold', sort_by: 'card_name', sort_dir: 'asc', personal_collection: 'no' },
-    }).then(r => r.data),
-    enabled: debouncedSearch.length >= 2 && step === 'search',
-  });
-
-  // Phase 2: fetch all unsold copies of selected card (single mode)
-  const { data: copiesResult, isFetching: isLoadingCopies } = useQuery<PaginatedResult<SlabResult>>({
-    queryKey: ['listing-copies', selectedCardName],
-    queryFn: () => api.get('/grading/slabs', {
-      params: { search: selectedCardName, limit: 200, status: 'unsold', sort_by: 'cert_number', sort_dir: 'asc', personal_collection: 'no' },
-    }).then(r => r.data),
-    enabled: !!selectedCardName && (step === 'quantity' || step === 'details'),
-  });
+  const { names: uniqueCardNames, allCopies, availableCopies, isSearching, isLoadingCopies } =
+    useListingCardPicker({
+      search: debouncedSearch,
+      cardName: selectedCardName,
+      cardKey: selectedCardKey,
+      searchEnabled: step === 'search',
+      copiesEnabled: step === 'quantity' || step === 'details',
+    });
 
 
   // Raw card search
@@ -357,9 +402,6 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
     }).then(r => r.data),
     enabled: debouncedRawSearch.length >= 2 && (step === 'raw-search' || step === 'raw-select'),
   });
-
-  const allCopies = copiesResult?.data.filter(c => selectedCardKey != null && slabDedupeKey(c) === selectedCardKey) ?? [];
-  const availableCopies = allCopies.filter(c => !c.is_listed && !c.is_personal_collection);
 
   // Grade bucket key is "COMPANY LABEL", matching the individual-sale picker
   // in Sales.tsx. Keying on grade_label alone merges copies graded by
@@ -380,9 +422,10 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const gradeKeys = Array.from(gradeBreakdown.keys());
   const activeGrade = selectedGrade ?? gradeKeys[0] ?? null;
   const copiesForGrade = availableCopies.filter(c => gradeBucketKey(c) === activeGrade);
-  // FIFO auto-pick prefers certs NOT already in card show inventory to avoid double-listing
-  const fifoOrdered = [...copiesForGrade].sort((a, b) => Number(a.is_card_show) - Number(b.is_card_show));
-  const fifoIds = new Set(fifoOrdered.slice(0, qty).map(c => c.id));
+  // Already ordered card-show-last by useListingCardPicker (filter preserves
+  // order), so the first `qty` are the FIFO pick: prefer certs not already
+  // committed to a booth, then lowest cert number from the server's sort.
+  const fifoIds = new Set(copiesForGrade.slice(0, qty).map(c => c.id));
   const effectiveIds = customSelected.size > 0 ? customSelected : fifoIds;
   const selectedCopies = copiesForGrade.filter(c => effectiveIds.has(c.id));
 
@@ -408,21 +451,6 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   // "...Charmander" vs "...CHARMANDER" — split a single part number into
   // two suggestions and miscount the unsold totals. We track every variant
   // and surface the longest one as the canonical display name.
-  const uniqueCardNames = searchResults
-    ? Array.from(
-        searchResults.data.reduce((map, s) => {
-          const key = slabDedupeKey(s);
-          const name = s.card_name ?? 'Unknown';
-          const cur = map.get(key) ?? { name, count: 0, onShow: 0 };
-          cur.count += 1;
-          if (s.is_card_show) cur.onShow += 1;
-          if (name.length > cur.name.length) cur.name = name;
-          map.set(key, cur);
-          return map;
-        }, new Map<string, { name: string; count: number; onShow: number }>())
-      ).filter(([, v]) => v.count > 0)
-    : [];
-
   // Raw: group by card name, then per-instance selector
   const uniqueRawCardNames = rawResults
     ? Array.from(

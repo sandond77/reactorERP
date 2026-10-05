@@ -47,6 +47,13 @@
 
 ### Refactors
 
+**Listings — one card-picker hook instead of two copies, and the copies had drifted**
+- Both Listings flows — the single-card listing builder and the per-slot picker inside a set listing — ran their own two-phase search: find a card by name, then fetch that card's copies and narrow them to what can be listed. The queries were byte-identical and so was most of the post-processing.
+- **They had already diverged**, in a way nothing surfaced: the phase-1 grouping used `''` as the fallback display name in one and `'Unknown'` in the other, so a card with no name rendered blank in the set-slot picker and `Unknown` in the single picker. One also carried a `k &&` truthiness guard on a key that `slabDedupeKey` never returns empty — dead code. Unified on `'Unknown'`; guard dropped.
+- New `useListingCardPicker` owns both queries, the dedupe-to-one-entry-per-card grouping, the `!is_listed && !is_personal_collection` filter, and the card-show-last ordering. Each caller keeps what's genuinely its own: grade tabs and qty-based FIFO for the single picker, manual per-cert selection for the slot picker.
+- The FIFO line in the single picker lost its own `is_card_show` sort — the hook already orders that way and `.filter()` preserves order, so the re-sort was a stable no-op and the last duplicate of that rule.
+- Query keys are now shared rather than per-caller. Several set-listing slots searching the same term previously keyed on `['set-slot-search', index, term]` and fetched once per slot; they now hit a single cache entry.
+
 **`apiErrorMessage` adopted at the remaining 39 callsites — and 40 dead lint suppressions fell out**
 - The September sweep converted 39 callsites to the shared helper but left 42 behind, so nine files carried both patterns at once (Listings had 8 raw alongside 3 converted, Grading 8 alongside 2). Two conventions inside one file is worse than either one used consistently.
 - All 39 remaining `x?.response?.data?.error ?? 'fallback'` expressions now call `apiErrorMessage(x, 'fallback')` across Expenses, Grading, Import, JoinOrg, Listings, Sales, SubReturns, Team and Trades.
