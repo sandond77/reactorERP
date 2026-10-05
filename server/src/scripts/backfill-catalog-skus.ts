@@ -34,6 +34,12 @@
 import * as path from 'path';
 import pg from 'pg';
 import dotenv from 'dotenv';
+// Imported, not re-implemented. This script used to carry its own copy of
+// generatePartNumber to stay independent of the app graph — and that copy
+// then missed the set-code canonicalization added to the real one, so a
+// backfill run would have re-minted exactly the split part numbers it exists
+// to repair. A backfill has to agree with the app's generator by construction.
+import { generatePartNumber } from '../utils/set-codes';
 
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
@@ -41,16 +47,6 @@ const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) throw new Error('DATABASE_URL not set — check server/.env or export from railway variables');
 
 const APPLY = process.argv.includes('--apply');
-
-// Mirror server/src/utils/set-codes.ts::generatePartNumber. Duplicated here
-// so this script has zero runtime dependency on the app's TS compilation
-// order — it's a one-shot, not part of the app graph.
-function generatePartNumber(language: string, setCode: string, cardNumber: string, gamePrefix: string): string {
-  const rawNum = cardNumber.split('/')[0].trim();
-  const digitsOnly = rawNum.replace(/[^0-9]/g, '');
-  const paddedNum = digitsOnly ? digitsOnly.padStart(3, '0') : rawNum.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return `${gamePrefix}-${language}-${setCode}-${paddedNum}`;
-}
 
 async function main() {
   const pool = new pg.Pool({ connectionString: DATABASE_URL });

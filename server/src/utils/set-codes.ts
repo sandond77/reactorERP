@@ -396,6 +396,11 @@ export const JP_SETS: SetEntry[] = [
   { code: 'M5',    names: ['abyss eye'] },
   { code: 'M6',    names: ['storm emeralda'] },
   { code: 'M6a',   names: ['30th celebration jp', '30th celebration'] },
+  // 25th Anniversary — a separate bucket from S8a (the official Celebrations
+  // set). Registered so canonicalizeSetCode preserves the lowercase 'th',
+  // which is the dominant form already in the catalog.
+  { code: '25th',   names: ['25th anniversary'] },
+  { code: '25th-P', names: ['25th anniversary promo'] },
   // Promos
   { code: 'SV-P',  names: ['scarlet & violet promo', 'sv-p promo', 'sv promo jp'] },
   { code: 'S-P',   names: ['sword & shield promo', 's-p promo', 'swsh promo jp'] },
@@ -419,6 +424,39 @@ function buildIndex(sets: SetEntry[]): LangMap {
 
 const EN_INDEX = buildIndex(EN_SETS);
 const JP_INDEX = buildIndex(JP_SETS);
+
+// Canonical casing for set codes, keyed by the code uppercased.
+//
+// Set codes are identity, not display text: m2a, M2a, M2A and m2A are the
+// same set. But the part number embeds the code verbatim, so a code that
+// arrives in two casings mints two part numbers for one card — which is
+// exactly what happened in production (27 split identities, 90 live slabs).
+//
+// Case is the ONLY thing normalized here. Suffix letters are significant:
+// M2 (Inferno X) and M2a (Mega Dream) are different sets and must stay
+// distinct. That falls out of keying on the full uppercased code — 'M2' and
+// 'M2A' are different keys — which is why this is an exact map lookup and
+// never lookupSetCode(), whose substring matching would collapse M2 into M2a.
+const CANONICAL_SET_CODES: Map<string, string> = (() => {
+  const m = new Map<string, string>();
+  for (const entry of [...EN_SETS, ...JP_SETS]) {
+    const key = entry.code.toUpperCase();
+    if (!m.has(key)) m.set(key, entry.code);
+  }
+  return m;
+})();
+
+/**
+ * Resolve any casing of a set code to its canonical form from the seed lists
+ * above. Codes not in the seed lists fall back to uppercase so that an
+ * unregistered code still resolves deterministically rather than splitting.
+ * Only casing changes — the code's characters are never altered otherwise.
+ */
+export function canonicalizeSetCode(setCode: string): string {
+  const trimmed = setCode.trim();
+  if (!trimmed) return trimmed;
+  return CANONICAL_SET_CODES.get(trimmed.toUpperCase()) ?? trimmed.toUpperCase();
+}
 
 /**
  * Look up a set code given a language and set name string (e.g. from a PSA label).
@@ -523,7 +561,14 @@ export function generatePartNumber(
   const rawNum = cardNumber.split('/')[0].trim();
   const digitsOnly = rawNum.replace(/[^0-9]/g, '');
   const paddedNum = digitsOnly ? digitsOnly.padStart(3, '0') : rawNum.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const base = `${gamePrefix}-${language}-${setCode}-${paddedNum}`;
+  // Canonicalize casing here rather than at each caller. The part number is
+  // the card's identity, so the set-code segment has to be deterministic no
+  // matter which casing a caller supplies — callers currently vary (the
+  // TCGdex probe in catalog.service adopts whichever casing the API accepted;
+  // AddPartModal and Intake uppercase before sending). Suffix letters stay
+  // significant: M2 and M2a remain distinct part numbers.
+  const canonicalSetCode = canonicalizeSetCode(setCode);
+  const base = `${gamePrefix}-${language}-${canonicalSetCode}-${paddedNum}`;
   const tail = (variantCode ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
   return tail ? `${base}-${tail}` : base;
 }
