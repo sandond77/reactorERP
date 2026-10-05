@@ -1056,7 +1056,14 @@ function AddCertsToListingModal({ base, listingLabel, onClose, onAdded }: { base
   );
 }
 
-function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert?: CertDetail; onClose: () => void }) {
+function EditListingModal({ row, cert, onClose, onScopeToCert }: {
+  row: AggregatedListing;
+  cert?: CertDetail;
+  onClose: () => void;
+  // Re-open this modal scoped to one cert, so its URL and price can be edited
+  // without touching the other listings in the group.
+  onScopeToCert?: (cert: CertDetail) => void;
+}) {
   const queryClient = useQueryClient();
   const isSet = !!row.listing_group_id;
   // When opened from a sub-row click on a non-set row, scope to just that one
@@ -1364,7 +1371,7 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
         {localCerts.length > 0 && (
           <div className="border-t border-zinc-700/50 divide-y divide-zinc-800/60">
             {localCerts.map((c) => (
-              <div key={c.listing_id ?? c.cert_number} className="flex items-center gap-3 px-4 py-2">
+              <div key={c.listing_id ?? c.cert_number} className="flex items-center gap-3 px-4 py-2 group/cert">
                 <div className="flex-1 min-w-0">
                   {isSet && c.card_name && (
                     <p className="text-[11px] text-zinc-300 truncate">{c.card_name}</p>
@@ -1382,9 +1389,35 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                     {c.cert_number && <span className="font-mono text-indigo-300/70">{formatCertNumber(c.cert_number)}</span>}
                     {c.condition && <span>{c.condition}</span>}
                     {c.grade_label && <span>{c.grade_label}</span>}
+                    {/* Open this cert's own listing. Only meaningful when the
+                        group holds independent listings — on a true multi-qty
+                        every cert shares the parent URL already shown above,
+                        so repeating it per row is noise. */}
+                    {groupHasDivergentListings && c.ebay_listing_url && (
+                      <a
+                        href={c.ebay_listing_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center text-indigo-400 hover:text-indigo-300 transition-colors"
+                        title="Open this listing on eBay">
+                        <ExternalLink size={11} />
+                      </a>
+                    )}
                     {c.list_price != null && <span className="ml-auto text-zinc-400">{formatCurrency(c.list_price, row.currency)}</span>}
                   </div>
                 </div>
+                {/* Edit just this listing. The group-level URL/price fields are
+                    withheld when listings diverge (they would overwrite all of
+                    them), so this is the way through to a single one. */}
+                {groupHasDivergentListings && c.listing_id && onScopeToCert && (
+                  <button type="button"
+                    onClick={() => onScopeToCert(c)}
+                    className="shrink-0 text-[11px] text-zinc-600 hover:text-indigo-300 transition-colors"
+                    title="Edit only this listing">
+                    Edit
+                  </button>
+                )}
                 {/* Per-cert remove — only meaningful for MULTI-QTY listings:
                     each cert lives on its own listings row and cancelling
                     one just drains the group down (the persisting listing
@@ -2079,7 +2112,18 @@ export function Listings() {
       </Modal>
 
       <Modal open={!!editTarget} onClose={() => setEditTarget(null)} title="Edit Listing">
-        {editTarget && <EditListingModal row={editTarget.row} cert={editTarget.cert} onClose={() => setEditTarget(null)} />}
+        {editTarget && (
+          /* Keyed on the scoped cert: the modal seeds localCerts, ebayUrl and
+             price from props via useState, so switching from the whole group
+             to one cert has to remount or those initial values go stale. */
+          <EditListingModal
+            key={editTarget.cert?.listing_id ?? 'group'}
+            row={editTarget.row}
+            cert={editTarget.cert}
+            onClose={() => setEditTarget(null)}
+            onScopeToCert={(c) => setEditTarget({ row: editTarget.row, cert: c })}
+          />
+        )}
       </Modal>
 
       {/* Tablet (<lg) filter drawer — surfaces all the column-header filters
