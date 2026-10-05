@@ -285,16 +285,23 @@ export async function listSlabs(
       -- the "propagate my new price to those copies too" option on commit.
       -- Sibling IDs are returned so the client can include them in the
       -- POST /card-shows/add-inventory payload when the toggle is on.
+      -- Identity here must match getCardShowPricingSuggestions exactly, or
+      -- the "@show xN" chip and the Suggested price beneath it describe
+      -- different sets of cards on the same row. Both key on part number +
+      -- company + numeric grade. catalog_id was the old key and missed
+      -- duplicate catalog rows for one card; the sku survives those.
       COALESCE((
         SELECT COUNT(*)::int
         FROM card_instances ci_cs
         JOIN slab_details sd_cs ON sd_cs.card_instance_id = ci_cs.id
+        JOIN card_catalog cc_cs ON cc_cs.id = ci_cs.catalog_id
         WHERE ci_cs.user_id = ci.user_id
           AND ci_cs.is_card_show = true
           AND ci_cs.status NOT IN ('sold', 'lost_damaged')
           AND ci_cs.id <> ci.id
-          AND ci_cs.catalog_id IS NOT NULL
-          AND ci_cs.catalog_id = ci.catalog_id
+          AND cc.sku IS NOT NULL
+          AND cc_cs.sku = cc.sku
+          AND cc_cs.sku NOT ILIKE '%LEGACY%'
           AND sd_cs.company = sd.company
           AND sd_cs.grade IS NOT DISTINCT FROM sd.grade
       ), 0)                                           AS at_show_count,
@@ -302,12 +309,14 @@ export async function listSlabs(
         SELECT array_agg(ci_cs.id::text)
         FROM card_instances ci_cs
         JOIN slab_details sd_cs ON sd_cs.card_instance_id = ci_cs.id
+        JOIN card_catalog cc_cs ON cc_cs.id = ci_cs.catalog_id
         WHERE ci_cs.user_id = ci.user_id
           AND ci_cs.is_card_show = true
           AND ci_cs.status NOT IN ('sold', 'lost_damaged')
           AND ci_cs.id <> ci.id
-          AND ci_cs.catalog_id IS NOT NULL
-          AND ci_cs.catalog_id = ci.catalog_id
+          AND cc.sku IS NOT NULL
+          AND cc_cs.sku = cc.sku
+          AND cc_cs.sku NOT ILIKE '%LEGACY%'
           AND sd_cs.company = sd.company
           AND sd_cs.grade IS NOT DISTINCT FROM sd.grade
       ), ARRAY[]::text[])                             AS at_show_sibling_ids
@@ -358,13 +367,18 @@ export async function listSlabs(
 export interface CardShowPricingSuggestion {
   slab_id: string;
   total_cost_cents: number;
-  // Suggested asking price in cents. Null when no other slab of the same
-  // (card, grade, company) is currently in card-show inventory.
+  // Suggested asking price in cents. Null when neither tier below has data.
   suggested_price_cents: number | null;
-  // How many other slabs the suggestion was drawn from — 0 means "none,
-  // no suggestion available." A count of 1 says "you only priced this
-  // once before" so the client can display that context if useful.
+  // How many records the suggestion was drawn from. 0 means no suggestion.
   sample_count: number;
+  // Which tier produced it, so the client can label the number honestly:
+  //   'at_show' — other copies of this card currently sitting at a show.
+  //               Primary tier: the point is to not put two prices on the
+  //               same card on the same table.
+  //   'sales'   — past card-show sale prices for this card. Fallback used
+  //               only when nothing comparable is at a show right now.
+  //   null      — no suggestion.
+  source: 'at_show' | 'sales' | null;
 }
 
 export async function getCardShowPricingSuggestions(
@@ -373,17 +387,30 @@ export async function getCardShowPricingSuggestions(
 ): Promise<CardShowPricingSuggestion[]> {
   if (slabIds.length === 0) return [];
 
+  // Identity is the part number (cc.sku) plus company plus NUMERIC grade.
+  //
+  // Three deliberate choices, each fixing a way the old query mismatched:
+  //   sku, not the display name — card_name_override varies by import source
+  //     and casing ("… VMAX CLIM…" vs "… Vmax Clim…"), so a name match split
+  //     one card into several. The part number is the canonical identity.
+  //   numeric grade, not grade_label — PSA grade 10.0 carries four distinct
+  //     label strings in this database ('10', '10 GEM MINT', 'GEM MINT 10',
+  //     'GEM MT') across 5084 slabs, so a label match fragmented a single
+  //     PSA 10 four ways. grade is NULL on 1 slab of 6790.
+  //   LEGACY skus excluded — that bucket is a catch-all holding genuinely
+  //     different cards under one part number, so it must never pool prices.
   const rows = await sql<{
     slab_id: string;
     total_cost_cents: number;
     suggested_price_cents: number | null;
     sample_count: number;
+    source: 'at_show' | 'sales' | null;
   }>`
     WITH target AS (
       SELECT
         ci.id  AS slab_id,
-        COALESCE(ci.card_name_override, cc.card_name) AS card_name_key,
-        sd.grade_label,
+        cc.sku AS sku_key,
+        sd.grade,
         sd.company,
         (COALESCE(ci.purchase_cost, 0)
           + COALESCE(sd.grading_cost, 0)
@@ -394,50 +421,78 @@ export async function getCardShowPricingSuggestions(
       WHERE ci.user_id = ${userId}
         AND ci.id IN (${sql.join(slabIds.map((v) => sql.val(v)))})
     ),
-    -- The most recent card_show_price this user has set for each (card,
-    -- grade, company) combo — excluding the slab we're pricing NOW so a
-    -- re-add of a card previously in the show doesn't just echo its own
-    -- old value.
-    latest AS (
-      SELECT DISTINCT ON (t.slab_id)
-        t.slab_id,
-        ci2.card_show_price AS suggested_price_cents,
-        ci2.updated_at
+    -- Every same-identity slab CURRENTLY at a card show with a price on it.
+    -- Primary tier: the job is to stop the same card carrying two different
+    -- prices on the same table. Sold copies are excluded here on purpose —
+    -- they are no longer on the table, and their stale card_show_price is
+    -- not what they sold for. Past sales are tier 2 below.
+    at_show AS (
+      SELECT t.slab_id, ci2.card_show_price AS price_cents, ci2.updated_at AS ranked_at
       FROM target t
       INNER JOIN card_instances ci2 ON ci2.user_id = ${userId}
       INNER JOIN slab_details    sd2 ON sd2.card_instance_id = ci2.id
-      LEFT  JOIN card_catalog    cc2 ON cc2.id = ci2.catalog_id
+      INNER JOIN card_catalog    cc2 ON cc2.id = ci2.catalog_id
       WHERE ci2.is_card_show = true
+        AND ci2.status NOT IN ('sold', 'lost_damaged')
         AND ci2.card_show_price IS NOT NULL
         AND ci2.id <> t.slab_id
-        AND COALESCE(ci2.card_name_override, cc2.card_name) = t.card_name_key
-        AND sd2.grade_label = t.grade_label
-        AND sd2.company     = t.company
-      ORDER BY t.slab_id, ci2.updated_at DESC
+        AND t.sku_key IS NOT NULL
+        AND cc2.sku = t.sku_key
+        AND cc2.sku NOT ILIKE '%LEGACY%'
+        AND sd2.company = t.company
+        AND sd2.grade IS NOT DISTINCT FROM t.grade
     ),
-    -- Sample count across the same identity so the UI can show "based on N."
-    samples AS (
-      SELECT t.slab_id, COUNT(*)::int AS sample_count
+    -- Fallback tier: what this card actually SOLD for at past card shows.
+    -- Uses sales.sale_price (realized), never the card_show_price left
+    -- behind on the slab. Only consulted when at_show has nothing.
+    past_sales AS (
+      SELECT t.slab_id, s.sale_price AS price_cents, s.sold_at AS ranked_at
       FROM target t
       INNER JOIN card_instances ci2 ON ci2.user_id = ${userId}
       INNER JOIN slab_details    sd2 ON sd2.card_instance_id = ci2.id
-      LEFT  JOIN card_catalog    cc2 ON cc2.id = ci2.catalog_id
-      WHERE ci2.is_card_show = true
-        AND ci2.card_show_price IS NOT NULL
+      INNER JOIN card_catalog    cc2 ON cc2.id = ci2.catalog_id
+      INNER JOIN sales           s   ON s.card_instance_id = ci2.id
+      WHERE s.platform = 'card_show'
+        -- Strictly positive: zero-price card-show rows exist (giveaways,
+        -- throw-ins, incomplete entries) and a $0.00 suggestion is worse
+        -- than none — it reads as a real number and can be committed.
+        AND s.sale_price > 0
         AND ci2.id <> t.slab_id
-        AND COALESCE(ci2.card_name_override, cc2.card_name) = t.card_name_key
-        AND sd2.grade_label = t.grade_label
-        AND sd2.company     = t.company
-      GROUP BY t.slab_id
+        AND t.sku_key IS NOT NULL
+        AND cc2.sku = t.sku_key
+        AND cc2.sku NOT ILIKE '%LEGACY%'
+        AND sd2.company = t.company
+        AND sd2.grade IS NOT DISTINCT FROM t.grade
+    ),
+    at_show_pick AS (
+      SELECT DISTINCT ON (slab_id) slab_id, price_cents FROM at_show
+      ORDER BY slab_id, ranked_at DESC
+    ),
+    at_show_count AS (
+      SELECT slab_id, COUNT(*)::int AS n FROM at_show GROUP BY slab_id
+    ),
+    sales_pick AS (
+      SELECT DISTINCT ON (slab_id) slab_id, price_cents FROM past_sales
+      ORDER BY slab_id, ranked_at DESC
+    ),
+    sales_count AS (
+      SELECT slab_id, COUNT(*)::int AS n FROM past_sales GROUP BY slab_id
     )
     SELECT
       t.slab_id,
       t.total_cost_cents,
-      latest.suggested_price_cents,
-      COALESCE(samples.sample_count, 0) AS sample_count
+      COALESCE(asp.price_cents, sp.price_cents)                       AS suggested_price_cents,
+      CASE WHEN asp.price_cents IS NOT NULL THEN COALESCE(asc2.n, 0)
+           WHEN sp.price_cents  IS NOT NULL THEN COALESCE(sc.n, 0)
+           ELSE 0 END                                                 AS sample_count,
+      CASE WHEN asp.price_cents IS NOT NULL THEN 'at_show'
+           WHEN sp.price_cents  IS NOT NULL THEN 'sales'
+           ELSE NULL END                                              AS source
     FROM target t
-    LEFT JOIN latest  ON latest.slab_id  = t.slab_id
-    LEFT JOIN samples ON samples.slab_id = t.slab_id
+    LEFT JOIN at_show_pick  asp  ON asp.slab_id  = t.slab_id
+    LEFT JOIN at_show_count asc2 ON asc2.slab_id = t.slab_id
+    LEFT JOIN sales_pick    sp   ON sp.slab_id   = t.slab_id
+    LEFT JOIN sales_count   sc   ON sc.slab_id   = t.slab_id
   `.execute(db);
 
   return rows.rows;

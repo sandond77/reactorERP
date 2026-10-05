@@ -2,6 +2,24 @@
 
 ## October 5, 2026
 
+### Features
+
+**Card-show pricing suggestions rebuilt as two explicit tiers**
+- The feature's intent: when adding a card to a show, suggest the price you already put on the same card at the same grade so the table doesn't carry two prices for one thing — and when nothing comparable is on the table, fall back to what that card has actually sold for at past shows. The old query implemented neither tier cleanly. It pooled live and sold stock together with no status filter, and read the stale `card_show_price` left on sold slabs rather than their realized sale price. Because `latest` ranked by `updated_at` and recording a sale bumps that column, **58% of suggestions were won by a slab that was already sold.**
+- Now two tiers in [grading.service.ts](server/src/services/grading.service.ts):
+  - **Tier 1 `at_show`** — same-identity copies *currently* at a show with a price set (`status NOT IN ('sold','lost_damaged')`). The primary case.
+  - **Tier 2 `sales`** — realized `sales.sale_price` where `platform = 'card_show'`, consulted only when tier 1 is empty. Filtered to `sale_price > 0`; zero-price card-show rows exist (giveaways, throw-ins, incomplete entries) and a `$0.00` suggestion is worse than none because it reads as real and can be committed.
+- The response now carries `source: 'at_show' | 'sales' | null`, and the Pick List labels the count accordingly — *"3 at show"* vs *"19 past show sales"*. The old bare *"N samples"* was ambiguous precisely when it mattered, sitting next to an `@show ×N` chip that counted a different pool.
+- **Identity fixed on three axes.** Matching now keys on part number + company + **numeric** grade:
+  - `cc.sku` instead of the display name — `card_name_override` varies by import source and casing, so a name match split one card several ways.
+  - `sd.grade` instead of `sd.grade_label` — PSA grade `10.0` carries **four** distinct label strings across **5084** slabs (`10`, `10 GEM MINT`, `GEM MINT 10`, `GEM MT`); a label match fragmented a single PSA 10 four ways. 16 `(company, grade)` pairs were affected in total. `grade` is NULL on 1 slab of 6790.
+  - `LEGACY` SKUs excluded — that bucket is a catch-all holding genuinely different cards under one part number, so it must never pool prices. 62 card-show sales sat under one.
+- Measured on production: suggestion coverage over a random sample of pick-list-eligible slabs is now **68%**, split roughly evenly between the two tiers, with tier 2 drawing real depth (samples of 10, 18, 19 sales on frequently-traded cards).
+
+**Pick List — `@show ×N` chip and Suggested price now agree**
+- The chip and the price beneath it used two different definitions of "same card": the chip keyed on `catalog_id` + company + numeric grade, the price on display-name string + company + `grade_label`. Two numbers on one row describing different sets of cards.
+- Both now key on part number + company + numeric grade. Moving the chip off `catalog_id` also fixes a blind spot of its own — duplicate catalog rows for one card (import-name variants, and in one case a `Tohoku's` / `Tokohu's` typo pair) have different `catalog_id`s but the same SKU, so the chip previously under-counted them.
+
 ### Fixes
 
 **Part numbers — set-code casing drift split one card across two SKUs**
