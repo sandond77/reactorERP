@@ -1100,6 +1100,27 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
   const effectiveMultiQty = singleListingId
     ? !!cert?.is_multi_qty
     : !!row.has_multi_qty;
+  // Does one URL + one price describe this whole group?
+  //
+  // The parent row aggregates every active listing for a (card + grade +
+  // company), and those can be EITHER one multi-qty listing holding several
+  // certs under a shared URL, OR several independent solo listings of the same
+  // card, each with its own URL and price. The URL/price fields at the bottom
+  // of this modal save through PATCH /listings/group, which writes the same
+  // values to every listing in the group — correct for the first case, silently
+  // destructive for the second. One part number here has 7 active listings with
+  // 7 distinct URLs and 7 distinct prices; a Save would have flattened all of
+  // them to whichever listing happened to prefill the form.
+  const distinctGroupUrls = new Set(
+    (row.cert_details ?? []).map((c) => c.ebay_listing_url ?? '').filter(Boolean)
+  );
+  const distinctGroupPrices = new Set(
+    (row.cert_details ?? []).map((c) => c.list_price).filter((p): p is number => p != null)
+  );
+  const groupHasDivergentListings =
+    !singleListingId && !isSet &&
+    (distinctGroupUrls.size > 1 || distinctGroupPrices.size > 1);
+
   const canAddCerts = isGradedRow && !isSet && effectiveMultiQty && !!parentListingId;
   const canPromote = isGradedRow && !isSet && !effectiveMultiQty && !!parentListingId && !!ebayUrl;
   const canEnd = isGradedRow && !isSet && effectiveMultiQty && !!parentListingId;
@@ -1349,7 +1370,15 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
                     <p className="text-[11px] text-zinc-300 truncate">{c.card_name}</p>
                   )}
                   <div className="flex items-center gap-2 text-[11px] text-zinc-500">
-                    {c.raw_purchase_label && <span className="font-mono text-indigo-300/70">{c.raw_purchase_label}</span>}
+                    {/* Lot label only when there's no cert. A slab bought raw
+                        and later graded keeps its raw_purchase_id, so both IDs
+                        exist — rendering them side by side in the same mono
+                        indigo read as two identifiers for one card. For a
+                        graded cert the cert number is the identity; the lot is
+                        provenance and lives on the slab detail view. */}
+                    {!c.cert_number && c.raw_purchase_label && (
+                      <span className="font-mono text-indigo-300/70">{c.raw_purchase_label}</span>
+                    )}
                     {c.cert_number && <span className="font-mono text-indigo-300/70">{formatCertNumber(c.cert_number)}</span>}
                     {c.condition && <span>{c.condition}</span>}
                     {c.grade_label && <span>{c.grade_label}</span>}
@@ -1384,19 +1413,39 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
           value={setName} onChange={(e) => setSetName(e.target.value)} />
       )}
 
-      <div>
-        <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
-          value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
-        {ebayUrl && isEbayOrderUrl(ebayUrl) && (
-          <p className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-400">
-            <AlertTriangle size={11} />
-            This looks like a sold order URL, not a listing URL. Listing URLs contain <span className="font-mono">/itm/</span>.
+      {groupHasDivergentListings ? (
+        /* Independent listings of the same card — editing URL or price here
+           would write one value across all of them. Point at the per-cert
+           rows instead, which patch a single listing. */
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 space-y-1">
+          <p className="text-xs font-semibold text-amber-200">
+            {distinctGroupUrls.size > 1
+              ? `${distinctGroupUrls.size} separate listings, each with its own URL`
+              : 'Separate listings at different prices'}
           </p>
-        )}
-      </div>
+          <p className="text-[11px] text-zinc-400 leading-relaxed">
+            These certs aren't one multi-qty listing — they're independent listings of the same card.
+            Editing the URL or price here would overwrite every one of them with a single value.
+            Open a specific cert from the table to change just that listing.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div>
+            <Input label="eBay Listing URL" type="url" placeholder="https://www.ebay.com/itm/…"
+              value={ebayUrl} onChange={(e) => setEbayUrl(e.target.value)} />
+            {ebayUrl && isEbayOrderUrl(ebayUrl) && (
+              <p className="mt-1 flex items-center gap-1.5 text-[11px] text-amber-400">
+                <AlertTriangle size={11} />
+                This looks like a sold order URL, not a listing URL. Listing URLs contain <span className="font-mono">/itm/</span>.
+              </p>
+            )}
+          </div>
 
-      <Input label={isSet ? 'Set Price (total)' : 'List Price'} type="text" inputMode="decimal" placeholder="0.00"
-        value={price} onChange={(e) => setPrice(e.target.value)} />
+          <Input label={isSet ? 'Set Price (total)' : 'List Price'} type="text" inputMode="decimal" placeholder="0.00"
+            value={price} onChange={(e) => setPrice(e.target.value)} />
+        </>
+      )}
 
       <div className="pt-2 border-t border-zinc-800 flex items-center justify-between">
         <div className="flex items-center gap-4">
@@ -1447,11 +1496,16 @@ function EditListingModal({ row, cert, onClose }: { row: AggregatedListing; cert
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={saving}>
-            {saving && <Loader2 size={14} className="animate-spin" />}
-            {saving ? 'Saving…' : 'Save Changes'}
-          </Button>
+          <Button type="button" variant="ghost" onClick={onClose}>Close</Button>
+          {/* Hidden rather than disabled when the group holds independent
+              listings: there is nothing on the form left to save, so a greyed
+              button would just invite clicking. */}
+          {!groupHasDivergentListings && (
+            <Button type="submit" disabled={saving}>
+              {saving && <Loader2 size={14} className="animate-spin" />}
+              {saving ? 'Saving…' : 'Save Changes'}
+            </Button>
+          )}
         </div>
       </div>
 

@@ -4,6 +4,16 @@
 
 ### Fixes
 
+**Edit Listing could flatten several independent listings into one URL and price**
+- The parent row in the Listings table aggregates every active listing for a (card + grade + company). Those can be **either** one multi-qty listing holding several certs under a shared URL, **or** several independent solo listings of the same card, each with its own URL and price. The modal showed a single `eBay Listing URL` and `List Price` for both cases, prefilled from whichever listing happened to be first.
+- Saving routed to `PATCH /listings/group`, and [`updateListingsByGroup`](server/src/services/listings.service.ts) writes the submitted values to **every** listing matching the group key. So opening the parent row for a card with 7 separate listings and clicking Save Changes — without editing anything — would overwrite all 7 with one URL and one price, collapsing 6 distinct URLs and 6 distinct prices. Audit-logged per row, so recoverable, but silent. The inline comment asserted "which targets the one underlying listing in this case"; that assumption only holds when the group really is a single listing.
+- The modal now compares the group's per-cert URLs and prices. When they diverge it replaces the two fields with an explanation and hides Save, pointing at the per-cert rows — which patch a single listing — instead. Genuine multi-qty groups are untouched and still edit as one.
+- Measured on production: of 63 listing groups holding more than one active listing, **12** are independent listings (**27** listings that could have been flattened) and 51 are true multi-qty where blanket editing remains correct.
+
+**Listings — raw purchase lot and cert number rendered as two identifiers for one card**
+- A slab bought raw and later graded keeps its `raw_purchase_id`, so it has both a lot label and a cert number. The cert list rendered both in the same mono indigo with no separator, so a row read as `2025R8 #141640158` — two IDs for what is one card, and easy to misread as a raw item mixed into a graded listing.
+- The lot label now shows only when there is no cert number. For a graded cert the cert is the identity; the lot is provenance and already appears on the slab detail view.
+
 **Pasting a multi-qty listing URL silently dropped every copy but one**
 - Two different kinds of eBay listing put several cards under one URL. A **set listing** holds different cards sold together; a **multi-qty listing** holds N copies of the same card. `handleBulkUrlLookup` deduped to one card per identity, which is right for a set and wrong for multi-qty — four identical copies looked like duplicates, so it kept one and discarded the rest with no indication. Selling 3 of a 4-qty listing and pasting the URL produced a one-card cart, under-recording the sale and leaving the other two showing as in stock.
 - The URL cannot say how many sold, so the fix is to ask. When every row collapses to a single identity, an inline amber prompt now appears — *"4 copies of this card on one listing · How many sold?"* — defaulting to all of them, with Enter-to-confirm. Rows are pre-sorted cert-ascending via `compareCertAsc`, so answering "2" takes the two oldest certs. Set listings are unaffected and still add one of each without a prompt.
