@@ -361,15 +361,25 @@ function AddListingModal({ onClose }: { onClose: () => void }) {
   const allCopies = copiesResult?.data.filter(c => selectedCardKey != null && slabDedupeKey(c) === selectedCardKey) ?? [];
   const availableCopies = allCopies.filter(c => !c.is_listed && !c.is_personal_collection);
 
+  // Grade bucket key is "COMPANY LABEL", matching the individual-sale picker
+  // in Sales.tsx. Keying on grade_label alone merges copies graded by
+  // different companies whenever the label strings happen to match — which
+  // is routine, since ~10% of slabs carry a bare numeric label ("10", "9.5")
+  // that contains no company information at all. Merged copies share one tab
+  // and one FIFO pool, so the auto-pick can put a CGC cert into a listing the
+  // user built for a PSA.
+  const gradeBucketKey = (c: SlabResult) =>
+    [c.company, c.grade_label].filter(Boolean).join(' ') || 'Ungraded';
+
   const gradeBreakdown = availableCopies.reduce((map, c) => {
-    const key = c.grade_label ?? 'Ungraded';
+    const key = gradeBucketKey(c);
     map.set(key, (map.get(key) ?? 0) + 1);
     return map;
   }, new Map<string, number>());
 
   const gradeKeys = Array.from(gradeBreakdown.keys());
   const activeGrade = selectedGrade ?? gradeKeys[0] ?? null;
-  const copiesForGrade = availableCopies.filter(c => (c.grade_label ?? 'Ungraded') === activeGrade);
+  const copiesForGrade = availableCopies.filter(c => gradeBucketKey(c) === activeGrade);
   // FIFO auto-pick prefers certs NOT already in card show inventory to avoid double-listing
   const fifoOrdered = [...copiesForGrade].sort((a, b) => Number(a.is_card_show) - Number(b.is_card_show));
   const fifoIds = new Set(fifoOrdered.slice(0, qty).map(c => c.id));
