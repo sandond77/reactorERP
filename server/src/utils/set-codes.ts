@@ -399,8 +399,12 @@ export const JP_SETS: SetEntry[] = [
   // 25th Anniversary — a separate bucket from S8a (the official Celebrations
   // set). Registered so canonicalizeSetCode preserves the lowercase 'th',
   // which is the dominant form already in the catalog.
+  // -P is the promo set; -G is the Golden Box, a distinct product whose cards
+  // reuse the same card numbers as the promos (both have an 002), so they
+  // must not share a set code.
   { code: '25th',   names: ['25th anniversary'] },
   { code: '25th-P', names: ['25th anniversary promo'] },
+  { code: '25th-G', names: ['25th anniversary golden box', 'golden box'] },
   // Promos
   { code: 'SV-P',  names: ['scarlet & violet promo', 'sv-p promo', 'sv promo jp'] },
   { code: 'S-P',   names: ['sword & shield promo', 's-p promo', 'swsh promo jp'] },
