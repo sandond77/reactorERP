@@ -2,6 +2,14 @@
 
 ## October 5, 2026
 
+### Fixes
+
+**Card-show sticker prices rejected `$45` and `1,200` as invalid**
+- The Pick List's CS Price field had its own `parseCents` living inside [PickListModal.tsx](client/src/components/card-shows/PickListModal.tsx), separate from the shared `parseDollars` / `toCents` in [lib/utils.ts](client/src/lib/utils.ts). The shared pair strips non-numeric characters before parsing — its comment says exactly why: *"parseFloat on `$38.58` returns NaN, which then propagates… The fix is to strip everything that isn't a digit or decimal point."* That fix never reached the local copy, which called `Number(trimmed)` directly.
+- Consequence: typing `$45` into a CS Price turned the field red with *"Invalid price"*, and so did `1,200` — so any four-figure card entered with a thousands separator was silently refused. Every other money field in the app accepts both.
+- Replaced with `parsePositiveCents` in `lib/utils.ts`, built on `toCents` so it inherits the stripping. It keeps the strict contract the Pick List needs — null for empty, non-numeric, zero or negative, so "nothing entered" stays distinguishable from "legitimately zero" and an unpriced row still can't be committed. A leading minus is rejected explicitly rather than stripped, since `parseDollars` would otherwise read `-5` as `5`, and in a price field that is a typo to surface rather than a value to accept.
+- Verified against the old implementation across 22 inputs. Five differ: `$45`, `$45.00`, `1,200` and `1,200.50` now parse where they previously returned null, and `4.5e2` now reads as `$4.52` rather than `$450` — scientific notation loses to text-stripping, which is already true of every other money field, so this makes the Pick List consistent rather than newly wrong.
+
 ### Refactors
 
 **`apiErrorMessage` adopted at the remaining 39 callsites — and 40 dead lint suppressions fell out**

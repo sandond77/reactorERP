@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tansta
 import { Search, X, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, apiErrorMessage, type PaginatedResult } from '../../lib/api';
-import { compareCertAsc } from '../../lib/utils';
+import { compareCertAsc, parsePositiveCents } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import {
   getPicks, togglePick, removePicks, clearPicks,
@@ -244,14 +244,14 @@ export function PickListModal({ open, onClose }: Props) {
       const eligible = reviewRows.filter((r) => {
         const s = reviewState[r.id];
         if (!s || !s.found) return false;
-        const priceCents = parseCents(s.price);
+        const priceCents = parsePositiveCents(s.price);
         return priceCents !== null;
       });
       if (eligible.length === 0) throw new Error('Nothing to commit');
       const cards: { id: string; card_show_price: number }[] = [];
       let propagatedCount = 0;
       for (const r of eligible) {
-        const priceCents = parseCents(reviewState[r.id].price)!;
+        const priceCents = parsePositiveCents(reviewState[r.id].price)!;
         cards.push({ id: r.id, card_show_price: priceCents });
         if (propagateIds.has(r.id) && r.at_show_sibling_ids.length > 0) {
           for (const sibId of r.at_show_sibling_ids) {
@@ -292,9 +292,9 @@ export function PickListModal({ open, onClose }: Props) {
   // Ready-to-commit summary
   const readyRows = reviewRows.filter((r) => {
     const s = reviewState[r.id];
-    return s?.found && parseCents(s.price) !== null;
+    return s?.found && parsePositiveCents(s.price) !== null;
   });
-  const readyTotalCents = readyRows.reduce((sum, r) => sum + (parseCents(reviewState[r.id].price) ?? 0), 0);
+  const readyTotalCents = readyRows.reduce((sum, r) => sum + (parsePositiveCents(reviewState[r.id].price) ?? 0), 0);
 
   // Add-mode rows — flatten all pages the infinite query has fetched so far
   const addRows = useMemo<SlabRow[]>(
@@ -689,7 +689,7 @@ function ReviewMode(props: {
       </p>
       {rows.map((r) => {
         const state = reviewState[r.id] ?? { found: false, price: '' };
-        const priceCents = parseCents(state.price);
+        const priceCents = parsePositiveCents(state.price);
         const priceValid = priceCents !== null;
         const cost = ((r.raw_cost ?? 0) + (r.grading_cost ?? 0)) / 100;
         const listed = r.listed_price != null ? r.listed_price / 100 : null;
@@ -747,7 +747,7 @@ function ReviewMode(props: {
                             : `· ${sampleCount} at show now`}
                         </span>
                       </span>
-                      {state.found && Math.round(suggested * 100) !== parseCents(state.price) && (
+                      {state.found && Math.round(suggested * 100) !== parsePositiveCents(state.price) && (
                         <button
                           type="button"
                           onClick={() => onChange(r.id, { price: suggested.toFixed(2) })}
@@ -844,12 +844,3 @@ function ReviewMode(props: {
   );
 }
 
-// Parse a user-entered dollar string into cents. Returns null on invalid or
-// zero — commit refuses to send cards without a positive price.
-function parseCents(input: string): number | null {
-  const trimmed = input.trim();
-  if (!trimmed) return null;
-  const num = Number(trimmed);
-  if (!Number.isFinite(num) || num <= 0) return null;
-  return Math.round(num * 100);
-}

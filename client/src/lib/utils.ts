@@ -30,6 +30,29 @@ export function toCents(value: string | number | null | undefined): number {
   return Math.round(parseDollars(value) * 100);
 }
 
+/**
+ * Strict sibling of `toCents` for fields where a price is required and zero is
+ * not a valid answer: returns null for empty, non-numeric, zero or negative
+ * input instead of collapsing everything to 0.
+ *
+ * The distinction matters where the UI must tell "nothing entered yet" apart
+ * from "legitimately zero" — the card-show pick list refuses to commit a row
+ * without a positive sticker price, and `toCents` returning 0 for both a blank
+ * field and the string "abc" cannot express that.
+ *
+ * Shares `parseDollars`' leniency about formatting, so "$45", "45", " 45.00 "
+ * and "45.00" all parse. A leading minus is rejected rather than stripped:
+ * parseDollars would silently read "-5" as 5, and in a price field that is a
+ * typo to surface, not a value to accept.
+ */
+export function parsePositiveCents(value: string | number | null | undefined): number | null {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed || trimmed.includes('-')) return null;
+  const cents = toCents(trimmed);
+  return cents > 0 ? cents : null;
+}
+
 // Mirrors server/src/utils/card-number.ts. Pokemon card numbers print as
 // "215/172" (numerator over set size); we canonicalize to "215". Used to
 // avoid form drift after auto-fill returns the full "x/y" form.
