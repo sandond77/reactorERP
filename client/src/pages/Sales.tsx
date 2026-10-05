@@ -243,11 +243,6 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   const [bulkSearch, setBulkSearch] = useState('');
   const [debouncedBulkSearch, setDebouncedBulkSearch] = useState('');
   const [bulkExactMatch, setBulkExactMatch] = useState(false);
-  // Combined Order default: already-listed inventory only. Sellers pick
-  // Combined Order when a buyer combined multiple existing listings, so
-  // unlisted cards are almost never the intent. Toggle off to widen the
-  // search to all eBay inventory.
-  const [bulkListedOnly, setBulkListedOnly] = useState(true);
   const [bulkDiscount, setBulkDiscount] = useState('');
   // Final Total is a mirror of the summed per-card finals — either the user
   // drives from this side (types $900, we distribute), or from the discount %
@@ -566,7 +561,24 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
   // that work.
   const bulkIsEbaySet = bulkIsEbay && bulkPricingMode === 'split';
   const bulkIsEbayCombined = bulkIsEbay && bulkPricingMode === 'per_item';
-  const bulkCombinedListedOnly = bulkIsEbayCombined && bulkListedOnly;
+  // Combined Order is always restricted to inventory with an active listing,
+  // and this is not a preference. Two reasons it can't be widened:
+  //
+  //   1. Submit already refuses any cert without a live listing — the order's
+  //      net total is split across certs in proportion to list_price, so a
+  //      cert with no list_price has no basis for allocation. Surfacing such
+  //      cards only let a user add something guaranteed to be rejected at the
+  //      end of the flow.
+  //   2. Worse, they poisoned FIFO. Identity groups collapse to one row whose
+  //      head is the lowest cert; with unlisted copies in the pool that head
+  //      can be an unsellable cert while the sellable one hides behind it.
+  //      93 groups in production hold both, and in 26 the unlisted cert sorts
+  //      first — so FIFO would have recommended the wrong cert outright.
+  //
+  // There was a user-facing "Already-listed only" toggle here, defaulting on.
+  // It was added a month after the submit guard, so its widened state never
+  // worked; removed rather than kept as a trap.
+  const bulkCombinedListedOnly = bulkIsEbayCombined;
   const { data: bulkSearchResults, isFetching: isBulkSearching } = useQuery<PaginatedResult<SlabResult>>({
     queryKey: ['bulk-sale-search', debouncedBulkSearch, bulkIsEbay, bulkIsEbaySet, bulkExactMatch, bulkCombinedListedOnly],
     queryFn: () => api.get('/grading/slabs', {
@@ -1883,11 +1895,10 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               Strict match — require exact term (no fuzzy/substring)
             </label>
             {bulkIsEbayCombined && (
-              <label className="flex items-center gap-2 text-[11px] text-zinc-400 cursor-pointer select-none">
-                <input type="checkbox" checked={bulkListedOnly} onChange={(e) => setBulkListedOnly(e.target.checked)}
-                  className="accent-indigo-500" />
-                Already-listed only — hide inventory without an active eBay listing
-              </label>
+              <p className="text-[11px] text-zinc-500">
+                Showing inventory with an active eBay listing — a Combined Order prices each cert
+                from its listing, so unlisted cards can't be part of one.
+              </p>
             )}
           </>
         )}
