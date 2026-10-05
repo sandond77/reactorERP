@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Search, X, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, apiErrorMessage, type PaginatedResult } from '../../lib/api';
+import { usePagedOrInfinite } from '../../lib/use-paged-or-infinite';
 import { compareCertAsc, parsePositiveCents } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import {
@@ -126,21 +127,24 @@ export function PickListModal({ open, onClose }: Props) {
     return next;
   });
 
-  // Add-mode search: unsold slabs not in card-show inventory. Infinite-scroll
-  // pagination via IntersectionObserver on a sentinel row at the bottom of
-  // the table body.
+  // Add-mode search: unsold slabs not in card-show inventory, via the shared
+  // paging hook rather than a second useInfiniteQuery. Pinned to 'infinite'
+  // because a modal has no URL state to hang a pagination toggle off, so
+  // `page` is inert. The sentinel observer stays local to AddMode: the shared
+  // useInfiniteSentinel watches the document viewport, and this list scrolls
+  // inside the modal, so it needs an observer scoped to that container.
   const PAGE_LIMIT = 50;
-  const addQuery = useInfiniteQuery<PaginatedResult<SlabRow>>({
+  const addQuery = usePagedOrInfinite<SlabRow>({
     queryKey: ['card-show-picker-add', debouncedSearch, sortBy, sortDir],
-    queryFn: ({ pageParam }) => api.get('/grading/slabs', {
+    fetch: (page) => api.get('/grading/slabs', {
       params: {
         status: 'unsold', is_card_show: 'no', personal_collection: 'no',
-        search: debouncedSearch || undefined, limit: PAGE_LIMIT, page: pageParam,
+        search: debouncedSearch || undefined, limit: PAGE_LIMIT, page,
         sort_by: sortBy, sort_dir: sortDir,
       },
     }).then((r) => r.data),
-    initialPageParam: 1,
-    getNextPageParam: (last) => (last.page < last.total_pages ? last.page + 1 : undefined),
+    mode: 'infinite',
+    page: 1,
     enabled: open && mode === 'add',
   });
 
@@ -296,12 +300,6 @@ export function PickListModal({ open, onClose }: Props) {
   });
   const readyTotalCents = readyRows.reduce((sum, r) => sum + (parsePositiveCents(reviewState[r.id].price) ?? 0), 0);
 
-  // Add-mode rows — flatten all pages the infinite query has fetched so far
-  const addRows = useMemo<SlabRow[]>(
-    () => addQuery.data?.pages.flatMap((p) => p.data) ?? [],
-    [addQuery.data],
-  );
-  const addTotal = addQuery.data?.pages[0]?.total ?? 0;
 
   function toggleReview(id: string, patch: Partial<ReviewEntry>) {
     // Delegates to the localStorage helper; the useSyncExternalStore
@@ -396,16 +394,16 @@ export function PickListModal({ open, onClose }: Props) {
             <AddMode
               search={search}
               setSearch={setSearch}
-              rows={addRows}
+              rows={addQuery.data}
               pickedSet={pickedSet}
               loading={addQuery.isLoading}
               sortBy={sortBy}
               sortDir={sortDir}
               onSort={toggleSort}
-              total={addTotal}
-              hasNextPage={!!addQuery.hasNextPage}
-              isFetchingNextPage={addQuery.isFetchingNextPage}
-              fetchNextPage={() => addQuery.fetchNextPage()}
+              total={addQuery.total}
+              hasNextPage={addQuery.hasMore}
+              isFetchingNextPage={addQuery.isFetchingMore}
+              fetchNextPage={addQuery.loadMore}
             />
           ) : (
             <ReviewMode

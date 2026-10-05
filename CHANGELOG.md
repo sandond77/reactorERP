@@ -47,6 +47,11 @@
 
 ### Refactors
 
+**Pick List — uses the shared paging hook instead of its own `useInfiniteQuery`**
+- The Add-mode search hand-rolled a second `useInfiniteQuery` with its own `getNextPageParam`, page flattening and total extraction, duplicating `usePagedOrInfinite`. Replaced; the hook's derivations are identical line for line, so behavior is unchanged.
+- The original audit note claimed consolidating here "would complicate the hook for its two main callers" because the modal needs an `IntersectionObserver` scoped to its own scroll container. That was wrong — the hook never owned the observer. `usePagedOrInfinite` returns `{ data, hasMore, loadMore, … }` and a *separate* `useInfiniteSentinel` wires the observer, so the two concerns were already decoupled. The modal keeps its local sentinel (the shared one watches the document viewport with a fixed 800px margin and takes no `root`) and just calls `loadMore`.
+- `mode` is pinned to `'infinite'` and `page` is inert, since a modal has no URL state to hang a pagination toggle from. The query key gains the hook's `'__infinite'` suffix, so the first open after deploy refetches rather than reading a stale entry under the old key.
+
 **Listings — one card-picker hook instead of two copies, and the copies had drifted**
 - Both Listings flows — the single-card listing builder and the per-slot picker inside a set listing — ran their own two-phase search: find a card by name, then fetch that card's copies and narrow them to what can be listed. The queries were byte-identical and so was most of the post-processing.
 - **They had already diverged**, in a way nothing surfaced: the phase-1 grouping used `''` as the fallback display name in one and `'Unknown'` in the other, so a card with no name rendered blank in the set-slot picker and `Unknown` in the single picker. One also carried a `k &&` truthiness guard on a key that `slabDedupeKey` never returns empty — dead code. Unified on `'Unknown'`; guard dropped.
