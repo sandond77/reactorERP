@@ -1,5 +1,22 @@
 # Reactor — Changelog
 
+## October 5, 2026
+
+### Fixes
+
+**Part numbers — set-code casing drift split one card across two SKUs**
+- Set codes are identity, not display text: `m2a`, `M2a`, `M2A` and `m2A` are the same set. But [`generatePartNumber`](server/src/utils/set-codes.ts#L516) embedded the code verbatim, so a code arriving in two casings minted two part numbers for one card — and `idx_card_catalog_sku` is `UNIQUE (user_id, sku)`, so the two never reconciled.
+- **Two sources fed the drift.** [catalog.service.ts:279-307](server/src/services/catalog.service.ts#L279) probes TCGdex with five casing variants of the set code and adopts whichever one the API accepted as `matchedSetCode`, which then goes straight into the SKU — a third-party API's URL tolerance was deciding our canonical identity. Separately [AddPartModal.tsx:171](client/src/components/catalog/AddPartModal.tsx#L171) and [Intake.tsx:35](client/src/pages/Intake.tsx#L35) uppercase the code before sending.
+- Fixed at the choke point: new `canonicalizeSetCode` resolves any casing to the seed lists' form and is called **inside** `generatePartNumber`, so no caller can mint a non-canonical part number regardless of what it passes in. The TCGdex probe may still try variants to *find* a card; it no longer names it.
+- **Suffix letters stay significant.** JP subsets are named that way — `M2` (Inferno X) and `M2a` (Mega Dream), `S12` (Paradigm Trigger) and `S12a` (VSTAR Universe) are different sets and must not collapse. That falls out of keying the map on the full uppercased code (`M2` and `M2A` are different keys). Deliberately an exact map lookup and never `lookupSetCode`, whose substring matching would fold `M2` into `M2a`.
+- Registered `25th` and `25th-P` in `JP_SETS`. Both are live user-defined codes absent from the registry (`S8a` covers the official Celebrations set); without entries they'd canonicalize to `25TH` and churn ~20 SKUs, where with them the dominant lowercase form is preserved.
+- Dropped the duplicated `generatePartNumber` in [backfill-catalog-skus.ts](server/src/scripts/backfill-catalog-skus.ts) in favor of importing the real one. That copy had already missed the canonicalization, so a backfill run would have re-minted the exact split part numbers it exists to repair — the same copy-paste drift this audit set out to find.
+
+**Catalog — 25th Anniversary Golden Box filed under the promo set code**
+- The Golden Box is a distinct product from the 25th Anniversary promos, but its cards sat under `25th-P`. Both products number this card `002`, so a Pokeball (Golden Box) and a Venusaur (promos) both resolved to `PKMN-JP-25th-P-002` — kept apart in production only by a casing accident in the stored SKU, which the canonicalization above removes.
+- Registered `25th-G` so they separate by identity rather than luck: `PKMN-JP-25th-G-002` vs `PKMN-JP-25th-P-002`. Aliases ordered so `lookupSetCode`'s longest-first matching routes "25th anniversary golden box" to `25th-G` instead of letting the shorter "25th anniversary" alias swallow it.
+- Caught while preparing a merge of the casing-split rows. The two rows looked like a duplicate pair by SKU, but every instance under one was named `Pokeball` and under the other `…002 Venusaur-Ho…` — merging them would have conflated two different cards. Verifying instance names before merging is what surfaced it.
+
 ## October 4, 2026
 
 ### Fixes
