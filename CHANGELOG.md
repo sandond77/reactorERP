@@ -4,6 +4,12 @@
 
 ### Fixes
 
+**Bulk sale — multi-qty listings were being treated as set listings and dumped every copy into the cart**
+- Clicking a single search result for a card with 3 copies on one eBay listing added all 3 certs at once with a "Added 3 cards from set listing" toast — but the listing is a **multi-qty single listing**, not a set. The Listings page correctly shows it as `MULTI`, not a set.
+- The bulk auto-pull gated on `bulkIsEbay && r.listing_url`, then fetched every active listing sharing that URL. Multi-qty copies all share one URL, so they looked identical to a set to that check. The server already computes the right signal — `is_set_listing` is true only when a sibling under the same URL belongs to a **different** card identity — and the individual-sale flow has used it since it shipped ([Sales.tsx:680](client/src/pages/Sales.tsx#L680)). The bulk path just never consulted it.
+- Gate is now `bulkIsEbay && r.is_set_listing && r.listing_url`. Genuine set listings still auto-pull every member on one click; multi-qty listings fall through to the normal single-card add, so each click adds exactly one cert (FIFO, per the grouping change below).
+- Pre-existing bug, not a regression from the FIFO grouping — but the grouping made it visible, since a collapsed row sets the expectation that one click adds one cert.
+
 **Combined Order search now collapses duplicate certs and offers FIFO, matching the individual-sale picker**
 - Searching a card with multiple listed copies (e.g. "scragg" → three identical `SV11W-WHITE FLARE 136 SCRAGGY ART RARE` PSA 10s at $94.49) rendered one row per cert. The seller had to know which cert number to click — but that's precisely the decision FIFO is supposed to make for them, and the individual-sale flow already does it: Phase 1 dedupes to card names, Phase 2 sorts copies by cert ascending and auto-selects the earliest non-set copy. Combined Order skipped both steps and dumped every cert flat.
 - Combined Order graded results are now grouped by identity (`card_name` + `company` + `grade_label`). Each group renders a single row whose displayed cert is the **FIFO head** — the lowest cert number not already in the cart. Clicking adds that cert; clicking again advances to the next one, so a buyer who genuinely combined two copies of the same card still works without hunting for cert numbers.

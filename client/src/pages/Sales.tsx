@@ -1820,12 +1820,16 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                       };
                     };
 
-                    // eBay set-listing auto-pull: if this slab's listing has
-                    // siblings under the same listing URL, fetch all of them
-                    // and add the whole set in one click. Falls back to a
-                    // single-card add if no URL (card show, private sale) or
-                    // the fetch fails.
-                    if (bulkIsEbay && r.listing_url) {
+                    // eBay set-listing auto-pull: a genuine set listing holds
+                    // several DIFFERENT cards under one URL, so clicking any
+                    // member should add the whole set. Gate on the server's
+                    // is_set_listing, never on listing_url alone — a multi-qty
+                    // single listing (N copies of the SAME card on one URL)
+                    // also shares a URL, and pulling by URL there silently
+                    // dumped every copy into the cart on one click. Falls back
+                    // to a single-card add when not a set, when there's no URL
+                    // (card show, private sale), or when the fetch fails.
+                    if (bulkIsEbay && r.is_set_listing && r.listing_url) {
                       try {
                         const res = await api.get('/listings/by-url/all', { params: { url: r.listing_url } });
                         const siblings = (res.data?.data ?? []) as SlabResult[];
