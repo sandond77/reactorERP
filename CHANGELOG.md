@@ -2,6 +2,14 @@
 
 ## October 5, 2026
 
+### UX
+
+**Listings — rows holding several independent listings now expand on click**
+- Clicking any graded row opened the group modal. For a row aggregating several *independent* listings that modal can only report that the listings differ and point back at the table — while the sub-rows directly beneath already carry each listing's own URL, price and click-to-edit. Reaching them required hitting the 11px chevron.
+- Those rows now expand on click. Clicking a sub-row opens the modal scoped to that single listing, which is where its URL and price can actually be edited.
+- **Gated on distinct URLs, not cert count.** A multi-qty listing holds several certs under one URL and is still a single listing, so it keeps opening the modal — that's where Add cert, End listing and the shared URL/price edit live, and expanding would just show N rows pointing at the same place. On production this splits 8 rows to expand-on-click and 206 to modal-on-click, including every multi-qty row.
+- The parent's **Listing** column no longer shows a link when the row spans several listings. The aggregation hands the parent one arbitrary `ebay_listing_url`, so that icon was sending users to whichever listing happened to be picked — it now reads `N links` with a hint to expand.
+
 ### Fixes
 
 **Combined Order — "Already-listed only" toggle could make FIFO recommend an unsellable cert**

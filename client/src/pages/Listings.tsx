@@ -1872,10 +1872,30 @@ export function Listings() {
                 // the aggregation. Matches the graded singles UX: parent is the
                 // summary, sub-row is the listing.
                 const collapseRaw = !isGraded && hasExpandable;
+                // Distinct listing URLs under this row. The aggregation hands
+                // the parent ONE ebay_listing_url, which is arbitrary when the
+                // certs sit on different listings — linking it would send the
+                // user to whichever happened to be picked.
+                const rowUrls = new Set(
+                  (row.cert_details ?? []).map((c) => c.ebay_listing_url ?? '').filter(Boolean)
+                );
+                // Several independent listings under one row: clicking expands
+                // instead of opening the modal. The sub-rows already carry each
+                // listing's own URL, price and click-to-edit, which is strictly
+                // more useful than a group modal that can only report that the
+                // listings differ.
+                //
+                // Gated on distinct URLs, not cert count. A multi-qty listing
+                // holds several certs under ONE URL and is still a single
+                // listing — the modal is the right primary action there, since
+                // that's where Add cert, End listing and the shared URL/price
+                // edit live. Expanding it would just show N rows pointing at
+                // the same place.
+                const expandsOnClick = isGraded && rowUrls.size > 1;
                 return (
                   <React.Fragment key={i}>
                     <tr
-                      onClick={() => setEditRow(row)}
+                      onClick={() => (expandsOnClick ? toggleExpand(key) : setEditRow(row))}
                       className="hover:bg-zinc-800/30 transition-colors cursor-pointer">
                       <td className="px-3 py-2 font-mono text-zinc-500 text-[11px] truncate" title={row.part_number ?? ''}>
                         {hasExpandable && (
@@ -1920,7 +1940,14 @@ export function Listings() {
                         {collapseRaw ? '' : formatCurrency(row.list_price ?? 0, row.currency)}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        {collapseRaw ? '' : row.ebay_listing_url ? (
+                        {collapseRaw ? '' : rowUrls.size > 1 ? (
+                          // Several distinct listings under this row — no single
+                          // link is the right one. Point at the sub-rows, which
+                          // each carry their own.
+                          <span className="text-[10px] text-zinc-500 whitespace-nowrap" title="Each listing has its own URL — expand the row to open them">
+                            {rowUrls.size} links
+                          </span>
+                        ) : row.ebay_listing_url ? (
                           isEbayOrderUrl(row.ebay_listing_url) ? (
                             <a href={row.ebay_listing_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
                               title="Order URL — this may already be sold"
