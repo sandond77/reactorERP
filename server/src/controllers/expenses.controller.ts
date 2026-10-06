@@ -4,7 +4,6 @@ import * as agentService from '../services/agent.service';
 import { z } from 'zod';
 import { toCents } from '../utils/cents';
 import { AppError } from '../middleware/errorHandler';
-import { saveReceiptImage } from '../utils/save-receipt';
 
 function splitCSV(val?: string): string[] | undefined {
   if (val === undefined) return undefined;
@@ -92,14 +91,6 @@ const exportSchema = z.object({
   format: z.enum(['csv', 'pdf']).default('csv'),
 });
 
-export async function uploadExpenseReceipt(req: Request, res: Response, next: NextFunction) {
-  try {
-    if (!req.file) throw new AppError(400, 'No image file provided');
-    const receiptUrl = await saveReceiptImage(req.dataUserId, req.params['id'] as string, req.file.buffer);
-    const expense = await expensesService.saveReceiptUrl(req.dataUserId, req.params['id'] as string, receiptUrl);
-    res.json({ data: expense });
-  } catch (err) { next(err); }
-}
 
 export async function parseExpenseReceipt(req: Request, res: Response, next: NextFunction) {
   try {

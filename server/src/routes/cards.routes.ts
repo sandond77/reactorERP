@@ -26,4 +26,3 @@ cardsRouter.get('/:id', cardsController.getCard);
 cardsRouter.patch('/:id', cardsController.updateCard);
 cardsRouter.delete('/:id', cardsController.deleteCard);
 cardsRouter.patch('/:id/status', cardsController.transitionStatus);
-cardsRouter.post('/:id/image', imageUpload.single('image'), cardsController.uploadCardImage);

@@ -1,5 +1,18 @@
 # Reactor — Changelog
 
+## October 6, 2026
+
+### Removals
+
+**Image and receipt storage removed — parsing kept**
+- The app could store card photos and receipt images on a Railway volume at `/app/uploads`. In production it never did: `card_instances.image_front_url` / `image_back_url` (0 of 8419), `expenses.receipt_url` (0 of 137), `raw_purchases.receipt_url` (0 of 1007) and all three `card_catalog.image_url*` columns (0 of 1566) are **entirely empty**. The volume held four orphaned receipt JPEGs, 769KB, referenced by nothing.
+- Meanwhile the card detail modal rendered two permanently-blank dashed placeholders with an Upload button on every card, and Expenses and Intake each carried a Receipt column that never showed anything.
+- **What stays — the whole point of the feature.** All three vision endpoints are untouched: `POST /cards/scan-image` (identify a card), `POST /expenses/parse-receipt` and `POST /agent/parse-receipt`. These read `req.file.buffer` in memory, send it to Claude, and return JSON. The extracted data flows into the database through the normal create paths exactly as before, and the file pickers that feed them remain.
+- **Removed** — three upload routes (`/cards/:id/image`, `/expenses/:id/receipt`, `/raw-purchases/:id/receipt`) and their handlers; `utils/save-receipt.ts`; the `saveReceiptUrl` service functions in both expenses and raw-purchases; the agent's `save_images` tool (definition, handler, `saveImageToCards`, system-prompt instruction and mutation-map entry); and the static `/uploads` route in `app.ts`. Client-side: the card image boxes and upload control, and the stored-receipt columns in Expenses and Intake.
+- **`pendingImages` deliberately kept.** It looked like image-saving machinery but is load-bearing for *parsing* — it re-attaches an uploaded image on follow-up turns so the agent can answer "parse the cert" without a re-upload.
+- **Database columns left in place.** All seven are empty and harmless; dropping them is irreversible and buys nothing. Easy to drop later, impossible to undo.
+- Side effect: with nothing reading or writing `/app/uploads`, the Railway volume mount can be removed from the service — which also clears the deploy failure that had been blocking releases since Oct 6.
+
 ## October 5, 2026
 
 ### UX

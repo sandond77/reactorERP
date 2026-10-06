@@ -20,7 +20,6 @@ router.get('/:id',        ctrl.getOne);
 router.post('/',          ctrl.create);
 router.patch('/:id',      ctrl.update);
 router.delete('/:id',     ctrl.remove);
-router.post('/:id/receipt', upload.single('image'), ctrl.uploadReceipt);
 
 // Inspection lines (card_instances linked to a purchase)
 router.post('/:id/lines',              ctrl.addLine);

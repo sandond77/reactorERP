@@ -1,6 +1,3 @@
-import fs from 'fs';
-import path from 'path';
-import sharp from 'sharp';
 import type { Request, Response, NextFunction } from 'express';
 import * as cardsService from '../services/cards.service';
 import * as agentService from '../services/agent.service';
@@ -182,36 +179,6 @@ export async function getRawFlatFilters(req: Request, res: Response, next: NextF
   } catch (err) { next(err); }
 }
 
-export async function uploadCardImage(req: Request, res: Response, next: NextFunction) {
-  try {
-    if (!req.file) { res.status(400).json({ error: 'No image provided' }); return; }
-    const cardId = req.params['id'] as string;
-    const side = (req.query['side'] as string) === 'back' ? 'back' : 'front';
-
-    // Verify card belongs to user
-    const card = await db.selectFrom('card_instances').select('id')
-      .where('id', '=', cardId).where('user_id', '=', req.dataUserId)
-      .executeTakeFirst();
-    if (!card) { res.status(404).json({ error: 'Card not found' }); return; }
-
-    const resized = await sharp(req.file.buffer)
-      .resize(1600, 1600, { fit: 'inside', withoutEnlargement: true })
-      .jpeg({ quality: 85 })
-      .toBuffer();
-    const dir = path.join(__dirname, '../../../uploads/card-images', req.dataUserId);
-    fs.mkdirSync(dir, { recursive: true });
-    const filename = `${cardId}-${side}.jpg`;
-    fs.writeFileSync(path.join(dir, filename), resized);
-
-    const url = `/uploads/card-images/${req.dataUserId}/${filename}`;
-    const field = side === 'back' ? 'image_back_url' : 'image_front_url';
-
-    await db.updateTable('card_instances').set({ [field]: url } as any)
-      .where('id', '=', cardId).execute();
-
-    res.json({ data: { url } });
-  } catch (err) { next(err); }
-}
 
 export async function scanImage(req: Request, res: Response, next: NextFunction) {
   try {

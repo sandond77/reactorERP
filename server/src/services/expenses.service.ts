@@ -129,17 +129,6 @@ export async function updateExpense(userId: string, id: string, input: Partial<E
   return updated;
 }
 
-export async function saveReceiptUrl(userId: string, id: string, receiptUrl: string) {
-  const updated = await db
-    .updateTable('expenses')
-    .set({ receipt_url: receiptUrl, updated_at: new Date() })
-    .where('id', '=', id)
-    .where('user_id', '=', userId)
-    .returningAll()
-    .executeTakeFirst();
-  if (!updated) throw new AppError(404, 'Expense not found');
-  return updated;
-}
 
 export async function deleteExpense(userId: string, id: string) {
   const existing = await db.selectFrom('expenses').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();

@@ -46,7 +46,7 @@ function PurchaseForm({
   onMultiLineChange,
 }: {
   initial?: Partial<PurchaseRow>;
-  onSave: (data: Record<string, unknown> | Record<string, unknown>[], receiptFile?: File) => void;
+  onSave: (data: Record<string, unknown> | Record<string, unknown>[]) => void;
   onClose: () => void;
   onDelete?: () => void;
   onMultiLineChange?: (multi: boolean) => void;
@@ -78,8 +78,9 @@ function PurchaseForm({
     } : null
   );
   const [catalogId, setCatalogId] = useState<string | null>(initial?.catalog_id ?? null);
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
-  const [receiptPreview, setReceiptPreview] = useState<string | null>(initial?.receipt_url ?? null);
+  // Local-only preview of the picked file. The image is parsed for its
+  // contents and discarded — receipt images are no longer stored.
+  const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [searchLabel, setSearchLabel] = useState('');
   const [autoFilling, setAutoFilling] = useState(false);
   const [parsingReceipt, setParsingReceipt] = useState(false);
@@ -387,7 +388,7 @@ function PurchaseForm({
           notes:          form.notes || undefined,
         };
       });
-      onSave(payloads, receiptFile ?? undefined);
+      onSave(payloads);
       return;
     }
 
@@ -407,7 +408,7 @@ function PurchaseForm({
       card_count:     parseInt(form.card_count) || 1,
       purchased_at:   form.purchased_at || undefined,
       notes:          form.notes || undefined,
-    }, receiptFile ?? undefined);
+    });
   }
 
   const inp   = 'w-full px-3 py-1.5 text-sm bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [color-scheme:dark]';
@@ -448,7 +449,6 @@ function PurchaseForm({
               const f = e.target.files?.[0];
               if (!f) return;
               if (uploadKind === 'receipt') {
-                setReceiptFile(f);
                 setReceiptPreview(URL.createObjectURL(f));
               }
               parseImage(f, uploadKind);
@@ -965,7 +965,6 @@ export function Intake() {
     status:  colMinWidth('Status',     true, false),
     bought:  colMinWidth('Purchased',  true, false),
     inspect:   colMinWidth('Inspected', true, false),
-    receipt: 44,
     actions: 80,
   };
   const { rz, totalWidth } = useColWidths({
@@ -981,7 +980,6 @@ export function Intake() {
     status:    Math.max(MINS.status,    100),
     bought:    Math.max(MINS.bought,    120),
     inspect:   Math.max(MINS.inspect,    90),
-    receipt:   MINS.receipt,
     actions:   MINS.actions,
   });
 
@@ -1018,7 +1016,7 @@ export function Intake() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['raw-purchases'] });
 
   const createMut = useMutation({
-    mutationFn: async ({ body, receiptFile }: { body: Record<string, unknown> | Record<string, unknown>[]; receiptFile?: File }) => {
+    mutationFn: async ({ body }: { body: Record<string, unknown> | Record<string, unknown>[] }) => {
       const bodies = Array.isArray(body) ? body : [body];
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const created: { id: string; type: string }[] = [];
@@ -1026,8 +1024,6 @@ export function Intake() {
         const res = await api.post('/raw-purchases', { ...b, tz });
         created.push({ id: res.data.id, type: (b.type as string) ?? 'raw' });
       }
-      // Receipt image is used for parsing only — never persisted to purchase records.
-      void receiptFile;
       return { count: created.length };
     },
     onSuccess: ({ count }) => { invalidate(); setAddOpen(false); toast.success(count > 1 ? `${count} purchases added` : 'Purchase added'); },
@@ -1035,14 +1031,9 @@ export function Intake() {
   });
 
   const updateMut = useMutation({
-    mutationFn: async ({ id, body, receiptFile }: { id: string; body: Record<string, unknown>; receiptFile?: File }) => {
+    mutationFn: async ({ id, body }: { id: string; body: Record<string, unknown> }) => {
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const res = await api.patch(`/raw-purchases/${id}`, { ...body, tz });
-      if (receiptFile) {
-        const fd = new FormData();
-        fd.append('image', receiptFile);
-        await api.post(`/raw-purchases/${id}/receipt`, fd).catch(() => {});
-      }
       return res.data;
     },
     onSuccess: () => { invalidate(); setEditRow(null); setReceiveRow(null); toast.success('Updated'); },
@@ -1147,7 +1138,6 @@ export function Intake() {
                 <ColHeader label="Status"     col="status"          {...sh} {...rz('status')}  minWidth={MINS.status} />
                 <ColHeader label="Purchased"  col="purchased_at"    {...sh} {...rz('bought')}  minWidth={MINS.bought} />
                 <ColHeader label="Inspected"  col="inspected_count"  {...sh} {...rz('inspect')}   minWidth={MINS.inspect}   align="right" />
-                <th style={{ width: MINS.receipt + 'px', minWidth: MINS.receipt + 'px' }} className="px-2 py-2 text-center font-semibold text-zinc-300 uppercase tracking-wide text-xs">Received?</th>
                 <th style={{ width: MINS.actions }} />
               </tr>
             </thead>
@@ -1180,14 +1170,6 @@ export function Intake() {
                     <span className={row.inspected_count > 0 ? 'text-emerald-400' : 'text-zinc-600'}>
                       {row.inspected_count}/{row.card_count}
                     </span>
-                  </td>
-                  <td className="px-2 py-2 text-center">
-                    {row.receipt_url && (
-                      <a href={row.receipt_url} target="_blank" rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()} title="View receipt">
-                        <img src={row.receipt_url} alt="receipt" className="h-7 w-7 object-cover rounded border border-zinc-700 hover:border-indigo-500 transition-colors mx-auto" />
-                      </a>
-                    )}
                   </td>
                   {/* Row actions */}
                   <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
@@ -1253,7 +1235,7 @@ export function Intake() {
         className={addWide ? 'max-w-5xl' : undefined}
       >
         <PurchaseForm
-          onSave={(body, receiptFile) => createMut.mutate({ body, receiptFile })}
+          onSave={(body) => createMut.mutate({ body })}
           onClose={() => { setAddOpen(false); setAddWide(false); }}
           onMultiLineChange={setAddWide}
         />
@@ -1264,9 +1246,9 @@ export function Intake() {
         {editRow && (
           <PurchaseForm
             initial={editRow}
-            onSave={(body, receiptFile) => {
+            onSave={(body) => {
               if (Array.isArray(body)) return; // edit only handles single-row updates
-              updateMut.mutate({ id: editRow.id, body, receiptFile });
+              updateMut.mutate({ id: editRow.id, body });
             }}
             onClose={() => setEditRow(null)}
             onDelete={() => { setEditRow(null); setDeleteRow(editRow); }}

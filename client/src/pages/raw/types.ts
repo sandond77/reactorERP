@@ -24,7 +24,6 @@ export interface PurchaseRow {
   catalog_sku?: string | null;
   reserved: boolean;
   notes: string | null;
-  receipt_url: string | null;
   inspected_count: number;
   sell_raw_count: number;
   grade_count: number;

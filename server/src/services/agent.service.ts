@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import Anthropic from '@anthropic-ai/sdk';
 import axios from 'axios';
 import { sql } from 'kysely';
@@ -8,12 +6,11 @@ import { db } from '../config/database';
 import { lookupSetCode, lookupSetName, generatePartNumber, EN_SETS, JP_SETS } from '../utils/set-codes';
 import { auditContext } from '../utils/audit-context';
 import { normalizeGradeLabel } from '../utils/grade-labels';
-import { createRawPurchase, saveReceiptUrl as saveRawPurchaseReceiptUrl } from './raw-purchases.service';
+import { createRawPurchase } from './raw-purchases.service';
 import { createCard, updateCard, transitionCardStatus, softDeleteCard } from './cards.service';
 import { recordSale, listSales, updateSale, deleteSale } from './sales.service';
 import { getCardShowBreakdown } from './reports.service';
-import { createExpense, deleteExpense, saveReceiptUrl as saveExpenseReceiptUrl } from './expenses.service';
-import { saveReceiptFromBase64 } from '../utils/save-receipt';
+import { createExpense, deleteExpense } from './expenses.service';
 import * as gradingService from './grading-submissions.service';
 import * as listingsService from './listings.service';
 import * as tradesService from './trades.service';
@@ -946,19 +943,6 @@ const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ['outgoing', 'incoming'],
     },
   },
-  // ── Image saving ──────────────────────────────────────────────────────────
-  {
-    name: 'save_images',
-    description: 'Save the uploaded image(s) to one or more records. Call this only after the user confirms they want the image saved. Use record_type "card" for card instances (add_card_to_purchase / add_graded_card results) and record_type "expense" for expenses (record_expense results). Accepts either internal UUIDs from a tool_result, or display IDs visible in chat history (e.g. expense_id "2026E3").',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        record_type: { type: 'string', enum: ['card', 'expense'], description: '"card" to attach to card instance(s), "expense" to attach to an expense' },
-        record_ids: { type: 'array', items: { type: 'string' }, description: 'Internal UUID OR display ID of each record. For expenses, display IDs look like "2026E3". For cards, internal UUIDs are required.' },
-      },
-      required: ['record_type', 'record_ids'],
-    },
-  },
   // ── Locations ─────────────────────────────────────────────────────────────
   {
     name: 'list_locations',
@@ -1552,32 +1536,6 @@ async function executeAgentTool(userId: string, toolName: string, toolInput: Rec
     return { success: true, deleted: expense_id, description: row.description };
   }
 
-  if (toolName === 'save_images') {
-    const { record_type, record_ids } = toolInput as { record_type: 'card' | 'expense'; record_ids: string[] };
-    const imgs = pendingImages.get(userId);
-    if (!imgs?.length) return { success: false, reason: 'No pending images to save' };
-    if (record_type === 'card') {
-      await saveImageToCards(userId, record_ids, imgs);
-      pendingImages.delete(userId);
-      return { success: true, saved_to: record_ids.length };
-    } else {
-      // expense — resolve display IDs (e.g. "2026E3") to internal UUIDs if needed
-      const rawId = record_ids[0];
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawId);
-      let expenseInternalId = rawId;
-      if (!isUuid) {
-        const row = await db.selectFrom('expenses').select('id')
-          .where('user_id', '=', userId).where('expense_id', '=', rawId).executeTakeFirst();
-        if (!row) return { success: false, reason: `Expense ${rawId} not found` };
-        expenseInternalId = row.id;
-      }
-      const url = await saveReceiptFromBase64(userId, expenseInternalId, imgs[0].base64);
-      await saveExpenseReceiptUrl(userId, expenseInternalId, url);
-      pendingImages.delete(userId);
-      return { success: true, saved_to: 1 };
-    }
-  }
-
   if (toolName === 'list_grading_batches') {
     const { status } = toolInput as { status?: string };
     const batches = await gradingService.listBatches(userId);
@@ -1818,27 +1776,6 @@ async function trimAndSummarize(
   return { messages: [...kept, ...recent], summary };
 }
 
-async function saveImageToCards(userId: string, cardIds: string[], images: AgentImage[]) {
-  if (!images.length) return;
-  try {
-    const dir = path.join(__dirname, '../../../uploads/card-images', userId);
-    fs.mkdirSync(dir, { recursive: true });
-    for (const cardId of cardIds) {
-      // Save front from first image, back from second if present
-      const sides: Array<'front' | 'back'> = ['front', 'back'];
-      for (let i = 0; i < Math.min(images.length, 2); i++) {
-        const image = images[i];
-        const ext = image.mediaType === 'image/png' ? 'png' : 'jpg';
-        const filename = `${cardId}-${sides[i]}.${ext}`;
-        fs.writeFileSync(path.join(dir, filename), Buffer.from(image.base64, 'base64'));
-        const url = `/uploads/card-images/${userId}/${filename}`;
-        const field = sides[i] === 'front' ? 'image_front_url' : 'image_back_url';
-        await db.updateTable('card_instances').set({ [field]: url } as any)
-          .where('id', '=', cardId).where('user_id', '=', userId).execute();
-      }
-    }
-  } catch { /* image save failure is non-fatal */ }
-}
 
 export async function chatWithAgent(
   userId: string,
@@ -1854,7 +1791,7 @@ export async function chatWithAgent(
   if (!hasFreshImages && messages.length <= 1) {
     pendingImages.delete(userId);
   }
-  // Store new images for this user so save_images can retrieve them later
+  // Store new images so follow-up turns can re-attach them for parsing
   if (images?.length) pendingImages.set(userId, images);
   // Re-attach pending images on follow-up turns so the agent can answer
   // questions like "parse the cert" or "what's the price on the sticker"
@@ -2078,7 +2015,6 @@ IMAGE HANDLING:
 - Card photo (raw): read card name, set, number, language. Ask for condition and decision.
 - Receipt/invoice: extract all fields, show summary, confirm before creating records.
 - After creating a card from an image, do NOT ask about saving the image — the cert link provides access to the card.
-- After creating an expense from a receipt image, you MAY ask the user once if they want the receipt saved. If they say yes, call save_images with record_type="expense" and the expense's display ID (e.g. "2026E3") in record_ids — do NOT call record_expense again to obtain a new internal_id.
 - If a prior assistant message in the history says a record was already created (expense, card, sale, listing, etc.), treat it as already done. Never re-run the same write tool to "redo" what was already reported — the duplicate cannot be undone automatically.
 - IMPORTANT — context persistence: tool results (list_inventory, lookup_catalog, etc.) are NOT included in history on later turns. So whenever you identify a card from an image OR a tool result, you MUST restate the key identifiers in your TEXT reply: cert number (for slabs), card name, card_instance_id (when known from list_inventory), and any prices read from stickers. Treat your own text reply as durable memory for the next turn.
 - Re-shown images: an image uploaded in a prior turn may still be visible to you in this conversation (the server re-attaches it for reference). You may use it to answer questions like "parse the cert" or "what does the sticker say". You MUST NOT use a re-shown image as the trigger to create a new record — only act on the user's explicit current text request. If a prior assistant message already reports a record was created from this image, that record stands; do not re-create it.
@@ -2198,7 +2134,6 @@ ${JSON.stringify(summary, null, 2)}${earlierContextSummary ? `\n\n=== EARLIER IN
             record_expense: ['expenses'],
             delete_expense: ['expenses'],
             delete_card: ['cards'],
-            save_images: ['cards', 'expenses'],
           };
           (TOOL_RESOURCE_MAP[block.name] ?? []).forEach((r) => mutatedResources.add(r));
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });

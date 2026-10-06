@@ -21,7 +21,6 @@ interface Expense {
   currency: string;
   notes: string | null;
   order_number: string | null;
-  receipt_url: string | null;
   created_at: string;
 }
 
@@ -65,12 +64,13 @@ function ExpenseModal({
   const [orderNumber, setOrderNumber] = useState(expense?.order_number ?? '');
   const [submitting, setSubmitting] = useState(false);
   const [parsing, setParsing] = useState(false);
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(expense?.receipt_url ?? null);
+  // Preview is local-only: the picked file is parsed for its contents and then
+  // discarded. Receipt images are no longer stored, so there is nothing to
+  // restore here when editing an existing expense.
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   async function handleImageUpload(file: File) {
     if (!file) return;
-    setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
     if (isEdit) return; // on edit, just queue the file — no auto-parse
     setParsing(true);
@@ -115,21 +115,12 @@ function ExpenseModal({
         notes: notes.trim() || undefined,
         order_number: orderNumber.trim() || undefined,
       };
-      let savedId: string;
       if (isEdit) {
         await api.put(`/expenses/${expense.id}`, body);
-        savedId = expense.id;
         toast.success('Expense updated');
       } else {
-        const res = await api.post('/expenses', body);
-        savedId = res.data.data.id;
+        await api.post('/expenses', body);
         toast.success('Expense added');
-      }
-      // Upload receipt image if one was selected
-      if (imageFile) {
-        const fd = new FormData();
-        fd.append('image', imageFile);
-        await api.post(`/expenses/${savedId}/receipt`, fd).catch(() => {});
       }
       queryClient.invalidateQueries({ queryKey: ['expenses'] });
       queryClient.invalidateQueries({ queryKey: ['expense-filters'] });
@@ -460,7 +451,6 @@ export function Expenses() {
     description:  colMinWidth('Description', true, false),
     amount:       colMinWidth('Amount',      true, false),
     order_number: colMinWidth('Order #',     true, false),
-    receipt:      colMinWidth('Receipt', false, false),
     notes:        colMinWidth('Notes',   false, false),
   };
 
@@ -471,7 +461,6 @@ export function Expenses() {
     description:  Math.max(MINS.description, 520),
     amount:       Math.max(MINS.amount, 140),
     order_number: Math.max(MINS.order_number, 170),
-    receipt:      Math.max(MINS.receipt, 90),
     notes:        Math.max(MINS.notes, 240),
   });
 
@@ -586,7 +575,6 @@ export function Expenses() {
                 <ColHeader label="Description" col="description" {...sh} {...rz('description')}  minWidth={MINS.description} />
                 <ColHeader label="Amount"      col="amount"      {...sh} {...rz('amount')}       minWidth={MINS.amount} align="center" />
                 <ColHeader label="Order #"     col="order_number" {...sh} {...rz('order_number')} minWidth={MINS.order_number} />
-                <ColHeader label="Receipt" col="" {...sh} {...rz('receipt')} minWidth={MINS.receipt} align="center" />
                 <ColHeader label="Notes"   col="" {...sh} {...rz('notes')}   minWidth={MINS.notes} />
               </tr>
             </thead>
@@ -604,15 +592,6 @@ export function Expenses() {
                   <td className="px-3 py-2 text-zinc-200 truncate" title={expense.description}>{expense.description}</td>
                   <td className="px-3 py-2 text-center font-medium text-zinc-200">{formatCurrency(expense.amount, expense.currency)}</td>
                   <td className="px-3 py-2 text-zinc-500 font-mono text-[11px]">{expense.order_number ?? '—'}</td>
-                  <td className="px-2 py-2 text-center">
-                    {expense.receipt_url && (
-                      <a href={expense.receipt_url} target="_blank" rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        title="View receipt">
-                        <img src={expense.receipt_url} alt="receipt" className="h-7 w-7 object-cover rounded border border-zinc-700 hover:border-indigo-500 transition-colors mx-auto" />
-                      </a>
-                    )}
-                  </td>
                   <td className="px-3 py-2 text-zinc-400 truncate" title={expense.notes ?? undefined}>
                     {expense.notes && (
                       /^https?:\/\//i.test(expense.notes) ? (

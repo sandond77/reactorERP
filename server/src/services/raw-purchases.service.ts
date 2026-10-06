@@ -547,17 +547,6 @@ export async function updateRawPurchase(
   return updated;
 }
 
-export async function saveReceiptUrl(userId: string, id: string, receiptUrl: string) {
-  const updated = await db
-    .updateTable('raw_purchases')
-    .set({ receipt_url: receiptUrl } as any)
-    .where('id', '=', id)
-    .where('user_id', '=', userId)
-    .returningAll()
-    .executeTakeFirst();
-  if (!updated) throw new Error('Raw purchase not found');
-  return updated;
-}
 
 export async function deleteRawPurchase(userId: string, id: string) {
   const existing = await db.selectFrom('raw_purchases').selectAll().where('id', '=', id).where('user_id', '=', userId).executeTakeFirst();
