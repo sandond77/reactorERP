@@ -15,6 +15,11 @@
 - Added `card_instances.market_value` (cents, nullable) and persisted it on trade intake. It rides along on the existing `trade_id` update rather than widening `createCard`'s signature, since it only applies to trade intake.
 - Nullable deliberately: every existing row predates collection, and cards acquired outside a trade may have no researched value.
 
+**Trades — unbalanced trades now require approval at submit, not a checkbox that goes stale**
+- The old gate was an inline *"Accept differential and proceed"* checkbox that unlocked the submit button. It could be ticked while the gap was $2, and stayed ticked while you carried on editing to a $200 gap — so what you approved and what you recorded could be entirely different numbers.
+- Replaced with a confirmation at submit that reads the figures at the moment of submission. It quotes the gap in **both dollars and percent** (`Off by $13.00 (3.2%)`), the two sides side by side, and the **effective rate the incoming cards are actually being taken in at** against their market value — flagging it when it differs from the rate you entered. That last number is the decision being made: *"we took this lot in at 90%"* is the thing to approve, not an abstract dollar gap.
+- The live amber warning stays for in-flight awareness, now saying you'll be asked to confirm. Modal rather than `window.confirm`, per CLAUDE.md.
+
 ### Fixes
 
 **Trades — balance tolerance widened from 1c to 5c**

@@ -382,7 +382,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
   const [tradeDate, setTradeDate] = useState('');
   const [tradePerson, setTradePerson] = useState('');
   const [tradeNotes, setTradeNotes] = useState('');
-  const [acceptDiff, setAcceptDiff] = useState(false);
+  const [confirmUnbalanced, setConfirmUnbalanced] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -424,6 +424,15 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
   // cent or two off the total. Prompting for that is noise; a real discrepancy
   // is dollars, not pennies.
   const isBalanced = diff <= 0.05;
+  // The gap as a share of the larger side — a $13 discrepancy means something
+  // very different on a $400 trade than on a $4,000 one, so the confirmation
+  // quotes both.
+  const diffPct = Math.max(outSide, inSide) > 0 ? (diff / Math.max(outSide, inSide)) * 100 : 0;
+  // What rate the incoming cards actually landed at overall, against their
+  // researched market value. This is the number being approved — "we took
+  // this lot in at 90%" is the decision, not the raw dollar gap.
+  const inMarketTotal = incomingAdded.reduce((s, e) => s + (parseFloat(e.market_value ?? '') || 0), 0);
+  const effectiveRate = inMarketTotal > 0 ? (inTotal / inMarketTotal) * 100 : null;
 
   function addOutgoing(card: SlabResult | RawCardResult, cardType: 'graded' | 'raw') {
     setOutgoing(prev => [...prev, { uid: String(Date.now()), card, cardType, value: '' }]);
@@ -453,10 +462,22 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
     return (cost / market) * 100;
   }
 
-  async function handleSubmit() {
+  // Gate: validate, then stop for explicit approval if the two sides don't
+  // reconcile. The previous "Accept differential" checkbox could be ticked
+  // early and went stale — tick it at a $2 gap, keep editing to a $200 gap,
+  // and it would still be ticked at submit. The confirmation now reads the
+  // final figures at the moment of submission, so what you approve is what
+  // you are actually recording.
+  function handleSubmit() {
     if (outgoing.length === 0) { toast.error('Add at least one outgoing card'); return; }
     if (outgoing.some(e => !e.value)) { toast.error('Assign a trade value to every outgoing card'); return; }
     if (incomingAdded.length === 0) { toast.error('Add at least one incoming card'); return; }
+    if (!isBalanced) { setConfirmUnbalanced(true); return; }
+    void submitTrade();
+  }
+
+  async function submitTrade() {
+    setConfirmUnbalanced(false);
     setSubmitting(true);
     try {
       await api.post('/trades', {
@@ -784,17 +805,9 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
               Unbalanced by ${diff.toFixed(2)} — out ${outSide.toFixed(2)} vs in ${inSide.toFixed(2)}.
             </p>
           </div>
-          <button type="button" onClick={() => setAcceptDiff(v => !v)}
-            className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
-              acceptDiff
-                ? 'bg-amber-500/20 border-amber-500/50 text-amber-200'
-                : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200'
-            }`}>
-            <span className={`w-3.5 h-3.5 rounded-sm border flex items-center justify-center shrink-0 ${acceptDiff ? 'bg-amber-500 border-amber-500' : 'border-zinc-600'}`}>
-              {acceptDiff && <span className="text-[10px] text-zinc-900 font-bold leading-none">✓</span>}
-            </span>
-            Accept differential and proceed
-          </button>
+          <p className="text-[11px] text-zinc-400">
+            You'll be asked to confirm this before it's recorded.
+          </p>
         </div>
       ) : null}
 
@@ -810,11 +823,64 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
 
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button type="button" disabled={submitting || (!isBalanced && !acceptDiff)} onClick={handleSubmit}>
+        <Button type="button" disabled={submitting} onClick={handleSubmit}>
           {submitting && <Loader2 size={14} className="animate-spin" />}
           Record Trade
         </Button>
       </div>
+
+      {/* Final approval for a trade whose sides don't reconcile. Reads the
+          figures at submit time, so what's approved is what gets recorded. */}
+      <Modal
+        open={confirmUnbalanced}
+        onClose={() => setConfirmUnbalanced(false)}
+        title="Confirm unbalanced trade"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
+            <p className="text-sm font-semibold text-amber-200">
+              Off by ${diff.toFixed(2)} ({diffPct.toFixed(1)}%)
+            </p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+              <span className="text-zinc-400">Going out</span>
+              <span className="text-right text-zinc-200 tabular-nums">${outSide.toFixed(2)}</span>
+              <span className="text-zinc-400">Coming in</span>
+              <span className="text-right text-zinc-200 tabular-nums">${inSide.toFixed(2)}</span>
+            </div>
+          </div>
+
+          {effectiveRate != null && (
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Incoming cards are being taken in at{' '}
+              <span className="font-semibold text-zinc-100">{effectiveRate.toFixed(1)}%</span>
+              {' '}of their ${inMarketTotal.toFixed(2)} market value
+              {Math.abs(effectiveRate - (parseFloat(tradePercent) || 80)) >= 0.5 && (
+                <> — you entered <span className="text-zinc-300">{parseFloat(tradePercent) || 80}%</span></>
+              )}.
+            </p>
+          )}
+
+          <p className="text-xs text-zinc-500 leading-relaxed">
+            Recording this will set each outgoing card's sale value and each incoming
+            card's cost basis to the amounts shown on the previous screen.
+          </p>
+
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setConfirmUnbalanced(false)}>
+              Go back
+            </Button>
+            <Button
+              type="button"
+              className="bg-amber-600 hover:bg-amber-500 text-white border-0"
+              disabled={submitting}
+              onClick={() => void submitTrade()}
+            >
+              {submitting && <Loader2 size={14} className="animate-spin" />}
+              Approve and record
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }
