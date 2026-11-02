@@ -10,6 +10,20 @@
 - Incoming rows now have an editable credit field. Editing one leaves the others alone; the existing balance warning and accept-discrepancy toggle already handle whatever that does to the totals. Each row also shows its **implied rate** next to the market value (`mkt $120.00 · 75.0%`), highlighted amber when it differs from the trade's headline percent — so a deliberately mixed trade reads as deliberate rather than as a mistake.
 - `trade_percent` keeps storing the rate you *entered*, as intent. The effective rate is derivable per row and across the trade from `purchase_cost ÷ market_value`.
 
+**Trades — outgoing sale values are now allocated instead of hand-typed**
+- From the same feedback: *"I like the way you can input the overall sale price for a bulk sale and it'll distribute the percentage across the cards. Can that be implemented to purchases and trades?"*
+- Outgoing cards had a single hand-typed `value` and no anchor to distribute by. The server comments were explicit that this was deliberate — *"the cash is conceptually already inside the value the user typed, so we do NOT distribute"* — i.e. the arithmetic was the user's job.
+- `OutEntry` gains a **market value**, seeded from the slab's current list price where one exists. The outgoing total is no longer a free choice; the balance equation fixes it:
+  ```
+  outTotal + cash_to_customer = inTotal + cash_from_customer
+  →  outTotal = inTotal + cash_in − cash_out
+  ```
+  Each card takes a share proportional to its market value. **Cash received flows into the outgoing side automatically**, which is what it represents — proceeds for the cards going out.
+- Any row is still overridable. Typing a value **pins** it (amber border, click `pinned` to release).
+- **Auto-rebalance toggle**, off by default. Off: a pinned row leaves the others alone and the trade goes out of balance, which the submit confirmation then surfaces. On: untouched rows absorb the slack so the total holds. Over-pinning beyond the available total is blocked with an explicit error rather than silently allocating negative shares.
+- A live line reports the state: `Allocating $600.00 across 3 outgoing cards · 1 pinned · incoming at 80.0%`.
+- Verified against the maths: no cash splits `$600` as `100/200/300`; `$100` cash in raises proceeds to `$700` (`116.67/233.33/350`); `$100` out drops them to `$500`; pinning one row at `$150` yields `$650` unbalanced with the toggle off and `150/180/270` balanced with it on.
+
 **Market value persisted — migration 065**
 - `TradeCardForm` has always asked for a market value, used it to compute the credit, posted it to the server as `market_value_cents`, and `trades.service.ts` declared it on `CreateTradeInput` — but it was **never written to any column**. The anchor was discarded and only the derived credit survived, so "what did we think this was worth versus what did we pay" was unanswerable after the fact.
 - Added `card_instances.market_value` (cents, nullable) and persisted it on trade intake. It rides along on the existing `trade_id` update rather than widening `createCard`'s signature, since it only applies to trade intake.

@@ -77,6 +77,9 @@ interface OutEntry {
   uid: string;
   card: SlabResult | RawCardResult;
   cardType: 'graded' | 'raw';
+  // Researched worth — the anchor the allocated sale value is derived from.
+  market_value: string;
+  // Override. Empty means "use the allocated share"; anything typed pins it.
   value: string;
 }
 
@@ -383,6 +386,9 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
   const [tradePerson, setTradePerson] = useState('');
   const [tradeNotes, setTradeNotes] = useState('');
   const [confirmUnbalanced, setConfirmUnbalanced] = useState(false);
+  // Opt-in. Off: overriding a row just pushes the trade out of balance.
+  // On: the untouched rows take up the slack so the total holds.
+  const [autoRebalance, setAutoRebalance] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -412,10 +418,48 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
   const rawResults = (rawSearchData?.data ?? []).filter(c => !outSelectedIds.has(c.id));
   const isSearching = isGradedSearching || isRawSearching;
 
-  const outTotal = outgoing.reduce((s, e) => s + (parseFloat(e.value) || 0), 0);
   const inTotal  = incomingAdded.reduce((s, e) => s + (parseFloat(e.purchase_cost) || 0), 0);
   const cashOut = parseFloat(cashToCustomer || '0') || 0;
   const cashIn  = parseFloat(cashFromCustomer || '0') || 0;
+
+  // ── Outgoing allocation ────────────────────────────────────────────────
+  // The outgoing total isn't a free choice — the balance equation fixes it:
+  //
+  //   outTotal + cash_to_customer = inTotal + cash_from_customer
+  //   => outTotal = inTotal + cash_in - cash_out
+  //
+  // So once the incoming side is priced, the proceeds attributable to the
+  // cards going out follow, and cash received lands in that figure
+  // automatically. That's the arithmetic the server comments currently
+  // assume the user did in their head before typing values in.
+  //
+  // Each outgoing card takes a share of that total proportional to its
+  // market value. A row with a typed value is PINNED and keeps it.
+  const targetOutTotal = inTotal + cashIn - cashOut;
+  const isPinned = (e: OutEntry) => e.value.trim() !== '';
+  const pinnedOutSum = outgoing.filter(isPinned)
+    .reduce((s, e) => s + (parseFloat(e.value) || 0), 0);
+  const marketOf = (e: OutEntry) => parseFloat(e.market_value) || 0;
+  const allOutMarket = outgoing.reduce((s, e) => s + marketOf(e), 0);
+  const unpinnedOutMarket = outgoing.filter(e => !isPinned(e)).reduce((s, e) => s + marketOf(e), 0);
+
+  // With rebalancing on, unpinned rows absorb whatever the pinned rows left
+  // so the total still lands on target. With it off they keep their plain
+  // share and any override simply pushes the trade out of balance — which
+  // the confirmation then surfaces.
+  const outRatio = autoRebalance
+    ? (unpinnedOutMarket > 0 ? (targetOutTotal - pinnedOutSum) / unpinnedOutMarket : 0)
+    : (allOutMarket > 0 ? targetOutTotal / allOutMarket : 0);
+
+  const outValueOf = (e: OutEntry) =>
+    isPinned(e) ? (parseFloat(e.value) || 0) : marketOf(e) * outRatio;
+
+  const outTotal = outgoing.reduce((s, e) => s + outValueOf(e), 0);
+  const pinnedCount = outgoing.filter(isPinned).length;
+  // Pinned rows claiming more than the whole trade leaves nothing to spread
+  // across the rest — surfaced rather than silently producing negatives.
+  const overPinned = autoRebalance && pinnedOutSum > targetOutTotal + 0.05;
+
   const outSide = outTotal + cashOut;
   const inSide  = inTotal + cashIn;
   const diff = Math.abs(outSide - inSide);
@@ -435,8 +479,17 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
   const effectiveRate = inMarketTotal > 0 ? (inTotal / inMarketTotal) * 100 : null;
 
   function addOutgoing(card: SlabResult | RawCardResult, cardType: 'graded' | 'raw') {
-    setOutgoing(prev => [...prev, { uid: String(Date.now()), card, cardType, value: '' }]);
+    // Seed market value from the slab's current list price when there is
+    // one — it is the closest thing to a researched worth we already hold.
+    const seeded = cardType === 'graded' && (card as SlabResult).listed_price != null
+      ? (((card as SlabResult).listed_price as number) / 100).toFixed(2)
+      : '';
+    setOutgoing(prev => [...prev, { uid: String(Date.now()), card, cardType, market_value: seeded, value: '' }]);
     setOutSearch('');
+  }
+
+  function updateOutMarket(uid: string, market_value: string) {
+    setOutgoing(prev => prev.map(e => e.uid === uid ? { ...e, market_value } : e));
   }
 
   function updateOut(uid: string, value: string) {
@@ -470,7 +523,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
   // you are actually recording.
   function handleSubmit() {
     if (outgoing.length === 0) { toast.error('Add at least one outgoing card'); return; }
-    if (outgoing.some(e => !e.value)) { toast.error('Assign a trade value to every outgoing card'); return; }
+    if (outgoing.some(e => outValueOf(e) <= 0)) { toast.error('Every outgoing card needs a market value or an assigned amount'); return; }
     if (incomingAdded.length === 0) { toast.error('Add at least one incoming card'); return; }
     if (!isBalanced) { setConfirmUnbalanced(true); return; }
     void submitTrade();
@@ -484,7 +537,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
         outgoing: outgoing.map(e => ({
           card_instance_id: e.card.id,
           listing_id: e.cardType === 'graded' ? ((e.card as SlabResult).listing_id ?? undefined) : undefined,
-          sale_price: (parseFloat(e.value) || 0).toFixed(2),
+          sale_price: outValueOf(e).toFixed(2),
           currency: e.card.currency,
         })),
         incoming: incomingAdded.map(e => ({
@@ -588,10 +641,28 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
                 </p>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <span className="text-xs text-zinc-500">$</span>
-                <input type="text" inputMode="decimal" placeholder="0.00" value={e.value}
-                  onChange={(ev) => updateOut(e.uid, ev.target.value)}
-                  className="w-20 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-sm text-zinc-100 focus:outline-none focus:border-indigo-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none" />
+                {/* Market value — the anchor each card's share is derived from */}
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-zinc-600">mkt</span>
+                  <input type="text" inputMode="decimal" placeholder="0.00" value={e.market_value}
+                    onChange={(ev) => updateOutMarket(e.uid, ev.target.value)}
+                    className="w-16 rounded bg-zinc-900 border border-zinc-700 px-1.5 py-1 text-right text-xs text-zinc-400 tabular-nums focus:outline-none focus:border-indigo-500" />
+                </div>
+                {/* Allocated share, overridable. Placeholder shows the computed
+                    value so an untouched row reads as derived, not blank. */}
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-zinc-500">$</span>
+                  <input type="text" inputMode="decimal"
+                    placeholder={outValueOf(e) > 0 ? outValueOf(e).toFixed(2) : '0.00'}
+                    value={e.value}
+                    onChange={(ev) => updateOut(e.uid, ev.target.value)}
+                    className={`w-20 rounded bg-zinc-900 border px-2 py-1 text-right text-sm tabular-nums focus:outline-none focus:border-indigo-500 ${isPinned(e) ? 'border-amber-500/50 text-amber-200' : 'border-zinc-700 text-zinc-100'}`} />
+                </div>
+                {isPinned(e) && (
+                  <button type="button" onClick={() => updateOut(e.uid, '')}
+                    title="Unpin — go back to the allocated share"
+                    className="text-[10px] text-amber-400 hover:text-amber-300">pinned</button>
+                )}
                 <button type="button" onClick={() => setOutgoing(prev => prev.filter(x => x.uid !== e.uid))} className="text-zinc-600 hover:text-zinc-400 ml-1">
                   <X size={13} />
                 </button>
@@ -743,7 +814,7 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
                       ].filter(Boolean).join(' · ')}
                 </p>
               </div>
-              <span className="text-zinc-400 shrink-0">${parseFloat(e.value || '0').toFixed(2)}</span>
+              <span className="text-zinc-400 shrink-0">${outValueOf(e).toFixed(2)}</span>
             </div>
           ))}
           {cashOut > 0 && (
@@ -790,6 +861,37 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
             <span className="text-zinc-200">${inSide.toFixed(2)}</span>
           </div>
         </div>
+      </div>
+
+      {/* Allocation controls. The outgoing total is fixed by the balance
+          equation, so the only choice here is how an override is absorbed. */}
+      <div className="rounded-lg border border-zinc-700/50 bg-zinc-800/30 px-3 py-2.5 space-y-2">
+        <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={autoRebalance}
+            onChange={(ev) => setAutoRebalance(ev.target.checked)}
+            className="accent-indigo-500"
+          />
+          Auto-rebalance to keep the trade balanced
+        </label>
+        <p className="text-[11px] text-zinc-500 leading-relaxed">
+          {autoRebalance
+            ? 'Editing a card pins it; the untouched cards take up the slack so the totals still match.'
+            : 'Editing a card leaves the others alone — the trade will go out of balance and you’ll confirm it at the end.'}
+        </p>
+        <p className="text-[11px] text-zinc-500 tabular-nums">
+          Allocating <span className="text-zinc-300">${targetOutTotal.toFixed(2)}</span> across{' '}
+          {outgoing.length} outgoing {outgoing.length === 1 ? 'card' : 'cards'}
+          {pinnedCount > 0 && <> · <span className="text-amber-400">{pinnedCount} pinned</span></>}
+          {effectiveRate != null && <> · incoming at <span className="text-zinc-300">{effectiveRate.toFixed(1)}%</span></>}
+        </p>
+        {overPinned && (
+          <p className="text-[11px] text-red-400">
+            Pinned cards total ${pinnedOutSum.toFixed(2)}, more than the ${targetOutTotal.toFixed(2)} available —
+            the remaining cards can't absorb a negative share. Unpin one, or turn off auto-rebalance.
+          </p>
+        )}
       </div>
 
       {isBalanced && outSide > 0 ? (
