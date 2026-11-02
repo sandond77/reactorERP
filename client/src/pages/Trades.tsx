@@ -419,7 +419,11 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
   const outSide = outTotal + cashOut;
   const inSide  = inTotal + cashIn;
   const diff = Math.abs(outSide - inSide);
-  const isBalanced = diff < 0.01;
+  // 5c tolerance rather than 1c. Allocating a total across rows by market-value
+  // share produces values like $33.47, and the rounded parts routinely sum a
+  // cent or two off the total. Prompting for that is noise; a real discrepancy
+  // is dollars, not pennies.
+  const isBalanced = diff <= 0.05;
 
   function addOutgoing(card: SlabResult | RawCardResult, cardType: 'graded' | 'raw') {
     setOutgoing(prev => [...prev, { uid: String(Date.now()), card, cardType, value: '' }]);
@@ -428,6 +432,25 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
 
   function updateOut(uid: string, value: string) {
     setOutgoing(prev => prev.map(e => e.uid === uid ? { ...e, value } : e));
+  }
+
+  // Per-row intake override. The trade percent seeds every incoming card's
+  // credit when it's added, but a real trade is rarely one flat rate — half
+  // the stuff at 80% and half at 75% is routine. Editing a row here leaves
+  // the others alone; the balance line and the accept-discrepancy toggle
+  // already handle whatever that does to the totals.
+  function updateIncomingCost(uid: string, purchase_cost: string) {
+    setIncomingAdded(prev => prev.map(e => e.uid === uid ? { ...e, purchase_cost } : e));
+  }
+
+  // What rate a row actually landed at, given its market value. Shown next to
+  // the input so a mixed-rate trade is legible at a glance rather than
+  // something you have to work out from two dollar figures.
+  function impliedRate(e: IncomingCardData): number | null {
+    const market = parseFloat(e.market_value ?? '');
+    const cost = parseFloat(e.purchase_cost);
+    if (!Number.isFinite(market) || market <= 0 || !Number.isFinite(cost)) return null;
+    return (cost / market) * 100;
   }
 
   async function handleSubmit() {
@@ -610,8 +633,33 @@ function TradeIntakeModal({ onClose }: { onClose: () => void }) {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <div className="text-right">
-                  {e.market_value && <p className="text-[10px] text-zinc-500 line-through">${parseFloat(e.market_value).toFixed(2)}</p>}
-                  <span className="text-xs text-emerald-400 font-semibold">${parseFloat(e.purchase_cost).toFixed(2)}</span>
+                  {e.market_value && (
+                    <p className="text-[10px] text-zinc-500">
+                      mkt ${parseFloat(e.market_value).toFixed(2)}
+                      {(() => {
+                        const r = impliedRate(e);
+                        if (r == null) return null;
+                        // Flag anything that isn't the trade's headline rate, so
+                        // a deliberately mixed trade reads as deliberate.
+                        const offRate = Math.abs(r - (parseFloat(tradePercent) || 80)) >= 0.5;
+                        return (
+                          <span className={offRate ? ' text-amber-400 font-medium' : ' text-zinc-600'}>
+                            {' · '}{r.toFixed(1)}%
+                          </span>
+                        );
+                      })()}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-1 justify-end">
+                    <span className="text-[11px] text-zinc-500">$</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={e.purchase_cost}
+                      onChange={(ev) => updateIncomingCost(e.uid, ev.target.value)}
+                      className="w-20 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-right text-xs text-emerald-400 font-semibold tabular-nums focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
                 </div>
                 <button type="button" onClick={() => setIncomingAdded(prev => prev.filter(x => x.uid !== e.uid))} className="text-zinc-600 hover:text-zinc-400">
                   <X size={12} />

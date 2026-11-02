@@ -1,5 +1,25 @@
 # Reactor — Changelog
 
+## November 2, 2026
+
+### Features
+
+**Trades — per-card intake value is now editable, and market value is finally stored**
+- From user feedback: *"I've been fudging numbers in the trade value. The numbers auto calculate 80% but we had a trade where half of the stuff was 80% and half was 75%."*
+- `trades.trade_percent` is a single rate applied to every incoming card, and the added-cards list rendered each card's market value and credit as **read-only text**. Changing one card's rate meant deleting it and re-adding it under a different percent — or hand-editing the numbers until the balance line went green. Both are the fudging.
+- Incoming rows now have an editable credit field. Editing one leaves the others alone; the existing balance warning and accept-discrepancy toggle already handle whatever that does to the totals. Each row also shows its **implied rate** next to the market value (`mkt $120.00 · 75.0%`), highlighted amber when it differs from the trade's headline percent — so a deliberately mixed trade reads as deliberate rather than as a mistake.
+- `trade_percent` keeps storing the rate you *entered*, as intent. The effective rate is derivable per row and across the trade from `purchase_cost ÷ market_value`.
+
+**Market value persisted — migration 065**
+- `TradeCardForm` has always asked for a market value, used it to compute the credit, posted it to the server as `market_value_cents`, and `trades.service.ts` declared it on `CreateTradeInput` — but it was **never written to any column**. The anchor was discarded and only the derived credit survived, so "what did we think this was worth versus what did we pay" was unanswerable after the fact.
+- Added `card_instances.market_value` (cents, nullable) and persisted it on trade intake. It rides along on the existing `trade_id` update rather than widening `createCard`'s signature, since it only applies to trade intake.
+- Nullable deliberately: every existing row predates collection, and cards acquired outside a trade may have no researched value.
+
+### Fixes
+
+**Trades — balance tolerance widened from 1c to 5c**
+- Allocating a total across rows by market-value share produces values like `$33.47`, and the rounded parts routinely sum a cent or two off the total. At a 1c tolerance that surfaced as an unbalanced-trade warning. A real discrepancy is dollars, not pennies.
+
 ## October 6, 2026
 
 ### Removals

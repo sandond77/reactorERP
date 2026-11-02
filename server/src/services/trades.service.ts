@@ -182,8 +182,14 @@ async function createTradeInner(
       } as any,
       slab
     );
-    await db.updateTable('card_instances').set({ trade_id: trade.id }).where('id', '=', card.id).execute();
-    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, trade_id: trade.id });
+    // market_value rides along on the trade_id update rather than going
+    // through createCard — it only applies to trade intake, so there's no
+    // reason to widen that signature. It was previously accepted on the
+    // input type and then dropped on the floor; now it persists as the
+    // anchor purchase_cost was allocated from.
+    const patch = { trade_id: trade.id, market_value: item.market_value_cents ?? null };
+    await db.updateTable('card_instances').set(patch).where('id', '=', card.id).execute();
+    await logAudit(userId, 'card_instances', card.id, 'updated', card, { ...card, ...patch });
   }));
 
   await logAudit(userId, 'trades', trade.id, 'created', null, trade);

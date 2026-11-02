@@ -147,6 +147,10 @@ export interface CardInstancesTable {
   status: CardStatus;
   quantity: number;
   purchase_cost: number;
+  // Researched market value in cents at acquisition — the anchor that
+  // purchase_cost was allocated from. Null for cards acquired without a
+  // researched value, and for everything predating migration 065.
+  market_value: number | null;
   currency: string;
   source_link: string | null;
   order_number: string | null;
