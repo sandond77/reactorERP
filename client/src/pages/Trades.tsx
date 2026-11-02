@@ -18,6 +18,7 @@ interface TradeCard {
   card_name: string | null;
   sale_price_cents?: number;
   purchase_cost_cents?: number;
+  market_value_cents?: number | null;
   currency: string;
   purchase_type?: string;
   condition?: string | null;
@@ -1004,6 +1005,11 @@ export function Trades() {
   const [editPerson, setEditPerson] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editTradePercent, setEditTradePercent] = useState('');
+  // Per-card edits on an existing trade, keyed by row id (sales.id for
+  // outgoing, card_instances.id for incoming). Seeded from the trade when
+  // the modal opens; only changed rows are sent.
+  const [editOut, setEditOut] = useState<Record<string, string>>({});
+  const [editIn, setEditIn] = useState<Record<string, { cost: string; market: string }>>({});
 
   const { data, isLoading } = useQuery<PaginatedResult<Trade>>({
     queryKey: ['trades', page],
@@ -1031,6 +1037,15 @@ export function Trades() {
     setEditPerson(trade.person ?? '');
     setEditNotes(trade.notes ?? '');
     setEditTradePercent(String(trade.trade_percent));
+    setEditOut(Object.fromEntries(
+      trade.out_cards.map(c => [c.id, ((c.sale_price_cents ?? 0) / 100).toFixed(2)])
+    ));
+    setEditIn(Object.fromEntries(
+      trade.in_cards.map(c => [c.id, {
+        cost: ((c.purchase_cost_cents ?? 0) / 100).toFixed(2),
+        market: c.market_value_cents != null ? (c.market_value_cents / 100).toFixed(2) : '',
+      }])
+    ));
   }
 
   async function handleEdit() {
@@ -1042,6 +1057,14 @@ export function Trades() {
         person: editPerson || undefined,
         notes: editNotes || undefined,
         trade_percent: parseFloat(editTradePercent) || 80,
+        outgoing: Object.entries(editOut).map(([sale_id, v]) => ({
+          sale_id, sale_price: (parseFloat(v) || 0).toFixed(2),
+        })),
+        incoming: Object.entries(editIn).map(([card_instance_id, v]) => ({
+          card_instance_id,
+          purchase_cost: (parseFloat(v.cost) || 0).toFixed(2),
+          market_value: v.market.trim() === '' ? null : (parseFloat(v.market) || 0).toFixed(2),
+        })),
       });
       toast.success('Trade updated');
       queryClient.invalidateQueries({ queryKey: ['trades'] });
@@ -1251,7 +1274,53 @@ export function Trades() {
       {/* Edit Trade Modal */}
       <Modal open={!!editingTrade} onClose={() => setEditingTrade(null)} title="Edit Trade">
         <div className="space-y-4">
-          <p className="text-xs text-zinc-500">Only trade details can be edited. To change cards or values, delete and re-record the trade.</p>
+          <p className="text-xs text-zinc-500">Correct a mis-keyed value here rather than deleting and re-recording the whole trade. Cards can't be added or removed — that still needs a re-record.</p>
+
+          {editingTrade && editingTrade.out_cards.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Going Out — sale value</p>
+              {editingTrade.out_cards.map(c => (
+                <div key={c.id} className="flex items-center gap-2 rounded-lg border border-zinc-700/40 bg-zinc-800/30 px-2.5 py-1.5">
+                  <p className="flex-1 min-w-0 text-xs text-zinc-300 truncate">{c.card_name ?? '—'}</p>
+                  <span className="text-[11px] text-zinc-500">$</span>
+                  <input type="text" inputMode="decimal"
+                    value={editOut[c.id] ?? ''}
+                    onChange={ev => setEditOut(prev => ({ ...prev, [c.id]: ev.target.value }))}
+                    className="w-20 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-right text-xs text-zinc-100 tabular-nums focus:outline-none focus:border-indigo-500" />
+                </div>
+              ))}
+            </div>
+          )}
+
+          {editingTrade && editingTrade.in_cards.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-zinc-500">Coming In — market value and credit</p>
+              {editingTrade.in_cards.map(c => {
+                const row = editIn[c.id] ?? { cost: '', market: '' };
+                const mk = parseFloat(row.market);
+                const ct = parseFloat(row.cost);
+                const rate = Number.isFinite(mk) && mk > 0 && Number.isFinite(ct) ? (ct / mk) * 100 : null;
+                return (
+                  <div key={c.id} className="flex items-center gap-2 rounded-lg border border-zinc-700/40 bg-zinc-800/30 px-2.5 py-1.5">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-zinc-300 truncate">{c.card_name ?? '—'}</p>
+                      {rate != null && <p className="text-[10px] text-zinc-600">{rate.toFixed(1)}% of market</p>}
+                    </div>
+                    <span className="text-[10px] text-zinc-600">mkt</span>
+                    <input type="text" inputMode="decimal" placeholder="—"
+                      value={row.market}
+                      onChange={ev => setEditIn(prev => ({ ...prev, [c.id]: { ...row, market: ev.target.value } }))}
+                      className="w-16 rounded bg-zinc-900 border border-zinc-700 px-1.5 py-1 text-right text-xs text-zinc-400 tabular-nums focus:outline-none focus:border-indigo-500" />
+                    <span className="text-[11px] text-zinc-500">$</span>
+                    <input type="text" inputMode="decimal"
+                      value={row.cost}
+                      onChange={ev => setEditIn(prev => ({ ...prev, [c.id]: { ...row, cost: ev.target.value } }))}
+                      className="w-20 rounded bg-zinc-900 border border-zinc-700 px-2 py-1 text-right text-xs text-emerald-400 font-semibold tabular-nums focus:outline-none focus:border-indigo-500" />
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Input label="Trade Date" type="date" value={editDate} onChange={e => setEditDate(e.target.value)} />
             <Input label="Person" placeholder="Customer name" value={editPerson} onChange={e => setEditPerson(e.target.value)} />

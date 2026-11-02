@@ -106,12 +106,41 @@ const updateTradeSchema = z.object({
   person: z.string().optional(),
   notes: z.string().optional(),
   trade_percent: z.coerce.number().optional(),
+  // Per-card corrections. Dollars in, cents out — same convention as the
+  // create payload. The service re-scopes every id to this trade before
+  // writing, so these can't reach another trade's rows.
+  outgoing: z.array(z.object({
+    sale_id: z.string().uuid(),
+    sale_price: z.union([z.string(), z.number()]).transform(toCents),
+  })).optional(),
+  incoming: z.array(z.object({
+    card_instance_id: z.string().uuid(),
+    purchase_cost: z.union([z.string(), z.number()]).optional().transform((v) => (v != null ? toCents(v) : undefined)),
+    market_value: z.union([z.string(), z.number()]).nullable().optional()
+      .transform((v) => (v == null ? v : toCents(v))),
+  })).optional(),
 });
 
 tradesRouter.patch('/:id', async (req, res, next) => {
   try {
     const body = updateTradeSchema.parse(req.body);
-    const trade = await tradesService.updateTrade(req.dataUserId, req.params.id, body);
+    // The API speaks dollars-named fields; the service speaks cents-named
+    // ones. Same mapping the create route does.
+    const trade = await tradesService.updateTrade(req.dataUserId, req.params.id, {
+      trade_date: body.trade_date,
+      person: body.person,
+      notes: body.notes,
+      trade_percent: body.trade_percent,
+      outgoing: body.outgoing?.map((o) => ({
+        sale_id: o.sale_id,
+        sale_price_cents: o.sale_price,
+      })),
+      incoming: body.incoming?.map((i) => ({
+        card_instance_id: i.card_instance_id,
+        purchase_cost_cents: i.purchase_cost,
+        market_value_cents: i.market_value,
+      })),
+    });
     res.json({ data: trade });
   } catch (err) {
     next(err);

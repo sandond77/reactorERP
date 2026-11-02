@@ -34,6 +34,15 @@
 - Replaced with a confirmation at submit that reads the figures at the moment of submission. It quotes the gap in **both dollars and percent** (`Off by $13.00 (3.2%)`), the two sides side by side, and the **effective rate the incoming cards are actually being taken in at** against their market value — flagging it when it differs from the rate you entered. That last number is the decision being made: *"we took this lot in at 90%"* is the thing to approve, not an abstract dollar gap.
 - The live amber warning stays for in-flight awareness, now saying you'll be asked to confirm. Modal rather than `window.confirm`, per CLAUDE.md.
 
+**Trades — existing trades can now have their per-card values corrected**
+- The edit modal said it plainly: *"Only trade details can be edited. To change cards or values, delete and re-record the trade."* Correcting one mis-keyed number meant unwinding the whole trade — which also reverses the outgoing sales and deletes the incoming cards.
+- Outgoing sale values and incoming market value / credit are now editable in place, with the implied rate shown per incoming row as in the add flow. Cards still can't be added or removed; that remains a re-record.
+- Server: `PATCH /trades/:id` accepts `outgoing[{ sale_id, sale_price }]` and `incoming[{ card_instance_id, purchase_cost, market_value }]`. Every id is re-scoped to the trade being edited before anything is written, so a caller can't reach another trade's rows by guessing ids. Each row change is audit-logged individually.
+- Raw intake mirrors its credit onto the generated `raw_purchase`, so a corrected cost updates both — otherwise the lot and the card disagree.
+- `in_cards` now returns `market_value_cents` so the edit form can show the anchor it was allocated from.
+
+**Why this mattered, from the data:** across 36 trades on the reporting account, `trade_percent` holds eight distinct values — 80% (21 trades), 100% (5), 75% (4), 70% (2), 60%, 85%, 50%, and **79.97%**. Nobody chooses 79.97%; that's a rate back-solved until the balance line went green. The single-rate model never matched how trades actually get done.
+
 ### Fixes
 
 **Trades — balance tolerance widened from 1c to 5c**

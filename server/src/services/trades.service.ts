@@ -236,6 +236,7 @@ export async function listTrades(userId: string, pagination: PaginationParams) {
           'id', ci_in.id,
           'card_name', COALESCE(ci_in.card_name_override, cc_in.card_name),
           'purchase_cost_cents', ci_in.purchase_cost,
+          'market_value_cents', ci_in.market_value,
           'currency', ci_in.currency,
           'purchase_type', ci_in.purchase_type,
           'condition', ci_in.condition,
@@ -374,9 +375,59 @@ export async function updateTrade(userId: string, tradeId: string, input: {
   person?: string;
   notes?: string;
   trade_percent?: number;
+  // Per-card corrections on an existing trade. Previously only the trade's
+  // metadata was editable, so fixing a mis-keyed value meant deleting the
+  // whole trade and re-entering it — which also unwinds the sales and the
+  // incoming cards. Both arrays are scoped to this trade before anything is
+  // written, so a caller can't reach another trade's rows by guessing ids.
+  outgoing?: { sale_id: string; sale_price_cents: number }[];
+  incoming?: { card_instance_id: string; purchase_cost_cents?: number; market_value_cents?: number | null }[];
 }) {
   const existing = await db.selectFrom('trades').selectAll().where('id', '=', tradeId).where('user_id', '=', userId).executeTakeFirst();
   if (!existing) throw new Error('Trade not found');
+
+  for (const row of input.outgoing ?? []) {
+    const before = await db.selectFrom('sales').selectAll()
+      .where('id', '=', row.sale_id)
+      .where('user_id', '=', userId)
+      .where('trade_id', '=', tradeId)
+      .executeTakeFirst();
+    if (!before) continue; // not part of this trade — ignore rather than trust the id
+    const after = await db.updateTable('sales')
+      .set({ sale_price: row.sale_price_cents })
+      .where('id', '=', row.sale_id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await logAudit(userId, 'sales', row.sale_id, 'updated', before, after);
+  }
+
+  for (const row of input.incoming ?? []) {
+    const before = await db.selectFrom('card_instances').selectAll()
+      .where('id', '=', row.card_instance_id)
+      .where('user_id', '=', userId)
+      .where('trade_id', '=', tradeId)
+      .executeTakeFirst();
+    if (!before) continue;
+    const patch: Record<string, unknown> = {};
+    if (row.purchase_cost_cents !== undefined) patch.purchase_cost = row.purchase_cost_cents;
+    if (row.market_value_cents !== undefined) patch.market_value = row.market_value_cents;
+    if (Object.keys(patch).length === 0) continue;
+    const after = await db.updateTable('card_instances')
+      .set(patch)
+      .where('id', '=', row.card_instance_id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    await logAudit(userId, 'card_instances', row.card_instance_id, 'updated', before, after);
+    // Raw intake also mirrors the cost onto its generated raw_purchase, so a
+    // corrected credit has to follow or the lot and the card disagree.
+    if (row.purchase_cost_cents !== undefined && before.raw_purchase_id) {
+      await db.updateTable('raw_purchases')
+        .set({ total_cost_usd: row.purchase_cost_cents })
+        .where('id', '=', before.raw_purchase_id)
+        .where('user_id', '=', userId)
+        .execute();
+    }
+  }
 
   const updated = await db.updateTable('trades')
     .set({
