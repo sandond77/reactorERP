@@ -575,7 +575,7 @@ function SelectBatchModal({
 
 // ── Return Form ───────────────────────────────────────────────────────────────
 
-function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void }) {
+function ReturnForm({ batch, onBack, onProcessed }: { batch: BatchDetail; onBack: () => void; onProcessed: (batchId: string) => void }) {
   const qc = useQueryClient();
   const fileRef = useRef<HTMLInputElement>(null);
   const [returnedAt, setReturnedAt] = useState(todayIso());
@@ -827,7 +827,10 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
     onSuccess: () => {
       toast.success('Return processed');
       qc.invalidateQueries({ queryKey: ['grading-subs'] });
-      onBack();
+      // Land on the completed return rather than the bare batch list. The
+      // grade breakdown is the thing you want the moment a sub comes back,
+      // and it lived behind an unmarked click on the returned row.
+      onProcessed(batch.id);
     },
      
     onError: (err) => toast.error(apiErrorMessage(err, 'Failed to process return')),
@@ -979,6 +982,21 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
     (s) => s.disposition === 'graded' && !s.cert_number.trim(),
   ).length;
   const showGapPanel = csvCandidates.length > 0 && (leftoverCsv.length > 0 || awaitingCert > 0);
+
+  // Grade distribution for the review step, mirroring the one ViewReturnModal
+  // shows after the fact. Same shape, built from the pending slots instead of
+  // stored slabs — so the breakdown is visible before committing the return,
+  // not only once it's irreversible.
+  const reviewGraded = slots
+    .filter((s) => s.disposition === 'graded')
+    .map((s) => parseFloat(s.grade))
+    .filter((g) => Number.isFinite(g));
+  const reviewTotal = reviewGraded.length;
+  const reviewBuckets = new Map<number, number>();
+  for (const g of reviewGraded) reviewBuckets.set(g, (reviewBuckets.get(g) ?? 0) + 1);
+  const reviewSummary = Array.from(reviewBuckets.entries())
+    .sort((a, b) => b[0] - a[0])
+    .map(([grade, count]) => ({ grade, count, pct: reviewTotal > 0 ? (count / reviewTotal) * 100 : 0 }));
 
   return (
     <div className="flex flex-col h-full">
@@ -1341,7 +1359,8 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
               </button>
             </div>
 
-            <div className="overflow-y-auto max-h-[60vh]">
+            <div className="flex max-h-[60vh]">
+            <div className="flex-1 overflow-y-auto">
               <table className="w-full text-xs border-collapse">
                 <thead className="sticky top-0 bg-zinc-900">
                   <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wide text-[10px]">
@@ -1403,6 +1422,38 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                   })}
                 </tbody>
               </table>
+            </div>
+
+            <div className="w-56 shrink-0 p-5 border-l border-zinc-800 overflow-y-auto">
+              <h3 className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-3">Grade Summary</h3>
+              {reviewSummary.length === 0 ? (
+                <p className="text-xs text-zinc-600">No graded slabs.</p>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-[10px] uppercase tracking-wide text-zinc-500 border-b border-zinc-800">
+                      <th className="text-left  py-1.5 font-medium">Grade</th>
+                      <th className="text-right py-1.5 font-medium">Count</th>
+                      <th className="text-right py-1.5 font-medium">%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/50">
+                    {reviewSummary.map((row) => (
+                      <tr key={row.grade}>
+                        <td className="py-1.5 text-emerald-400 font-semibold">{row.grade}</td>
+                        <td className="py-1.5 text-right text-zinc-300">{row.count}</td>
+                        <td className="py-1.5 text-right text-zinc-500">{row.pct.toFixed(2)}%</td>
+                      </tr>
+                    ))}
+                    <tr className="border-t border-zinc-700">
+                      <td className="py-1.5 text-zinc-400 font-medium">Total</td>
+                      <td className="py-1.5 text-right text-zinc-200 font-medium">{reviewTotal}</td>
+                      <td className="py-1.5 text-right text-zinc-400">100.00%</td>
+                    </tr>
+                  </tbody>
+                </table>
+              )}
+            </div>
             </div>
 
             <div className="flex items-center justify-between px-5 py-4 border-t border-zinc-800">
@@ -1635,7 +1686,13 @@ export function SubReturns() {
     if (detailLoading || !batchDetail) {
       return <div className="flex items-center justify-center h-40 text-zinc-600 text-sm">Loading…</div>;
     }
-    return <ReturnForm batch={batchDetail} onBack={() => setSelectedId(null)} />;
+    return (
+      <ReturnForm
+        batch={batchDetail}
+        onBack={() => setSelectedId(null)}
+        onProcessed={(id) => { setSelectedId(null); setViewingId(id); }}
+      />
+    );
   }
 
   // Earliest-submitted first — when returns come back from the grader they

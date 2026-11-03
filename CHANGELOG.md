@@ -28,6 +28,11 @@
 - Added a panel above the table listing every unclaimed cert with its description and grade, alongside a count of lines still expecting a slab. The two usually pair up, which points straight at the remap that fixes both.
 - The count is **disposition-aware**: only `graded` slots with no cert are flagged. A line already explained as `not_submitted` — listed on the sub but never actually shipped, so PSA was never going to return a cert for it — is accounted for and doesn't read as a gap. Same for `lost` and `not_graded`.
 
+**Sub Returns — the grade breakdown was only reachable by an unmarked click**
+- The Grade Summary (grade / count / %) existed only in `ViewReturnModal`, opened by clicking a row in the Returned list — a `<tr>` with `onClick` and `cursor-pointer` but nothing in the markup saying so. After confirming a return you were dropped on the bare batch list, so the distribution you actually want the moment a sub comes back looked like it didn't exist.
+- The same breakdown now renders **beside the review table before you confirm**, built from the pending slots instead of stored slabs — so you can see how the sub graded while the return is still editable, not only once it's committed.
+- Confirming a return now lands on the completed return's view instead of the batch list, so the after-the-fact summary shows up on its own.
+
 **Sub Returns — card #30 matched #130, #8 matched #108**
 - `scoreMatch` compared card numbers with `a.endsWith(b) || b.endsWith(a)` to absorb zero padding (`30` vs `030`). It also accepted any suffix, so genuinely different cards scored a full **+3**: `#30` matched `#130` and `#230`, `#8` matched `#108`. On a 389-card submission with numbers into the hundreds that is a steady source of wrong matches.
 - Now strips leading zeros and compares exactly. The `-3` penalty only applies when both sides are plainly numeric — a catalog number carrying a set prefix (`sv107` vs PSA's bare `107`) is a formatting difference, not evidence of a different card, so those stay neutral rather than being ruled out.
