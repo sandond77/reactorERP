@@ -404,7 +404,7 @@ function tokenize(s: string): Set<string> {
 function scoreMatch(item: BatchItem, c: CsvCandidate): number {
   let s = 0;
 
-  // ── Card name (substring 4, else token Jaccard up to 2) ─────────────────
+  // ── Card name (substring 4, else containment, else Jaccard) ─────────────
   if (item.card_name && c.subject) {
     const a = item.card_name.toLowerCase();
     const b = c.subject.toLowerCase();
@@ -415,9 +415,20 @@ function scoreMatch(item: BatchItem, c: CsvCandidate): number {
       const bT = tokenize(c.subject);
       if (aT.size && bT.size) {
         const inter = [...aT].filter((t) => bT.has(t)).length;
+        // Containment — what fraction of the SHORTER name is present in the
+        // longer one. Jaccard alone is the wrong measure here: our catalog
+        // names are terse ("Lugia Legend") while PSA labels are verbose
+        // ("2009 POKEMON JAPANESE SOULSILVER COLLECTION 030 LUGIA
+        // LEGEND-HOLO 1ST EDITION"), so dividing by the union punishes a
+        // perfect match for the label's length and leaves these scoring at
+        // or below the weak threshold. Every token of the short name being
+        // present is strong evidence regardless of what else the label says.
+        const contain = inter / Math.min(aT.size, bT.size);
         const union = new Set([...aT, ...bT]).size;
         const jacc = inter / union;
-        if (jacc >= 0.5) s += 2;
+        if (contain >= 0.99) s += 3.5;
+        else if (contain >= 0.6) s += 2.5;
+        else if (jacc >= 0.5) s += 2;
         else if (jacc >= 0.25) s += 1;
       }
     }
@@ -426,11 +437,21 @@ function scoreMatch(item: BatchItem, c: CsvCandidate): number {
   // ── Card # (extract from subject if no column; mismatch is a deal-breaker) ─
   const candCardNum = c.card_number || extractCardNumFromText(c.subject);
   if (item.card_number && candCardNum) {
-    const a = normalizeCardNum(item.card_number);
-    const b = normalizeCardNum(candCardNum);
+    // Compare after dropping zero padding, NOT by suffix. The old rule
+    // accepted a match whenever one number ended with the other, so #30
+    // matched #130 and #230, and #8 matched #108 — silently handing +3 to
+    // genuinely different cards. On a 389-card submission with numbers into
+    // the hundreds that is a steady source of wrong matches.
+    const stripPad = (v: string) => v.replace(/^0+(?=.)/, '');
+    const a = stripPad(normalizeCardNum(item.card_number));
+    const b = stripPad(normalizeCardNum(candCardNum));
     if (a && b) {
-      if (a === b || a.endsWith(b) || b.endsWith(a)) s += 3;
-      else s -= 3;
+      if (a === b) s += 3;
+      // Only penalise when both sides are plainly numeric. A catalog number
+      // carrying a set prefix ("sv107" vs PSA's bare "107") is a formatting
+      // difference, not evidence of a different card, so stay neutral
+      // rather than ruling the pairing out.
+      else if (/^\d+$/.test(a) && /^\d+$/.test(b)) s -= 3;
     }
   }
 
@@ -984,6 +1005,22 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                       <p className="text-[10px] text-zinc-600 px-2 break-words">
                         {item.set_name ?? '—'}{item.card_number ? ` · #${item.card_number}` : ''}
                       </p>
+                      {/* A CSV match replaces the title with PSA's label, which
+                          is what we want stored — but it also erases what this
+                          slot actually is, so a wrong match looks identical to
+                          a correct one. Keep the submitted name visible
+                          whenever the two differ, so the row can be checked at
+                          a glance instead of by cross-referencing the set and
+                          card number underneath. */}
+                      {slot.from_csv
+                        && item.card_name
+                        && slot.card_name_override
+                        && slot.card_name_override !== item.card_name && (
+                        <p className="text-[10px] px-2 break-words text-zinc-500">
+                          <span className="text-zinc-600">submitted as </span>
+                          {item.card_name}
+                        </p>
+                      )}
                     </td>
                     <td className="px-2 py-2 text-zinc-500 font-mono text-[10px] whitespace-nowrap">
                       {item.raw_purchase_label ?? '—'}

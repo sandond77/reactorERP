@@ -1,5 +1,22 @@
 # Reactor — Changelog
 
+## November 3, 2026
+
+### Fixes
+
+**Sub Returns — CSV import looked like it reordered rows, and mis-matched some cards**
+- Reported as *"the line items being shown aren't in order of that sub by line item"* after importing a PSA CSV. The rows aren't reordered — `setSlots` maps over the previous array and nothing sorts it. What changes is the **title**: [SubReturns.tsx:659](client/src/pages/SubReturns.tsx#L659) overwrites each slot's displayed name with the matched CSV row's subject, while the LINE number and the `set · #number` subtitle keep showing the original batch item. A wrong match therefore looks identical to a reorder.
+- Storing PSA's label is correct — `card_name_override` is meant to hold the full PSA label. But it erased the only on-screen evidence of what the slot actually was. The submitted name is now shown beneath the row whenever it differs from the imported one (`submitted as Lugia Legend (Unlimited)`), so a bad match is visible at a glance instead of needing a cross-reference against the set and card number.
+
+**Sub Returns — card #30 matched #130, #8 matched #108**
+- `scoreMatch` compared card numbers with `a.endsWith(b) || b.endsWith(a)` to absorb zero padding (`30` vs `030`). It also accepted any suffix, so genuinely different cards scored a full **+3**: `#30` matched `#130` and `#230`, `#8` matched `#108`. On a 389-card submission with numbers into the hundreds that is a steady source of wrong matches.
+- Now strips leading zeros and compares exactly. The `-3` penalty only applies when both sides are plainly numeric — a catalog number carrying a set prefix (`sv107` vs PSA's bare `107`) is a formatting difference, not evidence of a different card, so those stay neutral rather than being ruled out.
+
+**Sub Returns — short catalog names scored almost nothing against PSA labels**
+- Name similarity used token Jaccard, which divides by the union. Catalog names are terse (`Lugia Legend`) while PSA labels are verbose (`2009 POKEMON JAPANESE SOULSILVER COLLECTION 030 LUGIA LEGEND-HOLO 1ST EDITION`), so a *perfect* name match was punished for the label's length and landed at or below the weak threshold — contributing as little as +1 out of a possible 4.
+- Added a containment measure alongside it: what fraction of the **shorter** name appears in the longer. Every token present now scores 3.5, most tokens 2.5, with Jaccard retained as the fallback. Measured on real rows from the reported submission: `Lugia Legend (Unlimited)` 1 → 2.5, `Kyogre Groudon Legend` 1 → 3.5, `Ampharos` unchanged at 4 (already an exact substring).
+- **Still unfixed:** `Ho Oh Legend` scores 0 on name because the tokenizer drops tokens shorter than 3 characters, so `ho` and `oh` are discarded and only `legend` survives. That is why those rows import as *Weak (4.8)*. Lowering the token floor would affect every match and needs testing against a real CSV before changing.
+
 ## November 2, 2026
 
 ### Features
