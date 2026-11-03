@@ -1691,6 +1691,32 @@ export async function processReturn(userId: string, batchId: string, input: Proc
     }
   }
 
+  // Per-line capacity guard. A sub line of quantity N shipped N cards, so it
+  // can take back at most N slabs. The subtraction further down
+  // (`original.quantity - totalConsumed`) has no floor, so an over-booked line
+  // silently lands the source card_instance at a negative quantity and breaks
+  // cost basis for the lot. The client can produce this by remapping two slots
+  // onto one line, so it has to be refused here rather than trusted away.
+  const perLine = new Map<string, number>();
+  for (const it of input.items) {
+    perLine.set(it.batch_item_id, (perLine.get(it.batch_item_id) ?? 0) + 1);
+  }
+  const lineCaps = await db
+    .selectFrom('grading_batch_items')
+    .select(['id', 'quantity', 'line_item_num'])
+    .where('batch_id', '=', batchId)
+    .where('id', 'in', [...perLine.keys()])
+    .execute();
+  for (const line of lineCaps) {
+    const assigned = perLine.get(line.id) ?? 0;
+    if (assigned > line.quantity) {
+      throw new AppError(
+        400,
+        `Sub line #${line.line_item_num} submitted ${line.quantity} card${line.quantity === 1 ? '' : 's'} but ${assigned} slabs were assigned to it. Remap the extras onto the lines they belong to.`,
+      );
+    }
+  }
+
   // Lazy-load the catalog resolver — only constructed when needed, but reused
   // across all items in the batch.
   let cachedResolver: ((cardName: string, setName: string | null, cardNum: string | null, lang: string, idx: number) => Promise<string | null>) | null = null;

@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen, Sparkles } from 'lucide-react';
+import { ArrowLeft, PackageCheck, Plus, X, Upload, Lock, LockOpen, Sparkles, AlertTriangle } from 'lucide-react';
 import { api, apiErrorMessage } from '../lib/api';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -368,16 +368,30 @@ function extractYear(s: string): string | undefined {
 }
 
 // Pull a plausible card # from a PSA description. Year is the first digit run
-// and we skip past it; the next short digit run is almost always the card #.
+// and we skip past it; a set position follows as a zero-padded or 3+ digit run
+// ("...REVIVING LEGENDS 063 ENTEI...", "...SV-P PROMO 197 PIKACHU...").
+//
+// The length floor matters. Taking the *next* digit run of any length reads the
+// trailing number out of labels that carry no card # at all — "TARUKA PIKACHU
+// 1ST PLACE-ROUND 1" yielded "1", "...ROUND 2" yielded "2" — so eight distinct
+// slabs all claimed card #1 or #2. That handed +3 to wrong pairings and -3 to
+// right ones, which is worse than having no card # signal at all. A label with
+// no set position should produce nothing and let the name decide.
 function extractCardNumFromText(s: string): string | undefined {
   if (!s) return undefined;
   const matches = Array.from(s.matchAll(/\b(\d{1,4})\b/g));
   for (const m of matches) {
     const n = parseInt(m[1]);
     if (n >= 1980 && n <= 2039) continue; // skip the year
-    return m[1];
+    if (m[1].length >= 3 || /^0\d/.test(m[1])) return m[1];
   }
   return undefined;
+}
+
+// Collapse punctuation and spacing so "Legend-Holo  1st Edition" and
+// "LEGEND-HOLO 1ST EDITION" compare equal.
+function normName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
 const TOKEN_STOPWORDS = new Set([
@@ -404,13 +418,20 @@ function tokenize(s: string): Set<string> {
 function scoreMatch(item: BatchItem, c: CsvCandidate): number {
   let s = 0;
 
-  // ── Card name (substring 4, else containment, else Jaccard) ─────────────
+  // ── Card name (equality 5, else best of substring / containment / Jaccard) ─
   if (item.card_name && c.subject) {
-    const a = item.card_name.toLowerCase();
-    const b = c.subject.toLowerCase();
-    if (b.includes(a) || a.includes(b)) {
-      s += 4;
+    const a = normName(item.card_name);
+    const b = normName(c.subject);
+    // Only full equality is decisive. A *proper* substring used to score the
+    // same 4 points as an exact hit, which made a terse sub line match every
+    // longer label that merely starts with it: "Taruka Pikachu" tied with
+    // "Taruka Pikachu 1st Place-Round 1" on that row, and on seven more. The
+    // greedy pass then handed those rows out by slot order, so one short line
+    // stole a cert and every line after it shifted onto someone else's slab.
+    if (a === b) {
+      s += 5;
     } else {
+      let best = b.includes(a) || a.includes(b) ? 2.5 : 0;
       const aT = tokenize(item.card_name);
       const bT = tokenize(c.subject);
       if (aT.size && bT.size) {
@@ -426,11 +447,12 @@ function scoreMatch(item: BatchItem, c: CsvCandidate): number {
         const contain = inter / Math.min(aT.size, bT.size);
         const union = new Set([...aT, ...bT]).size;
         const jacc = inter / union;
-        if (contain >= 0.99) s += 3.5;
-        else if (contain >= 0.6) s += 2.5;
-        else if (jacc >= 0.5) s += 2;
-        else if (jacc >= 0.25) s += 1;
+        if (contain >= 0.99) best = Math.max(best, 3.5);
+        else if (contain >= 0.6) best = Math.max(best, 2.5);
+        else if (jacc >= 0.5) best = Math.max(best, 2);
+        else if (jacc >= 0.25) best = Math.max(best, 1);
       }
+      s += best;
     }
   }
 
@@ -643,7 +665,19 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
           if (s > 0) pairs.push({ slotIdx, candIdx, score: s });
         });
       });
-      pairs.sort((a, b) => b.score - a.score);
+      // Score first. Exact ties are common — a sub with eight near-identical
+      // lines produces eight pairings that score the same — and plain score
+      // sorting leaves the winner to insertion order, i.e. whichever slot
+      // happens to come first takes the cert. Break ties toward the pairing
+      // that keeps slots and CSV rows in the same relative position, so a tie
+      // resolves along the submission order instead of collapsing onto the
+      // earliest slot. PSA's order only drifts locally, so this is a good
+      // prior; it never overrides a real score difference.
+      const slotN = slots.length || 1;
+      const candN = candidates.length || 1;
+      const drift = (p: { slotIdx: number; candIdx: number }) =>
+        Math.abs(p.slotIdx / slotN - p.candIdx / candN);
+      pairs.sort((a, b) => b.score - a.score || drift(a) - drift(b));
 
       const usedSlots  = new Set<number>();
       const usedCands  = new Set<number>();
@@ -811,16 +845,55 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
   // under a different sub-line). Used to fix mis-assignments without re-uploading.
   function remapSlot(idx: number, newBatchItemId: string) {
     setSlots((prev) => {
+      const cur = prev[idx];
+      if (cur.batch_item_id === newBatchItemId) return prev;
+
+      const capacity = itemById.get(newBatchItemId)?.quantity ?? 1;
+      const occupants = prev
+        .map((s, i) => ({ s, i }))
+        .filter(({ s, i }) => i !== idx && s.batch_item_id === newBatchItemId);
       const next = [...prev];
-      // Pick the lowest unused copy_index for this batch_item_id
-      const used = new Set(next.filter((_, i) => i !== idx && _.batch_item_id === newBatchItemId).map((s) => s.copy_index));
+      const stamp = Date.now();
+
+      // A sub line of quantity N can only take back N slabs. Piling on an
+      // extra used to be allowed — it just took the next free copy_index —
+      // and processReturn subtracts one from the source card_instance per
+      // entry with no floor, so a qty-1 line holding two slabs lands at
+      // quantity -1 on confirm. Nor was it visible: the ·1/·2 suffix only
+      // renders when quantity > 1, so both rows showed the same bare line
+      // number. Swap with the slab already sitting there instead — remaps
+      // are almost always a correction of two rows that traded places, and
+      // a swap keeps every line's count exactly as submitted.
+      if (occupants.length >= capacity) {
+        const victim = occupants[occupants.length - 1];
+        next[victim.i] = {
+          ...victim.s,
+          batch_item_id: cur.batch_item_id,
+          copy_index: cur.copy_index,
+          key: `${cur.batch_item_id}-${cur.copy_index}-${stamp}`,
+        };
+        next[idx] = {
+          ...cur,
+          batch_item_id: newBatchItemId,
+          copy_index: victim.s.copy_index,
+          key: `${newBatchItemId}-${victim.s.copy_index}-${stamp + 1}`,
+        };
+        const from = itemById.get(cur.batch_item_id);
+        const to = itemById.get(newBatchItemId);
+        if (from && to) {
+          toast.success(`Swapped #${to.line_item_num} ↔ #${from.line_item_num}`);
+        }
+        return next;
+      }
+
+      const used = new Set(occupants.map(({ s }) => s.copy_index));
       let copyIdx = 0;
       while (used.has(copyIdx)) copyIdx++;
       next[idx] = {
-        ...next[idx],
+        ...cur,
         batch_item_id: newBatchItemId,
         copy_index: copyIdx,
-        key: `${newBatchItemId}-${copyIdx}-${Date.now()}`,
+        key: `${newBatchItemId}-${copyIdx}-${stamp}`,
       };
       return next;
     });
@@ -885,6 +958,28 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
 
   const totalCards = batch.items.reduce((s, i) => s + i.quantity, 0);
 
+  // CSV rows no slot is pointing at. Until now these were parsed, stashed for
+  // the AI-assist pool, and then invisible — a cert PSA returned that matched
+  // nothing simply vanished, with nothing on screen to review. That's the one
+  // failure the per-row "submitted as" line can't surface, because there is no
+  // row. Usually it means PSA graded something the sub didn't list, or a
+  // mis-match left one cert orphaned alongside one empty slot.
+  const claimedCsv = new Set(
+    slots.map((s) => s.matched_csv_index).filter((i): i is number => i != null),
+  );
+  const leftoverCsv = csvCandidates.filter((c) => !claimedCsv.has(c.csv_index));
+
+  // The other half of the same gap: slots still waiting on a slab. Only
+  // 'graded' slots count — a slot the user has already explained through the
+  // disposition column is accounted for and must not read as missing. That
+  // matters most for `not_submitted`, where the sub lists a card that never
+  // actually shipped, so PSA was never going to return a cert for it. Lost
+  // and not_graded are settled the same way.
+  const awaitingCert = slots.filter(
+    (s) => s.disposition === 'graded' && !s.cert_number.trim(),
+  ).length;
+  const showGapPanel = csvCandidates.length > 0 && (leftoverCsv.length > 0 || awaitingCert > 0);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 lg:gap-0 px-6 py-4 border-b border-zinc-800">
@@ -945,6 +1040,40 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
           />
         </div>
       </div>
+
+      {showGapPanel && (
+        <div className="px-6 py-3 border-b border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle size={13} className="text-amber-400 shrink-0" />
+            <p className="text-xs font-medium text-amber-200">
+              {[
+                leftoverCsv.length > 0 && `${leftoverCsv.length} CSV row${leftoverCsv.length === 1 ? '' : 's'} matched nothing`,
+                awaitingCert > 0 && `${awaitingCert} line${awaitingCert === 1 ? '' : 's'} still expecting a slab`,
+              ].filter(Boolean).join(' · ')}
+            </p>
+            <span className="text-[10px] text-amber-200/60">
+              {leftoverCsv.length > 0 && awaitingCert > 0
+                ? 'These usually pair up — remap a row onto the line it belongs to.'
+                : leftoverCsv.length > 0
+                  ? 'Not recorded on confirm — remap a row onto the right line, or check the sub for a missing card.'
+                  : 'Set a disposition for anything PSA never returned.'}
+            </span>
+          </div>
+          {leftoverCsv.length > 0 && (
+            <ul className="flex flex-col gap-1 max-h-32 overflow-y-auto">
+              {leftoverCsv.map((c) => (
+                <li key={c.csv_index} className="flex items-baseline gap-2 text-[11px]">
+                  <span className="font-mono text-amber-300/80 shrink-0">{c.cert || '(no cert)'}</span>
+                  <span className="text-zinc-300 break-words">{c.subject || '(no description)'}</span>
+                  {c.grade !== null && (
+                    <span className="text-zinc-500 shrink-0">· {c.grade_label ?? c.grade}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleReview} className="flex flex-col flex-1 overflow-hidden">
         <div className="flex-1 overflow-auto">
