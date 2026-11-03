@@ -1111,6 +1111,19 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                     conf === 'good'   ? `Good (${slot.match_score?.toFixed(1)})`   :
                     conf === 'weak'   ? `Weak (${slot.match_score?.toFixed(1)})`   :
                                         'Manual';
+                // Import stores PSA's label as the title, which is what we
+                // want kept — but it also overwrites the only on-screen trace
+                // of what the slot was submitted as, so a wrong match looks
+                // exactly like a right one. Remap already prints the sub
+                // line's name in full, so flag the disagreement there rather
+                // than repeating the name under the title. Compare normalised:
+                // our names are Title Case and PSA's are ALL CAPS, so a raw
+                // string compare fires on every single matched row.
+                const nameDisagrees =
+                  slot.from_csv
+                  && !!item.card_name
+                  && !!slot.card_name_override
+                  && normName(slot.card_name_override) !== normName(item.card_name);
                 const isGraded = slot.disposition === 'graded';
                 const dispDot =
                   slot.disposition === 'graded'        ? 'bg-emerald-500' :
@@ -1134,22 +1147,6 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                       <p className="text-[10px] text-zinc-600 px-2 break-words">
                         {item.set_name ?? '—'}{item.card_number ? ` · #${item.card_number}` : ''}
                       </p>
-                      {/* A CSV match replaces the title with PSA's label, which
-                          is what we want stored — but it also erases what this
-                          slot actually is, so a wrong match looks identical to
-                          a correct one. Keep the submitted name visible
-                          whenever the two differ, so the row can be checked at
-                          a glance instead of by cross-referencing the set and
-                          card number underneath. */}
-                      {slot.from_csv
-                        && item.card_name
-                        && slot.card_name_override
-                        && slot.card_name_override !== item.card_name && (
-                        <p className="text-[10px] px-2 break-words text-zinc-500">
-                          <span className="text-zinc-600">submitted as </span>
-                          {item.card_name}
-                        </p>
-                      )}
                     </td>
                     <td className="px-2 py-2 text-zinc-500 font-mono text-[10px] whitespace-nowrap">
                       {item.raw_purchase_label ?? '—'}
@@ -1257,7 +1254,14 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                           : '—';
                         return (
                           <div className="relative">
-                            <div className="px-1.5 py-1 pr-5 text-[11px] bg-zinc-900 border border-zinc-700 rounded text-zinc-300 whitespace-normal break-words min-h-[26px]">
+                            <div
+                              title={nameDisagrees ? `PSA returned "${slot.card_name_override}" — confirm this is the right sub line` : undefined}
+                              className={`px-1.5 py-1 pr-5 text-[11px] rounded whitespace-normal break-words min-h-[26px] ${
+                                nameDisagrees
+                                  ? 'bg-amber-500/10 border border-amber-500/50 text-amber-200'
+                                  : 'bg-zinc-900 border border-zinc-700 text-zinc-300'
+                              }`}
+                            >
                               {selectedLabel}
                             </div>
                             <span className="pointer-events-none absolute right-1.5 top-1.5 text-zinc-500 text-[9px]">▾</span>
