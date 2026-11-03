@@ -1081,7 +1081,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
             <thead className="sticky top-0 bg-zinc-950 z-10">
               <tr className="border-b border-zinc-700 text-zinc-400 uppercase tracking-wide text-[10px]">
                 <th className="px-2 py-2 text-left  font-medium w-10">Line</th>
-                <th className="px-3 py-2 text-left  font-medium min-w-[325px]">Card</th>
+                <th className="px-3 py-2 text-left  font-medium min-w-[325px]" title="PSA's label from the imported CSV — this is what gets stored as the card's name">Returned Card</th>
                 <th className="px-2 py-2 text-left  font-medium">ID</th>
                 <th className="px-2 py-2 text-right font-medium">Cost</th>
                 <th className="px-2 py-2 text-right font-medium">Exp</th>
@@ -1090,7 +1090,9 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                 <th className="px-2 py-2 text-left  font-medium">Grade</th>
                 <th className="px-2 py-2 text-left  font-medium">Label</th>
                 <th className="px-2 py-2 text-left  font-medium">Match</th>
-                <th className="px-2 py-2 text-left  font-medium min-w-[155px]">Remap</th>
+                <th className="px-2 py-2 text-left  font-medium min-w-[155px]" title="The sub line this slab is assigned to, as you entered it — click a cell to reassign">
+                  Remap <span className="text-zinc-600 normal-case tracking-normal">(to original sub entries)</span>
+                </th>
                 <th className="px-2 py-2 text-left  font-medium">Disposition</th>
                 <th className="px-2 py-2 text-center font-medium w-8" />
               </tr>
@@ -1344,7 +1346,7 @@ function ReturnForm({ batch, onBack }: { batch: BatchDetail; onBack: () => void 
                 <thead className="sticky top-0 bg-zinc-900">
                   <tr className="border-b border-zinc-800 text-zinc-500 uppercase tracking-wide text-[10px]">
                     <th className="px-4 py-2 text-left  font-medium w-12">Line</th>
-                    <th className="px-4 py-2 text-left  font-medium">Card</th>
+                    <th className="px-4 py-2 text-left  font-medium">Returned Card</th>
                     <th className="px-4 py-2 text-left  font-medium">ID</th>
                     <th className="px-4 py-2 text-right font-medium">Cost</th>
                     <th className="px-4 py-2 text-right font-medium">Exp</th>
