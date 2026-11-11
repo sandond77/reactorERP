@@ -1,5 +1,16 @@
 # Reactor — Changelog
 
+## November 10, 2026
+
+### Fixes
+
+**Sub Returns — returned slabs inherited a wrong catalog link and went missing from listings**
+- Reported as *"unable to find these marshadow cards when trying to add to listings."* The add-cert picker groups by catalog card, and 11 freshly returned Marshadow slabs were linked to `PKMN-JP-M1S-069` — which is **Inteleon** (Mega Symphonia 069), a different card — while the listing sat on `PKMN-JP-M1L-069` (Mega Brave 069, Marshadow). Different catalog rows, so the slabs were invisible to it.
+- Not the return matcher. The **source raw card** was already pointed at the Inteleon row before the sub shipped, and `processReturn` only re-resolved the catalog when the link was missing or legacy, so the slab inherited it. `lookupSetCode` resolves that label to `M1L` correctly — it was simply never consulted.
+- PSA's label states the set code and position of the slab actually in hand. `processReturn` now treats that as authoritative: when the label names a set code that disagrees with the inherited link, it re-resolves instead of trusting a link made before the card was ever graded. Labels that state no code (`2025 POKEMON TARUKA PIKACHU`, `...SHINY STAR V 021 RESHIRAM`) yield nothing and leave the existing link alone.
+- Promo codes carry their own hyphen, so `SV-P PROMO` is matched ahead of the general rule — otherwise every `SV-P` / `XY-P` label truncates to `SV` / `XY` and reads as a disagreement. That single mistake accounted for 260 of 389 apparent mismatches in the first audit pass.
+
+
 ## November 3, 2026
 
 ### Fixes

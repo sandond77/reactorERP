@@ -1623,6 +1623,18 @@ export interface ProcessReturnInput {
   items: ReturnItemInput[];
 }
 
+// The set code a PSA label states, e.g. "2025 POKEMON JAPANESE M1L-MEGA BRAVE
+// 069 MARSHADOW ART RARE" -> "M1L". Promo codes carry their own hyphen
+// ("SV-P PROMO"), so they are matched first; the general rule would otherwise
+// truncate "SV-P" to "SV" and read every promo as a disagreement.
+const PSA_PROMO_SET = /^\d{4}\s+POKEMON\s+(?:JAPANESE\s+)?([A-Za-z0-9+]{1,8}-[A-Z])\s+PROMO\b/i;
+const PSA_PLAIN_SET = /^\d{4}\s+POKEMON\s+(?:JAPANESE\s+)?([A-Za-z0-9+]{1,8})-[A-Z]/i;
+
+function statedSetCodeFromLabel(label: string): string | null {
+  const m = PSA_PROMO_SET.exec(label) ?? PSA_PLAIN_SET.exec(label);
+  return m ? m[1].toUpperCase() : null;
+}
+
 export async function processReturn(userId: string, batchId: string, input: ProcessReturnInput) {
   const batch = await db
     .selectFrom('grading_batches')
@@ -1821,7 +1833,28 @@ export async function processReturn(userId: string, batchId: string, input: Proc
             .where('set_code', 'ilike', 'LEGACY')
             .executeTakeFirst())
         : false;
-      if (!resolvedCatalogId || isLegacyLinked) {
+      // (c) the grader's label names a different set than the inherited link.
+      // That link was made before the card was ever graded, and when it is
+      // wrong the slab silently inherits it: a Marshadow raw pointed at the
+      // Inteleon row kept that row through the return, so the returned slab
+      // never joined its own catalog card and went missing from the
+      // add-cert-to-listing picker and from FIFO. PSA's label states the set
+      // code and position of the slab actually in hand, so when the two
+      // disagree the label wins and we re-resolve.
+      const returnedLabel = item.card_name_override ?? original.card_name_override;
+      let labelDisagrees = false;
+      if (resolvedCatalogId && !isLegacyLinked && returnedLabel) {
+        const stated = statedSetCodeFromLabel(returnedLabel);
+        if (stated) {
+          const linked = await db
+            .selectFrom('card_catalog')
+            .select('set_code')
+            .where('id', '=', resolvedCatalogId)
+            .executeTakeFirst();
+          labelDisagrees = !!linked?.set_code && linked.set_code.toUpperCase() !== stated;
+        }
+      }
+      if (!resolvedCatalogId || isLegacyLinked || labelDisagrees) {
         const cardName = item.card_name_override ?? original.card_name_override;
         if (cardName) {
           try {
