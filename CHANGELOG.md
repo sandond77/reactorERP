@@ -1,5 +1,31 @@
 # Reactor — Changelog
 
+## November 17, 2026
+
+### Features
+
+**Card Show Pick List — see what's already on the list before adding it again**
+- Reported from an 85-card list: *"i added that gulpin card like 4 times because i didnt know it was already on the list near the top."* The list is sorted by cert, which scatters copies of one card far apart, so an earlier pick is off-screen by the time you search for the same card again. Nothing on the Add-cards row said it was already picked.
+- Both modes now carry an indigo **`on list ×N`** badge, matching the existing amber `@show ×N` chip. **Add cards** shows it for any existing copy, so you see it before adding another. **Review picks** shows it only when the count is above one, so it flags duplicates without labelling all 85 rows.
+- Identity is catalog card + grade + company — the same notion `at_show_count` already uses. A PSA 9 and a PSA 10 of the same card don't count against each other, because they aren't interchangeable stock.
+- The picked-slab query was `enabled` only in review mode. It now runs whenever the modal is open: add-mode results are search-filtered and paged, so counting from them would have been wrong. Reconciliation stays review-only, already guarded in its own effect.
+
+**Card Show Pick List — printable pull sheet**
+- *"a quick list that I can print while i find the physical copies."* The modal is dark, scrollable and full of controls, so printing the screen is useless.
+- **Print list** (review mode) opens a clean light-background document and goes straight to the print dialog: a tick box, then **Cert · Grade · Card** in that order, with set and company beneath the name and the suggested price at the right. Sorted numerically ascending by cert (`#9` before `#100`), with blank or non-numeric certs falling to the end.
+
+### Fixes
+
+**Record Sale — split orders had two editing surfaces and could stamp one order # across separate orders**
+- Reported as *"if split order is clicked, we still see the ebay order links on top... top should be disabled if we select that."* Checking **eBay split this order** left the shared order link and order # fully editable above the per-cert overrides.
+- The deeper problem was the fallback. The shared pair still rode along in the payload, so a per-cert row left blank inherited it — stamping a single order number onto certs that eBay had split into *separate* orders. That records something that never happened.
+- With split on, the shared fields are now disabled **and withheld from the payload**, and every per-cert row requires its own order # and URL. Review & Confirm blocks with the offending card names, and empty fields carry an amber border so the gap is visible before clicking.
+- Order metadata is now required with split **off** too, for Combined Order and eBay Set alike — eBay Set had no such check at all, and a recorded sale with no order link can't be traced back to the order it came from.
+
+**Record Sale — per-cert order URL didn't fill in the order #**
+- The shared pair has always run the eBay link through `parseEbayOrderId` to pull `?orderid=`; the per-cert override rows never did, so the number had to be retyped per card.
+- They do now, with the same guard — only fills when that row's order # is still empty, so a hand-typed value is never clobbered. In practice pasting the URL satisfies both newly-required fields.
+
 ## November 10, 2026
 
 ### Fixes
