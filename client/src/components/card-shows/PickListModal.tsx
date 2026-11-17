@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Search, X, Loader2, AlertTriangle, Trash2 } from 'lucide-react';
+import { Search, X, Loader2, AlertTriangle, Trash2, Printer } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { api, apiErrorMessage, type PaginatedResult } from '../../lib/api';
 import { usePagedOrInfinite } from '../../lib/use-paged-or-infinite';
@@ -37,6 +37,10 @@ interface SlabRow {
   at_show_count: number;
   at_show_sibling_ids: string[];
 }
+
+// Same card identity as at_show_count uses: catalog card + grade + company.
+const identityKey = (r: SlabRow) =>
+  `${r.sku ?? r.card_name ?? ''}|${r.grade_label ?? ''}|${r.company}`;
 
 interface PricingSuggestion {
   slab_id: string;
@@ -164,7 +168,7 @@ export function PickListModal({ open, onClose }: Props) {
         limit: Math.min(Math.max(pickedIds.length, 1), 200), page: 1,
       },
     }).then((r) => r.data),
-    enabled: open && mode === 'review' && pickedIds.length > 0,
+    enabled: open && pickedIds.length > 0,
   });
 
   // Pricing suggestions — reuses the /grading/card-show-pricing-suggestions
@@ -222,6 +226,19 @@ export function PickListModal({ open, onClose }: Props) {
     if (!open) reconciledOnceRef.current = false;
   }, [open]);
 
+  // How many picks share each card identity (same catalog card + grade +
+  // company — the same notion at_show_count uses). An 85-row list sorted by
+  // cert scatters copies of one card far apart, so without this you re-add a
+  // card you already picked simply because the earlier copy is off-screen.
+  const pickedIdentityCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of reviewQuery.data?.data ?? []) {
+      const k = identityKey(r);
+      m.set(k, (m.get(k) ?? 0) + 1);
+    }
+    return m;
+  }, [reviewQuery.data]);
+
   // Rows for review mode: the intersection of picks and eligible slabs.
   // Sorted by numeric cert ascending so the review order matches how users
   // physically scan a storage box (low cert → high). Non-numeric or missing
@@ -238,6 +255,58 @@ export function PickListModal({ open, onClose }: Props) {
     return rows.sort((a, b) =>
       compareCertAsc(a, b) || (a.card_name ?? '').localeCompare(b.card_name ?? ''));
   }, [mode, pickedIds, reviewQuery.data]);
+
+  // A pull sheet for working the storage box: the picks in cert order with a
+  // box to tick as each one is found. Opened as a plain document and sent
+  // straight to the print dialog — the modal itself is dark, scrollable and
+  // full of controls, so printing the screen is useless.
+  function printPullSheet() {
+    const esc = (v: unknown) =>
+      String(v ?? '').replace(/[&<>"]/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+    const body = reviewRows.map((r) => {
+      const sug = suggestionMap.get(r.id)?.suggested_price_cents;
+      const price = sug != null ? "$" + (sug / 100).toFixed(2) : '';
+      return `<tr>
+        <td class="box"></td>
+        <td class="cert">${esc(r.cert_number ?? '—')}</td>
+        <td class="grade">${esc(r.grade_label ?? '—')}</td>
+        <td>${esc(r.card_name ?? '—')}<div class="sub">${esc(r.set_name ?? '')}${r.set_name ? ' · ' : ''}${esc(r.company)}</div></td>
+        <td class="num">${price}</td>
+      </tr>`;
+    }).join('');
+    const html = `<!doctype html><html><head><meta charset="utf-8">
+      <title>Card Show Pull Sheet</title><style>
+        *{box-sizing:border-box}
+        body{font:12px/1.35 -apple-system,Segoe UI,Roboto,sans-serif;color:#111;margin:24px}
+        h1{font-size:16px;margin:0 0 2px}
+        .meta{color:#666;font-size:11px;margin-bottom:14px}
+        table{width:100%;border-collapse:collapse}
+        th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#666;
+           border-bottom:1.5px solid #333;padding:0 6px 4px}
+        td{padding:5px 6px;border-bottom:1px solid #ddd;vertical-align:top}
+        .box{width:22px}
+        .box::before{content:"";display:block;width:12px;height:12px;border:1.3px solid #333;border-radius:2px}
+        .cert{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap;width:92px}
+        .grade{white-space:nowrap;width:104px}
+        .sub{color:#666;font-size:10px;margin-top:1px}
+        .num{text-align:right;white-space:nowrap;width:70px}
+        tr{break-inside:avoid}
+        thead{display:table-header-group}
+        @page{margin:14mm}
+      </style></head><body>
+      <h1>Card Show Pull Sheet</h1>
+      <div class="meta">${reviewRows.length} card${reviewRows.length === 1 ? '' : 's'} · cert order · ${new Date().toLocaleDateString()}</div>
+      <table><thead><tr><th></th><th>Cert</th><th>Grade</th><th>Card</th><th class="num">Sugg.</th></tr></thead>
+      <tbody>${body}</tbody></table>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { toast.error('Allow pop-ups to print the pull sheet.'); return; }
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    w.print();
+  }
 
   // Commit: bulk /card-shows/add-inventory for Found+Priced rows only. When
   // a row has Propagate ticked, its at_show_sibling_ids are appended to the
@@ -355,8 +424,19 @@ export function PickListModal({ open, onClose }: Props) {
             </button>
           </div>
           {pickedIds.length > 0 && (
-            clearArmed ? (
-              <div className="ml-auto flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-red-500/10 border border-red-500/40">
+            <div className="ml-auto flex items-center gap-2">
+            {mode === 'review' && !clearArmed && (
+              <button
+                type="button"
+                onClick={printPullSheet}
+                title="Open a printable checklist of these certs in cert order"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-zinc-700 text-zinc-400 hover:text-zinc-100 hover:border-zinc-500 transition-colors"
+              >
+                <Printer size={11} /> Print list
+              </button>
+            )}
+            {clearArmed ? (
+              <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-red-500/10 border border-red-500/40">
                 <AlertTriangle size={12} className="text-red-400" />
                 <span className="text-xs text-red-200">
                   Clear all <span className="font-semibold">{pickedIds.length}</span> pick{pickedIds.length === 1 ? '' : 's'}? This can't be undone.
@@ -380,11 +460,12 @@ export function PickListModal({ open, onClose }: Props) {
               <button
                 type="button"
                 onClick={() => setClearArmed(true)}
-                className="ml-auto inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-zinc-700 text-zinc-400 hover:text-red-300 hover:border-red-500/50 transition-colors"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-zinc-700 text-zinc-400 hover:text-red-300 hover:border-red-500/50 transition-colors"
               >
                 <Trash2 size={11} /> Clear All
               </button>
-            )
+            )}
+            </div>
           )}
         </div>
 
@@ -404,6 +485,7 @@ export function PickListModal({ open, onClose }: Props) {
               hasNextPage={addQuery.hasMore}
               isFetchingNextPage={addQuery.isFetchingMore}
               fetchNextPage={addQuery.loadMore}
+              onListCounts={pickedIdentityCounts}
             />
           ) : (
             <ReviewMode
@@ -416,6 +498,7 @@ export function PickListModal({ open, onClose }: Props) {
               suggestions={suggestionMap}
               propagateIds={propagateIds}
               onTogglePropagate={togglePropagate}
+              onListCounts={pickedIdentityCounts}
             />
           )}
         </div>
@@ -473,8 +556,9 @@ function AddMode(props: {
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   fetchNextPage: () => void;
+  onListCounts: Map<string, number>;
 }) {
-  const { search, setSearch, rows, pickedSet, loading, sortBy, sortDir, onSort, total, hasNextPage, isFetchingNextPage, fetchNextPage } = props;
+  const { search, setSearch, rows, pickedSet, loading, sortBy, sortDir, onSort, total, hasNextPage, isFetchingNextPage, fetchNextPage, onListCounts } = props;
 
   // Infinite-scroll sentinel: an IntersectionObserver on a tiny row at the
   // bottom of the tbody triggers fetchNextPage. Scoped to the scroll container
@@ -597,6 +681,18 @@ function AddMode(props: {
                               @show ×{r.at_show_count}
                             </span>
                           )}
+                          {(() => {
+                            const onList = onListCounts.get(identityKey(r)) ?? 0;
+                            if (onList < 1) return null;
+                            return (
+                              <span
+                                className="shrink-0 mt-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-indigo-500/15 border border-indigo-500/40 text-indigo-300"
+                                title={`${onList} copy${onList === 1 ? '' : 'ies'} of this card already on this pick list`}
+                              >
+                                on list ×{onList}
+                              </span>
+                            );
+                          })()}
                         </div>
                         {r.set_name && (
                           <div className="whitespace-normal break-words text-[10px] text-zinc-500 mt-0.5">{r.set_name}</div>
@@ -654,8 +750,9 @@ function ReviewMode(props: {
   suggestions: Map<string, PricingSuggestion>;
   propagateIds: Set<string>;
   onTogglePropagate: (id: string) => void;
+  onListCounts: Map<string, number>;
 }) {
-  const { rows, reviewState, onChange, onRemovePick, loading, empty, suggestions, propagateIds, onTogglePropagate } = props;
+  const { rows, reviewState, onChange, onRemovePick, loading, empty, suggestions, propagateIds, onTogglePropagate, onListCounts } = props;
   // Two-click confirm for per-row Remove — inline pattern per CLAUDE.md
   // (no window.confirm). First click arms the row; second click actually
   // drops the pick.
@@ -724,6 +821,18 @@ function ReviewMode(props: {
                       @show ×{r.at_show_count}
                     </span>
                   )}
+                  {(() => {
+                    const onList = onListCounts.get(identityKey(r)) ?? 0;
+                    if (onList < 2) return null;
+                    return (
+                      <span
+                        className="shrink-0 mt-0.5 text-[9px] font-semibold uppercase tracking-wider px-1.5 py-[1px] rounded bg-indigo-500/15 border border-indigo-500/40 text-indigo-300"
+                        title={`${onList} copy${onList === 1 ? '' : 'ies'} of this card on this pick list`}
+                      >
+                        on list ×{onList}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <p className="text-[11px] text-zinc-500 whitespace-normal break-words leading-snug">
                   {r.set_name ?? ''}
@@ -841,4 +950,3 @@ function ReviewMode(props: {
     </div>
   );
 }
-
