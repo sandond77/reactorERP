@@ -2323,7 +2323,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 </p>
               )}
             </div>
+            {/* Splitting moves order metadata onto the per-cert rows entirely,
+                so lock these rather than leaving two editable surfaces for one
+                value — and don't send them either (see handleBulkSubmit). */}
             <Input label="eBay Order Details Link" type="url" placeholder="https://www.ebay.com/…"
+              disabled={splitOrderDetails}
+              className="disabled:opacity-40 disabled:cursor-not-allowed"
               value={ebayLink}
               onChange={(e) => {
                 const val = e.target.value;
@@ -2334,6 +2339,8 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                 }
               }} />
             <Input label="Order #" placeholder="e.g. eBay order number"
+              disabled={splitOrderDetails}
+              className="disabled:opacity-40 disabled:cursor-not-allowed"
               value={orderNumber} onChange={(e) => setOrderNumber(e.target.value)} />
             <label className="flex items-start gap-2 rounded-lg bg-zinc-800/40 border border-zinc-700/40 px-3 py-2 cursor-pointer hover:border-zinc-600 transition-colors">
               <input type="checkbox" checked={splitOrderDetails}
@@ -2342,7 +2349,9 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
               <div className="text-[11px] leading-relaxed">
                 <span className="text-zinc-200 font-medium">eBay split this order</span>
                 <p className="text-zinc-500 mt-0.5">
-                  Applies different order # / URL per cert. Blank rows fall back to the shared values above.
+                  {splitOrderDetails
+                    ? 'Every cert needs its own order # and URL. The shared fields above are locked and not used.'
+                    : 'Applies a different order # / URL per cert. Each one becomes required.'}
                 </p>
               </div>
             </label>
@@ -2468,20 +2477,37 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     </p>
                     {splitOrderDetails && (
                       <div className="col-span-3 mt-1.5 grid grid-cols-2 gap-2">
-                        <input type="text" placeholder="Order # override (optional)"
+                        <input type="text" placeholder="Order # (required)"
                           value={orderDetailsOverrides[item.cart_entry_id]?.unique_id ?? ''}
                           onChange={(e) => setOrderDetailsOverrides(prev => ({
                             ...prev,
                             [item.cart_entry_id]: { ...prev[item.cart_entry_id], unique_id: e.target.value },
                           }))}
-                          className="text-[11px] bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono" />
-                        <input type="url" placeholder="Order details URL override (optional)"
+                          className={cn('text-[11px] bg-zinc-800 border rounded px-2 py-1 text-zinc-100 focus:outline-none focus:border-indigo-500 font-mono',
+                            orderDetailsOverrides[item.cart_entry_id]?.unique_id?.trim() ? 'border-zinc-700' : 'border-amber-500/50')} />
+                        <input type="url" placeholder="Order details URL (required)"
                           value={orderDetailsOverrides[item.cart_entry_id]?.order_details_link ?? ''}
-                          onChange={(e) => setOrderDetailsOverrides(prev => ({
-                            ...prev,
-                            [item.cart_entry_id]: { ...prev[item.cart_entry_id], order_details_link: e.target.value },
-                          }))}
-                          className="text-[11px] bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-100 focus:outline-none focus:border-indigo-500" />
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setOrderDetailsOverrides(prev => {
+                              const row = prev[item.cart_entry_id] ?? {};
+                              // An eBay order URL carries the order id, so read it
+                              // out instead of making the user retype it — the
+                              // shared pair above has always done this. Only fill
+                              // an empty row, so a hand-typed # is never clobbered.
+                              const parsed = val && !row.unique_id?.trim() ? parseEbayOrderId(val) : null;
+                              return {
+                                ...prev,
+                                [item.cart_entry_id]: {
+                                  ...row,
+                                  order_details_link: val,
+                                  ...(parsed ? { unique_id: parsed } : {}),
+                                },
+                              };
+                            });
+                          }}
+                          className={cn('text-[11px] bg-zinc-800 border rounded px-2 py-1 text-zinc-100 focus:outline-none focus:border-indigo-500',
+                            orderDetailsOverrides[item.cart_entry_id]?.order_details_link?.trim() ? 'border-zinc-700' : 'border-amber-500/50')} />
                       </div>
                     )}
                   </>
@@ -2593,6 +2619,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                     toast.error('Enter a total strike price (0 is OK for giveaways)');
                     return;
                   }
+                  // Same rule as Combined Order: an eBay sale isn't traceable
+                  // without the order link and number.
+                  if (!ebayLink.trim() || !orderNumber.trim()) {
+                    toast.error('Enter the eBay order details link and order #');
+                    return;
+                  }
                 } else if (isEbayCombined) {
                   // Combined Order: only Order Net Total is required.
                   // Per-cert prices are auto-derived from list_price × ratio.
@@ -2604,6 +2636,26 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
                   if (missingListed.length > 0) {
                     const names = missingListed.slice(0, 3).map(b => b.card_name ?? '(unnamed)').join(', ');
                     toast.error(`Missing listed price: ${names}${missingListed.length > 3 ? ` +${missingListed.length - 3} more` : ''}. Combined Order needs each cert to have a live listing.`);
+                    return;
+                  }
+                  // Order URL and order # are required either way — they're how a
+                  // recorded sale is traced back to the eBay order. Splitting moves
+                  // where they're typed, not whether they're needed: eBay splitting
+                  // an order means each cert really does have its own order number,
+                  // so inheriting one shared value across the rows would record
+                  // something that never happened.
+                  if (splitOrderDetails) {
+                    const incomplete = bulkCart.filter(i => {
+                      const o = orderDetailsOverrides[i.cart_entry_id];
+                      return !o?.unique_id?.trim() || !o?.order_details_link?.trim();
+                    });
+                    if (incomplete.length > 0) {
+                      const names = incomplete.slice(0, 3).map(b => b.card_name ?? '(unnamed)').join(', ');
+                      toast.error(`Split order needs an order # and URL for every cert. Missing: ${names}${incomplete.length > 3 ? ` +${incomplete.length - 3} more` : ''}`);
+                      return;
+                    }
+                  } else if (!ebayLink.trim() || !orderNumber.trim()) {
+                    toast.error('Enter the eBay order details link and order #');
                     return;
                   }
                 } else {
@@ -2674,6 +2726,7 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
     const selectedShow = (cardShowsData?.data ?? []).find(s => s.id === cardShowId);
 
     async function handleBulkSubmit() {
+      const sharedOrderMetaSuppressed = isEbayCombined && splitOrderDetails;
       setSubmitting(true);
       try {
         await api.post('/sales/batch', {
@@ -2702,8 +2755,12 @@ function RecordSaleModal({ onClose }: { onClose: () => void }) {
           }),
           platform: isAnyEbay ? 'ebay' : 'card_show',
           card_show_id: isAnyEbay ? undefined : (cardShowId || undefined),
-          unique_id: isAnyEbay ? (orderNumber || undefined) : undefined,
-          order_details_link: isAnyEbay ? (ebayLink || undefined) : undefined,
+          // Split means every row carries its own order metadata, so the
+          // shared pair is deliberately not sent — otherwise the server would
+          // fall back to it and stamp one order # onto certs that eBay split
+          // into separate orders.
+          unique_id: isAnyEbay && !sharedOrderMetaSuppressed ? (orderNumber || undefined) : undefined,
+          order_details_link: isAnyEbay && !sharedOrderMetaSuppressed ? (ebayLink || undefined) : undefined,
           currency,
           sold_at: soldAt || undefined,
           unique_id_2: notes || undefined,
